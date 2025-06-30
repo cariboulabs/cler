@@ -4,6 +4,7 @@
 #include "result.hpp"
 #include <thread>
 #include <array>
+#include <set>
 
 enum class ClerError {
     InvalidChannelIndex,
@@ -66,6 +67,10 @@ namespace cler {
             : _runners(std::make_tuple(std::forward<BlockRunners>(runners)...)) {}
 
         void run() {
+            if (!valid()) {
+                throw std::runtime_error("Invalid FlowGraph: "
+                        "duplicate channels detected. Each channel can be connected once.");
+            }
             _stop_flag = false;
 
             // This lambda takes an index sequence (0, 1, ..., N-1) and expands it at compile time.
@@ -102,6 +107,20 @@ namespace cler {
         }
 
     private:
+
+        bool valid() const {
+            std::set<const void*> output_ptrs;
+            bool ok = true;
+
+            std::apply([&](const auto&... runners) {
+                ((std::apply([&](auto*... outs) {
+                    ((ok &= output_ptrs.insert(static_cast<const void*>(outs)).second), ...);
+                }, runners.outputs)), ...);
+            }, _runners);
+
+            return ok;
+        }
+
         static constexpr std::size_t _N = sizeof...(BlockRunners);
         std::tuple<BlockRunners...> _runners;
         std::array<std::thread, _N> _threads;

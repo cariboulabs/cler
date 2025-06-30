@@ -49,6 +49,11 @@
         "variant": "cpp",
         "cwctype": "cpp",
         "numbers": "cpp",
-        "semaphore": "cpp"
+        "semaphore": "cpp",
+        "list": "cpp",
+        "unordered_map": "cpp",
+        "unordered_set": "cpp",
+        "bitset": "cpp",
+        "span": "cpp"
     }
 }

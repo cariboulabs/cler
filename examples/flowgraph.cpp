@@ -72,53 +72,21 @@ struct AdderBlock : public cler::BlockBase<AdderBlock> {
     float _c_values[BATCH_SIZE] = {0.0};
 };
 
-// struct GainBlock : public cler::BlockBase<GainBlock> {
-//     cler::Channel<float> in0;
-//     float gain;
-
-//     GainBlock(const char* name, float gain_value) : BlockBase(name), in0(CHANNEL_SIZE), gain(gain_value) {}
-
-//     cler::Result<cler::Empty, ClerError> procedure_impl(cler::Channel<float>* out) {
-//         if (in0.size() < BATCH_SIZE) {
-//             return ClerError::NotEnoughSamples;
-//         }
-//         if (out->space() < BATCH_SIZE) {
-//             return ClerError::NotEnoughSpace;
-//         }
-//         size_t read = in0.readN(_tmp, BATCH_SIZE);
-//         if (read != BATCH_SIZE) {
-//             printf("Failed to read from in0, read: %zu, expected: %zu\n", read, BATCH_SIZE);
-//         }
-//         for (size_t i = 0; i < BATCH_SIZE; ++i) {
-//             _tmp[i] *= gain;
-//         }
-//         size_t written = out->writeN(_tmp, BATCH_SIZE);
-//         if (written != BATCH_SIZE) {
-//             printf("Failed to write to out, written: %zu, expected: %zu\n", written, BATCH_SIZE);
-//         }
-//         return cler::Empty{};
-//     }
-
-//     private:
-//         float _tmp[BATCH_SIZE] = {0.0f};
-
-// };
-
 struct SinkBlock : public cler::BlockBase<SinkBlock> {
-    cler::Channel<float> in0;
+    cler::Channel<float> in;
 
-    SinkBlock(const char* name) : BlockBase(name), in0(CHANNEL_SIZE) {
+    SinkBlock(const char* name) : BlockBase(name), in(CHANNEL_SIZE) {
         _first_sample_time = std::chrono::steady_clock::now();
     }
 
     cler::Result<cler::Empty, ClerError> procedure_impl() {
-        if (in0.size() < BATCH_SIZE) {
+        if (in.size() < BATCH_SIZE) {
             return ClerError::NotEnoughSamples;
         }
 
-        size_t read = in0.readN(_tmp, BATCH_SIZE);
+        size_t read = in.readN(_tmp, BATCH_SIZE);
         if (read != BATCH_SIZE) {
-            printf("Failed to read from in0, read: %zu, expected: %zu\n", read, BATCH_SIZE);
+            printf("Failed to read from in, read: %zu, expected: %zu\n", read, BATCH_SIZE);
         }
         _samples_processed += BATCH_SIZE;
 
@@ -145,7 +113,7 @@ int main() {
 
     cler::BlockRunner source_runner{&source, &adder.in0, &adder.in1};
     cler::BlockRunner adder_runner{&adder, &gain.in};
-    cler::BlockRunner gain_runner{&gain, &sink.in0};
+    cler::BlockRunner gain_runner{&gain, &sink.in};
     cler::BlockRunner sink_runner{&sink};
 
     cler::FlowGraph flowgraph(
