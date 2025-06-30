@@ -1,102 +1,148 @@
 #include "cler.hpp"
 #include "result.hpp"
 #include "utils.hpp"
+#include <cmath>
+
 #include <thread>
 #include <chrono>
-#include <SDL2/SDL.h>
+#include <GLFW/glfw3.h>
+
+
+#include "imgui.h"
+#include "implot.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
 
 const size_t CHANNEL_SIZE = 512;
 const size_t BATCH_SIZE = CHANNEL_SIZE / 2;
 
 struct SourceBlock : public cler::BlockBase<SourceBlock> {
-    SourceBlock(const char* name)  : BlockBase(name) {} 
+    SourceBlock(const char* name) : BlockBase(name) {}
 
     cler::Result<cler::Empty, ClerError> procedure_impl(
         cler::Channel<float>* out) {
+
         if (out->space() < BATCH_SIZE) {
             return ClerError::NotEnoughSpace;
         }
+
+        static float phase = 0.0f;
+        const float freq = 0.05f;
+
         for (size_t i = 0; i < BATCH_SIZE; ++i) {
-            out->push(i % BATCH_SIZE);
+            float value = std::sin(phase + i * freq) * 100.0f; // scale to visible amplitude
+            out->push(value);
         }
+
+        phase += 0.1f; // shift phase to animate
         return cler::Empty{};
     }
 };
-
 struct FreqPlotBlock : public cler::BlockBase<FreqPlotBlock> {
     cler::Channel<float> in;
 
-    SDL_Window* window = nullptr;
-    SDL_Renderer* renderer = nullptr;
-
-    static constexpr int WINDOW_WIDTH = 800;
-    static constexpr int WINDOW_HEIGHT = 400;
-
     FreqPlotBlock(const char* name)
-        : BlockBase(name), in(CHANNEL_SIZE) 
+        : BlockBase(name), in(CHANNEL_SIZE)
     {
-        if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-            throw std::runtime_error("SDL_Init failed!");
-        }
+        init_plot();
 
-        window = SDL_CreateWindow(
-            "FreqPlot",
-            SDL_WINDOWPOS_CENTERED,
-            SDL_WINDOWPOS_CENTERED,
-            WINDOW_WIDTH,
-            WINDOW_HEIGHT,
-            SDL_WINDOW_SHOWN
-        );
-
-        if (!window) {
-            throw std::runtime_error("SDL_CreateWindow failed!");
-        }
-
-        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-        if (!renderer) {
-            throw std::runtime_error("SDL_CreateRenderer failed!");
+        // Initialize x-axis values
+        for (size_t i = 0; i < BATCH_SIZE; ++i) {
+            _x[i] = static_cast<float>(i);
         }
     }
 
     ~FreqPlotBlock() {
-        if (renderer) SDL_DestroyRenderer(renderer);
-        if (window) SDL_DestroyWindow(window);
-        SDL_Quit();
+        destroy_plot();
     }
 
+    // Runs in MAIN THREAD
+    void render() {
+        if (glfwWindowShouldClose(_window)) {
+            exit(0);
+        }
+
+        glfwPollEvents();
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        ImGui::Begin("Frequency Plot");
+
+        if (ImPlot::BeginPlot("Waveform", "Sample Index", "Amplitude",
+                              ImVec2(-1, 300))) {
+            ImPlot::PlotLine("Signal", _x, _samples, BATCH_SIZE);
+            ImPlot::EndPlot();
+        }
+
+        ImGui::End();
+
+        ImGui::Render();
+        int display_w, display_h;
+        glfwGetFramebufferSize(_window, &display_w, &display_h);
+        glViewport(0, 0, display_w, display_h);
+        glClearColor(0, 0, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        glfwSwapBuffers(_window);
+    }
+
+    // Runs in worker thread
     cler::Result<cler::Empty, ClerError> procedure_impl() {
         if (in.size() < BATCH_SIZE) {
             return ClerError::NotEnoughSamples;
         }
 
-        // Pull batch
-        std::vector<float> samples(BATCH_SIZE);
-        for (size_t i = 0; i < BATCH_SIZE; ++i) {
-            float val;
-            in.pop(val);
-            samples[i] = val;
+        // Safely read into the buffer the render() will use
+        const size_t read = in.readN(_samples, BATCH_SIZE);
+        if (read != BATCH_SIZE) {
+            return ClerError::NotEnoughSamples;
         }
-
-        // Clear window
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderClear(renderer);
-
-        // Draw waveform
-        SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
-        for (size_t i = 1; i < BATCH_SIZE; ++i) {
-            int x1 = (i - 1) * WINDOW_WIDTH / BATCH_SIZE;
-            int y1 = WINDOW_HEIGHT / 2 - static_cast<int>(samples[i - 1]);
-            int x2 = i * WINDOW_WIDTH / BATCH_SIZE;
-            int y2 = WINDOW_HEIGHT / 2 - static_cast<int>(samples[i]);
-            SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
-        }
-
-        SDL_RenderPresent(renderer);
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        
 
         return cler::Empty{};
+    }
+
+private:
+    GLFWwindow* _window = nullptr;
+    static constexpr int WINDOW_WIDTH = 800;
+    static constexpr int WINDOW_HEIGHT = 400;
+
+    float _samples[BATCH_SIZE] = {0};
+    float _x[BATCH_SIZE] = {0};
+
+    void init_plot() {
+        if (!glfwInit()) {
+            throw std::runtime_error("GLFW init failed!");
+        }
+
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+        _window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "FreqPlot ImPlot", nullptr, nullptr);
+        if (!_window) {
+            throw std::runtime_error("Failed to create GLFW window");
+        }
+        glfwMakeContextCurrent(_window);
+        glfwSwapInterval(1);
+
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImPlot::CreateContext();
+        ImGui::StyleColorsDark();
+
+        ImGui_ImplGlfw_InitForOpenGL(_window, true);
+        ImGui_ImplOpenGL3_Init("#version 330");
+    }
+
+    void destroy_plot() {
+        ImGui_ImplOpenGL3_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImPlot::DestroyContext();
+        ImGui::DestroyContext();
+        glfwDestroyWindow(_window);
+        glfwTerminate();
     }
 };
 
@@ -114,9 +160,8 @@ int main() {
 
     flowgraph.run();
 
-
     while (true) {
-        // Simulate some work in the main thread
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        freqplot.render();
     }
 }
