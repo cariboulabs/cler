@@ -30,24 +30,12 @@ namespace cler {
     template <typename T, size_t N = 0>
     using Channel = dro::SPSCQueue<T, N>;
 
-    template <typename Derived>
     struct BlockBase {
-
         explicit BlockBase(const char* name) : _name(name) {}
-
-        template <typename... OChannel>
-        Result<Empty, ClerError> procedure(OChannel*... ochannels) {
-            return static_cast<Derived*>(this)->procedure_impl(ochannels...);
-        }
-
-        const char* name() {
-            return _name;
-        }
-
-        private:
-            const char* _name;
+        const char* name() const { return _name; }
+    private:
+        const char* _name;
     };
-
     template<typename Block, typename... Channels>
     struct BlockRunner {
         Block* block;

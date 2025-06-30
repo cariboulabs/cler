@@ -5,10 +5,10 @@
 const size_t CHANNEL_SIZE = 512;
 const size_t BATCH_SIZE = CHANNEL_SIZE / 2;
 
-struct SourceBlock : public cler::BlockBase<SourceBlock> {
+struct SourceBlock : public cler::BlockBase {
     SourceBlock(const char* name) : BlockBase(name) {}
 
-    cler::Result<cler::Empty, ClerError> procedure_impl(
+    cler::Result<cler::Empty, ClerError> procedure(
         cler::Channel<float>* out) {
 
         if (out->space() < BATCH_SIZE) {
@@ -31,7 +31,7 @@ struct SourceBlock : public cler::BlockBase<SourceBlock> {
         return cler::Empty{};
     }
 };
-struct FreqPlotBlock : public cler::BlockBase<FreqPlotBlock> {
+struct FreqPlotBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
     FreqPlotBlock(const char* name) : BlockBase(name), in(CHANNEL_SIZE) {
@@ -40,7 +40,7 @@ struct FreqPlotBlock : public cler::BlockBase<FreqPlotBlock> {
         }
     }
 
-    cler::Result<cler::Empty, ClerError> procedure_impl() {
+    cler::Result<cler::Empty, ClerError> procedure() {
         if (in.size() < BATCH_SIZE) {
             return ClerError::NotEnoughSamples;
         }

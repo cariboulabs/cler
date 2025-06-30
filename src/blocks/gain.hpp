@@ -1,18 +1,18 @@
 #include "cler.hpp"
 
 template <typename T>
-struct GainBlock : public cler::BlockBase<GainBlock<T>> {
+struct GainBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
     GainBlock(const char* name, T gain_value, size_t buffer_size, size_t work_size):
-     cler::BlockBase<GainBlock<T>>(name), in(buffer_size), _gain(gain_value), _work_size(work_size) {
+     cler::BlockBase(name), in(buffer_size), _gain(gain_value), _work_size(work_size) {
         _tmp = new T[_work_size];
      }
     ~GainBlock() {
         delete[] _tmp;
     }
 
-    cler::Result<cler::Empty, ClerError> procedure_impl(cler::Channel<T>* out) {
+    cler::Result<cler::Empty, ClerError> procedure(cler::Channel<T>* out) {
         if (in.size() < _work_size) {
             return ClerError::NotEnoughSamples;
         }
