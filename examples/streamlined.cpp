@@ -38,7 +38,8 @@ struct AdderBlock : public cler::BlockBase<AdderBlock> {
 
     AdderBlock(const char* name) : BlockBase(name), in0(CHANNEL_SIZE), in1(CHANNEL_SIZE) {}
 
-    cler::Result<cler::Empty, ClerError> procedure_impl(cler::Channel<float>* out) {
+    //                                             Adderblock pushes to gain block which has a stack buffer!
+    cler::Result<cler::Empty, ClerError> procedure_impl(cler::Channel<float, CHANNEL_SIZE>* out) {
         if (in0.size() < BATCH_SIZE || in1.size() < BATCH_SIZE) {
             return ClerError::NotEnoughSamples;
         }
@@ -73,10 +74,10 @@ struct AdderBlock : public cler::BlockBase<AdderBlock> {
 };
 
 struct GainBlock : public cler::BlockBase<GainBlock> {
-    cler::Channel<float> in0;
+    cler::Channel<float, CHANNEL_SIZE> in0; //this is a stack buffer!
     float gain;
 
-    GainBlock(const char* name, float gain_value) : BlockBase(name), in0(CHANNEL_SIZE), gain(gain_value) {}
+    GainBlock(const char* name, float gain_value) : BlockBase(name), gain(gain_value) {}
 
     cler::Result<cler::Empty, ClerError> procedure_impl(cler::Channel<float>* out) {
         if (in0.size() < BATCH_SIZE) {

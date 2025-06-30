@@ -69,8 +69,8 @@ struct FreqPlotBlock : public cler::BlockBase<FreqPlotBlock> {
 
         ImGui::Begin("Frequency Plot");
 
-        if (ImPlot::BeginPlot("Waveform", "Sample Index", "Amplitude",
-                              ImVec2(-1, 300))) {
+        if (ImPlot::BeginPlot("Waveform", ImVec2(-1, 300))) {
+            ImPlot::SetupAxes("Sample Index", "Amplitude");
             ImPlot::PlotLine("Signal", _x, _samples, BATCH_SIZE);
             ImPlot::EndPlot();
         }
@@ -161,7 +161,7 @@ int main() {
     flowgraph.run();
 
     while (true) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
         freqplot.render();
     }
 }

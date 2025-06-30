@@ -25,8 +25,9 @@ inline const char* to_str(ClerError error) {
 }
 
 namespace cler {
-    template <typename T>
-    using Channel = dro::SPSCQueue<T>;
+    
+    template <typename T, size_t N = 0>
+    using Channel = dro::SPSCQueue<T, N>;
 
     template <typename Derived>
     struct BlockBase {
