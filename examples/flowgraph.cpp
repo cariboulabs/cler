@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "blocks/gain.hpp"
 #include <iostream>
 #include <chrono>
 
@@ -71,37 +72,37 @@ struct AdderBlock : public cler::BlockBase<AdderBlock> {
     float _c_values[BATCH_SIZE] = {0.0};
 };
 
-struct GainBlock : public cler::BlockBase<GainBlock> {
-    cler::Channel<float> in0;
-    float gain;
+// struct GainBlock : public cler::BlockBase<GainBlock> {
+//     cler::Channel<float> in0;
+//     float gain;
 
-    GainBlock(const char* name, float gain_value) : BlockBase(name), in0(CHANNEL_SIZE), gain(gain_value) {}
+//     GainBlock(const char* name, float gain_value) : BlockBase(name), in0(CHANNEL_SIZE), gain(gain_value) {}
 
-    cler::Result<cler::Empty, ClerError> procedure_impl(cler::Channel<float>* out) {
-        if (in0.size() < BATCH_SIZE) {
-            return ClerError::NotEnoughSamples;
-        }
-        if (out->space() < BATCH_SIZE) {
-            return ClerError::NotEnoughSpace;
-        }
-        size_t read = in0.readN(_tmp, BATCH_SIZE);
-        if (read != BATCH_SIZE) {
-            printf("Failed to read from in0, read: %zu, expected: %zu\n", read, BATCH_SIZE);
-        }
-        for (size_t i = 0; i < BATCH_SIZE; ++i) {
-            _tmp[i] *= gain;
-        }
-        size_t written = out->writeN(_tmp, BATCH_SIZE);
-        if (written != BATCH_SIZE) {
-            printf("Failed to write to out, written: %zu, expected: %zu\n", written, BATCH_SIZE);
-        }
-        return cler::Empty{};
-    }
+//     cler::Result<cler::Empty, ClerError> procedure_impl(cler::Channel<float>* out) {
+//         if (in0.size() < BATCH_SIZE) {
+//             return ClerError::NotEnoughSamples;
+//         }
+//         if (out->space() < BATCH_SIZE) {
+//             return ClerError::NotEnoughSpace;
+//         }
+//         size_t read = in0.readN(_tmp, BATCH_SIZE);
+//         if (read != BATCH_SIZE) {
+//             printf("Failed to read from in0, read: %zu, expected: %zu\n", read, BATCH_SIZE);
+//         }
+//         for (size_t i = 0; i < BATCH_SIZE; ++i) {
+//             _tmp[i] *= gain;
+//         }
+//         size_t written = out->writeN(_tmp, BATCH_SIZE);
+//         if (written != BATCH_SIZE) {
+//             printf("Failed to write to out, written: %zu, expected: %zu\n", written, BATCH_SIZE);
+//         }
+//         return cler::Empty{};
+//     }
 
-    private:
-        float _tmp[BATCH_SIZE] = {0.0f};
+//     private:
+//         float _tmp[BATCH_SIZE] = {0.0f};
 
-};
+// };
 
 struct SinkBlock : public cler::BlockBase<SinkBlock> {
     cler::Channel<float> in0;
@@ -139,11 +140,11 @@ struct SinkBlock : public cler::BlockBase<SinkBlock> {
 int main() {
     SourceBlock source("Source");
     AdderBlock adder("Adder");
-    GainBlock gain("Gain",2.0f);
+    GainBlock<float> gain("Gain", 2.0f, CHANNEL_SIZE, BATCH_SIZE); //In the library, We dont template on what we dont have to
     SinkBlock sink("Sink");
 
     cler::BlockRunner source_runner{&source, &adder.in0, &adder.in1};
-    cler::BlockRunner adder_runner{&adder, &gain.in0};
+    cler::BlockRunner adder_runner{&adder, &gain.in};
     cler::BlockRunner gain_runner{&gain, &sink.in0};
     cler::BlockRunner sink_runner{&sink};
 
