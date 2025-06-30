@@ -11,3 +11,4 @@ add_compile_options(-Wall -Wextra -Wno-unused-variable -Wno-missing-braces)
 
 include_directories(src)
 add_subdirectory(examples)
+add_subdirectory(src/gui)

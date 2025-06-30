@@ -2,84 +2,10 @@
 #include "result.hpp"
 #include "utils.hpp"
 #include <cmath>
-
-#include <thread>
-#include <chrono>
-#include <GLFW/glfw3.h>
-
-
-#include "imgui.h"
-#include "implot.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
+#include "gui/gui_manager.hpp"
 
 const size_t CHANNEL_SIZE = 512;
 const size_t BATCH_SIZE = CHANNEL_SIZE / 2;
-
-struct GuiManager {
-    GLFWwindow* window = nullptr;
-
-    void init() {
-    if (!glfwInit()) {
-        throw std::runtime_error("GLFW init failed!");
-    }
-
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_SAMPLES, 4);
-
-    window = glfwCreateWindow(800, 400, "DSP Blocks", nullptr, nullptr);
-    if (!window) {
-        throw std::runtime_error("Failed to create GLFW window");
-    }
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
-
-    glEnable(GL_MULTISAMPLE);
-
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImPlot::CreateContext();
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
-
-    ImGui::GetStyle().AntiAliasedLines = true;
-    ImGui::GetStyle().AntiAliasedLinesUseTex = true; 
-    }
-
-    void begin_frame() {
-        glfwPollEvents();
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-    }
-
-    void end_frame() {
-        ImGui::Render();
-        int display_w, display_h;
-        glfwGetFramebufferSize(window, &display_w, &display_h);
-        glViewport(0, 0, display_w, display_h);
-        glClearColor(0, 0, 0, 1);
-        glClear(GL_COLOR_BUFFER_BIT);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        glfwSwapBuffers(window);
-    }
-
-    bool should_close() {
-        return glfwWindowShouldClose(window);
-    }
-
-    void shutdown() {
-        ImGui_ImplOpenGL3_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
-        ImPlot::DestroyContext();
-        ImGui::DestroyContext();
-        glfwDestroyWindow(window);
-        glfwTerminate();
-    }
-};
 
 struct SourceBlock : public cler::BlockBase<SourceBlock> {
     SourceBlock(const char* name) : BlockBase(name) {}
@@ -95,11 +21,15 @@ struct SourceBlock : public cler::BlockBase<SourceBlock> {
         const float freq = 0.05f;
 
         for (size_t i = 0; i < BATCH_SIZE; ++i) {
-            float value = std::sin(phase + i * freq) * 100.0f; // scale to visible amplitude
+            float value = std::sin(phase + i * freq) * 100.0f;
             out->push(value);
         }
 
-        phase += 0.1f; // shift phase to animate
+        phase += 0.1f;
+        if (phase >= 2.0f * M_PI) {
+            phase -= 2.0f * M_PI;
+        }
+        
         return cler::Empty{};
     }
 };
@@ -121,14 +51,30 @@ struct FreqPlotBlock : public cler::BlockBase<FreqPlotBlock> {
     }
 
     void render() {
+        // Optional: Get main viewport size for centering
+        ImVec2 display_size = ImGui::GetIO().DisplaySize;
+
+        // Center the window on first use
+        static bool first_open = true;
+        if (first_open) {
+            ImVec2 window_size = ImVec2(1000, 400); // set your preferred window size
+            ImVec2 center_pos = ImVec2(
+                (display_size.x - window_size.x) * 0.5f,
+                (display_size.y - window_size.y) * 0.5f
+            );
+            ImGui::SetNextWindowPos(center_pos, ImGuiCond_Once);
+            ImGui::SetNextWindowSize(window_size, ImGuiCond_Once);
+            first_open = false;
+        }
+
         ImGui::Begin("Frequency Plot");
-        if (ImPlot::BeginPlot("Waveform", ImVec2(-1, 300))) {
+        if (ImPlot::BeginPlot("Waveform")) {
             ImPlot::SetupAxes("Sample Index", "Amplitude");
             ImPlot::PlotLine("Signal", _x, _samples, BATCH_SIZE);
             ImPlot::EndPlot();
         }
         ImGui::End();
-    }
+}
 
 private:
     float _samples[BATCH_SIZE] = {0};
@@ -139,8 +85,7 @@ private:
 
 
 int main() {
-    GuiManager gui;
-    gui.init();
+    cler::GuiManager gui(1000, 400 , "Frequency Plot Example");
 
     SourceBlock source("Source");
     FreqPlotBlock freqplot("FreqPlot");
@@ -162,6 +107,4 @@ int main() {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
-
-    gui.shutdown();
 }

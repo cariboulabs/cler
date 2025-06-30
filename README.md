@@ -1,20 +1,18 @@
 # Cler: Compile-Time DSP Flowgraph Framework
 
 cler is a C++ heaer only template-based framework for constructing and executing flowgraphs of processing blocks, especially for DSP, SDR, or other high-throughput streaming pipelines.
-It is designed to maximize compile-time safety and performance while minimizing runtime overhead.
+Its goal is to be tiny, and allow maximal flexability:
+* All code, no frontend.
+* Defining blocks amounts to implementing a struct with a method.
+* Channels are type agnostic.
 
-# Features
+How to use it? Just Include `cler.hpp`
 
-Tiny framework: Less than 1k lines of pure c++ code
+# Things to Know
 
-Zero runtime polymorphism:
-No virtual functions or base pointers. All block dispatch and connections are resolved statically.
+* **Buffers**
+Our buffers are modified version of `https://github.com/drogalis/SPSC-Queue`. They allow for static or heap allocation. See  the gain block in `streamlined.cpp` for an example.
 
-Lock-free, high-performance channels:
-Uses rigtorp::SPSCQueue for efficient single-producer/single-consumer buffering between blocks.
-
-Template-based block construction:
-Blocks define their own procedure_impl() with custom channel types and interfaces.
-
-Automatic multithreading:
-Each block runs in its own thread for maximum throughput and pipeline parallelism.
+* **GUI**: </br>
+Cler is a header only library, but includes a gui library (dearimgui) that is compiled. To use it, include `gui_manager.hpp`, add `src/gui` subdirectory in your `cmake`, and link you executable against `cler_gui`.
+See `freqplot` as an example.
