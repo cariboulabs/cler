@@ -9,16 +9,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_C_STANDARD 99)
 add_compile_options(-Wall -Wextra -Wno-unused-variable -Wno-missing-braces)
 
-#-----------Add Liquid------------
-include(FetchContent)
-FetchContent_Declare(
-  liquid
-  GIT_REPOSITORY https://github.com/jgaeddert/liquid-dsp
-  GIT_TAG master
-)
-FetchContent_MakeAvailable(liquid)
-#----------------------------------
+#note: Cler is a header only library, so you dont need to build it to use it.
+#it does have sub-libraries that have depedencies
+#examples use these sub-libraries, so you need to build them for the examples to work
 
 include_directories(src)
-add_subdirectory(examples)
+
+add_subdirectory(src/blocks)
 add_subdirectory(src/gui)
+add_subdirectory(examples)

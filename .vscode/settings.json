@@ -66,6 +66,10 @@
         "numeric": "cpp",
         "optional": "cpp",
         "fstream": "cpp",
-        "__nullptr": "cpp"
+        "__nullptr": "cpp",
+        "filesystem": "cpp",
+        "queue": "cpp",
+        "stack": "cpp",
+        "*.inc": "cpp"
     }
 }
