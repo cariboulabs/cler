@@ -12,12 +12,12 @@ struct GainBlock : public cler::BlockBase {
         delete[] _tmp;
     }
 
-    cler::Result<cler::Empty, ClerError> procedure(cler::Channel<T>* out) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<T>* out) {
         if (in.size() < _work_size) {
-            return ClerError::NotEnoughSamples;
+            return cler::Error::NotEnoughSamples;
         }
         if (out->space() < _work_size) {
-            return ClerError::NotEnoughSpace;
+            return cler::Error::NotEnoughSpace;
         }
 
         size_t read = in.readN(_tmp, _work_size);

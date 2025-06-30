@@ -6,26 +6,26 @@
 #include <array>
 #include <set>
 
-enum class ClerError {
-    InvalidChannelIndex,
-    NotEnoughSamples,
-    NotEnoughSpace,    
-};
-
-inline const char* to_str(ClerError error) {
-    switch (error) {
-        case ClerError::InvalidChannelIndex:
-            return "Invalid channel index";
-        case ClerError::NotEnoughSpace:
-            return "Not enough space in output buffers";
-        case ClerError::NotEnoughSamples:
-            return "Not enough samples in input buffers";
-        default:
-            return "Unknown error";
-    }
-}
-
 namespace cler {
+
+    enum class Error {
+        InvalidChannelIndex,
+        NotEnoughSamples,
+        NotEnoughSpace,    
+    };
+
+    inline const char* to_str(Error error) {
+        switch (error) {
+            case Error::InvalidChannelIndex:
+                return "Invalid channel index";
+            case Error::NotEnoughSpace:
+                return "Not enough space in output buffers";
+            case Error::NotEnoughSamples:
+                return "Not enough samples in input buffers";
+            default:
+                return "Unknown error";
+        }
+    }
     
     template <typename T, size_t N = 0>
     using Channel = dro::SPSCQueue<T, N>;
@@ -67,12 +67,12 @@ namespace cler {
                     auto& runner = std::get<Is>(_runners);
 
                     while (!_stop_flag) {
-                        Result<Empty, ClerError> result = std::apply([&](auto*... outs) {
+                        Result<Empty, Error> result = std::apply([&](auto*... outs) {
                             return runner.block->procedure(outs...);
                         }, runner.outputs);
                         if (result.is_err()) {
                             auto err = result.unwrap_err();
-                            if (err == ClerError::InvalidChannelIndex) {
+                            if (err == Error::InvalidChannelIndex) {
                                 stop();
                                 throw std::runtime_error(to_str(err)); //onlt crashes the current thread, so we stop
                             } else {

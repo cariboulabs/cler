@@ -1,5 +1,6 @@
 {
     "files.associations": {
+        "*.cpp": "cpp",
         "stdexcept": "cpp",
         "array": "cpp",
         "atomic": "cpp",
@@ -54,6 +55,17 @@
         "unordered_map": "cpp",
         "unordered_set": "cpp",
         "bitset": "cpp",
-        "span": "cpp"
+        "span": "cpp",
+        "format": "cpp",
+        "__locale": "cpp",
+        "ios": "cpp",
+        "complex": "cpp",
+        "cstdarg": "cpp",
+        "map": "cpp",
+        "set": "cpp",
+        "numeric": "cpp",
+        "optional": "cpp",
+        "fstream": "cpp",
+        "__nullptr": "cpp"
     }
 }

@@ -9,11 +9,11 @@ const size_t BATCH_SIZE = CHANNEL_SIZE / 2;
 struct SourceBlock : public cler::BlockBase {
     SourceBlock(const char* name)  : BlockBase(name) {} 
 
-    cler::Result<cler::Empty, ClerError> procedure(
+    cler::Result<cler::Empty, cler::Error> procedure(
         cler::Channel<float>* out0,
         cler::Channel<double>* out1) {
         if (out0->space() < BATCH_SIZE || out1->space() < BATCH_SIZE) {
-            return ClerError::NotEnoughSpace;
+            return cler::Error::NotEnoughSpace;
         }
         size_t written;
         written = out0->writeN(_ones, BATCH_SIZE);
@@ -38,12 +38,12 @@ struct AdderBlock : public cler::BlockBase {
 
     AdderBlock(const char* name) : BlockBase(name), in0(CHANNEL_SIZE), in1(CHANNEL_SIZE) {}
 
-    cler::Result<cler::Empty, ClerError> procedure(cler::Channel<float>* out) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<float>* out) {
         if (in0.size() < BATCH_SIZE || in1.size() < BATCH_SIZE) {
-            return ClerError::NotEnoughSamples;
+            return cler::Error::NotEnoughSamples;
         }
         if (out->space() < BATCH_SIZE) {
-            return ClerError::NotEnoughSpace;
+            return cler::Error::NotEnoughSpace;
         }
 
         size_t read;
@@ -79,9 +79,9 @@ struct SinkBlock : public cler::BlockBase {
         _first_sample_time = std::chrono::steady_clock::now();
     }
 
-    cler::Result<cler::Empty, ClerError> procedure() {
+    cler::Result<cler::Empty, cler::Error> procedure() {
         if (in.size() < BATCH_SIZE) {
-            return ClerError::NotEnoughSamples;
+            return cler::Error::NotEnoughSamples;
         }
 
         size_t read = in.readN(_tmp, BATCH_SIZE);

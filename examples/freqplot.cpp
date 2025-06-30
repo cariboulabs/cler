@@ -8,11 +8,11 @@ const size_t BATCH_SIZE = CHANNEL_SIZE / 2;
 struct SourceBlock : public cler::BlockBase {
     SourceBlock(const char* name) : BlockBase(name) {}
 
-    cler::Result<cler::Empty, ClerError> procedure(
+    cler::Result<cler::Empty, cler::Error> procedure(
         cler::Channel<float>* out) {
 
         if (out->space() < BATCH_SIZE) {
-            return ClerError::NotEnoughSpace;
+            return cler::Error::NotEnoughSpace;
         }
 
         static float phase = 0.0f;
@@ -40,9 +40,9 @@ struct FreqPlotBlock : public cler::BlockBase {
         }
     }
 
-    cler::Result<cler::Empty, ClerError> procedure() {
+    cler::Result<cler::Empty, cler::Error> procedure() {
         if (in.size() < BATCH_SIZE) {
-            return ClerError::NotEnoughSamples;
+            return cler::Error::NotEnoughSamples;
         }
         in.readN(_samples, BATCH_SIZE);
         return cler::Empty{};

@@ -8,11 +8,11 @@ const size_t BATCH_SIZE = CHANNEL_SIZE / 2;
 struct SourceBlock : public cler::BlockBase {
     SourceBlock(const char* name)  : BlockBase(name) {} 
 
-    cler::Result<cler::Empty, ClerError> procedure(
+    cler::Result<cler::Empty, cler::Error> procedure(
         cler::Channel<float>* out0,
         cler::Channel<double>* out1) {
         if (out0->space() < BATCH_SIZE || out1->space() < BATCH_SIZE) {
-            return ClerError::NotEnoughSpace;
+            return cler::Error::NotEnoughSpace;
         }
         size_t written;
         written = out0->writeN(_ones, BATCH_SIZE);
@@ -38,26 +38,26 @@ struct AdderBlock : public cler::BlockBase {
     AdderBlock(const char* name) : BlockBase(name), in0(CHANNEL_SIZE), in1(CHANNEL_SIZE) {}
 
     //                                             Adderblock pushes to gain block which has a stack buffer!
-    cler::Result<cler::Empty, ClerError> procedure(cler::Channel<float, CHANNEL_SIZE>* out) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<float, CHANNEL_SIZE>* out) {
         const float* a_values;
         size_t a_available;
         size_t a_readable = in0.peek_read(a_values, BATCH_SIZE, &a_available);
         if (a_available < BATCH_SIZE) {
-            return ClerError::NotEnoughSamples;
+            return cler::Error::NotEnoughSamples;
         }
 
         const double* b_values;
         size_t b_available;
         size_t b_readable = in1.peek_read(b_values, BATCH_SIZE, &b_available);
         if (b_available < BATCH_SIZE) {
-            return ClerError::NotEnoughSamples;
+            return cler::Error::NotEnoughSamples;
         }
 
         size_t c_available;
         float* c_values;
         size_t c_space = out->peek_write(c_values, BATCH_SIZE, &c_available);
         if (c_available < BATCH_SIZE) {
-            return ClerError::NotEnoughSpace;
+            return cler::Error::NotEnoughSpace;
         }
 
         size_t n_work_samples = std::min(a_readable, b_readable);
@@ -79,19 +79,19 @@ struct GainBlock : public cler::BlockBase {
 
     GainBlock(const char* name, float gain_value) : BlockBase(name), gain(gain_value) {}
 
-    cler::Result<cler::Empty, ClerError> procedure(cler::Channel<float>* out) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<float>* out) {
         const float * in_values;
         size_t in_available;
         size_t in_readable = in.peek_read(in_values, BATCH_SIZE, &in_available);
         if (in_available < BATCH_SIZE) {
-            return ClerError::NotEnoughSamples;
+            return cler::Error::NotEnoughSamples;
         }
 
         size_t out_available;
         float* out_values;
         size_t out_space = out->peek_write(out_values, BATCH_SIZE, &out_available);
         if (out_available < BATCH_SIZE) {
-            return ClerError::NotEnoughSpace;
+            return cler::Error::NotEnoughSpace;
         }
 
         size_t n_work_samples = std::min(in_readable, out_space);
@@ -113,16 +113,16 @@ struct SinkBlock : public cler::BlockBase {
         _first_sample_time = std::chrono::steady_clock::now();
     }
 
-    cler::Result<cler::Empty, ClerError> procedure() {
+    cler::Result<cler::Empty, cler::Error> procedure() {
         if (in.size() < BATCH_SIZE) {
-            return ClerError::NotEnoughSamples;
+            return cler::Error::NotEnoughSamples;
         }
 
         const float* values;
         size_t available;
         size_t read = in.peek_read(values, BATCH_SIZE, &available);
         if (available < BATCH_SIZE) {
-            return ClerError::NotEnoughSamples;
+            return cler::Error::NotEnoughSamples;
         }
 
         _samples_processed += read;
@@ -149,7 +149,7 @@ int main() {
     GainBlock gain("Gain",2.0f);
     SinkBlock sink("Sink");
 
-    cler::Result<cler::Empty, ClerError> res = cler::Empty{};
+    cler::Result<cler::Empty, cler::Error> res = cler::Empty{};
 
     while (true) {
         res = source.procedure(&adder.in0, &adder.in1);
