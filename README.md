@@ -20,3 +20,6 @@ See `freqplot` as an example.
 * **Library**: </br>
 There is also a library of useful blocks for quick plug and play in `src/blocks`. Because it is easy to create blocks, the DSP blocks can be specalizied for each case. As such, the library blocks are exactly the opposite, broad and general. There, we don't template where we dont have to. Everything that can go on the heap - goes on the heap.
 See the gain block in `flowgraph.cpp` for an example
+
+* **Peek-Commit or ReadWrite**: </br>
+Cler supports two buffer access patterns: **Peek-Commit** and **ReadWrite**. In Peek-Commit mode, you can inspect (peek) data in the buffer without removing it, and then explicitly commit the number of items you have processed. This is useful for blocks that need to look ahead or process variable amounts of data. In ReadWrite mode, reading from the buffer automatically advances the read pointer, which is simpler but less flexible. The `streamlined.cpp` example implements **Peek-Commit** while the `flowgraph.cpp` implements **ReadWrite**. Although surprising, there wasnt a measureable difference between the two methods.

@@ -287,11 +287,8 @@ public:
     const auto padding  = writer_.paddingCache_;
     auto writeIndex     = writer_.writeIndex_.load(std::memory_order_relaxed);
 
-    auto readIndexCache = writer_.readIndexCache_;
     const auto nextWriteIndex = (writeIndex + count) % capacity;
-
-    // Always refresh if needed
-    readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
+    auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
     writer_.readIndexCache_ = readIndexCache;
 
     std::size_t space;
@@ -321,10 +318,7 @@ public:
     const auto padding  = base_type::padding;
 
     auto readIndex  = reader_.readIndex_.load(std::memory_order_relaxed);
-    auto writeIndex = reader_.writeIndexCache_;
-
-    // Always refresh the writer index cache
-    writeIndex = writer_.writeIndex_.load(std::memory_order_acquire);
+    auto writeIndex = writer_.writeIndex_.load(std::memory_order_acquire);
     reader_.writeIndexCache_ = writeIndex;
 
     std::size_t available;
@@ -350,6 +344,82 @@ public:
 
     return toRead;
   }
+
+[[nodiscard]] std::size_t peek_write(T*& ptr, std::size_t max, std::size_t* total_space) noexcept {
+  const auto capacity = base_type::capacity_;
+  const auto padding  = writer_.paddingCache_;
+  const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
+
+  auto readIndexCache = writer_.readIndexCache_;
+  readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
+  writer_.readIndexCache_ = readIndexCache;
+
+  std::size_t space;
+  if (readIndexCache > writeIndex) {
+    space = readIndexCache - writeIndex - 1;
+  } else {
+    space = capacity - writeIndex + readIndexCache - 1;
+  }
+  if (total_space) {
+    *total_space = space;
+  }
+
+  const std::size_t available = std::min(max, space);
+  if (available == 0) {
+    ptr = nullptr;
+    return 0;
+  }
+
+  const std::size_t contiguous = std::min(available, capacity - writeIndex);
+  ptr = &base_type::buffer_[writeIndex + padding];
+  return contiguous;
+}
+
+void commit_write(std::size_t count) noexcept {
+  const auto capacity = base_type::capacity_;
+  const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
+  const auto nextWriteIndex = (writeIndex + count) % capacity;
+  writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+}
+
+[[nodiscard]] std::size_t peek_read(const T*& ptr, std::size_t max, std::size_t* total_available) noexcept {
+  const auto capacity = base_type::capacity_;
+  const auto padding  = base_type::padding;
+
+  const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
+
+  auto writeIndexCache = reader_.writeIndexCache_;
+  writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
+  reader_.writeIndexCache_ = writeIndexCache;
+
+  std::size_t available;
+  if (writeIndexCache >= readIndex) {
+    available = writeIndexCache - readIndex;
+  } else {
+    available = capacity - readIndex + writeIndexCache;
+  }
+
+  if (total_available) {
+    *total_available = available;
+  }
+
+  const std::size_t toRead = std::min(max, available);
+  if (toRead == 0) {
+    ptr = nullptr;
+    return 0;
+  }
+
+  const std::size_t contiguous = std::min(toRead, capacity - readIndex);
+  ptr = &base_type::buffer_[readIndex + padding];
+  return contiguous;
+}
+
+void commit_read(std::size_t count) noexcept {
+  const auto capacity = base_type::capacity_;
+  const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
+  const auto nextReadIndex = (readIndex + count) % capacity;
+  reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
+}
 
 
 
