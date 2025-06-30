@@ -10,7 +10,7 @@ How to use it? Just Include `cler.hpp`
 
 # Things to Know
 
-* **Buffers**
+* **Buffers** </br>
 Our buffers are modified version of `https://github.com/drogalis/SPSC-Queue`. They allow for static or heap allocation. See  the gain block in `streamlined.cpp` for an example.
 
 * **GUI**: </br>
