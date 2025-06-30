@@ -282,7 +282,7 @@ public:
     return capacity() - size();
   }
 
-  [[nodiscard]] std::size_t writeN(const T* src, std::size_t count) noexcept(nothrow_v) {
+  std::size_t writeN(const T* src, std::size_t count) noexcept(nothrow_v) {
     const auto capacity = base_type::capacity_;
     const auto padding  = writer_.paddingCache_;
     auto writeIndex     = writer_.writeIndex_.load(std::memory_order_relaxed);
@@ -316,7 +316,7 @@ public:
     return toWrite;
   }
 
-  [[nodiscard]] std::size_t readN(T* dst, std::size_t count) noexcept(nothrow_v) {
+  std::size_t readN(T* dst, std::size_t count) noexcept(nothrow_v) {
     const auto capacity = base_type::capacity_;
     const auto padding  = base_type::padding;
 

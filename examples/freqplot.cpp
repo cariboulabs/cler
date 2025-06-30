@@ -16,6 +16,71 @@
 const size_t CHANNEL_SIZE = 512;
 const size_t BATCH_SIZE = CHANNEL_SIZE / 2;
 
+struct GuiManager {
+    GLFWwindow* window = nullptr;
+
+    void init() {
+    if (!glfwInit()) {
+        throw std::runtime_error("GLFW init failed!");
+    }
+
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_SAMPLES, 4);
+
+    window = glfwCreateWindow(800, 400, "DSP Blocks", nullptr, nullptr);
+    if (!window) {
+        throw std::runtime_error("Failed to create GLFW window");
+    }
+    glfwMakeContextCurrent(window);
+    glfwSwapInterval(1);
+
+    glEnable(GL_MULTISAMPLE);
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImPlot::CreateContext();
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+    ImGui::GetStyle().AntiAliasedLines = true;
+    ImGui::GetStyle().AntiAliasedLinesUseTex = true; 
+    }
+
+    void begin_frame() {
+        glfwPollEvents();
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+    }
+
+    void end_frame() {
+        ImGui::Render();
+        int display_w, display_h;
+        glfwGetFramebufferSize(window, &display_w, &display_h);
+        glViewport(0, 0, display_w, display_h);
+        glClearColor(0, 0, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        glfwSwapBuffers(window);
+    }
+
+    bool should_close() {
+        return glfwWindowShouldClose(window);
+    }
+
+    void shutdown() {
+        ImGui_ImplOpenGL3_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImPlot::DestroyContext();
+        ImGui::DestroyContext();
+        glfwDestroyWindow(window);
+        glfwTerminate();
+    }
+};
+
 struct SourceBlock : public cler::BlockBase<SourceBlock> {
     SourceBlock(const char* name) : BlockBase(name) {}
 
@@ -41,112 +106,42 @@ struct SourceBlock : public cler::BlockBase<SourceBlock> {
 struct FreqPlotBlock : public cler::BlockBase<FreqPlotBlock> {
     cler::Channel<float> in;
 
-    FreqPlotBlock(const char* name)
-        : BlockBase(name), in(CHANNEL_SIZE)
-    {
-        init_plot();
-
-        // Initialize x-axis values
+    FreqPlotBlock(const char* name) : BlockBase(name), in(CHANNEL_SIZE) {
         for (size_t i = 0; i < BATCH_SIZE; ++i) {
             _x[i] = static_cast<float>(i);
         }
     }
 
-    ~FreqPlotBlock() {
-        destroy_plot();
+    cler::Result<cler::Empty, ClerError> procedure_impl() {
+        if (in.size() < BATCH_SIZE) {
+            return ClerError::NotEnoughSamples;
+        }
+        in.readN(_samples, BATCH_SIZE);
+        return cler::Empty{};
     }
 
-    // Runs in MAIN THREAD
     void render() {
-        if (glfwWindowShouldClose(_window)) {
-            exit(0);
-        }
-
-        glfwPollEvents();
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-
         ImGui::Begin("Frequency Plot");
-
         if (ImPlot::BeginPlot("Waveform", ImVec2(-1, 300))) {
             ImPlot::SetupAxes("Sample Index", "Amplitude");
             ImPlot::PlotLine("Signal", _x, _samples, BATCH_SIZE);
             ImPlot::EndPlot();
         }
-
         ImGui::End();
-
-        ImGui::Render();
-        int display_w, display_h;
-        glfwGetFramebufferSize(_window, &display_w, &display_h);
-        glViewport(0, 0, display_w, display_h);
-        glClearColor(0, 0, 0, 1);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        glfwSwapBuffers(_window);
-    }
-
-    // Runs in worker thread
-    cler::Result<cler::Empty, ClerError> procedure_impl() {
-        if (in.size() < BATCH_SIZE) {
-            return ClerError::NotEnoughSamples;
-        }
-
-        // Safely read into the buffer the render() will use
-        const size_t read = in.readN(_samples, BATCH_SIZE);
-        if (read != BATCH_SIZE) {
-            return ClerError::NotEnoughSamples;
-        }
-
-        return cler::Empty{};
     }
 
 private:
-    GLFWwindow* _window = nullptr;
-    static constexpr int WINDOW_WIDTH = 800;
-    static constexpr int WINDOW_HEIGHT = 400;
-
     float _samples[BATCH_SIZE] = {0};
     float _x[BATCH_SIZE] = {0};
-
-    void init_plot() {
-        if (!glfwInit()) {
-            throw std::runtime_error("GLFW init failed!");
-        }
-
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
-        _window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "FreqPlot ImPlot", nullptr, nullptr);
-        if (!_window) {
-            throw std::runtime_error("Failed to create GLFW window");
-        }
-        glfwMakeContextCurrent(_window);
-        glfwSwapInterval(1);
-
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImPlot::CreateContext();
-        ImGui::StyleColorsDark();
-
-        ImGui_ImplGlfw_InitForOpenGL(_window, true);
-        ImGui_ImplOpenGL3_Init("#version 330");
-    }
-
-    void destroy_plot() {
-        ImGui_ImplOpenGL3_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
-        ImPlot::DestroyContext();
-        ImGui::DestroyContext();
-        glfwDestroyWindow(_window);
-        glfwTerminate();
-    }
 };
 
+//init window and the rest
+
+
 int main() {
+    GuiManager gui;
+    gui.init();
+
     SourceBlock source("Source");
     FreqPlotBlock freqplot("FreqPlot");
 
@@ -160,8 +155,13 @@ int main() {
 
     flowgraph.run();
 
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    while (!gui.should_close()) {
+        gui.begin_frame();
         freqplot.render();
+        gui.end_frame();
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+
+    gui.shutdown();
 }

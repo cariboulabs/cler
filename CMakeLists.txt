@@ -7,7 +7,7 @@ project(cler2
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_C_STANDARD 99)
-add_compile_options(-Wall -Wextra -Wno-unused-variable -Wno-missing-braces -Wno-interference-size)
+add_compile_options(-Wall -Wextra -Wno-unused-variable -Wno-missing-braces)
 
 include_directories(src)
 add_subdirectory(examples)

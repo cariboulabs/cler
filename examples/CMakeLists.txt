@@ -40,7 +40,6 @@ add_executable(freqplot
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-    ${imgui_SOURCE_DIR}/imgui_demo.cpp  # Optional
 
     # ImGui backends
     ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
@@ -49,7 +48,6 @@ add_executable(freqplot
     # ImPlot core
     ${implot_SOURCE_DIR}/implot.cpp
     ${implot_SOURCE_DIR}/implot_items.cpp
-    ${implot_SOURCE_DIR}/implot_demo.cpp  # Optional
 )
 
 # === Include directories ===
