@@ -1,6 +1,4 @@
 #include "cler.hpp"
-#include "result.hpp"
-#include "utils.hpp"
 #include <cmath>
 #include "gui/gui_manager.hpp"
 
@@ -81,9 +79,6 @@ private:
     float _x[BATCH_SIZE] = {0};
 };
 
-//init window and the rest
-
-
 int main() {
     cler::GuiManager gui(1000, 400 , "Frequency Plot Example");
 
@@ -100,6 +95,7 @@ int main() {
 
     flowgraph.run();
 
+    //rendering has to happen in the MAIN THREAD
     while (!gui.should_close()) {
         gui.begin_frame();
         freqplot.render();
