@@ -1,5 +1,6 @@
 #include "cler.hpp"
 
+//a one to one gain block over arbitrary types
 template <typename T>
 struct GainBlock : public cler::BlockBase {
     cler::Channel<T> in;

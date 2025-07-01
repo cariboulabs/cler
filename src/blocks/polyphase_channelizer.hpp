@@ -5,9 +5,9 @@
 #include <complex>
 #include <cassert>
 
-struct PolyphaseChannelizer : public cler::BlockBase {
+struct PolyphaseChannelizerBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
-    PolyphaseChannelizer(const char* name,
+    PolyphaseChannelizerBlock(const char* name,
                         size_t num_channels,
                         float  kaiser_attenuation,
                         size_t kaiser_filter_length,
@@ -31,7 +31,7 @@ struct PolyphaseChannelizer : public cler::BlockBase {
         _tmp_in = new std::complex<float>[in_work_size];
         _tmp_out = new std::complex<float>[num_channels];
     }
-    ~PolyphaseChannelizer() {
+    ~PolyphaseChannelizerBlock() {
         delete[] _tmp_in;
         delete[] _tmp_out;
         if (_pfch) firpfbch2_crcf_destroy(_pfch);
