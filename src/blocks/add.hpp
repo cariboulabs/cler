@@ -11,12 +11,16 @@ struct AddBlock : public cler::BlockBase {
             throw std::invalid_argument("AddBlock requires at least two input channels");
         }
         
-        //Our ringbuffers are not copy/move so we cant use std::vector
-        //As such, we use a raw array of cler::Channel<T>
-        in = new cler::Channel<T>[num_inputs];
+        // Our ringbuffers are not copy/move so we cant use std::vector
+        // As such, we use a raw array of cler::Channel<T>
+        // Allocate raw storage only, no default construction
+        in = static_cast<cler::Channel<T>*>(
+            ::operator new[](num_inputs * sizeof(cler::Channel<T>))
+        );
         for (size_t i = 0; i < num_inputs; ++i) {
             new (&in[i]) cler::Channel<T>(in_buffer_size);
         }
+
         _tmp = new T[_work_size];
 
      }
