@@ -1,3 +1,4 @@
+#We add all general block dependencies here. Reminder that core cler does not depend on any of these.
 cmake_minimum_required(VERSION 3.16)
 
 include(FetchContent)
