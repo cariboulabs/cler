@@ -2,9 +2,9 @@ add_executable(streamlined streamlined.cpp)
 add_executable(flowgraph flowgraph.cpp)
 
 add_executable(polyphase_channelizer polyphase_channelizer.cpp)
-target_link_libraries(polyphase_channelizer liquid)
+target_link_libraries(polyphase_channelizer liquid cler_gui)
 target_include_directories(polyphase_channelizer PRIVATE
-  ${liquid_SOURCE_DIR}/include
+  ${liquid_INCLUDE_DIR}
 )
 
 
