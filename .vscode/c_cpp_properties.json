@@ -4,7 +4,8 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/build/_deps/liquid-src/include"
+                "${workspaceFolder}/build/_deps/liquid-src/include",
+                "${workspaceFolder}/build/_deps/fftw/include"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/clang",

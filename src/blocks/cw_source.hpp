@@ -9,9 +9,10 @@ struct CWSourceBlock : public cler::BlockBase {
     static_assert(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>,
                   "CWSourceBlock only supports float or std::complex<float>");
 
-    CWSourceBlock(const char* name, int frequency_hz, int sample_rate_sps, size_t work_size)
+    CWSourceBlock(const char* name, float ampltiude, int frequency_hz, int sample_rate_sps, size_t work_size)
         : cler::BlockBase(name),
           _work_size(work_size),
+          _amplitude(ampltiude),
           _frequency_hz(frequency_hz),
           _sample_rate_sps(sample_rate_sps)
     {
@@ -39,9 +40,9 @@ struct CWSourceBlock : public cler::BlockBase {
 
         for (size_t i = 0; i < _work_size; ++i) {
             if constexpr (std::is_same_v<T, std::complex<float>>) {
-                _tmp[i] = std::polar(1.0f, phase);
+                _tmp[i] = _amplitude * std::polar(1.0f, phase);
             } else {
-                _tmp[i] = std::cos(phase);
+                _tmp[i] = _amplitude * std::cos(phase);
             }
 
             phase += phase_increment;
@@ -57,6 +58,7 @@ struct CWSourceBlock : public cler::BlockBase {
 private:
     size_t _work_size;
     T* _tmp;
+    float _amplitude;
     int _frequency_hz;
     int _sample_rate_sps;
 };
