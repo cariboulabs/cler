@@ -1,13 +1,13 @@
-#include "cler.hpp"
-#include "gui_manager.hpp"
-#include "blocks/polyphase_channelizer.hpp"
-#include "blocks/add.hpp"
-#include "blocks/cw_source.hpp"
-#include "blocks/plot_time_series.hpp"
+// #include "cler.hpp"
+// #include "gui_manager.hpp"
+// #include "blocks/polyphase_channelizer.hpp"
+// #include "blocks/add.hpp"
+// #include "blocks/cw_source.hpp"
+// #include "blocks/plot_time_series.hpp"
 
 int main() {
-    // CWSourceBlock<float> cw_source1("CW Source", 1, 100, 256);
-    // CWSourceBlock<float> cw_source2("CW Source", 2, 100, 256);
+    // SourceCWBlock<float> cw_source1("CW Source", 1, 100, 256);
+    // SourceCWBlock<float> cw_source2("CW Source", 2, 100, 256);
     // // AddBlock<std::complex<float>> adder("Adder", 2, 512, 256);
 
     // const char* signal_labels[] = {
