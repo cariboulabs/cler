@@ -76,7 +76,7 @@ struct clgmskframesync_s {
     unsigned int k;                 // filter samples/symbol
     unsigned int m;                 // filter semi-length (symbols)
     float BT;                       // filter bandwidth-time product
-    framesync_callback callback;    // user-defined callback function
+    clgmskframesync_callback callback;    // user-defined callback function
     void * userdata;                // user-defined data structure
     framesyncstats_s framesyncstats;// frame statistic object
     framedatastats_s framedatastats;// frame statistic object (packet statistics)
@@ -137,13 +137,8 @@ struct clgmskframesync_s {
     int payload_valid;              // did payload pass crc?
     
     // status variables
-    enum {
-        STATE_DETECTFRAME=0,
-        STATE_RXSYNCWORD,        
-        STATE_RXPREAMBLE,           
-        STATE_RXHEADER,           
-        STATE_RXPAYLOAD,
-    } state;
+    clgmskframesync_state_en state;
+    unsigned int sample_counter;    //counter: num of samples received in general
     unsigned int preamble_counter;  // counter: num of p/n syms received
     unsigned int syncword_counter; // counter: num of syncword syms received
     unsigned int header_counter;    // counter: num of header syms received
@@ -164,10 +159,11 @@ clgmskframesync clgmskframesync_create_set(unsigned int       _k,
                                         unsigned int       _syncword_symbols_len,
                                         float _detector_threshold,
                                         float _detector_dphi_max,
-                                        framesync_callback _callback,
+                                        clgmskframesync_callback _callback,
                                         void *             _userdata)
 {
     clgmskframesync q = (clgmskframesync) malloc(sizeof(struct clgmskframesync_s));
+    q->sample_counter = 0;
     q->callback = _callback;
     q->userdata = _userdata;
     q->k        = _k;        // samples/symbol
@@ -327,7 +323,7 @@ int clgmskframesync_set_header_len(clgmskframesync _q,
 int clgmskframesync_reset(clgmskframesync _q)
 {
     // reset state and counters
-    _q->state = STATE_DETECTFRAME;
+    _q->state = CLGMSKFRAMESYNC_STATE_DETECTFRAME;
     _q->preamble_counter = 0;
     _q->syncword_counter = 0;
     _q->header_counter   = 0;
@@ -355,18 +351,19 @@ int clgmskframesync_reset(clgmskframesync _q)
 
 int clgmskframesync_is_frame_open(clgmskframesync _q)
 {
-    return (_q->state == STATE_DETECTFRAME) ? 0 : 1;
+    return (_q->state == CLGMSKFRAMESYNC_STATE_DETECTFRAME) ? 0 : 1;
 }
 
 int clgmskframesync_execute_sample(clgmskframesync _q,
                                  float complex _x)
 {
+    _q->sample_counter++;
     switch (_q->state) {
-    case STATE_DETECTFRAME: return clgmskframesync_execute_detectframe(_q, _x);
-    case STATE_RXPREAMBLE:  return clgmskframesync_execute_rxpreamble (_q, _x);
-    case STATE_RXSYNCWORD:  return clgmskframesync_execute_rxsyncword   (_q, _x);
-    case STATE_RXHEADER:    return clgmskframesync_execute_rxheader   (_q, _x);
-    case STATE_RXPAYLOAD:   return clgmskframesync_execute_rxpayload  (_q, _x);
+    case CLGMSKFRAMESYNC_STATE_DETECTFRAME: return clgmskframesync_execute_detectframe(_q, _x);
+    case CLGMSKFRAMESYNC_STATE_RXPREAMBLE:  return clgmskframesync_execute_rxpreamble (_q, _x);
+    case CLGMSKFRAMESYNC_STATE_RXSYNCWORD:  return clgmskframesync_execute_rxsyncword   (_q, _x);
+    case CLGMSKFRAMESYNC_STATE_RXHEADER:    return clgmskframesync_execute_rxheader   (_q, _x);
+    case CLGMSKFRAMESYNC_STATE_RXPAYLOAD:   return clgmskframesync_execute_rxpayload  (_q, _x);
     default:;
     }
 
@@ -524,7 +521,7 @@ int clgmskframesync_pushpn(clgmskframesync _q)
 
     // set state (still need a few more samples before entire p/n
     // sequence has been received)
-    _q->state = STATE_RXPREAMBLE;
+    _q->state = CLGMSKFRAMESYNC_STATE_RXPREAMBLE;
 
     for (i=delay; i<buffer_len; i++) {
         // run remaining samples through sample state machine
@@ -610,9 +607,16 @@ int clgmskframesync_execute_rxpreamble(clgmskframesync _q,
         _q->preamble_counter++;
 
         if (_q->preamble_counter == _q->preamble_len) {
-            _q->state = STATE_RXSYNCWORD;
-            // _q->callback
-            printf("preamble received, switching to STATE_RXSYNCWORD\n");
+            _q->callback(_q->sample_counter,
+                         _q->state,
+                         NULL,
+                         0,
+                         NULL,
+                         0,
+                         0,
+                         _q->framesyncstats,
+                         _q->userdata);
+            _q->state = CLGMSKFRAMESYNC_STATE_RXHEADER;
         }
     }
     return LIQUID_OK;
@@ -692,13 +696,16 @@ int clgmskframesync_execute_rxheader(clgmskframesync _q,
                 _q->framesyncstats.fec1          = LIQUID_FEC_UNKNOWN;
 
                 // invoke callback method
-                _q->callback(_q->header_dec,
-                             _q->header_valid,
-                             NULL,
-                             0,
-                             0,
-                             _q->framesyncstats,
-                             _q->userdata);
+                _q->callback(
+                            _q->sample_counter,
+                            _q->state,
+                            _q->header_dec,
+                            _q->header_valid,
+                            NULL,
+                            0,
+                            0,
+                            _q->framesyncstats,
+                            _q->userdata);
 
                 clgmskframesync_reset(_q);
             }
@@ -708,7 +715,7 @@ int clgmskframesync_execute_rxheader(clgmskframesync _q,
                 return clgmskframesync_reset(_q);
 
             // update state
-            _q->state = STATE_RXPAYLOAD;
+            _q->state = CLGMSKFRAMESYNC_STATE_RXPAYLOAD;
         }
     }
     return LIQUID_OK;
@@ -769,13 +776,16 @@ int clgmskframesync_execute_rxpayload(clgmskframesync _q,
                 _q->framesyncstats.fec1          = _q->fec1;
 
                 // invoke callback method
-                _q->callback(_q->header_dec,
-                             _q->header_valid,
-                             _q->payload_dec,
-                             _q->payload_dec_len,
-                             _q->payload_valid,
-                             _q->framesyncstats,
-                             _q->userdata);
+                _q->callback(
+                            _q->sample_counter,
+                            _q->state,
+                            _q->header_dec,
+                            _q->header_valid,
+                            _q->payload_dec,
+                            _q->payload_dec_len,
+                            _q->payload_valid,
+                            _q->framesyncstats,
+                            _q->userdata);
             }
 
             // reset frame synchronizer
@@ -790,27 +800,28 @@ int clgmskframesync_decode_syncword(clgmskframesync _q)
     // check if syncword matches
     unsigned int i;
     unsigned int start = _q->syncword_counter - _q->syncword_symbols_len;
+    clgmskframesync_reset(_q);
     
     for (i = 0; i<_q->syncword_symbols_len; i++) 
     {
         if (_q->syncword_symbols_est[start + i] != _q->syncword_symbols_expected[i]) {
-            printf("syncword does not match\n");
-            for (i=0; i<_q->syncword_symbols_len; i++) {
-                printf("%d ", _q->syncword_symbols_expected[i]);
-            }
-            printf("\n");
-            for (i=0; i<_q->syncword_symbols_len; i++) {
-                printf("%d ", _q->syncword_symbols_est[start + i]);
-            }
-            printf("\n");
-            //print hamming distance
-            unsigned int hamming_distance = 0;
-            for (i=0; i<_q->syncword_symbols_len; i++) {
-                if (_q->syncword_symbols_expected[i] != _q->syncword_symbols_est[start + i]) {
-                    hamming_distance++;
-                }
-            }
-            printf("hamming distance: %u\n", hamming_distance);
+            // printf("syncword does not match\n");
+            // for (i=0; i<_q->syncword_symbols_len; i++) {
+            //     printf("%d ", _q->syncword_symbols_expected[i]);
+            // }
+            // printf("\n");
+            // for (i=0; i<_q->syncword_symbols_len; i++) {
+            //     printf("%d ", _q->syncword_symbols_est[start + i]);
+            // }
+            // printf("\n");
+            // //print hamming distance
+            // unsigned int hamming_distance = 0;
+            // for (i=0; i<_q->syncword_symbols_len; i++) {
+            //     if (_q->syncword_symbols_expected[i] != _q->syncword_symbols_est[start + i]) {
+            //         hamming_distance++;
+            //     }
+            // }
+            // printf("hamming distance: %u\n", hamming_distance);
 
             if (start + i == _q->syncword_lookup_multiplier * _q->syncword_symbols_len) {
                 printf("syncword lookup multiplier reached, resetting synchronizer\n");

@@ -3,12 +3,14 @@
 #include "utils.hpp"
 #include <iostream>
 #include <fstream>
+#include <vector>
 
 using liquid_complex = liquid_float_complex;
 
 
 constexpr char* INPUT_FILE = "recordings/recorded_stream_0x55904E.bin";
 constexpr char* POST_DECIM_OUTPUT_FILE = "output/post_decim_output.bin";
+constexpr char* PREAMBLE_DETECTIONS_OUTPUT_FILE = "output/preamble_detections.bin";
 
 constexpr size_t WORK_SIZE = 1024; //How much to read from the input at once
 constexpr size_t INPUT_MSPS = 4000000; // 4 MHz samples per second
@@ -30,10 +32,29 @@ constexpr float DETECTOR_DPHI_MAX = 0.05f; // Maximum carrier offset allowable
 constexpr unsigned char PREAMBLE_LEN = 24; // Length of preamble in symbols
 constexpr unsigned char SYNCWORD[] = {0x55, 0x90, 0x4E}; // Example syncword in bytes
 
-int callback(clgmskframesync* _q)
+struct UserData {
+    std::vector<unsigned int> preamble_detections;
+};
+
+int callback(
+            unsigned int _sample_counter,
+            clgmskframesync_state_en _state,
+            unsigned char *  _header,
+            int              _header_valid,
+            unsigned char *  _payload,
+            unsigned int     _payload_len,
+            int              _payload_valid,
+            framesyncstats_s _stats,
+            void*           _userdata)
 {
-    // if (_q->state == RX)
-    // printf("***** gmskframesync callback invoked *****\n");
+    UserData* userdata = static_cast<UserData*>(_userdata);
+
+    if (_state == CLGMSKFRAMESYNC_STATE_RXPREAMBLE) {
+        printf("Callback called with sample counter %u and state %d\n",
+               _sample_counter, _state);
+
+        userdata->preamble_detections.push_back(_sample_counter);
+    }
     return 0;
 }
 
@@ -56,7 +77,10 @@ int main() {
     unsigned char syncword_symbols[syncword_symbols_len];
     syncword_to_symbols(syncword_symbols, SYNCWORD, syncword_len);
 
-    clgmskframesync fs = clgmskframesync_create_set(N_DECIMATED_SAMPLES_PER_SYMBOL,
+    UserData userdata;
+
+    clgmskframesync fs = clgmskframesync_create_set(
+                                                N_DECIMATED_SAMPLES_PER_SYMBOL,
                                                 M,
                                                 BT,
                                                 PREAMBLE_LEN,
@@ -64,8 +88,8 @@ int main() {
                                                 syncword_symbols_len,
                                                 DETECTOR_THRESHOLD,
                                                 DETECTOR_DPHI_MAX,
-                                                NULL,
-                                                NULL);
+                                                callback,
+                                                &userdata);
     
 
     liquid_complex input_buffer[WORK_SIZE];
@@ -88,5 +112,17 @@ int main() {
         }
 
         clgmskframesync_execute(fs, post_decim_buffer, n_decimated_samples);
+    }
+
+    //save preamble detections to output file
+    std::ofstream preamble_detections_file(PREAMBLE_DETECTIONS_OUTPUT_FILE, std::ios::binary);
+    if (!preamble_detections_file) {
+        std::cerr << "Failed to open preamble detections output file\n";
+    } else {
+        preamble_detections_file.write(
+            reinterpret_cast<const char*>(userdata.preamble_detections.data()),
+            userdata.preamble_detections.size() * sizeof(unsigned int)
+        );
+        preamble_detections_file.close();
     }
 }
