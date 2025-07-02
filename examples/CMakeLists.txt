@@ -9,5 +9,3 @@ target_include_directories(polyphase_channelizer PRIVATE
 
 add_executable(freqplot freqplot.cpp)
 target_link_libraries(freqplot cler_gui liquid)
-
-add_subdirectory(easylink_gmskdemod)
