@@ -61,7 +61,7 @@ int clgmskframesync_update_symsync(clgmskframesync _q,
 // execute stages
 int clgmskframesync_execute_detectframe(clgmskframesync _q, float complex _x);
 int clgmskframesync_execute_rxpreamble( clgmskframesync _q, float complex _x);
-int clgmskframesync_execute_syncword( clgmskframesync _q, float complex _x);
+int clgmskframesync_execute_rxsyncword( clgmskframesync _q, float complex _x);
 int clgmskframesync_execute_rxheader(   clgmskframesync _q, float complex _x);
 int clgmskframesync_execute_rxpayload(  clgmskframesync _q, float complex _x);
 
@@ -159,8 +159,11 @@ struct clgmskframesync_s {
 clgmskframesync clgmskframesync_create_set(unsigned int       _k,
                                         unsigned int       _m,
                                         float              _BT,
+                                        unsigned int       _preamble_symbols_len,
                                         const unsigned char*  _syncword_symbols,
                                         unsigned int       _syncword_symbols_len,
+                                        float _detector_threshold,
+                                        float _detector_dphi_max,
                                         framesync_callback _callback,
                                         void *             _userdata)
 {
@@ -179,7 +182,7 @@ clgmskframesync clgmskframesync_create_set(unsigned int       _k,
     unsigned int i;
 
     // frame detector
-    q->preamble_len = 63;
+    q->preamble_len = _preamble_symbols_len;
     q->preamble_pn = (float*)malloc(q->preamble_len*sizeof(float));
     q->preamble_rx = (float*)malloc(q->preamble_len*sizeof(float));
     float complex preamble_samples[q->preamble_len*q->k];
@@ -206,10 +209,8 @@ clgmskframesync clgmskframesync_create_set(unsigned int       _k,
     for (i=0; i<q->preamble_len*q->k; i++)
         printf("preamble(%3u) = %12.8f + j*%12.8f;\n", i+1, crealf(preamble_samples[i]), cimagf(preamble_samples[i]));
 #endif
-    // create frame detector
-    float threshold = 0.5f;     // detection threshold
-    float dphi_max  = 0.2f;    // maximum carrier offset allowable
-    q->frame_detector = detector_cccf_create(preamble_samples, q->preamble_len*q->k, threshold, dphi_max);
+    q->frame_detector = detector_cccf_create(preamble_samples, q->preamble_len*q->k,
+        _detector_threshold, _detector_dphi_max);
     q->buffer = windowcf_create(q->k*(q->preamble_len+q->m));
 
     // create symbol timing recovery filters
@@ -363,7 +364,7 @@ int clgmskframesync_execute_sample(clgmskframesync _q,
     switch (_q->state) {
     case STATE_DETECTFRAME: return clgmskframesync_execute_detectframe(_q, _x);
     case STATE_RXPREAMBLE:  return clgmskframesync_execute_rxpreamble (_q, _x);
-    case STATE_RXSYNCWORD:  return clgmskframesync_execute_syncword   (_q, _x);
+    case STATE_RXSYNCWORD:  return clgmskframesync_execute_rxsyncword   (_q, _x);
     case STATE_RXHEADER:    return clgmskframesync_execute_rxheader   (_q, _x);
     case STATE_RXPAYLOAD:   return clgmskframesync_execute_rxpayload  (_q, _x);
     default:;
@@ -609,15 +610,15 @@ int clgmskframesync_execute_rxpreamble(clgmskframesync _q,
         _q->preamble_counter++;
 
         if (_q->preamble_counter == _q->preamble_len) {
-            clgmskframesync_syncpn(_q);
             _q->state = STATE_RXSYNCWORD;
+            // _q->callback
             printf("preamble received, switching to STATE_RXSYNCWORD\n");
         }
     }
     return LIQUID_OK;
 }
 
-int clgmskframesync_execute_syncword(clgmskframesync _q,
+int clgmskframesync_execute_rxsyncword(clgmskframesync _q,
                                    float complex _x)
 {
     // mix signal down
@@ -793,7 +794,7 @@ int clgmskframesync_decode_syncword(clgmskframesync _q)
     for (i = 0; i<_q->syncword_symbols_len; i++) 
     {
         if (_q->syncword_symbols_est[start + i] != _q->syncword_symbols_expected[i]) {
-            printf("syncword does not match");
+            printf("syncword does not match\n");
             for (i=0; i<_q->syncword_symbols_len; i++) {
                 printf("%d ", _q->syncword_symbols_expected[i]);
             }

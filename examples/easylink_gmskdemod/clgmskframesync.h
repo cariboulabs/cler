@@ -17,8 +17,11 @@ typedef struct clgmskframesync_s * clgmskframesync;
 clgmskframesync clgmskframesync_create_set(unsigned int   _k,
                                        unsigned int       _m,
                                        float              _BT,
+                                       unsigned int       _preamble_len,
                                        const unsigned char*  _syncword,
                                        unsigned int       _syncword_len,
+                                       float _detector_threshold,
+                                       float _detector_dphi_max,
                                        framesync_callback _callback,
                                        void *             _userdata);
 int clgmskframesync_destroy(clgmskframesync _q);

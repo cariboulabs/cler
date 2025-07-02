@@ -18,3 +18,11 @@ int generate_output_directory() {
     }
     return 0;
 }
+
+void syncword_to_symbols(unsigned char* out_symbols, const unsigned char* in_syncword, size_t len) {
+    for (size_t i = 0; i < len; ++i) {
+        for (int bit = 7; bit >= 0; --bit) {
+            out_symbols[i * 8 + (7 - bit)] = (in_syncword[i] >> bit) & 0x01;
+        }
+    }
+}
