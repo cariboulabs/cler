@@ -10,14 +10,17 @@
 struct PlotSpectrumBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
 
-    PlotSpectrumBlock(const char* name, size_t num_inputs, const char** signal_labels, size_t work_size, float sample_rate) 
-        : BlockBase(name), _num_inputs(num_inputs), _signal_labels(signal_labels), _work_size(work_size), _sample_rate(sample_rate)
+    PlotSpectrumBlock(const char* name, size_t num_inputs, const char** signal_labels, size_t work_size, float sps) 
+        : BlockBase(name), _num_inputs(num_inputs), _signal_labels(signal_labels), _work_size(work_size), _sps(sps)
     {
         if (num_inputs < 1) {
             throw std::invalid_argument("PlotSpectrumBlock requires at least one input channel");
         }
         if (work_size == 0) {
             throw std::invalid_argument("Work size must be greater than zero.");
+        }
+        if ((work_size & (work_size - 1)) != 0) {
+            throw std::invalid_argument("Work size must be a power of two.");
         }
 
         // Allocate channels for complex input
@@ -43,7 +46,7 @@ struct PlotSpectrumBlock : public cler::BlockBase {
         // Allocate frequency bins
         _freq_bins = new float[work_size];
         for (size_t i = 0; i < work_size; ++i) {
-            _freq_bins[i] = i * (_sample_rate / _work_size);
+            _freq_bins[i] = i * (_sps / _work_size);
         }
 
         // Liquid DSP: allocate input/output buffers
@@ -115,7 +118,7 @@ private:
     size_t _num_inputs;
     const char** _signal_labels;
     size_t _work_size;
-    float _sample_rate;
+    float _sps;
 
     std::complex<float>** _time_buffers; // [num_inputs][work_size]
     float** _spectrum_buffers;            // [num_inputs][work_size]
