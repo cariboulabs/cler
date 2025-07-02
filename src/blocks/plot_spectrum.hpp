@@ -5,7 +5,7 @@
 #include <complex>
 #include <cmath>
 
-#include <fftw3.h>
+#include <liquid/liquid.h>
 
 struct PlotSpectrumBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
@@ -46,12 +46,11 @@ struct PlotSpectrumBlock : public cler::BlockBase {
             _freq_bins[i] = i * (_sample_rate / _work_size);
         }
 
-        // FFTW: allocate complex buffers and plan
-        _fftw_in_cpx = fftwf_alloc_complex(_work_size);
-        _fftw_out_cpx = fftwf_alloc_complex(_work_size);
-        _fftw_plan = fftwf_plan_dft_1d(
-            _work_size, _fftw_in_cpx, _fftw_out_cpx, FFTW_FORWARD, FFTW_MEASURE
-        );
+        // Liquid DSP: allocate input/output buffers
+        _liquid_inout = new std::complex<float>[_work_size];
+
+        // Create FFT plan
+        _fftplan = fft_create_plan(_work_size, _liquid_inout, _liquid_inout, LIQUID_FFT_FORWARD, 0);
     }
 
     ~PlotSpectrumBlock() {
@@ -65,10 +64,9 @@ struct PlotSpectrumBlock : public cler::BlockBase {
         delete[] _spectrum_buffers;
 
         delete[] _freq_bins;
+        delete[] _liquid_inout;
 
-        fftwf_destroy_plan(_fftw_plan);
-        fftwf_free(_fftw_in_cpx);
-        fftwf_free(_fftw_out_cpx);
+        fft_destroy_plan(_fftplan);
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
@@ -81,18 +79,18 @@ struct PlotSpectrumBlock : public cler::BlockBase {
         for (size_t i = 0; i < _num_inputs; ++i) {
             in[i].readN(_time_buffers[i], _work_size);
 
-            // Copy input to FFTW input buffer
+            // Copy input to Liquid input buffer
             for (size_t j = 0; j < _work_size; ++j) {
-                _fftw_in_cpx[j][0] = _time_buffers[i][j].real();
-                _fftw_in_cpx[j][1] = _time_buffers[i][j].imag();
+                _liquid_inout[j] = _time_buffers[i][j];
             }
 
-            fftwf_execute(_fftw_plan);
+            // Execute FFT
+            fft_execute(_fftplan);
 
             // Compute magnitude spectrum
             for (size_t k = 0; k < _work_size; ++k) {
-                float real = _fftw_out_cpx[k][0];
-                float imag = _fftw_out_cpx[k][1];
+                float real = _liquid_inout[k].real();
+                float imag = _liquid_inout[k].imag();
                 float mag = std::sqrt(real * real + imag * imag);
                 _spectrum_buffers[i][k] = 20.0f * std::log10(mag + 1e-15f);
             }
@@ -123,7 +121,6 @@ private:
     float** _spectrum_buffers;            // [num_inputs][work_size]
     float* _freq_bins;                    // [work_size]
 
-    fftwf_plan _fftw_plan;
-    fftwf_complex* _fftw_in_cpx;
-    fftwf_complex* _fftw_out_cpx;
+    std::complex<float>* _liquid_inout;   // single in/out buffer
+    fftplan _fftplan;                     // Liquid-DSP FFT plan
 };

@@ -9,4 +9,4 @@ target_include_directories(polyphase_channelizer PRIVATE
 
 
 add_executable(freqplot freqplot.cpp)
-target_link_libraries(freqplot cler_gui fftw3f)
+target_link_libraries(freqplot cler_gui liquid)
