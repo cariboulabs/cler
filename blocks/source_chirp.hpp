@@ -13,7 +13,7 @@ struct SourceChirpBlock : public cler::BlockBase {
                      float amplitude,
                      float f0_hz,
                      float f1_hz,
-                     int sps,
+                     size_t sps,
                      float chirp_duration_s,
                      size_t work_size)
         : cler::BlockBase(name),
@@ -28,7 +28,7 @@ struct SourceChirpBlock : public cler::BlockBase {
         }
 
         _chirp_duration_samples = static_cast<size_t>(std::round(static_cast<double>(_sps) * chirp_duration_s));
-        _k = (_f1 - _f0) / _chirp_duration_samples;
+        _k = (_f1 - _f0) /static_cast<float>(_chirp_duration_samples);
 
         _tmp = new T[_work_size];
     }
@@ -74,7 +74,7 @@ private:
     float _f0;
     float _f1;
     float _k; // chirp rate (Hz/sample)
-    int _sps;
+    size_t _sps;
     size_t _chirp_duration_samples;
 
     size_t _current_sample_idx = 0;
