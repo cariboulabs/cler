@@ -182,29 +182,33 @@ clgmskframesync clgmskframesync_create_set(unsigned int       _k,
     q->preamble_pn = (float*)malloc(q->preamble_len*sizeof(float));
     q->preamble_rx = (float*)malloc(q->preamble_len*sizeof(float));
     float complex preamble_samples[q->preamble_len*q->k];
-    msequence ms = msequence_create(6, 0x6d, 1);
+
     gmskmod mod = gmskmod_create(q->k, q->m, q->BT);
 
-    for (i=0; i<q->preamble_len + q->m; i++) {
-        unsigned char bit = msequence_advance(ms);
-
-        // save p/n sequence
-        if (i < q->preamble_len)
-            q->preamble_pn[i] = bit ? 1.0f : -1.0f;
-        
-        // modulate/interpolate
-        if (i < q->m) gmskmod_modulate(mod, bit, &preamble_samples[0]);
-        else          gmskmod_modulate(mod, bit, &preamble_samples[(i-q->m)*q->k]);
+    // printf("number of samples in preamble: %u\n", q->preamble_len * q->k);
+    
+    //burn in
+    for (i = 0; i < q->m; i++) {
+        unsigned int bit = i % 2; 
+        liquid_float_complex throwaway;
+        gmskmod_modulate(mod, bit, &throwaway);
+    }
+    
+    for (i=0; i<q->preamble_len; i++) {
+        unsigned int bit = i % 2; 
+        gmskmod_modulate(mod, bit, &preamble_samples[i * q->k]);
     }
 
     gmskmod_destroy(mod);
-    msequence_destroy(ms);
 
-#if 0
-    // print sequence
-    for (i=0; i<q->preamble_len*q->k; i++)
-        printf("preamble(%3u) = %12.8f + j*%12.8f;\n", i+1, crealf(preamble_samples[i]), cimagf(preamble_samples[i]));
-#endif
+    // printf("preamble samples (k = %u):\n", q->k);
+    // for (i = 0; i < q->preamble_len * q->k; i++) {
+    //     printf("%12.8f %12.8f\n", crealf(preamble_samples[i]), cimagf(preamble_samples[i]));
+    // }
+
+    // printf("k = %u, m = %u, BT = %f\n", q->k, q->m, q->BT);
+    // printf("detector threshold = %f, dphi_max = %f\n",
+    //        _detector_threshold, _detector_dphi_max);
     q->frame_detector = detector_cccf_create(preamble_samples, q->preamble_len*q->k,
         _detector_threshold, _detector_dphi_max);
     q->buffer = windowcf_create(q->k*(q->preamble_len+q->m));
@@ -569,11 +573,6 @@ int clgmskframesync_execute_detectframe(clgmskframesync _q,
 
     // check if frame has been detected
     if (detected) {
-        //printf("***** frame detected! tau-hat:%8.4f, dphi-hat:%8.4f, gamma:%8.2f dB\n",
-        //        _q->tau_hat, _q->dphi_hat, 20*log10f(_q->gamma_hat));
-
-        // push buffered samples through synchronizer
-        // NOTE: state will be updated to STATE_RXPREAMBLE internally
         clgmskframesync_pushpn(_q);
     }
     return LIQUID_OK;

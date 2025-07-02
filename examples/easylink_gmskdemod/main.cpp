@@ -21,7 +21,7 @@ constexpr float BT = 0.3f;
 constexpr size_t M = 3;
 constexpr size_t N_INPUT_SAMPLES_PER_SYMBOL = INPUT_MSPS / (200000/2); //bt is 0.3 + config
 constexpr size_t N_DECIMATED_SAMPLES_PER_SYMBOL = 2;
-constexpr size_t DECIMATION_FACTOR = N_INPUT_SAMPLES_PER_SYMBOL / N_DECIMATED_SAMPLES_PER_SYMBOL; // 3
+constexpr size_t DECIMATION_FACTOR = N_INPUT_SAMPLES_PER_SYMBOL / N_DECIMATED_SAMPLES_PER_SYMBOL;
 
 constexpr float DECIM_ATTENUATION = 80.0;
 constexpr float DECIM_FRAC = (float)1/DECIMATION_FACTOR;

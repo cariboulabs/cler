@@ -43,11 +43,27 @@ add_custom_command(
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${RECORDED_STREAM2}
 )
 
+if(UNIX)
+    set(CHMOD_COMMAND chmod +x ${CMAKE_CURRENT_BINARY_DIR}/analyze.py)
+else()
+    set(CHMOD_COMMAND "")
+endif()
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/analyze.py
+    COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_CURRENT_SOURCE_DIR}/analyze.py
+            ${CMAKE_CURRENT_BINARY_DIR}/analyze.py
+    COMMAND ${CHMOD_COMMAND}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/analyze.py
+    COMMENT "Copying and setting executable permission on analyze.py"
+)
+
 # Create a custom target that triggers both copy commands
 add_custom_target(copy_assets ALL
     DEPENDS
         ${CMAKE_CURRENT_BINARY_DIR}/${RECORDED_STREAM1}
         ${CMAKE_CURRENT_BINARY_DIR}/${RECORDED_STREAM2}
+        ${CMAKE_CURRENT_BINARY_DIR}/analyze.py
     COMMENT "Copying recorded streams to binary directory"
 )
 
