@@ -26,7 +26,7 @@ constexpr size_t DECIMATION_FACTOR = N_INPUT_SAMPLES_PER_SYMBOL / N_DECIMATED_SA
 constexpr float DECIM_ATTENUATION = 80.0;
 constexpr float DECIM_FRAC = (float)1/DECIMATION_FACTOR;
 
-constexpr float DETECTOR_THRESHOLD = 0.6f;
+constexpr float DETECTOR_THRESHOLD = 0.8f;
 constexpr float DETECTOR_DPHI_MAX = 0.1f; // Maximum carrier offset allowable
 
 constexpr unsigned char PREAMBLE_LEN = 24; // Length of preamble in symbols

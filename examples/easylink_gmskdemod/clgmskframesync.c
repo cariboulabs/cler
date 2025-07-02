@@ -185,30 +185,28 @@ clgmskframesync clgmskframesync_create_set(unsigned int       _k,
 
     gmskmod mod = gmskmod_create(q->k, q->m, q->BT);
 
-    // printf("number of samples in preamble: %u\n", q->preamble_len * q->k);
     
-    //burn in
-    for (i = 0; i < q->m; i++) {
-        unsigned int bit = i % 2; 
-        liquid_float_complex throwaway;
-        gmskmod_modulate(mod, bit, &throwaway);
-    }
-    
-    for (i=0; i<q->preamble_len; i++) {
-        unsigned int bit = i % 2; 
-        gmskmod_modulate(mod, bit, &preamble_samples[i * q->k]);
+    unsigned int sample_idx = 0;
+    for (i = 0; i < q->preamble_len + q->m; i++) {
+        unsigned int bit = i % 2;
+        liquid_float_complex samples[q->k];  // buffer for k samples
+        gmskmod_modulate(mod, bit, samples);
+
+        if (i >= q->m) {
+            // Store these k samples in the output
+            for (unsigned int j = 0; j < q->k; j++) {
+                preamble_samples[sample_idx++] = samples[j];
+            }
+        }
     }
 
     gmskmod_destroy(mod);
 
-    // printf("preamble samples (k = %u):\n", q->k);
-    // for (i = 0; i < q->preamble_len * q->k; i++) {
-    //     printf("%12.8f %12.8f\n", crealf(preamble_samples[i]), cimagf(preamble_samples[i]));
-    // }
+    printf("preamble samples (k = %u):\n", q->k);
+    for (i = 0; i < q->preamble_len * q->k; i++) {
+        printf("%12.8f %12.8f\n", crealf(preamble_samples[i]), cimagf(preamble_samples[i]));
+    }
 
-    // printf("k = %u, m = %u, BT = %f\n", q->k, q->m, q->BT);
-    // printf("detector threshold = %f, dphi_max = %f\n",
-    //        _detector_threshold, _detector_dphi_max);
     q->frame_detector = detector_cccf_create(preamble_samples, q->preamble_len*q->k,
         _detector_threshold, _detector_dphi_max);
     q->buffer = windowcf_create(q->k*(q->preamble_len+q->m));
