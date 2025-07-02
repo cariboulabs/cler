@@ -4,7 +4,6 @@
 extern "C" {
 #endif
 
-#include "logger/logger.h"
 #include "liquid.h"
 
 typedef struct clgmskframesync_s * clgmskframesync;

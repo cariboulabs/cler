@@ -28,6 +28,7 @@
 #include <math.h>
 #include <complex.h>
 #include <assert.h>
+#include <stdbool.h>
 
 #include "clgmskframesync.h"
 #include "liquid.internal.h"
@@ -610,7 +611,7 @@ int clgmskframesync_execute_rxpreamble(clgmskframesync _q,
         if (_q->preamble_counter == _q->preamble_len) {
             clgmskframesync_syncpn(_q);
             _q->state = STATE_RXSYNCWORD;
-            ZF_LOGI("preamble received, switching to STATE_RXSYNCWORD\n");
+            printf("preamble received, switching to STATE_RXSYNCWORD\n");
         }
     }
     return LIQUID_OK;
@@ -792,7 +793,7 @@ int clgmskframesync_decode_syncword(clgmskframesync _q)
     for (i = 0; i<_q->syncword_symbols_len; i++) 
     {
         if (_q->syncword_symbols_est[start + i] != _q->syncword_symbols_expected[i]) {
-            ZF_LOGW("syncword does not match");
+            printf("syncword does not match");
             for (i=0; i<_q->syncword_symbols_len; i++) {
                 printf("%d ", _q->syncword_symbols_expected[i]);
             }
@@ -811,14 +812,14 @@ int clgmskframesync_decode_syncword(clgmskframesync _q)
             printf("hamming distance: %u\n", hamming_distance);
 
             if (start + i == _q->syncword_lookup_multiplier * _q->syncword_symbols_len) {
-                ZF_LOGW("syncword lookup multiplier reached, resetting synchronizer\n");
+                printf("syncword lookup multiplier reached, resetting synchronizer\n");
                 return clgmskframesync_reset(_q);
             } else {
                 return 0;
             }
         }
     }
-    ZF_LOGI("syncword matches, resetting synchronizer\n");
+    printf("syncword matches, resetting synchronizer\n");
     clgmskframesync_reset(_q);
 }
 

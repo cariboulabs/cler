@@ -70,6 +70,7 @@
         "filesystem": "cpp",
         "queue": "cpp",
         "stack": "cpp",
-        "*.inc": "cpp"
+        "*.inc": "cpp",
+        "liquid.h": "c"
     }
 }

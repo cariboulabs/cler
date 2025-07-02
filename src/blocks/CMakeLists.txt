@@ -33,3 +33,19 @@ else()
   ===============================================================
   ")
 endif()
+
+set(LIQUID_INCLUDE_DIRS ${CMAKE_BINARY_DIR}/_deps/liquid-src/include)
+if (NOT EXISTS ${LIQUID_INCLUDE_DIRS})
+  message(FATAL_ERROR "
+  ===============================================================
+  ❌  ERROR: liquid include directory not found at ${LIQUID_INCLUDE_DIRS}!
+  Please ensure that liquid is correctly fetched and built.
+  ===============================================================
+  ")
+else()
+  message(STATUS "
+  ===============================================================
+  ✅  STATUS: liquid include directory found at ${LIQUID_INCLUDE_DIRS}!
+  ===============================================================
+  ")
+endif()
