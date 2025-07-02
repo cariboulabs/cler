@@ -12,7 +12,7 @@ constexpr char* INPUT_FILE = "recordings/recorded_stream_0x55904E.bin";
 constexpr char* POST_DECIM_OUTPUT_FILE = "output/post_decim_output.bin";
 constexpr char* PREAMBLE_DETECTIONS_OUTPUT_FILE = "output/preamble_detections.bin";
 
-constexpr size_t WORK_SIZE = 1024; //How much to read from the input at once
+constexpr size_t WORK_SIZE = 40; //How much to read from the input at once
 constexpr size_t INPUT_MSPS = 4000000; // 4 MHz samples per second
 constexpr size_t INPUT_BW = 160000.0; // 130 kHz bandwidth
 static_assert(INPUT_MSPS  % INPUT_BW == 0, "Input MSPS must be a multiple of Input BW for decimation to work correctly.");
@@ -26,8 +26,8 @@ constexpr size_t DECIMATION_FACTOR = N_INPUT_SAMPLES_PER_SYMBOL / N_DECIMATED_SA
 constexpr float DECIM_ATTENUATION = 80.0;
 constexpr float DECIM_FRAC = (float)1/DECIMATION_FACTOR;
 
-constexpr float DETECTOR_THRESHOLD = 0.5f;
-constexpr float DETECTOR_DPHI_MAX = 0.05f; // Maximum carrier offset allowable
+constexpr float DETECTOR_THRESHOLD = 0.6f;
+constexpr float DETECTOR_DPHI_MAX = 0.1f; // Maximum carrier offset allowable
 
 constexpr unsigned char PREAMBLE_LEN = 24; // Length of preamble in symbols
 constexpr unsigned char SYNCWORD[] = {0x55, 0x90, 0x4E}; // Example syncword in bytes
@@ -47,11 +47,13 @@ int callback(
             framesyncstats_s _stats,
             void*           _userdata)
 {
+    static int preamble_counter = 0;
     UserData* userdata = static_cast<UserData*>(_userdata);
 
     if (_state == CLGMSKFRAMESYNC_STATE_RXPREAMBLE) {
-        printf("Callback called with sample counter %u and state %d\n",
-               _sample_counter, _state);
+        preamble_counter ++;
+        printf("PREAMB: (%d) Callback called with sample counter %u and state %d\n",
+               preamble_counter, _sample_counter, _state);
 
         userdata->preamble_detections.push_back(_sample_counter);
     }

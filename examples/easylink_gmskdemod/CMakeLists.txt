@@ -1,3 +1,13 @@
+
+# Enable -Wdeprecated-declarations warning for GCC/Clang
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-Wno-deprecated-declarations -Wno-unused-parameter 
+                        -Wno-write-strings -Wno-return-type 
+                        -Wno-old-style-declaration -Wno-sign-compare)
+endif()
+
+
+
 add_library(clgmskframesync
     clgmskframesync.c
 )
