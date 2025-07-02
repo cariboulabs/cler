@@ -1,5 +1,5 @@
 #include "cler.hpp"
-#include "liquid/liquid.h"
+#include "liquid.h"
 #include <vector>
 #include <memory>
 #include <complex>

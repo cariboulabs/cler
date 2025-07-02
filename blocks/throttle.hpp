@@ -27,6 +27,7 @@ struct ThrottleBlock : public cler::BlockBase {
         size_t available_in;
         size_t n_readable = in.peek_read(in_values, _work_size, &available_in);
         if (available_in < _work_size) {
+            printf("%s: not enough samples in input channel: %zu\n", name(), available_in);
             return cler::Error::NotEnoughSamples;
         }
 
@@ -34,10 +35,10 @@ struct ThrottleBlock : public cler::BlockBase {
         size_t available_out;
         size_t n_writable = out->peek_write(out_values, _work_size, &available_out);
         if (available_out < _work_size) {
+            printf("%s: not enough space in output channel: %zu\n", name(), available_out);
             return cler::Error::NotEnoughSpace;
         }
 
-        // Copy samples through
         for (size_t i = 0; i < _work_size; ++i) {
             out_values[i] = in_values[i];
         }
@@ -55,6 +56,7 @@ struct ThrottleBlock : public cler::BlockBase {
         }
         _last_time = std::chrono::steady_clock::now();
 
+        printf("%s: throttled %zu samples\n", name(), _work_size);
         return cler::Empty{};
     }
 

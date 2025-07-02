@@ -5,7 +5,7 @@
 #include <complex>
 #include <cmath>
 
-#include "liquid/liquid.h"
+#include "liquid.h"
 
 struct PlotSpectrumBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;

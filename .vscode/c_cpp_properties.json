@@ -4,7 +4,8 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/src/**",
+                "${workspaceFolder}/include/**",
+                "${workspaceFolder}/blocks/gui/**",
                 "${workspaceFolder}/build/_deps/liquid-src/include"
             ],
             "defines": [],
