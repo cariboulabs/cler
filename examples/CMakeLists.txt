@@ -1,9 +1,8 @@
 include_directories(
-  ${CMAKE_PROJECT_SOURCE_DIR}/include
-  ${LIQUID_INCLUDE_DIRS}
+  ${PROJECT_SOURCE_DIR}
+  ${PROJECT_SOURCE_DIR}/include
+  ${LIQUID_INCLUDE_DIRS}/blocks/gui
 )
-
-message(STATUS "CMAKE_PROJECT_SOURCE_DIR = ${CMAKE_PROJECT_SOURCE_DIR}")
 
 add_executable(streamlined streamlined.cpp)
 add_executable(flowgraph flowgraph.cpp)

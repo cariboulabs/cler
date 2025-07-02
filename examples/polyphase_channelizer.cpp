@@ -1,5 +1,5 @@
 #include "cler.hpp"
-#include "gui/gui_manager.hpp"
+#include "gui_manager.hpp"
 #include "blocks/polyphase_channelizer.hpp"
 #include "blocks/add.hpp"
 #include "blocks/cw_source.hpp"
