@@ -1,6 +1,7 @@
 #include "cler.hpp"
 #include <iostream>
 #include <chrono>
+#include "utils.hpp"
 
 const size_t CHANNEL_SIZE = 512;
 
@@ -17,8 +18,8 @@ struct SourceBlock : public cler::BlockBase {
         cler::Channel<double>* out1) {
 
         //this is faster than pushing one by one
-        out0->writeN(_ones, out0->space());
-        out1->writeN(_twos, out1->space());
+        out0->writeN(_ones, floor2(out0->space()));
+        out1->writeN(_twos, floor2(out1->space()));
         return cler::Empty{};
     }
 
