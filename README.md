@@ -18,8 +18,15 @@ Cler is a header only library, but includes a gui library (dearimgui) that is co
 See `freqplot` as an example.
 
 * **Library**: </br>
-There is also a library of useful blocks for quick plug and play in `src/blocks`. Because it is easy to create blocks, the DSP blocks can be specalizied for each case. As such, the library blocks are exactly the opposite, broad and general. There, we don't template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
-See the gain block in `flowgraph.cpp` for an example
+There is also a library of useful blocks for quick plug and play in `src/blocks`. Because it is easy to create blocks, the DSP blocks can be specalizied for each case. As such, the library blocks are exactly the opposite, broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
 
 * **Peek-Commit or ReadWrite**: </br>
-Cler supports two buffer access patterns: **Peek-Commit** and **ReadWrite**. In Peek-Commit mode, you can inspect (peek) data in the buffer without removing it, and then explicitly commit the number of items you have processed. In ReadWrite mode, reading from the buffer copies it over to another buffer, automatically advances the read pointer. The `streamlined.cpp` example implements **Peek-Commit** while the `flowgraph.cpp` implements **ReadWrite**. Although surprising, we noticed that **ReadWrite** is often faster (even though it has an extra memcpy invovled)
+Cler supports three buffer access patterns: 
+    * **Push/Pop** </br>
+    For single values. there is also a try push/pop you can use if you dont inspect size() beforehand.
+
+    * **Peek/Commit** </br>
+    Allows you to inspect (peek) data in the buffer without removing it, then explicitly commit the number of items you’ve processed. The downside is that if you reach the end of the ring buffer, you can only peek up to the buffer’s end — not the entire available space at once.
+    
+    * **Read/Write**. </br>
+    Provides access to the full available buffer space for larger chunks of data. You’ll typically copy data to a temporary buffer for processing. Read/Write automatically advances the ring buffer pointers for you — no manual commit needed.
