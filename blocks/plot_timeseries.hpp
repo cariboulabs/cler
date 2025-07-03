@@ -4,13 +4,13 @@
 struct PlotTimeSeriesBlock : public cler::BlockBase {
     cler::Channel<float>* in;
 
-    PlotTimeSeriesBlock(const char* name, size_t num_inputs, const char** signal_labels, size_t sps, size_t buffer_size, size_t work_size) : 
-        BlockBase(name), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps), _buffer_size(buffer_size), _work_size(work_size) {
+    PlotTimeSeriesBlock(const char* name, size_t num_inputs, const char** signal_labels, size_t sps, size_t buffer_size) : 
+        BlockBase(name), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps), _buffer_size(buffer_size) {
         if (num_inputs < 1) {
             throw std::invalid_argument("PlotTimeSeriesBlock requires at least one input channels");
         }
-        if (work_size == 0) {
-            throw std::invalid_argument("Work size must be greater than zero.");
+        if (buffer_size == 0) {
+            throw std::invalid_argument("Buffer size must be greater than zero.");
         }
 
         samples_counter = 0;

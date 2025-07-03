@@ -71,6 +71,9 @@
         "queue": "cpp",
         "stack": "cpp",
         "*.inc": "cpp",
-        "liquid.h": "c"
+        "liquid.h": "c",
+        "mutex": "cpp",
+        "charconv": "cpp",
+        "__config": "cpp"
     }
 }

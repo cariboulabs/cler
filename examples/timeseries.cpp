@@ -3,7 +3,6 @@
 #include "blocks/plot_timeseries.hpp"
 #include "blocks/math_complex2magphase.hpp"
 #include "blocks/source_chirp.hpp"
-#include "blocks/throttle.hpp"
 #include <complex>
 
 int main() {
@@ -11,7 +10,6 @@ int main() {
 
     cler::GuiManager gui(1000, 400 , "TimeSeries Plot Example");
     SourceChirpBlock<std::complex<float>> source("ChirpSource", 0.1f, 0.0, SPS/2, SPS, 1e5, 256);
-    // ThrottleBlock<std::complex<float>> throttle("Throttle", SPS, 2);
 
     ComplexToMagPhaseBlock complex2magphase("complex2magphase", 512);
     const char* signal_labels[] = {"magnitude", "phase"};
