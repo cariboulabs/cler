@@ -8,15 +8,16 @@
 struct ComplexToMagPhaseBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
 
-    ComplexToMagPhaseBlock(const char* name, size_t work_size)
-        : cler::BlockBase(name), in(work_size), _work_size(work_size) 
+    ComplexToMagPhaseBlock(const char* name, size_t buffer_size, size_t work_size)
+        : cler::BlockBase(name), in(work_size), _buffer_size(buffer_size), _work_size(work_size) 
     {
-        if (_work_size == 0) {
-            throw std::invalid_argument("Work size must be greater than zero.");
+        if (buffer_size < work_size) {
+            throw std::invalid_argument("Buffer size must be greater than or equal to work size.");
         }
-        _tmp_c = new std::complex<float>[_work_size];
-        _tmp_mag = new float[_work_size];
-        _tmp_phase = new float[_work_size];
+
+        _tmp_c = new std::complex<float>[_buffer_size];
+        _tmp_mag = new float[_buffer_size];
+        _tmp_phase = new float[_buffer_size];
     }
     ~ComplexToMagPhaseBlock() {
         delete[] _tmp_c;
@@ -48,6 +49,7 @@ struct ComplexToMagPhaseBlock : public cler::BlockBase {
     }
 
 private:
+    size_t _buffer_size;
     size_t _work_size;
     std::complex<float>* _tmp_c;
     float* _tmp_mag;

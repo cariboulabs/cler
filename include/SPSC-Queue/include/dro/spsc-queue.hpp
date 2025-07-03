@@ -345,7 +345,7 @@ public:
     return toRead;
   }
 
-[[nodiscard]] std::size_t peek_write(T*& ptr, std::size_t max, std::size_t* total_space) noexcept {
+[[nodiscard]] std::size_t peek_write(T*& ptr, std::size_t* total_space) noexcept {
   const auto capacity = base_type::capacity_;
   const auto padding  = writer_.paddingCache_;
   const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
@@ -364,13 +364,12 @@ public:
     *total_space = space;
   }
 
-  const std::size_t available = std::min(max, space);
-  if (available == 0) {
+  if (space == 0) {
     ptr = nullptr;
     return 0;
   }
 
-  const std::size_t contiguous = std::min(available, capacity - writeIndex);
+  const std::size_t contiguous = std::min(space, capacity - writeIndex);
   ptr = &base_type::buffer_[writeIndex + padding];
   return contiguous;
 }
@@ -382,7 +381,7 @@ void commit_write(std::size_t count) noexcept {
   writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
 }
 
-[[nodiscard]] std::size_t peek_read(const T*& ptr, std::size_t max, std::size_t* total_available) noexcept {
+[[nodiscard]] std::size_t peek_read(const T*& ptr, std::size_t* total_available) noexcept {
   const auto capacity = base_type::capacity_;
   const auto padding  = base_type::padding;
 
@@ -403,13 +402,12 @@ void commit_write(std::size_t count) noexcept {
     *total_available = available;
   }
 
-  const std::size_t toRead = std::min(max, available);
-  if (toRead == 0) {
+  if (available == 0) {
     ptr = nullptr;
     return 0;
   }
 
-  const std::size_t contiguous = std::min(toRead, capacity - readIndex);
+  const std::size_t contiguous = std::min(available, capacity - readIndex);
   ptr = &base_type::buffer_[readIndex + padding];
   return contiguous;
 }

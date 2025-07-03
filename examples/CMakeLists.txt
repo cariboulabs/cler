@@ -7,11 +7,11 @@ include_directories(
 add_executable(streamlined streamlined.cpp)
 add_executable(flowgraph flowgraph.cpp)
 
-add_executable(polyphase_channelizer polyphase_channelizer.cpp)
-target_link_libraries(polyphase_channelizer PRIVATE liquid cler_gui)
+# add_executable(polyphase_channelizer polyphase_channelizer.cpp)
+# target_link_libraries(polyphase_channelizer PRIVATE liquid cler_gui)
 
-add_executable(freqplot freqplot.cpp)
-target_link_libraries(freqplot cler_gui liquid)
+# add_executable(freqplot freqplot.cpp)
+# target_link_libraries(freqplot cler_gui liquid)
 
-add_executable(timeseries timeseries.cpp)
-target_link_libraries(timeseries cler_gui)
+# add_executable(timeseries timeseries.cpp)
+# target_link_libraries(timeseries cler_gui)
