@@ -14,7 +14,7 @@ int main() {
     
     const char* signal_labels[] = {"CW"};
     PlotTimeSeriesBlock timeseries_plot(
-        "Time Series Plot",
+        "TimeSeriesPlot",
         1, // number of inputs
         signal_labels,
         SPS,

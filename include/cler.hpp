@@ -79,7 +79,7 @@ namespace cler {
                             auto err = result.unwrap_err();
                             if (err == Error::InvalidChannelIndex) {
                                 stop();
-                                throw std::runtime_error(to_str(err)); //onlt crashes the current thread, so we stop
+                                throw std::runtime_error(to_str(err)); //only crashes the current thread, so we stop
                             } else {
                                 std::this_thread::yield();
                             }

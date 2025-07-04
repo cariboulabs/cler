@@ -313,6 +313,49 @@ public:
     return toWrite;
   }
 
+  std::size_t force_writeN(const T* src, std::size_t count) noexcept(nothrow_v) {
+    const auto capacity = base_type::capacity_;
+    const auto padding  = writer_.paddingCache_;
+    auto writeIndex     = writer_.writeIndex_.load(std::memory_order_relaxed);
+
+    // Calculate next write index no matter what
+    const auto nextWriteIndex = (writeIndex + count) % capacity;
+
+    // If we're overwriting unread data, advance reader index
+    auto readIndex = reader_.readIndex_.load(std::memory_order_acquire);
+
+    std::size_t used_space;
+    if (readIndex > writeIndex) {
+      used_space = writeIndex + (capacity - readIndex);
+    } else {
+      used_space = writeIndex - readIndex;
+    }
+
+    if (count > capacity - 1) {
+      // Defensive: never force write more than capacity-1
+      count = capacity - 1;
+    }
+
+    if (count > (capacity - 1 - used_space)) {
+      // Not enough space, so move reader forward to make room
+      std::size_t advance = count - (capacity - 1 - used_space);
+      auto newReadIndex = (readIndex + advance) % capacity;
+      reader_.readIndex_.store(newReadIndex, std::memory_order_release);
+    }
+
+    const std::size_t firstChunk = std::min(count, capacity - writeIndex);
+
+    std::memcpy(&base_type::buffer_[writeIndex + padding], src, firstChunk * sizeof(T));
+
+    if (firstChunk < count) {
+      std::memcpy(&base_type::buffer_[padding], src + firstChunk, (count - firstChunk) * sizeof(T));
+    }
+
+    writer_.writeIndex_.store((writeIndex + count) % capacity, std::memory_order_release);
+
+    return count;
+  }
+
   std::size_t readN(T* dst, std::size_t count) noexcept(nothrow_v) {
     const auto capacity = base_type::capacity_;
     const auto padding  = base_type::padding;
@@ -345,7 +388,7 @@ public:
     return toRead;
   }
 
-[[nodiscard]] std::size_t peek_write(T*& ptr1, std::size_t& size1, T*& ptr2, std::size_t& size2) noexcept {
+std::size_t peek_write(T*& ptr1, std::size_t& size1, T*& ptr2, std::size_t& size2) noexcept {
   const auto capacity = base_type::capacity_;
   const auto padding  = writer_.paddingCache_;
   const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
@@ -396,7 +439,7 @@ void commit_write(std::size_t count) noexcept {
   writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
 }
 
-[[nodiscard]] std::size_t peek_read(const T*& ptr1, std::size_t& size1,  const T*& ptr2, std::size_t& size2) noexcept {
+std::size_t peek_read(const T*& ptr1, std::size_t& size1,  const T*& ptr2, std::size_t& size2) noexcept {
   const auto capacity = base_type::capacity_;
   const auto padding  = base_type::padding;
 

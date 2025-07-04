@@ -66,13 +66,17 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
         }
         work_size = cler::floor2(work_size);
 
+        size_t commit_read_size = (_x_channel->size() >= work_size) ? work_size : 0;
+
         // Read & push to y buffers
         for (size_t i = 0; i < _num_inputs; ++i) {
             in[i].readN(_tmp_y_buffer, work_size);
+            _y_channels[i].commit_read(commit_read_size);
             _y_channels[i].writeN(_tmp_y_buffer, work_size);
         }
 
         // Generate x timestamps & push
+        _x_channel->commit_read(commit_read_size);
         for (size_t i = 0; i < work_size; ++i) {
             float t = static_cast<float>(_samples_counter + i) / _sps;
             _x_channel->push(t);
@@ -83,32 +87,32 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
     }
 
     void render() {
-    ImGui::Begin("PlotTimeSeries");
-    if (ImPlot::BeginPlot(name())) {
-        ImPlot::SetupAxes("Time [s]", "Y");
+        ImGui::Begin("PlotTimeSeries");
+        if (ImPlot::BeginPlot(name())) {
+            ImPlot::SetupAxes("Time [s]", "Y");
 
-        const float* x_ptr1 = nullptr;
-        const float* x_ptr2 = nullptr;
-        std::size_t x_s1 = 0, x_s2 = 0;
-        _x_channel->peek_read(x_ptr1, x_s1, x_ptr2, x_s2);
-        memcpy(_tmp_x_buffer, x_ptr1, x_s1 * sizeof(float));
-        memcpy(_tmp_x_buffer + x_s1, x_ptr2, x_s2 * sizeof(float));
+            const float* x_ptr1 = nullptr;
+            const float* x_ptr2 = nullptr;
+            std::size_t x_s1 = 0, x_s2 = 0;
+            _x_channel->peek_read(x_ptr1, x_s1, x_ptr2, x_s2);
+            memcpy(_tmp_x_buffer, x_ptr1, x_s1 * sizeof(float));
+            memcpy(_tmp_x_buffer + x_s1, x_ptr2, x_s2 * sizeof(float));
 
-        for (size_t i = 0; i < _num_inputs; ++i) {
-            const float* y_ptr1 = nullptr;
-            const float* y_ptr2 = nullptr;
-            std::size_t y_s1 = 0, y_s2 = 0;
-            _y_channels[i].peek_read(y_ptr1, y_s1, y_ptr2, y_s2);
-            memcpy(_tmp_y_buffer, y_ptr1, y_s1 * sizeof(float));
-            memcpy(_tmp_y_buffer + y_s1, y_ptr2, y_s2 * sizeof(float));
+            for (size_t i = 0; i < _num_inputs; ++i) {
+                const float* y_ptr1 = nullptr;
+                const float* y_ptr2 = nullptr;
+                std::size_t y_s1 = 0, y_s2 = 0;
+                _y_channels[i].peek_read(y_ptr1, y_s1, y_ptr2, y_s2);
+                memcpy(_tmp_y_buffer, y_ptr1, y_s1 * sizeof(float));
+                memcpy(_tmp_y_buffer + y_s1, y_ptr2, y_s2 * sizeof(float));
 
-            ImPlot::PlotLine(_signal_labels[i], _tmp_x_buffer, _tmp_y_buffer, static_cast<int>(x_s1 + x_s2));
+                ImPlot::PlotLine(_signal_labels[i], _tmp_x_buffer, _tmp_y_buffer, static_cast<int>(x_s1 + x_s2));
+            }
+
+            ImPlot::EndPlot();
         }
-
-        ImPlot::EndPlot();
+        ImGui::End();
     }
-    ImGui::End();
-}
 
 private:
     size_t _samples_counter = 0;
