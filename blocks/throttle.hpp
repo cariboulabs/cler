@@ -1,8 +1,6 @@
 #pragma once
 #include "cler.hpp"
 #include <chrono>
-#include <thread>
-#include <type_traits>
 
 template <typename T>
 struct ThrottleBlock : public cler::BlockBase {
@@ -31,6 +29,8 @@ struct ThrottleBlock : public cler::BlockBase {
         }
 
         // Pop one sample, push one sample
+        // Note: If we do a batch size, we will encause jittering downstream
+        //       working 1 sample at a time is slow, but we dont mind about slow if we are throttling
         T sample;
         in.pop(sample);
         out->push(sample);
