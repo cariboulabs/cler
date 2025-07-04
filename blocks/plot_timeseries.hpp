@@ -40,9 +40,10 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
     }
 
     ~PlotTimeSeriesBlock() {
+        using FloatChannel = cler::Channel<float>; //cant template on Destructor...
         for (size_t i = 0; i < _num_inputs; ++i) {
-           delete &in[i];
-           delete &_y_channels[i];
+            in[i].~FloatChannel();
+            _y_channels[i].~FloatChannel();
         }
         ::operator delete[](in);
         ::operator delete[](_y_channels);
