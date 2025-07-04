@@ -2,6 +2,7 @@
 #include "gui_manager.hpp"
 #include "blocks/plot_timeseries.hpp"
 #include "blocks/source_cw.hpp"
+#include "blocks/throttle.hpp"
 // #include "blocks/math_complex2magphase.hpp"
 // #include "blocks/source_chirp.hpp"
 #include <complex>
@@ -10,8 +11,8 @@ int main() {
     size_t SPS = 100;
 
     cler::GuiManager gui(1000, 400 , "TimeSeries Plot Example");
-    SourceCWBlock<float> source("Source", 1.0f, 0.1f, SPS);
-    
+    SourceCWBlock<float> source("Source", 1.0f, 2.0f, SPS);
+    ThrottleBlock<float> throttle("Throttle", SPS);
     const char* signal_labels[] = {"CW"};
     PlotTimeSeriesBlock timeseries_plot(
         "TimeSeriesPlot",
@@ -21,11 +22,13 @@ int main() {
         10.0f // duration in seconds
     );
 
-    cler::BlockRunner source_runner(&source, &timeseries_plot.in[0]);
+    cler::BlockRunner source_runner(&source, &throttle.in);
+    cler::BlockRunner throttle_runner(&throttle, &timeseries_plot.in[0]);
     cler::BlockRunner timeseries_plot_runner(&timeseries_plot);
 
     cler::FlowGraph flowgraph(
         source_runner,
+        throttle_runner,
         timeseries_plot_runner
     );
 
