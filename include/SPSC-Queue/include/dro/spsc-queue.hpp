@@ -345,7 +345,7 @@ public:
     return toRead;
   }
 
-[[nodiscard]] std::size_t peek_write(T*& ptr, std::size_t* total_space) noexcept {
+[[nodiscard]] std::size_t peek_write(T*& ptr1, std::size_t& size1, T*& ptr2, std::size_t& size2) noexcept {
   const auto capacity = base_type::capacity_;
   const auto padding  = writer_.paddingCache_;
   const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
@@ -360,18 +360,33 @@ public:
   } else {
     space = capacity - writeIndex + readIndexCache - 1;
   }
-  if (total_space) {
-    *total_space = space;
-  }
 
   if (space == 0) {
-    ptr = nullptr;
+    ptr1 = nullptr;
+    ptr2 = nullptr;
+    size1 = 0;
+    size2 = 0;
     return 0;
   }
 
-  const std::size_t contiguous = std::min(space, capacity - writeIndex);
-  ptr = &base_type::buffer_[writeIndex + padding];
-  return contiguous;
+  // First chunk: contiguous to end
+  std::size_t first_chunk = (readIndexCache > writeIndex)
+      ? space  // contiguous, no wrap
+      : capacity - writeIndex;
+
+  ptr1 = &base_type::buffer_[writeIndex + padding];
+  size1 = first_chunk;
+
+  if (readIndexCache <= writeIndex) {
+    // Wrapped: second chunk exists
+    ptr2 = &base_type::buffer_[padding];
+    size2 = readIndexCache - 1;
+  } else {
+    ptr2 = nullptr;
+    size2 = 0;
+  }
+
+  return space;
 }
 
 void commit_write(std::size_t count) noexcept {
@@ -381,7 +396,7 @@ void commit_write(std::size_t count) noexcept {
   writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
 }
 
-[[nodiscard]] std::size_t peek_read(const T*& ptr, std::size_t* total_available) noexcept {
+[[nodiscard]] std::size_t peek_read(const T*& ptr1, std::size_t& size1,  const T*& ptr2, std::size_t& size2) noexcept {
   const auto capacity = base_type::capacity_;
   const auto padding  = base_type::padding;
 
@@ -398,18 +413,32 @@ void commit_write(std::size_t count) noexcept {
     available = capacity - readIndex + writeIndexCache;
   }
 
-  if (total_available) {
-    *total_available = available;
-  }
-
   if (available == 0) {
-    ptr = nullptr;
+    ptr1 = nullptr;
+    ptr2 = nullptr;
+    size1 = 0;
+    size2 = 0;
     return 0;
   }
 
-  const std::size_t contiguous = std::min(available, capacity - readIndex);
-  ptr = &base_type::buffer_[readIndex + padding];
-  return contiguous;
+  // First chunk: contiguous
+  std::size_t first_chunk = (writeIndexCache >= readIndex)
+      ? available   // no wrap
+      : capacity - readIndex;
+
+  ptr1 = &base_type::buffer_[readIndex + padding];
+  size1 = first_chunk;
+
+  if (writeIndexCache < readIndex) {
+    // Wrapped, so second chunk exists
+    ptr2 = &base_type::buffer_[padding];
+    size2 = writeIndexCache;
+  } else {
+    ptr2 = nullptr;
+    size2 = 0;
+  }
+
+  return available;
 }
 
 void commit_read(std::size_t count) noexcept {

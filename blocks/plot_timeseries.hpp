@@ -1,86 +1,126 @@
+#pragma once
 #include "cler.hpp"
 #include "gui/gui_manager.hpp"
 
 struct PlotTimeSeriesBlock : public cler::BlockBase {
     cler::Channel<float>* in;
 
-    PlotTimeSeriesBlock(const char* name, size_t num_inputs, const char** signal_labels, size_t sps, size_t buffer_size) : 
-        BlockBase(name), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps), _buffer_size(buffer_size) {
+    PlotTimeSeriesBlock(const char* name, size_t num_inputs, const char** signal_labels, size_t sps, float duration_s) 
+        : BlockBase(name), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps) 
+    {
         if (num_inputs < 1) {
-            throw std::invalid_argument("PlotTimeSeriesBlock requires at least one input channels");
+            throw std::invalid_argument("PlotTimeSeriesBlock requires at least one input channel");
         }
-        if (buffer_size == 0) {
-            throw std::invalid_argument("Buffer size must be greater than zero.");
+        if (duration_s <= 0) {
+            throw std::invalid_argument("Duration must be greater than zero.");
         }
 
-        samples_counter = 0;
-        
-        // Our ringbuffers are not copy/move so we cant use std::vector
-        // As such, we use a raw array of cler::Channel<T>
-        // Allocate raw storage only, no default construction
+        _buffer_size = static_cast<size_t>(sps * duration_s);
+
+        // Allocate input channels
         in = static_cast<cler::Channel<float>*>(
             ::operator new[](num_inputs * sizeof(cler::Channel<float>))
         );
         for (size_t i = 0; i < num_inputs; ++i) {
-            new (&in[i]) cler::Channel<float>(2 * work_size);
+            new (&in[i]) cler::Channel<float>(_buffer_size);
         }
 
-        _y_buffers = new float*[num_inputs];
+        // Allocate y buffers as channels
+        _y_channels = static_cast<cler::Channel<float>*>(
+            ::operator new[](num_inputs * sizeof(cler::Channel<float>))
+        );
         for (size_t i = 0; i < num_inputs; ++i) {
-            _y_buffers[i] = new float[work_size];
+            new (&_y_channels[i]) cler::Channel<float>(_buffer_size);
         }
 
-        _x_buffer = new float[work_size];
+        // X buffer as channel too
+        _x_channel = new cler::Channel<float>(_buffer_size);
+
+        _tmp_x_buffer = new float[_buffer_size];
+        _tmp_y_buffer = new float[_buffer_size];
     }
 
     ~PlotTimeSeriesBlock() {
-        delete[] in;
         for (size_t i = 0; i < _num_inputs; ++i) {
-            delete[] _y_buffers[i];
+           delete &in[i];
+           delete &_y_channels[i];
         }
-        delete[] _y_buffers;
-        delete[] _x_buffer;
+        ::operator delete[](in);
+        ::operator delete[](_y_channels);
+
+        delete _x_channel;
+        
+        delete[] _tmp_x_buffer;
+        delete[] _tmp_y_buffer;
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
-        for (size_t i = 0; i < _num_inputs; ++i) {
-            if (in[i].size() < _work_size) {
-                return cler::Error::NotEnoughSamples;
+        size_t work_size = in[0].size();
+        for (size_t i = 1; i < _num_inputs; ++i) {
+            if (in[i].size() < work_size) {
+                work_size = in[i].size();
             }
         }
+        if (work_size == 0) {
+            return cler::Error::NotEnoughSamples;
+        }
+        work_size = cler::floor2(work_size);
 
+        // Read & push to y buffers
         for (size_t i = 0; i < _num_inputs; ++i) {
-            in[i].readN(_y_buffers[i], _work_size);
+            in[i].readN(_tmp_y_buffer, work_size);
+            _y_channels[i].writeN(_tmp_y_buffer, work_size);
         }
-        //update x buffer
-        for (size_t i = 0; i < _work_size; ++i) {
-            _x_buffer[i] = static_cast<float>(samples_counter + i) / _sps;
+
+        // Generate x timestamps & push
+        for (size_t i = 0; i < work_size; ++i) {
+            float t = static_cast<float>(_samples_counter + i) / _sps;
+            _x_channel->push(t);
         }
-        samples_counter += _work_size;
-        return cler::Empty{}; 
+        _samples_counter += work_size;
+
+        return cler::Empty{};
     }
 
     void render() {
-        ImGui::Begin("PlotTimeSeries"); //imgui window title
-        if (ImPlot::BeginPlot(name())) { //implot title
-            ImPlot::SetupAxes("Sample Index", "Amplitude");
-            for (size_t i = 0; i < _num_inputs; ++i) {
-                ImPlot::PlotLine(_signal_labels[i], _x_buffer, _y_buffers[i], _work_size, 0, sizeof(float), ImPlotLineFlags_None);
-            }
-            ImPlot::EndPlot();
-        }
-        ImGui::End();
-    }
-    private:
-        size_t samples_counter;
+    ImGui::Begin("PlotTimeSeries");
+    if (ImPlot::BeginPlot(name())) {
+        ImPlot::SetupAxes("Time [s]", "Y");
 
-        size_t _num_inputs;
-        const char** _signal_labels;
-        size_t _sps;
-        size_t _buffer_size; 
-        size_t _work_size;
-        
-        float** _y_buffers;
-        float* _x_buffer;
-            
+        const float* x_ptr1 = nullptr;
+        const float* x_ptr2 = nullptr;
+        std::size_t x_s1 = 0, x_s2 = 0;
+        _x_channel->peek_read(x_ptr1, x_s1, x_ptr2, x_s2);
+        memcpy(_tmp_x_buffer, x_ptr1, x_s1 * sizeof(float));
+        memcpy(_tmp_x_buffer + x_s1, x_ptr2, x_s2 * sizeof(float));
+
+        for (size_t i = 0; i < _num_inputs; ++i) {
+            const float* y_ptr1 = nullptr;
+            const float* y_ptr2 = nullptr;
+            std::size_t y_s1 = 0, y_s2 = 0;
+            _y_channels[i].peek_read(y_ptr1, y_s1, y_ptr2, y_s2);
+            memcpy(_tmp_y_buffer, y_ptr1, y_s1 * sizeof(float));
+            memcpy(_tmp_y_buffer + y_s1, y_ptr2, y_s2 * sizeof(float));
+
+            ImPlot::PlotLine(_signal_labels[i], _tmp_x_buffer, _tmp_y_buffer, static_cast<int>(x_s1 + x_s2));
+        }
+
+        ImPlot::EndPlot();
+    }
+    ImGui::End();
+}
+
+private:
+    size_t _samples_counter = 0;
+
+    size_t _num_inputs;
+    const char** _signal_labels;
+    size_t _sps;
+    size_t _buffer_size;
+
+    float* _tmp_y_buffer;
+    float* _tmp_x_buffer;
+
+    cler::Channel<float>* _y_channels;  // ring buffers for each signal
+    cler::Channel<float>* _x_channel;   // ring buffer for timestamps
 };
