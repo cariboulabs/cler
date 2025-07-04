@@ -88,7 +88,9 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
     }
 
     void render() {
+        
         ImGui::Begin("PlotTimeSeries");
+        ImPlot::SetNextAxesToFit();  
         if (ImPlot::BeginPlot(name())) {
             ImPlot::SetupAxes("Time [s]", "Y");
 
@@ -98,10 +100,6 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
             size_t total = _x_channel->peek_read(x_ptr1, x_s1, x_ptr2, x_s2);
             memcpy(_tmp_x_buffer, x_ptr1, x_s1 * sizeof(float));
             memcpy(_tmp_x_buffer + x_s1, x_ptr2, x_s2 * sizeof(float));
-
-            double x_min = _tmp_x_buffer[0];
-            double x_max = _tmp_x_buffer[total - 1];
-            ImPlot::SetupAxisLimits(ImAxis_X1, x_min, x_max, ImGuiCond_Always);
 
             for (size_t i = 0; i < _num_inputs; ++i) {
                 const float* y_ptr1 = nullptr;
