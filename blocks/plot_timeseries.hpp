@@ -32,7 +32,6 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
         for (size_t i = 0; i < num_inputs; ++i) {
             new (&_y_channels[i]) cler::Channel<float>(_buffer_size);
         }
-
         // X buffer as channel too
         _x_channel = new cler::Channel<float>(_buffer_size);
 
@@ -66,11 +65,12 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
         }
         work_size = cler::floor2(work_size);
 
-        size_t commit_read_size = (_x_channel->size() >= work_size) ? work_size : 0;
+        size_t commit_read_size = (_x_channel->size() + work_size) > _buffer_size ?
+            _x_channel->size() + work_size - _buffer_size : 0;
 
         // Read & push to y buffers
         for (size_t i = 0; i < _num_inputs; ++i) {
-            in[i].readN(_tmp_y_buffer, work_size);
+            size_t read = in[i].readN(_tmp_y_buffer, work_size);
             _y_channels[i].commit_read(commit_read_size);
             _y_channels[i].writeN(_tmp_y_buffer, work_size);
         }
@@ -94,9 +94,13 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
             const float* x_ptr1 = nullptr;
             const float* x_ptr2 = nullptr;
             std::size_t x_s1 = 0, x_s2 = 0;
-            _x_channel->peek_read(x_ptr1, x_s1, x_ptr2, x_s2);
+            size_t total = _x_channel->peek_read(x_ptr1, x_s1, x_ptr2, x_s2);
             memcpy(_tmp_x_buffer, x_ptr1, x_s1 * sizeof(float));
             memcpy(_tmp_x_buffer + x_s1, x_ptr2, x_s2 * sizeof(float));
+
+            double x_min = _tmp_x_buffer[0];
+            double x_max = _tmp_x_buffer[total - 1];
+            ImPlot::SetupAxisLimits(ImAxis_X1, x_min, x_max, ImGuiCond_Always);
 
             for (size_t i = 0; i < _num_inputs; ++i) {
                 const float* y_ptr1 = nullptr;
@@ -106,9 +110,8 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
                 memcpy(_tmp_y_buffer, y_ptr1, y_s1 * sizeof(float));
                 memcpy(_tmp_y_buffer + y_s1, y_ptr2, y_s2 * sizeof(float));
 
-                ImPlot::PlotLine(_signal_labels[i], _tmp_x_buffer, _tmp_y_buffer, static_cast<int>(x_s1 + x_s2));
+                ImPlot::PlotLine(_signal_labels[i], _tmp_x_buffer, _tmp_y_buffer, static_cast<int>(total));
             }
-
             ImPlot::EndPlot();
         }
         ImGui::End();
