@@ -26,7 +26,9 @@ Cler supports three buffer access patterns:
     For single values. there is also a try push/pop you can use if you dont inspect size() beforehand.
 
     * **Peek/Commit** </br>
-    Allows you to inspect (peek) data in the buffer without removing it, then explicitly commit the number of items you’ve processed. The downside is that if you reach the end of the ring buffer, you can only peek up to the buffer’s end — not the entire available space at once.
+    Allows you to inspect (peek) data in the buffer without removing it, then explicitly commit the number of items you’ve processed.
+    The downside is that you can only access data up to the physical end of the ring buffer at a time — so if your logical window wraps, you may need to handle two chunks (the tail and the head).
+    This means you might have to process or copy data in parts when the buffer wraps, adding some complexity.
     
     * **Read/Write**. </br>
     Provides access to the full available buffer space for larger chunks of data. You’ll typically copy data to a temporary buffer for processing. Read/Write automatically advances the ring buffer pointers for you — no manual commit needed.

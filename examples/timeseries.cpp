@@ -10,7 +10,7 @@ int main() {
     size_t SPS = 100;
 
     cler::GuiManager gui(1000, 400 , "TimeSeries Plot Example");
-    SourceCWBlock<float> source("Source", 1.0f, 5.0f, SPS);
+    SourceCWBlock<float> source("Source", 1.0f, 0.1f, SPS);
     
     const char* signal_labels[] = {"CW"};
     PlotTimeSeriesBlock timeseries_plot(
