@@ -9,9 +9,9 @@ struct SourceCWBlock : public cler::BlockBase {
     static_assert(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>,
                   "SourceCWBlock only supports float or std::complex<float>");
 
-    SourceCWBlock(const char* name, float ampltiude, int frequency_hz, int sps)
+    SourceCWBlock(const char* name, float amplitude, float frequency_hz, size_t sps)
         : cler::BlockBase(name),
-        _amplitude(ampltiude),
+        _amplitude(amplitude),
         _frequency_hz(frequency_hz),
         _sps(sps)
     {
@@ -24,21 +24,18 @@ struct SourceCWBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<T>* out) {
+        const float phase_increment = 2.0f * PI * _frequency_hz / _sps;
 
-
-        static float phase = 0.0f;
-        const float phase_increment = 2.0f * M_PI * _frequency_hz / _sps;
-
-        for (size_t i = 0; i < out->space(); ++i) {
+        for (size_t i = 0; i < cler::floor2(out->space()); ++i) {
             if constexpr (std::is_same_v<T, std::complex<float>>) {
-                out->push(_amplitude * std::polar(1.0f, phase));
+                out->push(_amplitude * std::polar(1.0f, _phase));
             } else {
-                out->push(_amplitude * std::cos(phase));
+                out->push(_amplitude * std::cos(_phase));
             }
 
-            phase += phase_increment;
-            if (phase >= 2.0f * M_PI) {
-                phase -= 2.0f * M_PI;
+            _phase += phase_increment;
+            if (_phase >= 2.0f * PI) {
+                _phase -= 2.0f * PI;
             }
         }
 
@@ -46,9 +43,11 @@ struct SourceCWBlock : public cler::BlockBase {
     }
 
 private:
+    static constexpr float PI = std::numbers::pi_v<float>; 
     float _amplitude;
-    int _frequency_hz;
-    int _sps;
+    float _frequency_hz;
+    size_t _sps;
 
+    float _phase = 0.0f;
     size_t _work_size;
 };

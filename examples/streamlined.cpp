@@ -17,8 +17,8 @@ struct SourceBlock : public cler::BlockBase {
         cler::Channel<double>* out1) {
 
         //this is faster than pushing one by one
-        out0->writeN(_ones, floor2(out0->space()));
-        out1->writeN(_twos, floor2(out1->space()));
+        out0->writeN(_ones, cler::floor2(out0->space()));
+        out1->writeN(_twos, cler::floor2(out1->space()));
         return cler::Empty{};
     }
 
