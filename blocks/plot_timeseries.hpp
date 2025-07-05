@@ -1,6 +1,7 @@
 #pragma once
 #include "cler.hpp"
 #include "gui/gui_manager.hpp"
+#include "zf_log.h"
 
 struct PlotTimeSeriesBlock : public cler::BlockBase {
     cler::Channel<float>* in;
@@ -97,33 +98,44 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
         }
         _samples_counter += work_size;
 
-        if (_snapshot_requested.load(std::memory_order_acquire)) {
-            size_t available = _x_channel->size();
-            _x_channel->readN(_snapshot_x_buffer, available);
-            for (size_t i = 0; i < _num_inputs; ++i)
-            {
-                _y_channels[i].readN(_snapshot_y_buffers[i], available);
+        if (_snapshot_ready_size.load(std::memory_order_acquire) == 0) {
+            const float* ptr1, *ptr2;
+            size_t size1, size2;
+
+            size_t available = _x_channel->peek_read(ptr1, size1, ptr2, size2);
+            memcpy(_snapshot_x_buffer, ptr1, size1 * sizeof(float));
+            memcpy(_snapshot_x_buffer + size1, ptr2, size2 * sizeof(float));
+            for (size_t i = 0; i < _num_inputs; ++i) {
+                size_t available_y = _y_channels[i].peek_read(ptr1, size1, ptr2, size2);
+                assert(available_y == available);
+                memcpy(_snapshot_y_buffers[i], ptr1, size1 * sizeof(float));
+                memcpy(_snapshot_y_buffers[i] + size1, ptr2, size2 * sizeof(float));
             }
-            _snapshot_ready.store(available, std::memory_order_release);
+            _snapshot_ready_size.store(available, std::memory_order_release); //update available samples
         }
 
         return cler::Empty{};
     }
 
     void render() {
-        _snapshot_ready.store(0, std::memory_order_relaxed);
-        _snapshot_requested.store(true, std::memory_order_release);
+        _snapshot_ready_size.store(0, std::memory_order_release); //reset available samples
+        
+        size_t counter = 0;
+        while (_snapshot_ready_size.load(std::memory_order_acquire) == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            counter++;
+            if (counter > 50) {
+                ZF_LOGW("Block %s: Waiting for snapshot to be ready, timeout reached", name());
+                return;
+            }
+        }
 
+        size_t available = _snapshot_ready_size.load(std::memory_order_acquire);
         ImGui::Begin("PlotTimeSeries");
-        ImPlot::SetNextAxesToFit();  
+        ImPlot::SetNextAxesToFit();
         if (ImPlot::BeginPlot(name())) {
             ImPlot::SetupAxes("Time [s]", "Y");
 
-            size_t available;
-            while (available == 0) {
-                available = _snapshot_ready.load(std::memory_order_acquire);
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
             for (size_t i = 0; i < _num_inputs; ++i) {
                 ImPlot::PlotLine(_signal_labels[i], _snapshot_x_buffer, _snapshot_y_buffers[i], static_cast<int>(available));
             }
@@ -143,9 +155,7 @@ private:
     cler::Channel<float>* _y_channels;  // ring buffers for each signal
     cler::Channel<float>* _x_channel;   // ring buffer for timestamps
 
-    std::atomic<bool> _snapshot_requested = false;
-    std::atomic<size_t> _snapshot_counter = 0;
-    std::atomic<size_t> _snapshot_size = 0;
+    std::atomic<size_t> _snapshot_ready_size = 0;
     float* _snapshot_x_buffer = nullptr;
     float** _snapshot_y_buffers = nullptr;
 

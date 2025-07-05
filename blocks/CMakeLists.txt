@@ -14,3 +14,11 @@ FetchContent_Declare(
   GIT_TAG master
 )
 FetchContent_MakeAvailable(liquid)
+
+# Add zf_log
+FetchContent_Declare(
+  zf_log
+  GIT_REPOSITORY https://github.com/wonder-mice/zf_log
+  GIT_TAG master
+)
+FetchContent_MakeAvailable(zf_log)

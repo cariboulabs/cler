@@ -6,7 +6,8 @@
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/include/**",
                 "${workspaceFolder}/blocks/gui/**",
-                "${workspaceFolder}/build/_deps/liquid-src/include"
+                "${workspaceFolder}/build/_deps/liquid-src/include",
+                "${workspaceFolder}/build/_deps/zf_log-src/zf_log"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/clang",
