@@ -27,7 +27,7 @@ int main() {
         10.0f //duration in seconds
     );
 
-    SourceChirpBlock<std::complex<float>> chirp_source("ChirpSource", 1.0f, 1.0f, 10.0f, SPS, 10.0f);
+    SourceChirpBlock<std::complex<float>> chirp_source("ChirpSource", 1.0f, 5.0f, 95.0f, SPS, 10.0f);
     ThrottleBlock<std::complex<float>> chirp_throttle("ChirpThrottle", SPS);
     FanoutBlock<std::complex<float>> chirp_fanout("ChirpFanout", 2);
     ComplexToMagPhaseBlock chirp_c2realimag("ChirpComplex2RealImag", ComplexToMagPhaseBlock::Mode::RealImag);
@@ -38,10 +38,11 @@ int main() {
         SPS,
         10.0f //duration in seconds
     );
+    const char* cspectrum_labels[] = {"Chirp"};
     PlotCSpectrumBlock chirp_cspectrum_plot(
         "Chirp-CSpectrumPlot",
-        2, // number of inputs
-        signal_labels,
+        1, // number of inputs
+        cspectrum_labels,
         SPS,
         256 // buffer size for FFT
     );
