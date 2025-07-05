@@ -46,8 +46,6 @@ int main() {
         256 // buffer size for FFT
     );
 
-    SinkTerminalBlock<std::complex<float>> sink_terminal("SinkTerminal");
-    cler::BlockRunner sink_terminal_runner(&sink_terminal);
 
     cler::BlockRunner cw_source_runner(&cw_source, &cw_throttle.in);
     cler::BlockRunner cw_throttle_runner(&cw_throttle, &cw_complex2realimag.in);
@@ -56,8 +54,8 @@ int main() {
 
     cler::BlockRunner chirp_source_runner(&chirp_source, &chirp_throttle.in);
     cler::BlockRunner chirp_throttle_runner(&chirp_throttle, &chirp_fanout.in);
-    cler::BlockRunner chirp_fanout_runner(&chirp_fanout, &chirp_c2realimag.in, &sink_terminal.in); //end of branch1
-    cler::BlockRunner chirp_complex2realimag(&chirp_c2realimag, &chirp_timeseries_plot.in[0], &chirp_timeseries_plot.in[1]);
+    cler::BlockRunner chirp_fanout_runner(&chirp_fanout, &chirp_c2realimag.in, &chirp_cspectrum_plot.in[0]);
+    cler::BlockRunner chirp_complex2realimag_runner(&chirp_c2realimag, &chirp_timeseries_plot.in[0], &chirp_timeseries_plot.in[1]);
     cler::BlockRunner chirp_timeseries_plot_runner(&chirp_timeseries_plot);
     cler::BlockRunner chirp_cspectrum_plot_runner(&chirp_cspectrum_plot);
 
@@ -70,9 +68,9 @@ int main() {
         chirp_source_runner,
         chirp_throttle_runner,
         chirp_fanout_runner,
-        chirp_complex2realimag,
-        chirp_timeseries_plot_runner
-        // chirp_cspectrum_plot_runner
+        chirp_complex2realimag_runner,
+        chirp_timeseries_plot_runner,
+        chirp_cspectrum_plot_runner
     );
 
     flowgraph.run();
@@ -80,8 +78,9 @@ int main() {
     //rendering has to happen in the MAIN THREAD
     while (!gui.should_close()) {
         gui.begin_frame();
-        chirp_timeseries_plot.render();
         cw_timeseries_plot.render();
+        chirp_timeseries_plot.render();
+        chirp_cspectrum_plot.render();
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
