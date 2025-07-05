@@ -35,6 +35,13 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
         // X buffer as channel too
         _x_channel = new cler::Channel<float>(_buffer_size);
 
+        //allocate snapshot buffers
+        _snapshot_x_buffer = new float[_buffer_size];
+        _snapshot_y_buffers = new float*[_num_inputs];
+        for (size_t i = 0; i < num_inputs; ++i) {
+            _snapshot_y_buffers[i] = new float[_buffer_size];
+        }
+
         _tmp_x_buffer = new float[_buffer_size];
         _tmp_y_buffer = new float[_buffer_size];
     }
@@ -49,6 +56,12 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
         ::operator delete[](_y_channels);
 
         delete _x_channel;
+
+        delete[] _snapshot_x_buffer;
+        for (size_t i = 0; i < _num_inputs; ++i) {
+            delete[] _snapshot_y_buffers[i];
+        }
+        delete[] _snapshot_y_buffers;
         
         delete[] _tmp_x_buffer;
         delete[] _tmp_y_buffer;
@@ -84,32 +97,35 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
         }
         _samples_counter += work_size;
 
+        if (_snapshot_requested.load(std::memory_order_acquire)) {
+            size_t available = _x_channel->size();
+            _x_channel->readN(_snapshot_x_buffer, available);
+            for (size_t i = 0; i < _num_inputs; ++i)
+            {
+                _y_channels[i].readN(_snapshot_y_buffers[i], available);
+            }
+            _snapshot_ready.store(available, std::memory_order_release);
+        }
+
         return cler::Empty{};
     }
 
     void render() {
-        
+        _snapshot_ready.store(0, std::memory_order_relaxed);
+        _snapshot_requested.store(true, std::memory_order_release);
+
         ImGui::Begin("PlotTimeSeries");
         ImPlot::SetNextAxesToFit();  
         if (ImPlot::BeginPlot(name())) {
             ImPlot::SetupAxes("Time [s]", "Y");
 
-            const float* x_ptr1 = nullptr;
-            const float* x_ptr2 = nullptr;
-            std::size_t x_s1 = 0, x_s2 = 0;
-            size_t total = _x_channel->peek_read(x_ptr1, x_s1, x_ptr2, x_s2);
-            memcpy(_tmp_x_buffer, x_ptr1, x_s1 * sizeof(float));
-            memcpy(_tmp_x_buffer + x_s1, x_ptr2, x_s2 * sizeof(float));
-
+            size_t available;
+            while (available == 0) {
+                available = _snapshot_ready.load(std::memory_order_acquire);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
             for (size_t i = 0; i < _num_inputs; ++i) {
-                const float* y_ptr1 = nullptr;
-                const float* y_ptr2 = nullptr;
-                std::size_t y_s1 = 0, y_s2 = 0;
-                _y_channels[i].peek_read(y_ptr1, y_s1, y_ptr2, y_s2);
-                memcpy(_tmp_y_buffer, y_ptr1, y_s1 * sizeof(float));
-                memcpy(_tmp_y_buffer + y_s1, y_ptr2, y_s2 * sizeof(float));
-
-                ImPlot::PlotLine(_signal_labels[i], _tmp_x_buffer, _tmp_y_buffer, static_cast<int>(total));
+                ImPlot::PlotLine(_signal_labels[i], _snapshot_x_buffer, _snapshot_y_buffers[i], static_cast<int>(available));
             }
             ImPlot::EndPlot();
         }
@@ -124,9 +140,15 @@ private:
     size_t _sps;
     size_t _buffer_size;
 
-    float* _tmp_y_buffer;
-    float* _tmp_x_buffer;
-
     cler::Channel<float>* _y_channels;  // ring buffers for each signal
     cler::Channel<float>* _x_channel;   // ring buffer for timestamps
+
+    std::atomic<bool> _snapshot_requested = false;
+    std::atomic<size_t> _snapshot_counter = 0;
+    std::atomic<size_t> _snapshot_size = 0;
+    float* _snapshot_x_buffer = nullptr;
+    float** _snapshot_y_buffers = nullptr;
+
+    float* _tmp_y_buffer = nullptr;
+    float* _tmp_x_buffer = nullptr;
 };
