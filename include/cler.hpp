@@ -59,6 +59,16 @@ namespace cler {
         FlowGraph(BlockRunners&... runners)
             : _runners(std::make_tuple(std::forward<BlockRunners>(runners)...)) {}
 
+        ~FlowGraph() {
+            stop(); // Ensure threads are stopped before destruction
+        }
+
+        //delete copy, move and assignment. Once created that thing does not go anywhere
+        FlowGraph(const FlowGraph&) = delete;
+        FlowGraph(FlowGraph&&) = delete;
+        FlowGraph& operator=(const FlowGraph&) = delete;
+        FlowGraph& operator=(FlowGraph&&) = delete;
+
         void run() {
             if (!valid()) {
                 throw std::runtime_error("Invalid FlowGraph: "
