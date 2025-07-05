@@ -3,16 +3,15 @@
 #include "gui/gui_manager.hpp"
 #include "liquid.h"
 #include <complex>
-#include <cmath>
 
-struct PlotSpectrumBlock : public cler::BlockBase {
+struct PlotCSpectrumBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
 
-    PlotSpectrumBlock(const char* name, size_t num_inputs, const char** signal_labels, size_t sps, size_t buffer_size) 
+    PlotCSpectrumBlock(const char* name, size_t num_inputs, const char** signal_labels, size_t sps, size_t buffer_size) 
         : BlockBase(name), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps) 
     {
         if (num_inputs < 1) {
-            throw std::invalid_argument("PlotSpectrumBlock requires at least one input channel");
+            throw std::invalid_argument("PlotCSpectrumBlock requires at least one input channel");
         }
         if (buffer_size <= 2) {
             throw std::invalid_argument("Buffer size must be greater than two.");
@@ -50,8 +49,11 @@ struct PlotSpectrumBlock : public cler::BlockBase {
         _tmp_y_buffer = new std::complex<float>[_buffer_size];
         _tmp_magnitude_buffer = new float[_buffer_size];
 
-        _liquid_inout = new liquid_float_complex[_buffer_size];
-        _fftplan = fft_create_plan(buffer_size, _liquid_inout, _liquid_inout, LIQUID_FFT_FORWARD, 0);
+        _liquid_inout = new std::complex<float>[_buffer_size];
+        _fftplan = fft_create_plan(buffer_size, 
+            reinterpret_cast<liquid_float_complex*>(_liquid_inout),
+            reinterpret_cast<liquid_float_complex*>(_liquid_inout),
+             LIQUID_FFT_FORWARD, 0);
 
         _gui_prev_window_size.x = 800.0f;
         _gui_prev_window_size.y = 400.0f;
@@ -60,7 +62,7 @@ struct PlotSpectrumBlock : public cler::BlockBase {
         _gui_prev_window_pos = ImVec2(offset_x, offset_y);
     }
 
-    ~PlotSpectrumBlock() {
+    ~PlotCSpectrumBlock() {
         using ComplexChannel = cler::Channel<std::complex<float>>; //cant template on Destructor...
         for (size_t i = 0; i < _num_inputs; ++i) {
             in[i].~ComplexChannel();
@@ -193,9 +195,9 @@ struct PlotSpectrumBlock : public cler::BlockBase {
                 mempcpy(_liquid_inout, _snapshot_y_buffers[i], available * sizeof(liquid_float_complex));
                 fft_execute(_fftplan);
                 for (size_t j = 0; j < available; ++j) {
-                    _tmp_magnitude_buffer[j] = 10.0f * log10f(
-                        sqrtf(_liquid_inout[j].real * _liquid_inout[j].real + _liquid_inout[j].imag * _liquid_inout[j].imag)
-                    );
+                    float re = _liquid_inout[j].real();
+                    float im = _liquid_inout[j].imag();
+                    _tmp_magnitude_buffer[j] = 10.0f * log10f(sqrtf(re * re + im * im) + 1e-15f);
                 }
                 ImPlot::PlotLine(_signal_labels[i], _freq_bins, _tmp_magnitude_buffer, _buffer_size);
             }
@@ -222,7 +224,7 @@ private:
     std::complex<float>* _tmp_y_buffer = nullptr;
     float* _tmp_magnitude_buffer = nullptr;
 
-    liquid_float_complex* _liquid_inout;
+    std::complex<float>* _liquid_inout;
     fftplan _fftplan;
 
     bool _gui_fullscreen = false;

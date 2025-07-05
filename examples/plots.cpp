@@ -5,6 +5,7 @@
 #include "blocks/source_chirp.hpp"
 #include "blocks/throttle.hpp"
 #include "blocks/math_complex_demux.hpp"
+#include "blocks/plot_cspectrum.hpp"
 #include <complex>
 
 int main() {
