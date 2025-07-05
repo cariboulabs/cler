@@ -13,16 +13,16 @@ struct ComplexToMagPhaseBlock : public cler::BlockBase {
         RealImag = 1
     };
 
-    ComplexToMagPhaseBlock(const char* name, Mode block_mode, size_t buffer_size)
-        : cler::BlockBase(name), in(buffer_size), _block_mode(block_mode), _buffer_size(buffer_size)
+    ComplexToMagPhaseBlock(const char* name, Mode block_mode)
+        : cler::BlockBase(name), in(cler::DEFAULT_BUFFER_SIZE), _block_mode(block_mode)
     {
-        if (buffer_size == 0) {
+        if (cler::DEFAULT_BUFFER_SIZE == 0) {
             throw std::invalid_argument("Buffer size must be greater than zero.");
         }
 
-        _tmp_c = new std::complex<float>[_buffer_size];
-        _tmp_a = new float[_buffer_size];
-        _tmp_b = new float[_buffer_size];
+        _tmp_c = new std::complex<float>[cler::DEFAULT_BUFFER_SIZE];
+        _tmp_a = new float[cler::DEFAULT_BUFFER_SIZE];
+        _tmp_b = new float[cler::DEFAULT_BUFFER_SIZE];
     }
     ~ComplexToMagPhaseBlock() {
         delete[] _tmp_c;
@@ -34,7 +34,7 @@ struct ComplexToMagPhaseBlock : public cler::BlockBase {
         cler::ChannelBase<float>* a_out,
         cler::ChannelBase<float>* b_out)
     {
-        size_t transferable = cler::floor2(std::min({in.size(), a_out->space(), b_out->space()}));
+        size_t transferable = cler::floor2(std::min({in.size(), a_out->space(), b_out->space(), cler::DEFAULT_BUFFER_SIZE}));
 
         if (transferable == 0) {
             return cler::Error::NotEnoughSamples;

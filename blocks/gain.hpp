@@ -22,7 +22,7 @@ struct GainBlock : public cler::BlockBase {
         if (available_samples == 0) {
             return cler::Error::NotEnoughSamples;
         }
-        size_t transferable = cler::floor2(std::min(available_space, available_samples, cler::DEFAULT_BUFFER_SIZE));
+        size_t transferable = cler::floor2(std::min({available_space, available_samples, cler::DEFAULT_BUFFER_SIZE}));
 
         size_t read = in.readN(_tmp, transferable);
         for (size_t i = 0; i < transferable; ++i) {

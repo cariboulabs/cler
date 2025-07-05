@@ -6,6 +6,8 @@
 #include "blocks/throttle.hpp"
 #include "blocks/math_complex_demux.hpp"
 #include "blocks/plot_cspectrum.hpp"
+#include "blocks/fanout.hpp"
+#include "blocks/sink_terminal.hpp"
 #include <complex>
 
 int main() {
@@ -15,7 +17,7 @@ int main() {
     
     SourceCWBlock<std::complex<float>> cw_source("CWSource", 1.0f, 2.0f, SPS);
     ThrottleBlock<std::complex<float>> cw_throttle("CWThrottle", SPS);
-    ComplexToMagPhaseBlock cw_demux("CWDemux", ComplexToMagPhaseBlock::Mode::RealImag, 1024);
+    ComplexToMagPhaseBlock cw_complex2realimag("CWComplex2RealImag", ComplexToMagPhaseBlock::Mode::RealImag);
     const char* signal_labels[] = {"Real", "Imaginary"};
     PlotTimeSeriesBlock cw_timeseries_plot(
         "CW-TimeSeriesPlot",
@@ -27,7 +29,8 @@ int main() {
 
     SourceChirpBlock<std::complex<float>> chirp_source("ChirpSource", 1.0f, 1.0f, 10.0f, SPS, 10.0f);
     ThrottleBlock<std::complex<float>> chirp_throttle("ChirpThrottle", SPS);
-    ComplexToMagPhaseBlock chirp_demux("ChirpDemux", ComplexToMagPhaseBlock::Mode::RealImag, 1024);
+    FanoutBlock<std::complex<float>> chirp_fanout("ChirpFanout", 2);
+    ComplexToMagPhaseBlock chirp_c2realimag("ChirpComplex2RealImag", ComplexToMagPhaseBlock::Mode::RealImag);
     PlotTimeSeriesBlock chirp_timeseries_plot(
         "Chirp-TimeSeriesPlot",
         2, // number of inputs
@@ -35,28 +38,41 @@ int main() {
         SPS,
         10.0f //duration in seconds
     );
+    PlotCSpectrumBlock chirp_cspectrum_plot(
+        "Chirp-CSpectrumPlot",
+        2, // number of inputs
+        signal_labels,
+        SPS,
+        256 // buffer size for FFT
+    );
+
+    SinkTerminalBlock<std::complex<float>> sink_terminal("SinkTerminal");
+    cler::BlockRunner sink_terminal_runner(&sink_terminal);
 
     cler::BlockRunner cw_source_runner(&cw_source, &cw_throttle.in);
-    cler::BlockRunner cw_throttle_runner(&cw_throttle, &cw_demux.in);
-    cler::BlockRunner cw_demux_runner(&cw_demux, &cw_timeseries_plot.in[0], &cw_timeseries_plot.in[1]);
+    cler::BlockRunner cw_throttle_runner(&cw_throttle, &cw_complex2realimag.in);
+    cler::BlockRunner cw_complex2realimag_runner(&cw_complex2realimag, &cw_timeseries_plot.in[0], &cw_timeseries_plot.in[1]);
     cler::BlockRunner cw_timeseries_plot_runner(&cw_timeseries_plot);
 
     cler::BlockRunner chirp_source_runner(&chirp_source, &chirp_throttle.in);
-    cler::BlockRunner chirp_throttle_runner(&chirp_throttle, &chirp_demux.in);
-    cler::BlockRunner chirp_demux_runner(&chirp_demux, &chirp_timeseries_plot.in[0], &chirp_timeseries_plot.in[1]);
+    cler::BlockRunner chirp_throttle_runner(&chirp_throttle, &chirp_fanout.in);
+    cler::BlockRunner chirp_fanout_runner(&chirp_fanout, &chirp_c2realimag.in, &sink_terminal.in); //end of branch1
+    cler::BlockRunner chirp_complex2realimag(&chirp_c2realimag, &chirp_timeseries_plot.in[0], &chirp_timeseries_plot.in[1]);
     cler::BlockRunner chirp_timeseries_plot_runner(&chirp_timeseries_plot);
-
+    cler::BlockRunner chirp_cspectrum_plot_runner(&chirp_cspectrum_plot);
 
     cler::FlowGraph flowgraph(
         cw_source_runner,
         cw_throttle_runner,
-        cw_demux_runner,
+        cw_complex2realimag_runner,
         cw_timeseries_plot_runner,
 
         chirp_source_runner,
         chirp_throttle_runner,
-        chirp_demux_runner,
+        chirp_fanout_runner,
+        chirp_complex2realimag,
         chirp_timeseries_plot_runner
+        // chirp_cspectrum_plot_runner
     );
 
     flowgraph.run();
