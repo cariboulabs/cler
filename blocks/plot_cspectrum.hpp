@@ -118,7 +118,7 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
             const std::complex<float>* ptr1, *ptr2;
             size_t size1, size2;
 
-            size_t available; //all the same by design
+            size_t available = 0; //all the same by design
             for (size_t i = 0; i < _num_inputs; ++i) {
                 available = _y_channels[i].peek_read(ptr1, size1, ptr2, size2);
                 memcpy(_snapshot_y_buffers[i], ptr1, size1 * sizeof(std::complex<float>));
