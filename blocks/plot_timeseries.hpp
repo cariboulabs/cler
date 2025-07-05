@@ -44,6 +44,12 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
 
         _tmp_x_buffer = new float[_buffer_size];
         _tmp_y_buffer = new float[_buffer_size];
+
+        _gui_prev_window_size.x = 800.0f;
+        _gui_prev_window_size.y = 400.0f;
+        float offset_x = static_cast<float>(rand() % static_cast<int>(800.0f / 2));
+        float offset_y = static_cast<float>(rand() % static_cast<int>(400.0f / 2));
+        _gui_prev_window_pos = ImVec2(offset_x, offset_y);
     }
 
     ~PlotTimeSeriesBlock() {
@@ -129,6 +135,9 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
             return; // nothing to render yet
         }
 
+        ImGui::SetNextWindowPos(_gui_prev_window_pos, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(_gui_prev_window_size, ImGuiCond_FirstUseEver);
+
         size_t available = _snapshot_ready_size.load(std::memory_order_acquire);
 
         // Optional: Save current window flags
@@ -143,9 +152,15 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
             ImGuiViewport* viewport = ImGui::GetMainViewport();
             ImGui::SetNextWindowPos(viewport->Pos);
             ImGui::SetNextWindowSize(viewport->Size);
+        } else if (_gui_just_exited_fullscreen) {
+            // Apply the saved size/pos only once right after exiting fullscreen
+            ImGui::SetNextWindowPos(_gui_prev_window_pos, ImGuiCond_Always);
+            ImGui::SetNextWindowSize(_gui_prev_window_size, ImGuiCond_Always);
+            _gui_just_exited_fullscreen = false;  // Clear the flag so it doesn't repeat
         }
+        
+        ImGui::Begin(name(), nullptr, window_flags);
 
-        ImGui::Begin("PlotTimeSeries", nullptr, window_flags);
         //buttons and stuff
         if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
             _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
@@ -157,6 +172,12 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
         }
         ImGui::SameLine();
         if (ImGui::Button(_gui_fullscreen ? "Exit Fullscreen" : "Fullscreen")) {
+            if (!_gui_fullscreen) {
+            _gui_prev_window_pos = ImGui::GetWindowPos();
+            _gui_prev_window_size = ImGui::GetWindowSize();
+            } else {
+            _gui_just_exited_fullscreen = true;
+            }
             _gui_fullscreen = !_gui_fullscreen;
         }
         //end buttons
@@ -192,6 +213,9 @@ private:
     float* _tmp_x_buffer = nullptr;
 
     bool _gui_fullscreen = false;
+    bool _gui_just_exited_fullscreen = false; 
     bool _gui_auto_fit = true; // Automatically fit axes to data
     std::atomic<bool> _gui_pause = false;
+    ImVec2 _gui_prev_window_pos;
+    ImVec2 _gui_prev_window_size;
 };
