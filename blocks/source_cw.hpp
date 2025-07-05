@@ -23,7 +23,7 @@ struct SourceCWBlock : public cler::BlockBase {
         }
     }
 
-    cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<T>* out) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
         const float phase_increment = 2.0f * PI * _frequency_hz / _sps;
 
         for (size_t i = 0; i < cler::floor2(out->space()); ++i) {

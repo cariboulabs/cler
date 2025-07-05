@@ -20,7 +20,7 @@ struct ThrottleBlock : public cler::BlockBase {
         }
     }
 
-    cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<T>* out) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
         if (in.size() == 0) {
             return cler::Error::NotEnoughSamples;
         }

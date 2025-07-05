@@ -33,7 +33,7 @@ struct SourceChirpBlock : public cler::BlockBase {
         _k = (_f1_hz - _f0_hz) / _chirp_duration_s; // sweep rate (Hz/s)
     }
 
-    cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<T>* out) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
         size_t n_samples = cler::floor2(out->space());
         for (size_t i = 0; i < n_samples; ++i) {
             float t = static_cast<float>(_sample_idx) / _sps;

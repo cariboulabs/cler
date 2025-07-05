@@ -32,8 +32,70 @@ namespace cler {
         }
     }
     
+    template <typename T>
+    struct ChannelBase {
+        virtual ~ChannelBase() = default;
+        virtual size_t size() const = 0;
+        virtual size_t space() const = 0;
+        virtual void push(const T&) = 0;
+        virtual void pop(T&) = 0;
+        virtual bool try_push(const T&) = 0;
+        virtual bool try_pop(T&) = 0;
+        virtual size_t writeN(const T* data, size_t n) = 0;
+        virtual size_t readN(T* data, size_t n) = 0;
+        virtual size_t peek_write(T*& ptr1, size_t& size1, T*& ptr2, size_t& size2) = 0;
+        virtual void commit_write(size_t count) = 0;
+        virtual size_t peek_read(const T*& ptr1, size_t& size1, const T*& ptr2, size_t& size2) = 0;
+        virtual void commit_read(size_t count) = 0;
+    };
+
+    //allows for heap/stack allocation to share the same interface
     template <typename T, size_t N = 0>
-    using Channel = dro::SPSCQueue<T, N>;
+    struct Channel : public ChannelBase<T> {
+        dro::SPSCQueue<T, N> _queue;
+
+        Channel() = default;
+        Channel(size_t size) requires (N == 0) : _queue(size) {
+            if (size == 0) {
+                throw std::invalid_argument("Channel size must be greater than zero.");
+            }
+        }
+
+        size_t size() const override { return _queue.size(); }
+        size_t space() const override { return _queue.space(); }
+
+        void push(const T& v) override { _queue.push(v); }
+        void pop(T& v) override { _queue.pop(v); }
+
+        bool try_push(const T& v) override {
+            return _queue.try_push(v);
+        }
+        bool try_pop(T& v) override {
+            return _queue.try_pop(v);
+        }
+
+        size_t writeN(const T* data, size_t n) override {
+            return _queue.writeN(data, n);
+        }
+        size_t readN(T* data, size_t n) override {
+            return _queue.readN(data, n);
+        }
+        size_t peek_write(T*& ptr1, size_t& size1, T*& ptr2, size_t& size2) override {
+            return _queue.peek_write(ptr1, size1, ptr2, size2);
+        }
+
+        void commit_write(size_t count) override {
+            _queue.commit_write(count);
+        }
+
+        size_t peek_read(const T*& ptr1, size_t& size1, const T*& ptr2, size_t& size2) override {
+            return _queue.peek_read(ptr1, size1, ptr2, size2);
+        }
+
+        void commit_read(size_t count) override {
+            _queue.commit_read(count);
+        }
+    };
 
     struct BlockBase {
         explicit BlockBase(const char* name) : _name(name) {}

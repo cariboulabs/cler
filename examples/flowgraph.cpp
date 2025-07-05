@@ -35,7 +35,7 @@ struct AdderBlock : public cler::BlockBase {
     AdderBlock(const char* name) : BlockBase(name), in0(CHANNEL_SIZE), in1(CHANNEL_SIZE) {}
 
     //                                             Adderblock pushes to gain block which has a stack buffer!
-    cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<float, CHANNEL_SIZE>* out) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
         size_t transferable = std::min({in0.size(), in1.size(), out->space()});
         for (size_t i = 0; i < transferable; ++i) {
             float value0;
@@ -54,7 +54,7 @@ struct GainBlock : public cler::BlockBase {
 
     GainBlock(const char* name, float gain_value) : BlockBase(name), gain(gain_value) {}
 
-    cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<float>* out) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
         size_t transferable = std::min(in.size(), out->space());
         for (size_t i = 0; i < transferable; ++i) {
             float value;
@@ -101,7 +101,7 @@ int main() {
     SinkBlock sink("Sink");
 
     cler::BlockRunner source_runner{&source, &adder.in0, &adder.in1};
-    cler::BlockRunner adder_runner{&adder, &gain.in};
+    cler::BlockRunner adder_runner{&adder, static_cast<cler::ChannelBase<float>*>(&gain.in)};
     cler::BlockRunner gain_runner{&gain, &sink.in};
     cler::BlockRunner sink_runner{&sink};
 

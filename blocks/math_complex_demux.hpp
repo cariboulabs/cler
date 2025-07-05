@@ -31,8 +31,8 @@ struct ComplexToMagPhaseBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(
-        cler::Channel<float>* a_out,
-        cler::Channel<float>* b_out)
+        cler::ChannelBase<float>* a_out,
+        cler::ChannelBase<float>* b_out)
     {
         size_t transferable = cler::floor2(std::min({in.size(), a_out->space(), b_out->space()}));
 
