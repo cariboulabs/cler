@@ -7,7 +7,6 @@
 #include "blocks/math_complex_demux.hpp"
 #include "blocks/plot_cspectrum.hpp"
 #include "blocks/fanout.hpp"
-#include "blocks/sink_terminal.hpp"
 #include <complex>
 
 int main() {
