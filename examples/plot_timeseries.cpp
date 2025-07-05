@@ -22,7 +22,7 @@ int main() {
         2, // number of inputs
         signal_labels,
         SPS,
-        10.0f // duration in seconds
+        2.0f //duration in seconds
     );
 
     cler::BlockRunner source_runner(&source, &throttle.in);

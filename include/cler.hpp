@@ -105,6 +105,7 @@ namespace cler {
             std::set<const void*> output_ptrs;
             bool ok = true;
 
+            //check that each output pointer is unique
             std::apply([&](const auto&... runners) {
                 ((std::apply([&](auto*... outs) {
                     ((ok &= output_ptrs.insert(static_cast<const void*>(outs)).second), ...);
