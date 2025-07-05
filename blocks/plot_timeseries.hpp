@@ -1,7 +1,6 @@
 #pragma once
 #include "cler.hpp"
 #include "gui/gui_manager.hpp"
-#include "zf_log.h"
 
 struct PlotTimeSeriesBlock : public cler::BlockBase {
     cler::Channel<float>* in;
@@ -98,7 +97,8 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
         }
         _samples_counter += work_size;
 
-        if (_snapshot_ready_size.load(std::memory_order_acquire) == 0) {
+        if (_snapshot_requested.load(std::memory_order_acquire)) {
+            _snapshot_ready_size.store(0, std::memory_order_release); //reset snapshot ready size
             const float* ptr1, *ptr2;
             size_t size1, size2;
 
@@ -112,22 +112,17 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
                 memcpy(_snapshot_y_buffers[i] + size1, ptr2, size2 * sizeof(float));
             }
             _snapshot_ready_size.store(available, std::memory_order_release); //update available samples
+            _snapshot_requested.store(false, std::memory_order_release);
         }
 
         return cler::Empty{};
     }
 
     void render() {
-        _snapshot_ready_size.store(0, std::memory_order_release); //reset available samples
+        _snapshot_requested.store(true, std::memory_order_release);
         
-        size_t counter = 0;
-        while (_snapshot_ready_size.load(std::memory_order_acquire) == 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            counter++;
-            if (counter > 50) {
-                ZF_LOGW("Block %s: Waiting for snapshot to be ready, timeout reached", name());
-                return;
-            }
+        if (_snapshot_ready_size.load(std::memory_order_acquire) == 0) {
+            return; // nothing to render yet
         }
 
         size_t available = _snapshot_ready_size.load(std::memory_order_acquire);
@@ -156,6 +151,7 @@ private:
     cler::Channel<float>* _x_channel;   // ring buffer for timestamps
 
     std::atomic<size_t> _snapshot_ready_size = 0;
+    std::atomic<bool> _snapshot_requested = false;
     float* _snapshot_x_buffer = nullptr;
     float** _snapshot_y_buffers = nullptr;
 
