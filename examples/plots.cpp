@@ -71,8 +71,10 @@ int main() {
         chirp_throttle_runner,
         chirp_fanout_runner,
         chirp_complex2realimag,
-        chirp_timeseries_plot_runner
+        chirp_timeseries_plot_runner,
         // chirp_cspectrum_plot_runner
+
+        sink_terminal_runner // Uncomment to see the terminal output
     );
 
     flowgraph.run();
