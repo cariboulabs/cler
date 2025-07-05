@@ -68,6 +68,10 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
+        if (_gui_pause.load(std::memory_order_acquire)) {
+            return cler::Empty{}; // Do nothing if paused
+        }
+
         size_t work_size = in[0].size();
         for (size_t i = 1; i < _num_inputs; ++i) {
             if (in[i].size() < work_size) {
@@ -119,49 +123,54 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
     }
 
     void render() {
-    _snapshot_requested.store(true, std::memory_order_release);
+        _snapshot_requested.store(true, std::memory_order_release);
 
-    if (_snapshot_ready_size.load(std::memory_order_acquire) == 0) {
-        return; // nothing to render yet
-    }
-
-    size_t available = _snapshot_ready_size.load(std::memory_order_acquire);
-
-    // Optional: Save current window flags
-    ImGuiWindowFlags window_flags = ImGuiWindowFlags_None;
-    if (_fullscreen) {
-        window_flags |= ImGuiWindowFlags_NoTitleBar 
-                      | ImGuiWindowFlags_NoResize 
-                      | ImGuiWindowFlags_NoMove 
-                      | ImGuiWindowFlags_NoCollapse;
-        
-        // Set the next window position and size to cover the entire viewport
-        ImGuiViewport* viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(viewport->Pos);
-        ImGui::SetNextWindowSize(viewport->Size);
-    }
-
-    ImGui::Begin("PlotTimeSeries", nullptr, window_flags);
-
-    // Add the fullscreen toggle button
-    if (ImGui::Button(_fullscreen ? "Exit Fullscreen" : "Fullscreen")) {
-        _fullscreen = !_fullscreen;
-    }
-    ImGui::SameLine();
-    ImGui::Checkbox("Auto Fit Axes", &_auto_fit);
-    if (_auto_fit) {
-        ImPlot::SetNextAxesToFit();
-    }
-    if (ImPlot::BeginPlot(name())) {
-        ImPlot::SetupAxes("Time [s]", "Y");
-
-        for (size_t i = 0; i < _num_inputs; ++i) {
-            ImPlot::PlotLine(_signal_labels[i], _snapshot_x_buffer, _snapshot_y_buffers[i], static_cast<int>(available));
+        if (_snapshot_ready_size.load(std::memory_order_acquire) == 0) {
+            return; // nothing to render yet
         }
-        ImPlot::EndPlot();
+
+        size_t available = _snapshot_ready_size.load(std::memory_order_acquire);
+
+        // Optional: Save current window flags
+        ImGuiWindowFlags window_flags = ImGuiWindowFlags_None;
+        if (_gui_fullscreen) {
+            window_flags |= ImGuiWindowFlags_NoTitleBar 
+                        | ImGuiWindowFlags_NoResize 
+                        | ImGuiWindowFlags_NoMove 
+                        | ImGuiWindowFlags_NoCollapse;
+            
+            // Set the next window position and size to cover the entire viewport
+            ImGuiViewport* viewport = ImGui::GetMainViewport();
+            ImGui::SetNextWindowPos(viewport->Pos);
+            ImGui::SetNextWindowSize(viewport->Size);
+        }
+
+        ImGui::Begin("PlotTimeSeries", nullptr, window_flags);
+        //buttons and stuff
+        if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
+            _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
+        }
+        ImGui::SameLine();
+        ImGui::Checkbox("Auto Fit Axes", &_gui_auto_fit);
+        if (_gui_auto_fit) {
+            ImPlot::SetNextAxesToFit();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(_gui_fullscreen ? "Exit Fullscreen" : "Fullscreen")) {
+            _gui_fullscreen = !_gui_fullscreen;
+        }
+        //end buttons
+
+        if (ImPlot::BeginPlot(name())) {
+            ImPlot::SetupAxes("Time [s]", "Y");
+
+            for (size_t i = 0; i < _num_inputs; ++i) {
+                ImPlot::PlotLine(_signal_labels[i], _snapshot_x_buffer, _snapshot_y_buffers[i], static_cast<int>(available));
+            }
+            ImPlot::EndPlot();
+        }
+        ImGui::End();
     }
-    ImGui::End();
-}
 
 private:
     size_t _samples_counter = 0;
@@ -182,6 +191,7 @@ private:
     float* _tmp_y_buffer = nullptr;
     float* _tmp_x_buffer = nullptr;
 
-    bool _fullscreen = false;
-    bool _auto_fit = true; // Automatically fit axes to data
+    bool _gui_fullscreen = false;
+    bool _gui_auto_fit = true; // Automatically fit axes to data
+    std::atomic<bool> _gui_pause = false;
 };
