@@ -1,9 +1,6 @@
 #pragma once
 
 #include "cler.hpp"
-#include <type_traits>
-#include <cstddef>
-
 template <typename T>
 struct SinkTerminalBlock : public cler::BlockBase {
     cler::Channel<T> in;
