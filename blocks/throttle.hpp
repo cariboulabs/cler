@@ -4,13 +4,11 @@
 
 template <typename T>
 struct ThrottleBlock : public cler::BlockBase {
-    static constexpr size_t BUFFER_SIZE = 1024;
-
     cler::Channel<T> in;
 
     ThrottleBlock(const char* name, size_t sps)
         : cler::BlockBase(name),
-          in(BUFFER_SIZE),
+          in(cler::DEFAULT_BUFFER_SIZE),
           _sps(sps),
           _interval(1.0 / static_cast<double>(sps)),
           _next_tick(std::chrono::high_resolution_clock::now())
