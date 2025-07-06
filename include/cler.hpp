@@ -19,7 +19,8 @@ namespace cler {
     enum class Error {
         InvalidChannelIndex,
         NotEnoughSamples,
-        NotEnoughSpace,    
+        NotEnoughSpace,
+        ProcedureError,
     };
 
     inline const char* to_str(Error error) {
