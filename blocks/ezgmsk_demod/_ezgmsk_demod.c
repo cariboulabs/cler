@@ -143,9 +143,9 @@ ezgmsk_demod ezgmsk_demod_create_set(unsigned int          _k,
                                         const unsigned char*     _syncword_symbols,
                                         unsigned int             _syncword_symbols_len,
                                         unsigned int             _header_byte_len,
+                                        unsigned int             _payload_max_bytes_len,
                                         float                    _detector_threshold,
                                         float                    _detector_dphi_max,
-                                        unsigned int             _payload_max_bytes_len,
                                         ezgmsk_demod_callback    _callback,
                                         void *                   _userdata)
 {

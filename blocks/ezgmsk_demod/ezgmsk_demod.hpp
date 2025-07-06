@@ -33,9 +33,9 @@ struct GmskDemodBlock : public cler::BlockBase {
             syncword_symbols,
             syncword_symbols_len,
             header_bytes_len,
+            payload_max_bytes_len,
             detector_threshold,
             detector_dphi_max,
-            payload_max_bytes_len,
             callback,
             callback_context
         );

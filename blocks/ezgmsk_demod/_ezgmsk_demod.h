@@ -38,10 +38,10 @@ ezgmsk_demod ezgmsk_demod_create_set(unsigned int         _k,
                                     const unsigned char*        _syncword,
                                     unsigned int                _syncword_len,
                                     unsigned int                _header_symbols_len,
+                                    unsigned int                _payload_max_bytes_len,
                                     float                       _detector_threshold,
                                     float                       _detector_dphi_max,
-                                    unsigned int                _payload_max_bytes_len,
-                                    ezgmsk_demod_callback    _callback,
+                                    ezgmsk_demod_callback        _callback,
                                     void *                      _userdata);
 int ezgmsk_demod_destroy(ezgmsk_demod _q);
 int ezgmsk_demod_print(ezgmsk_demod _q);

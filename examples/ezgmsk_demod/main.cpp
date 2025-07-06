@@ -134,18 +134,18 @@ int main() {
     CallbackContext callback_context;
 
     ezgmsk_demod fs = ezgmsk_demod_create_set(
-                                                N_DECIMATED_SAMPLES_PER_SYMBOL,
-                                                M,
-                                                BT,
-                                                PREAMBLE_LEN,
-                                                syncword_symbols,
-                                                syncword_symbols_len,
-                                                HEADER_BYTE_LEN,
-                                                255, // Max payload length in bytes
-                                                DETECTOR_THRESHOLD,
-                                                DETECTOR_DPHI_MAX,
-                                                callback,
-                                                &callback_context);
+                                            N_DECIMATED_SAMPLES_PER_SYMBOL,
+                                            M,
+                                            BT,
+                                            PREAMBLE_LEN,
+                                            syncword_symbols,
+                                            syncword_symbols_len,
+                                            HEADER_BYTE_LEN,
+                                            255, // Max payload length in bytes
+                                            DETECTOR_THRESHOLD,
+                                            DETECTOR_DPHI_MAX,
+                                            callback,
+                                            &callback_context);
     
 
     liquid_float_complex input_buffer[WORK_SIZE];
