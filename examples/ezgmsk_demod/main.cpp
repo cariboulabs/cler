@@ -29,8 +29,11 @@ constexpr size_t PREAMBLE_LEN = 24; // Length of preamble in symbols
 constexpr unsigned char SYNCWORD[] = {0x55, 0x90, 0x4E}; // Example syncword in bytes
 constexpr size_t HEADER_BYTE_LEN = 3;
 
+constexpr size_t NUM_MESSAGES_IN_FILE = 100;
+
 
 struct CallbackContext {
+    bool finished = false;
     std::vector<unsigned int> preamble_detections;
     std::vector<unsigned int> syncword_detections;
     std::vector<unsigned int> header_detections;
@@ -83,33 +86,12 @@ int callback(
     if (_state == EZGMSK_DEMOD_STATE_RXPAYLOAD) {
         payload_counter++;
         callback_context->payload_detections.push_back(_sample_counter);
+
+        if (payload_counter == NUM_MESSAGES_IN_FILE) {
+            callback_context->finished = true;
+        }
         return 0;
     }
-}
-
-void syncword_to_symbols(unsigned char* out_symbols, const unsigned char* in_syncword, size_t len) {
-    for (size_t i = 0; i < len; ++i) {
-        for (int bit = 7; bit >= 0; --bit) {
-            out_symbols[i * 8 + (7 - bit)] = (in_syncword[i] >> bit) & 0x01;
-        }
-    }
-}
-
-int generate_output_directory() {
-    try {
-        if (!std::filesystem::exists("output")) {
-            std::filesystem::create_directory("output");
-            std::cout << "output directory created.\n";
-        } else {
-             for (const auto& entry : std::filesystem::directory_iterator("output")) {
-                std::filesystem::remove_all(entry);  // removes files and subdirectories
-            }
-        }
-    } catch (const std::filesystem::filesystem_error& e) {
-        std::cerr << "Filesystem error: " << e.what() << '\n';
-        return 1;
-    }
-    return 0;
 }
 
 int main() {

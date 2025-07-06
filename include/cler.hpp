@@ -21,6 +21,8 @@ namespace cler {
         NotEnoughSamples,
         NotEnoughSpace,
         ProcedureError,
+        IOError,
+        EOFReached,
     };
 
     inline const char* to_str(Error error) {
@@ -31,6 +33,12 @@ namespace cler {
                 return "Not enough space in output buffers";
             case Error::NotEnoughSamples:
                 return "Not enough samples in input buffers";
+            case Error::ProcedureError:
+                return "Procedure error";
+            case Error::IOError:
+                return "I/O error";
+            case Error::EOFReached:
+                return "End of file reached";
             default:
                 return "Unknown error";
         }

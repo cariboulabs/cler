@@ -2,7 +2,6 @@
 
 #include "cler.hpp"
 #include <complex>
-#include <cmath>
 #include <algorithm>
 
 struct ComplexToMagPhaseBlock : public cler::BlockBase {
@@ -16,10 +15,6 @@ struct ComplexToMagPhaseBlock : public cler::BlockBase {
     ComplexToMagPhaseBlock(const char* name, Mode block_mode)
         : cler::BlockBase(name), in(cler::DEFAULT_BUFFER_SIZE), _block_mode(block_mode)
     {
-        if (cler::DEFAULT_BUFFER_SIZE == 0) {
-            throw std::invalid_argument("Buffer size must be greater than zero.");
-        }
-
         _tmp_c = new std::complex<float>[cler::DEFAULT_BUFFER_SIZE];
         _tmp_a = new float[cler::DEFAULT_BUFFER_SIZE];
         _tmp_b = new float[cler::DEFAULT_BUFFER_SIZE];
