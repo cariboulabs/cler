@@ -12,30 +12,30 @@ extern "C" {
 
 struct GmskDemodBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;   // Complex baseband input samples
-    cler::Channel<unsigned char> out;        // Output payload bytes
 
     GmskDemodBlock(const char* name,
                    unsigned int k,
                    unsigned int m,
                    float BT,
-                   unsigned int preamble_len,
-                   const unsigned char* syncword,
-                   unsigned int syncword_len,
-                   unsigned int header_symbols_len,
-                   float detector_threshold,
-                   float detector_dphi_max,
+                   unsigned int preamble_symbols_len,
+                   const unsigned char* syncword_symbols,
+                   unsigned int syncword_symbols_len,
+                   unsigned int header_bytes_len,
                    unsigned int payload_max_bytes_len,
                    ezgmsk_demod_callback callback,
-                   void* callback_context)
+                   void* callback_context,
+                   float detector_threshold = 0.9f,
+                   float detector_dphi_max = 0.1f)
     : BlockBase(name),
       in(cler::DEFAULT_BUFFER_SIZE)
     {
         // Create demod
         _demod = ezgmsk_demod_create_set(
             k, m, BT,
-            preamble_len,
-            syncword, syncword_len,
-            header_symbols_len,
+            preamble_symbols_len,
+            syncword_symbols,
+            syncword_symbols_len,
+            header_bytes_len,
             detector_threshold,
             detector_dphi_max,
             payload_max_bytes_len,
@@ -51,15 +51,17 @@ struct GmskDemodBlock : public cler::BlockBase {
     ~GmskDemodBlock() {
         if (_demod) {
             ezgmsk_demod_destroy(_demod);
-            _demod = nullptr;
         }
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
-        // Determine how many samples we can feed
         size_t available = in.size();
         if (available == 0) {
             return cler::Error::NotEnoughSamples;
+        }
+
+        for (size_t i = 0; i < available; ++i) {
+            ezgmsk_demod_execute(_demod,)
         }
 
         // Prepare buffer for samples to pass to demod
