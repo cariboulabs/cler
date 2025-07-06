@@ -22,7 +22,7 @@ static_assert(INPUT_SPS  % INPUT_BW == 0, "Input MSPS must be a multiple of Inpu
 
 constexpr float BT = 0.3f;
 constexpr size_t M = 3;
-constexpr size_t N_INPUT_SAMPLES_PER_SYMBOL = INPUT_SPS / (200000/2); //bt is 0.3 + config of file
+constexpr size_t N_INPUT_SAMPLES_PER_SYMBOL = INPUT_SPS / (200000/2); //bt is 0.3 + provided bw to ezlink
 constexpr size_t N_DECIMATED_SAMPLES_PER_SYMBOL = 2;
 constexpr float DECIM_RATIO = static_cast<float>(N_DECIMATED_SAMPLES_PER_SYMBOL) / static_cast<float>(N_INPUT_SAMPLES_PER_SYMBOL);
 constexpr float DECIM_ATTENUATION = 80.0;
