@@ -6,7 +6,6 @@
 #include "fanout.hpp"
 #include "sink_file.hpp"
 
-#include <csignal>
 #include <atomic>
 
 constexpr const char* INPUT_FILE = "recordings/recorded_stream_0x55904E.bin";
@@ -36,6 +35,7 @@ struct CallbackContext {
     std::vector<unsigned int> syncword_detections;
     std::vector<unsigned int> header_detections;
     std::vector<unsigned int> payload_detections;
+    std::atomic<bool> finished{false};
 };
 
 int ezgmsk_demod_cb(
@@ -54,19 +54,19 @@ int ezgmsk_demod_cb(
     static int payload_counter = 0;
     CallbackContext* callback_context = static_cast<CallbackContext*>(_context);
 
+    if (callback_context->finished == true) {return 0;};
+
     if (_state == ezgmsk::EZGMSK_DEMOD_STATE_DETECTFRAME) {
         preamble_counter ++;
         callback_context->preamble_detections.push_back(_sample_counter);
-        return 0;
     }
 
-    if (_state == ezgmsk::EZGMSK_DEMOD_STATE_RXSYNCWORD) {
+    else if (_state == ezgmsk::EZGMSK_DEMOD_STATE_RXSYNCWORD) {
         syncword_counter++;
         callback_context->syncword_detections.push_back(_sample_counter);
-        return 0;
     }
 
-    if (_state == ezgmsk::EZGMSK_DEMOD_STATE_RXHEADER) {
+    else if (_state == ezgmsk::EZGMSK_DEMOD_STATE_RXHEADER) {
         header_counter++;
         callback_context->header_detections.push_back(_sample_counter);
 
@@ -81,27 +81,19 @@ int ezgmsk_demod_cb(
         return length;
     }
 
-    if (_state == ezgmsk::EZGMSK_DEMOD_STATE_RXPAYLOAD) {
+    else if (_state == ezgmsk::EZGMSK_DEMOD_STATE_RXPAYLOAD) {
         payload_counter++;
         callback_context->payload_detections.push_back(_sample_counter);
-        return 0;
+    }
+
+    if (payload_counter > 20) {
+        callback_context->finished = true;
     }
 
     return 0;
 }
 
-std::atomic<bool> running { true };
-void signal_handler(int signum) {
-    if (signum == SIGINT) {
-        std::cout << "Received SIGINT, stopping...\n";
-    } else {
-        std::cout << "Received signal " << signum << ", stopping...\n";
-    }
-    running = false;
-}
-
 int main() {
-    std::signal(SIGINT, signal_handler);
     if (generate_output_directory() != 0) {return 1;}
 
     SourceFileBlock<std::complex<float>> input_file_block("Input File Block", INPUT_FILE, true);
@@ -145,7 +137,7 @@ int main() {
 
     flowgraph.run();
 
-    while (running) {
+    while (callback_context.finished == false) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 

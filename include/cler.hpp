@@ -112,6 +112,14 @@ namespace cler {
     struct BlockBase {
         explicit BlockBase(const char* name) : _name(name) {}
         const char* name() const { return _name; }
+
+        // Non-copyable
+        BlockBase(const BlockBase&) = delete;
+        BlockBase& operator=(const BlockBase&) = delete;
+
+        // Non-movable
+        BlockBase(BlockBase&&) = delete;
+        BlockBase& operator=(BlockBase&&) = delete;
     private:
         const char* _name;
     };

@@ -546,7 +546,7 @@ int ezgmsk_demod_execute_rxsyncword(ezgmsk_demod _q,
                 _q->snr_db,
                 _q->userdata);
                 _q->state = EZGMSK_DEMOD_STATE_RXHEADER;
-            } else if (_q->syncword_counter > _q->syncword_lookup_symbols_len) {
+            } else if (_q->syncword_counter >= _q->syncword_lookup_symbols_len) {
                 ezgmsk_demod_reset(_q);
             }
         }

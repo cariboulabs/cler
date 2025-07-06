@@ -18,19 +18,19 @@ phase[np.abs(data) < 0.05] = 0
 # Plot time domain
 fig, axes = plt.subplots(1,1)
 ax = axes
-ax.plot(phase, label='phase')
-for detection in preamble_detections:
-    detection = detection
-    ax.axvline(x=detection, color='r', linestyle='--')
-for detection in syncword_detections:
-    detection = detection
-    ax.axvline(x=detection, color = [0.0,0.8,0.0], linestyle='--')
-for detection in header_detections:
-    detection = detection
-    ax.axvline(x=detection, color = 'k', linestyle='--')
-for detection in payload_detections:
-    detection = detection
-    ax.axvline(x=detection, color = [0.8,0.0,0.8], linestyle='--')
+ax.plot(phase, label='squelched phase')
+for i, detection in enumerate(preamble_detections):
+    ax.axvline(x=detection, color='r', linestyle='--',
+               label='preamble' if i == 0 else "")
+for i, detection in enumerate(syncword_detections):
+    ax.axvline(x=detection, color=[0.0,0.8,0.0], linestyle='--',
+               label='syncword' if i == 0 else "")
+for i, detection in enumerate(header_detections):
+    ax.axvline(x=detection, color='k', linestyle='--',
+               label='header' if i == 0 else "")
+for i, detection in enumerate(payload_detections):
+    ax.axvline(x=detection, color=[0.8,0.0,0.8], linestyle='--',
+               label='payload' if i == 0 else "")
 ax.legend()
 ax.set_title('Phase of Samples')
 ax.set_ylabel('Phase (radians)')
