@@ -13,6 +13,7 @@ namespace cler {
 
     size_t floor2(size_t x) {
         if (x == 0) return 0;
+        if (x == 1) return 1;
         return size_t(1) << (std::bit_width(x) - 1);
     }
 
