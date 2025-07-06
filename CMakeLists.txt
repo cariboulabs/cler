@@ -5,6 +5,7 @@ project(cler
         DESCRIPTION "a lean dsp block library for sdr")
 
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 99)
 add_compile_options(-Wall -Wextra -Wno-unused-variable -Wno-missing-braces)
 

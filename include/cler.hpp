@@ -5,6 +5,7 @@
 #include <thread>
 #include <array>
 #include <set>
+#include <bit>
 
 namespace cler {
 

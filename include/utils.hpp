@@ -1,7 +1,9 @@
 #pragma once
 
+//this file includes things that might be optional for the user to include
+//examples: io, hardware specific, logging, etc.
+
 #include "cler.hpp"
-#include <bit>
 #include <iostream>
 
 namespace cler {
