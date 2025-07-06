@@ -8,10 +8,10 @@ extern "C" {
 #include "_ezgmsk_demod.h"
 }
 
-struct GmskDemodBlock : public cler::BlockBase {
+struct EZGmskDemodBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
 
-    GmskDemodBlock(const char* name,
+    EZGmskDemodBlock(const char* name,
                    unsigned int k,
                    unsigned int m,
                    float BT,
@@ -20,7 +20,7 @@ struct GmskDemodBlock : public cler::BlockBase {
                    unsigned int syncword_symbols_len,
                    unsigned int header_bytes_len,
                    unsigned int payload_max_bytes_len,
-                   ezgmsk_demod_callback callback,
+                   ezgmsk::ezgmsk_demod_callback callback,
                    void* callback_context,
                    float detector_threshold = 0.9f,
                    float detector_dphi_max = 0.1f)
@@ -43,9 +43,9 @@ struct GmskDemodBlock : public cler::BlockBase {
         _tmp = new std::complex<float>[cler::DEFAULT_BUFFER_SIZE];
     }
 
-    ~GmskDemodBlock() {
+    ~EZGmskDemodBlock() {
         if (_demod) {
-            ezgmsk_demod_destroy(_demod);
+            ezgmsk::ezgmsk_demod_destroy(_demod);
         }
     }
 
@@ -56,12 +56,12 @@ struct GmskDemodBlock : public cler::BlockBase {
         }
 
         in.readN(_tmp, available);
-        ezgmsk_demod_execute(_demod, reinterpret_cast<liquid_float_complex*>(_tmp), available);
+        ezgmsk::ezgmsk_demod_execute(_demod, reinterpret_cast<liquid_float_complex*>(_tmp), available);
 
         return cler::Empty{};
     }
 
 private:
-    ezgmsk_demod _demod = nullptr;
+    ezgmsk::ezgmsk_demod _demod = nullptr;
     std::complex<float>* _tmp;
 };

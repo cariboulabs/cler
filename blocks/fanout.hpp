@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
+#include <cassert>
 
 // A generic Demux block: routes input samples to multiple outputs in round-robin fashion.
 template <typename T>

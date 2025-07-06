@@ -6,10 +6,10 @@
 #include <algorithm>
 
 template <typename T>
-struct FileSourceBlock : public cler::BlockBase {
+struct SourceFileBlock : public cler::BlockBase {
     typedef void (*on_eof)(const char* filename);
 
-    FileSourceBlock(const char* name, const char* filename, bool repeat = false, on_eof callback = nullptr)
+    SourceFileBlock(const char* name, const char* filename, bool repeat = true, on_eof callback = nullptr)
         : cler::BlockBase(name),
           _filename(filename),
           _repeat(repeat),
@@ -23,7 +23,7 @@ struct FileSourceBlock : public cler::BlockBase {
         _tmp = new T[cler::DEFAULT_BUFFER_SIZE];
     }
 
-    ~FileSourceBlock() {
+    ~SourceFileBlock() {
         if (_file.is_open()) {
             _file.close();
         }

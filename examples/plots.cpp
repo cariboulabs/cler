@@ -8,12 +8,11 @@
 #include "blocks/plot_cspectrum.hpp"
 #include "blocks/fanout.hpp"
 #include "blocks/plot_cspectogram.hpp"
-#include <complex>
 
 int main() {
     size_t SPS = 100;
 
-    cler::GuiManager gui(1000, 400 , "TimeSeries Plot Example");
+    cler::GuiManager gui(1000, 400 , "Plots Example");
     
     SourceCWBlock<std::complex<float>> cw_source("CWSource", 1.0f, 2.0f, SPS);
     ThrottleBlock<std::complex<float>> cw_throttle("CWThrottle", SPS);

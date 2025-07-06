@@ -6,7 +6,7 @@ template <typename T>
 struct ThrottleBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
-    ThrottleBlock(const char* name, size_t sps)
+    ThrottleBlock(const char* name, const size_t sps)
         : cler::BlockBase(name),
           in(cler::DEFAULT_BUFFER_SIZE),
           _sps(sps),

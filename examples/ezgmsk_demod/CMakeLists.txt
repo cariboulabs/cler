@@ -4,6 +4,11 @@ target_link_libraries(main PRIVATE
     ezgmsk_demod
 )
 
+target_include_directories(main PRIVATE
+  ${PROJECT_SOURCE_DIR}/blocks
+  ${PROJECT_SOURCE_DIR}/include
+)
+
 set(RECORDED_STREAM1 recordings/recorded_stream_0x55904E.bin)
 add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${RECORDED_STREAM1}

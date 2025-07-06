@@ -1,6 +1,7 @@
 #pragma once
 
 #ifdef __cplusplus
+namespace ezgmsk {
 extern "C" {
 #endif
 
@@ -54,4 +55,5 @@ int ezgmsk_demod_execute(ezgmsk_demod _q,
 
 #ifdef __cplusplus
 }
+} // namespace ezgmsk
 #endif
