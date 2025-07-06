@@ -6,12 +6,15 @@
 #include "fanout.hpp"
 #include "sink_file.hpp"
 
-constexpr char* INPUT_FILE = "recordings/recorded_stream_0x55904E.bin";
-constexpr char* POST_DECIM_OUTPUT_FILE = "output/post_decim_output.bin";
-constexpr char* PREAMBLE_DETECTIONS_OUTPUT_FILE = "output/preamble_detections.bin";
-constexpr char* SYNCWORD_DETECTIONS_OUTPUT_FILE = "output/syncword_detections.bin";
-constexpr char* HEADER_DETECTIONS_OUTPUT_FILE = "output/header_detections.bin";
-constexpr char* PAYLOAD_DETECTIONS_OUTPUT_FILE = "output/payload_detections.bin";
+#include <csignal>
+#include <atomic>
+
+constexpr const char* INPUT_FILE = "recordings/recorded_stream_0x55904E.bin";
+constexpr const char* POST_DECIM_OUTPUT_FILE = "output/post_decim_output.bin";
+constexpr const char* PREAMBLE_DETECTIONS_OUTPUT_FILE = "output/preamble_detections.bin";
+constexpr const char* SYNCWORD_DETECTIONS_OUTPUT_FILE = "output/syncword_detections.bin";
+constexpr const char* HEADER_DETECTIONS_OUTPUT_FILE = "output/header_detections.bin";
+constexpr const char* PAYLOAD_DETECTIONS_OUTPUT_FILE = "output/payload_detections.bin";
 
 constexpr size_t INPUT_SPS = 4000000;
 constexpr size_t INPUT_BW = 160000; 
@@ -87,13 +90,22 @@ int ezgmsk_demod_cb(
     return 0;
 }
 
-int main() {
-    if (generate_output_directory() != 0) {
-        return 1;
+std::atomic<bool> running { true };
+void signal_handler(int signum) {
+    if (signum == SIGINT) {
+        std::cout << "Received SIGINT, stopping...\n";
+    } else {
+        std::cout << "Received signal " << signum << ", stopping...\n";
     }
+    running = false;
+}
+
+int main() {
+    std::signal(SIGINT, signal_handler);
+    if (generate_output_directory() != 0) {return 1;}
 
     SourceFileBlock<std::complex<float>> input_file_block("Input File Block", INPUT_FILE, true);
-    // MultiStageResamplerBlock<std::complex<float>> decimator("Decimator",DECIM_RATIO, DECIM_ATTENUATION);
+    MultiStageResamplerBlock<std::complex<float>> decimator("Decimator",DECIM_RATIO, DECIM_ATTENUATION);
     FanoutBlock<std::complex<float>> fanout("Fanout Block", 2);
 
     SinkFileBlock<std::complex<float>> output_file_block("Output File Block", POST_DECIM_OUTPUT_FILE);
@@ -117,30 +129,31 @@ int main() {
                    &callback_context);
 
 
-    // liquid_float_complex input_buffer[WORK_SIZE];
-    // liquid_float_complex post_decim_buffer[WORK_SIZE]; //it wont be bigger
-    // while (input_file.read(reinterpret_cast<char*>(input_buffer), WORK_SIZE * sizeof(liquid_float_complex))) {
+    cler::BlockRunner source_runner(&input_file_block, &decimator.in);
+    cler::BlockRunner decimator_runner(&decimator, &fanout.in);
+    cler::BlockRunner fanout_runner(&fanout, &ezgmsk_demod.in, &output_file_block.in);
+    cler::BlockRunner ezgmsk_demod_runner(&ezgmsk_demod);
+    cler::BlockRunner output_runner(&output_file_block);
 
-    //     size_t bytes_read = input_file.gcount();
-    //     size_t samples_read = bytes_read / sizeof(liquid_float_complex);
+    cler::FlowGraph flowgraph(
+        source_runner,
+        decimator_runner,
+        fanout_runner,
+        ezgmsk_demod_runner,
+        output_runner
+    );
 
-    //     unsigned int n_decimated_samples = 0;
-    //     msresamp_crcf_execute(
-    //         decimator,
-    //         input_buffer, samples_read,
-    //         post_decim_buffer, &n_decimated_samples
-    //     );
+    flowgraph.run();
 
-    //     //write post decimated output to file
-    //     for (size_t i = 0; i < n_decimated_samples; i++) {
-    //         post_decim_output_file.write(reinterpret_cast<const char*>(&post_decim_buffer[i]), sizeof(liquid_float_complex));
-    //     }
+    while (running) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
 
-    //     ezgmsk_demod_execute(fs, post_decim_buffer, n_decimated_samples);
-    // }
+    flowgraph.stop();
+    save_detections_to_file(PREAMBLE_DETECTIONS_OUTPUT_FILE, callback_context.preamble_detections);
+    save_detections_to_file(SYNCWORD_DETECTIONS_OUTPUT_FILE, callback_context.syncword_detections);
+    save_detections_to_file(HEADER_DETECTIONS_OUTPUT_FILE, callback_context.header_detections);
+    save_detections_to_file(PAYLOAD_DETECTIONS_OUTPUT_FILE, callback_context.payload_detections);
 
-    // save_detections_to_file(PREAMBLE_DETECTIONS_OUTPUT_FILE, callback_context.preamble_detections);
-    // save_detections_to_file(SYNCWORD_DETECTIONS_OUTPUT_FILE, callback_context.syncword_detections);
-    // save_detections_to_file(HEADER_DETECTIONS_OUTPUT_FILE, callback_context.header_detections);
-    // save_detections_to_file(PAYLOAD_DETECTIONS_OUTPUT_FILE, callback_context.payload_detections);
+    return 0;
 }
