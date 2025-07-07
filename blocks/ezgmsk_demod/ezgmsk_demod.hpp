@@ -47,6 +47,7 @@ struct EZGmskDemodBlock : public cler::BlockBase {
         if (_demod) {
             ezgmsk::ezgmsk_demod_destroy(_demod);
         }
+        delete[] _tmp;
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() {

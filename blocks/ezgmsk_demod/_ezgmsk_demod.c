@@ -204,7 +204,7 @@ ezgmsk_demod ezgmsk_demod_create_set(unsigned int          _k,
     q->syncword_lookup_symbols_len = 2*_syncword_symbols_len + _preamble_symbols_len;
     q->syncword_symbols_len = _syncword_symbols_len;
     q->syncword_symbols_expected = (unsigned char*) malloc(q->syncword_lookup_symbols_len*sizeof(unsigned char));
-    q->syncword_symbols_est = (unsigned char*) malloc(q->syncword_symbols_len*sizeof(unsigned char));
+    q->syncword_symbols_est = (unsigned char*) malloc(q->syncword_lookup_symbols_len*sizeof(unsigned char));
     memcpy(q->syncword_symbols_expected, _syncword_symbols, q->syncword_symbols_len*sizeof(unsigned char));
 
     // create/allocate header objects/arrays
@@ -241,6 +241,10 @@ int ezgmsk_demod_destroy(ezgmsk_demod _q)
     windowcf_destroy(_q->buffer);
     free(_q->preamble_pn);
     free(_q->preamble_rx);
+
+    // syncword
+    free(_q->syncword_symbols_expected);
+    free(_q->syncword_symbols_est);
     
     // header
     free(_q->header_symbols);
