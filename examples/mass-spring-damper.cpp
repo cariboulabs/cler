@@ -1,5 +1,4 @@
 #include "cler.hpp"
-#include "utils.hpp"
 #include <chrono>
 #include <algorithm>
 #include "gui_manager.hpp"
@@ -14,7 +13,7 @@ constexpr const float wn = 1.0f; // Natural frequency
 constexpr const float zeta = 0.5f; // Damping ratio
 constexpr const float M = 1.0f; // Mass
 constexpr const float K = wn * wn * M; // Spring constant
-constexpr const float C = 2.0f * zeta * wn * M; //
+constexpr const float C = 2.0f * zeta * wn * M;
 
 struct PlantBlock : public cler::BlockBase {
     cler::Channel<float> force_in;
