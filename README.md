@@ -8,7 +8,7 @@ Its goal is to be tiny, and allow maximal flexability:
 * Channels are type agnostic.
 * Blocks and flowgraph can be made completely static
 * Tailored for Embedded Systems -  even MCUs
-* Built for radio, but can also be used for control and simulations (supports cyclic graphs!)
+* Built for radio, but can also be used for control and simulations (supports cyclic graphs, and online modifiable params)
 
 How to use it? Just Include `cler.hpp` and you are good for the basics.
 Want to use included blocks? See the `examples` folder.

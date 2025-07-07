@@ -5,6 +5,7 @@
 #include "blocks/throttle.hpp"
 #include "blocks/plot_timeseries.hpp"
 #include "blocks/fanout.hpp"
+#include <atomic>
 
 constexpr const size_t SPS = 100; // Samples per second
 constexpr const float DT = 1.0f / static_cast<float>(SPS);
@@ -53,6 +54,7 @@ struct PlantBlock : public cler::BlockBase {
 
 struct ControllerBlock : public cler::BlockBase {
     cler::Channel<float> measured_position_in;
+
     ControllerBlock(const char* name)  
         : BlockBase(name), measured_position_in(cler::DEFAULT_BUFFER_SIZE) {} 
 
@@ -70,16 +72,21 @@ struct ControllerBlock : public cler::BlockBase {
             float measured_position;
             measured_position_in.pop(measured_position);
 
+            // Atomically read parameters
+            float target  = _target.load(std::memory_order_relaxed);
+            float kp      = _kp.load(std::memory_order_relaxed);
+            float ki      = _ki.load(std::memory_order_relaxed);
+            float kd      = _kd.load(std::memory_order_relaxed);
+
             // Calculate error
-            float ek = _target - measured_position;
+            float ek = target - measured_position;
 
             // PID control
             float derivative = (ek - _ekm1) / DT; // Derivative term
             float dk = 0.9f * _dkm1 + 0.1f * derivative; // Low-pass filter for derivative term
             _int_state += ek * DT; // Integral term
 
-            // Calculate control force
-            float force = _kp * ek + _ki * _int_state + _kd * dk;
+            float force = kp * ek + ki * _int_state + kd * dk;
 
             _ekm1 = ek; // Update previous error
             _dkm1 = dk; // Update previous derivative
@@ -90,30 +97,46 @@ struct ControllerBlock : public cler::BlockBase {
         return cler::Empty{};
     }
 
-    //function to change the target position in dearimgui
     void render() {
-        ImGui::Begin("Controller");  // You can name the window however you want
+        ImGui::Begin("Controller");
 
         ImGui::Text("PID Controller");
-        ImGui::SliderFloat("Target Position", &_target, -10.0f, 10.0f);
-        ImGui::InputFloat("Kp", &_kp, 0.1f, 1.0f);
-        ImGui::InputFloat("Ki", &_ki, 0.1f, 1.0f);
-        ImGui::InputFloat("Kd", &_kd, 0.1f, 1.0f);
+
+        // Use a local copy for ImGui input, then store atomically
+        float tmp_target = _target.load();
+        if (ImGui::SliderFloat("Target Position", &tmp_target, -10.0f, 10.0f)) {
+            _target.store(tmp_target);
+        }
+
+        float tmp_kp = _kp.load();
+        if (ImGui::InputFloat("Kp", &tmp_kp, 0.1f, 1.0f)) {
+            _kp.store(tmp_kp);
+        }
+
+        float tmp_ki = _ki.load();
+        if (ImGui::InputFloat("Ki", &tmp_ki, 0.1f, 1.0f)) {
+            _ki.store(tmp_ki);
+        }
+
+        float tmp_kd = _kd.load();
+        if (ImGui::InputFloat("Kd", &tmp_kd, 0.1f, 1.0f)) {
+            _kd.store(tmp_kd);
+        }
 
         ImGui::End();
     }
 
-    private:
-        float _ekm1 = 0.0;
-        float _dkm1 = 0.0;
-        float _int_state = 0.0;
-        
-        float _target  = 10.0;
-        float _kp = 2.0f;
-        float _ki = 1.0f;
-        float _kd = 1.0f;
-};
+private:
+    float _ekm1 = 0.0;
+    float _dkm1 = 0.0;
+    float _int_state = 0.0;
 
+    // ✅ Make these atomic for safe cross-thread reads/writes
+    std::atomic<float> _target {10.0f};
+    std::atomic<float> _kp {2.0f};
+    std::atomic<float> _ki {1.0f};
+    std::atomic<float> _kd {1.0f};
+};
 int main() {
      cler::GuiManager gui (800, 600, "Mass-Spring-Damper Simulation");
 
