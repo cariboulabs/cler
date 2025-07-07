@@ -8,8 +8,12 @@ Its goal is to be tiny, and allow maximal flexability:
 * Channels are type agnostic.
 * Blocks and flowgraph can be made completely static
 * Tailored for Embedded Systems -  even MCUs
+* Built for radio, but can also be used for control and simulations (supports cyclic graphs!)
 
-How to use it? Just Include `cler.hpp`
+How to use it? Just Include `cler.hpp` and you are good for the basics.
+Want to use included blocks? See the `examples` folder.
+
+Just one thing to look out for... because Cler is template heavy, error messages can overwhelming. But no worries, with the small context window that is Cler, any LLM can help you out with ease.
 
 # Things to Know
 
@@ -20,6 +24,7 @@ Our buffers are modified version of `https://github.com/drogalis/SPSC-Queue`. Th
 Cler supports three buffer access patterns: 
     * **Push/Pop** </br>
     For single values. there is also a try push/pop you can use if you dont inspect size() beforehand.
+    Remember though, after you have poped a value, you must not put it back! Cler channels are lock-free SPSC that *ASSUME* that one thread is a writer while another is a reader. No mixin' it up
 
     * **Peek/Commit** </br>
     Allows you to inspect (peek) data in the buffer without removing it, then explicitly commit the number of items you’ve processed.
@@ -29,9 +34,21 @@ Cler supports three buffer access patterns:
     * **Read/Write**. </br>
     Provides access to the full available buffer space for larger chunks of data. You’ll typically copy data to a temporary buffer for processing. Read/Write automatically advances the ring buffer pointers for you — no manual commit needed.
 
+* **Flowgraph vs Streamlined** </br>
+Cler supports two architectural styles:
+    * **flowgraph** </br>
+    In flowgraph mode, you manually define each block and the channels that connect them. You then pass the connection structure into a flowgraph that is incharge of running the blocks. Behind the scenees, Cler flowgraph creates an OS thread for every block which constantly calls its `procedure()`. When the call returns an error, it yeilds to other threads before trying again.
+
+    * **streamlined** </br>
+    In streamlined mode, you are in charge of writing the loop, and you are in charge of passing samples from one block to the other.
+
+    When the blocks are simple, the streamlined approach will be faster than the flowgraph becuase of the thread overhead. As a compromise, you can create `superblocks` which combine multiple small blocks.
+    See `streamlined` and  `flowgraph` examples.
+
+
 
 * **Blocks**: </br>
-Blocks is a library of useful blocks for quick plug and play Its depedencies are `liquid`, `imdeargui` and `zf_log`. In CLER, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
+Blocks is a library of useful blocks for quick plug and play Its soft depedencies are `liquid`, `imdeargui` and `zf_log`. In CLER, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
 
 * **Blocks/GUI**: </br>
-Cler is a header only library, but includes a gui library (dearimgui) that is compiled. To use it, include `gui_manager.hpp` and link your executable against `cler_gui`.
+Cler is a header only library, but includes a gui library (dearimgui) that is compiled. To use it, include `gui_manager.hpp` and link your executable against `cler_gui`. See the `plots` or `mass-spring-damper` examples.
