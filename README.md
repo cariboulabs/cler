@@ -1,14 +1,14 @@
 # Cler: Compile-Time DSP Flowgraph Framework
 
-cler is a C++ heaer only template-based framework for constructing and executing flowgraphs of processing blocks, especially for DSP, SDR, or other high-throughput streaming pipelines.
+Cler is a C++ header only template-based framework for constructing and executing flowgraphs of DSP processing blocks.
 Its goal is to be tiny, and allow maximal flexability:
 
 * All code, no frontend.
 * Defining blocks amounts to implementing a struct with a method.
 * Channels are type agnostic.
-* Blocks and flowgraph can be made completely static
+* Flowgraphs are, and Blocks can be made completely static
 * Tailored for Embedded Systems -  even MCUs
-* Built for radio, but can also be used for control and simulations (supports cyclic graphs, and online modifiable params)
+* Built for radio, but can also be used for control and dynamic simulations (supports cyclic graphs, and online modifiable params)
 
 How to use it? Just Include `cler.hpp` and you are good for the basics.
 Want to use included blocks? See the `examples` folder.
@@ -48,7 +48,8 @@ Cler supports two architectural styles:
 
 
 * **Blocks**: </br>
-Blocks is a library of useful blocks for quick plug and play Its soft depedencies are `liquid`, `imdeargui` and `zf_log`. In CLER, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
+Blocks is a library of useful blocks for quick "plug and play". Its soft depedencies are `liquid`, `imdeargui` and `zf_log`. </br>
+In CLER, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
 
 * **Blocks/GUI**: </br>
 Cler is a header only library, but includes a gui library (dearimgui) that is compiled. To use it, include `gui_manager.hpp` and link your executable against `cler_gui`. See the `plots` or `mass-spring-damper` examples.

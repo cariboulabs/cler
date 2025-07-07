@@ -6,6 +6,8 @@
 #include "blocks/plot_timeseries.hpp"
 #include "blocks/fanout.hpp"
 #include <atomic>
+#include <numbers>
+#include <cmath>
 
 constexpr const size_t SPS = 100; // Samples per second
 constexpr const float DT = 1.0f / static_cast<float>(SPS);
@@ -47,6 +49,93 @@ struct PlantBlock : public cler::BlockBase {
         return cler::Empty{};
     }
 
+    void render() {
+        ImGui::Begin("Plant");
+
+        ImVec2 canvas_p0 = ImGui::GetCursorScreenPos();
+        ImVec2 canvas_sz = ImGui::GetContentRegionAvail();
+        if (canvas_sz.x < 200.0f) canvas_sz.x = 200.0f;
+        if (canvas_sz.y < 100.0f) canvas_sz.y = 100.0f;
+        ImVec2 canvas_p1 = ImVec2(canvas_p0.x + canvas_sz.x, canvas_p0.y + canvas_sz.y);
+
+        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+        // Background and border
+        draw_list->AddRectFilled(canvas_p0, canvas_p1, IM_COL32(40, 40, 40, 255));
+        draw_list->AddRect(canvas_p0, canvas_p1, IM_COL32(255, 255, 255, 255));
+
+        float spring_start_x = canvas_p0.x + 50.0f;
+        float center_y = (canvas_p0.y + canvas_p1.y) * 0.5f;
+
+        float spring_end_x = spring_start_x + 200.0f + _x * 20.0f;
+
+        // Floor line
+        draw_list->AddLine(
+            ImVec2(canvas_p0.x + 20.0f, center_y + 50.0f),
+            ImVec2(canvas_p1.x - 20.0f, center_y + 50.0f),
+            IM_COL32(200, 200, 200, 60), 1.0f
+        );
+
+        // Fixed wall with hatch
+        for (float y = center_y - 40.0f; y <= center_y + 40.0f; y += 8.0f) {
+            draw_list->AddLine(
+                ImVec2(spring_start_x - 20.0f, y),
+                ImVec2(spring_start_x - 35.0f, y + 5.0f),
+                IM_COL32(255, 255, 255, 150), 2.0f
+            );
+        }
+
+        // Mass block
+        ImVec2 mass_size = ImVec2(40.0f, 40.0f);
+
+        ImVec2 mass_p0;
+        mass_p0.x = spring_end_x;
+        mass_p0.y = center_y - mass_size.y * 0.5f;
+
+        ImVec2 mass_p1;
+        mass_p1.x = spring_end_x + mass_size.x;
+        mass_p1.y = center_y + mass_size.y * 0.5f;
+
+        ImVec2 mass_center;
+        mass_center.x = (mass_p0.x + mass_p1.x) * 0.5f;
+        mass_center.y = (mass_p0.y + mass_p1.y) * 0.5f;
+
+        // 🌀 Perfect sine spring: always ends at mass_center
+        int num_points = 100;
+        float coil_length = mass_center.x - 0.5f*(mass_size.x) - spring_start_x;
+        float amplitude = 12.0f;
+        float cycles = 5.0f; // number of full waves between start and end
+
+        ImVec2 prev;
+        prev.x = spring_start_x;
+        prev.y = center_y;
+
+        for (int i = 1; i <= num_points; ++i) {
+            float t = (float)i / (float)num_points;
+            float x = spring_start_x + t * coil_length;
+            float phase = t * cycles * 2.0f * std::numbers::pi; // full sine wave
+            float y = center_y + sinf(phase) * amplitude;
+
+            draw_list->AddLine(prev, ImVec2(x, y), IM_COL32(255, 215, 0, 255), 3.0f);
+            prev.x = x;
+            prev.y = y;
+        }
+
+        // Mass block shadow
+        ImVec2 shadow_p0;
+        shadow_p0.x = mass_p0.x + 4.0f;
+        shadow_p0.y = mass_p0.y + 4.0f;
+        ImVec2 shadow_p1;
+        shadow_p1.x = mass_p1.x + 4.0f;
+        shadow_p1.y = mass_p1.y + 4.0f;
+        draw_list->AddRectFilled(shadow_p0, shadow_p1, IM_COL32(0, 0, 0, 100), 6.0f);
+
+        // Mass block
+        draw_list->AddRectFilled(mass_p0, mass_p1, IM_COL32(200, 50, 50, 255), 6.0f);
+        draw_list->AddRect(mass_p0, mass_p1, IM_COL32(255, 255, 255, 180), 2.0f);
+
+        ImGui::End();
+    }
     private:
         float _x = 0.0;
         float _v = 0.0;
@@ -83,7 +172,7 @@ struct ControllerBlock : public cler::BlockBase {
 
             // PID control
             float derivative = (ek - _ekm1) / DT; // Derivative term
-            float dk = 0.9f * _dkm1 + 0.1f * derivative; // Low-pass filter for derivative term
+            float dk = 0.95f * _dkm1 + 0.05f * derivative; // Low-pass filter for derivative term
             _int_state += ek * DT; // Integral term
 
             float force = kp * ek + ki * _int_state + kd * dk;
@@ -131,12 +220,12 @@ private:
     float _dkm1 = 0.0;
     float _int_state = 0.0;
 
-    // ✅ Make these atomic for safe cross-thread reads/writes
     std::atomic<float> _target {10.0f};
     std::atomic<float> _kp {2.0f};
     std::atomic<float> _ki {1.0f};
     std::atomic<float> _kd {1.0f};
 };
+
 int main() {
      cler::GuiManager gui (800, 600, "Mass-Spring-Damper Simulation");
 
@@ -174,6 +263,7 @@ int main() {
     while (!gui.should_close()) {
         gui.begin_frame();
         controller.render();
+        plant.render();
         plot.render();
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
