@@ -6,7 +6,7 @@ target_link_libraries(main PRIVATE
 
 target_include_directories(main PRIVATE
   ${PROJECT_SOURCE_DIR}/blocks
-  ${PROJECT_SOURCE_DIR}/include
+  ${PROJECT_SOURCE_DIR}/include #for cler
 )
 
 set(RECORDED_STREAM1 recordings/recorded_stream_0x55904E.bin)
@@ -42,7 +42,7 @@ add_custom_command(
 )
 
 # Create a custom target that triggers both copy commands
-add_custom_target(copy_assets ALL
+add_custom_target(ezgmsk_copy_assets ALL
     DEPENDS
         ${CMAKE_CURRENT_BINARY_DIR}/${RECORDED_STREAM1}
         ${CMAKE_CURRENT_BINARY_DIR}/${RECORDED_STREAM2}
@@ -51,4 +51,6 @@ add_custom_target(copy_assets ALL
 )
 
 # # Make your executable depend on this custom target
-add_dependencies(main copy_assets)
+add_dependencies(main ezgmsk_copy_assets)
+
+add_subdirectory(sandbox)

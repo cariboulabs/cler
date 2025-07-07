@@ -1,5 +1,7 @@
+EXAMPLE
+
 55555555 55904E     184F        AA                        3C55330F00000000FFFFFFFF3C33FF001BD73C0F1EBB9AFC7E4D5CF6AA333F598D1B1212659A1E112B2B1B4142BDC9AF6F90AC902417C55C536FD4BD69691E4BEDB7C560AA33B7E21D1D9AC0DF
-PREAMBLE  SYNC      IEE HDR     ADDR SIZE = 1                   PAYLOAD ...
+PREAMBLE  SYNC      IEE HDR     ADDR SIZE = 1             PAYLOAD ...
 
 
 #define EASYLINK_IEEE_HDR_CRC_S                     (12U)
@@ -12,11 +14,3 @@ PREAMBLE  SYNC      IEE HDR     ADDR SIZE = 1                   PAYLOAD ...
     ((crc << EASYLINK_IEEE_HDR_CRC_S) | (whitening << EASYLINK_IEEE_HDR_WHTNG_S) |
     ((length << EASYLINK_IEEE_HDR_LEN_S) & EASYLINK_IEEE_HDR_LEN_M)) 
 }
-
-SYNCWORD IN BITS:
-0101 0101 1001 0000 0010 1110
-
-
-
- https://github.com/jgaeddert/liquid-dsp/blob/master/examples/gmskframesync_example.c
- qdetector_cccf_create_gmsk
