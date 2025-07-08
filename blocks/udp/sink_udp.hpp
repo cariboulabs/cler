@@ -17,12 +17,12 @@ namespace UDPBlock {
                            SocketType type,
                            const std::string& dest_host_or_path,
                            uint16_t port,
-                           std::queue<size_t>& free_slots,
+                           std::queue<size_t>& slab_free_slots,
                            OnSendCallback callback = nullptr,
                            void* callback_context = nullptr)
             : cler::BlockBase(name),
             _socket(type, dest_host_or_path, port),
-            _free_slots(free_slots),
+            _slab_free_slots(slab_free_slots),
             _callback(callback),
             _callback_context(callback_context)
         {}
@@ -42,7 +42,7 @@ namespace UDPBlock {
                 if (_socket.send(slice.data, slice.len) < 0) {
                     return cler::Error::IOError;
                 }
-                _free_slots.push(slice.slot_idx);
+                _slab_free_slots.push(slice.slot_idx);
                 if (_callback) {
                     _callback(slice, _callback_context);
                 }
@@ -53,7 +53,7 @@ namespace UDPBlock {
 
     private:
         GenericDatagramSocket _socket;
-        std::queue<size_t>& _free_slots;
+        std::queue<size_t>& _slab_free_slots;
         OnSendCallback _callback = nullptr;
         void* _callback_context = nullptr;
     };
