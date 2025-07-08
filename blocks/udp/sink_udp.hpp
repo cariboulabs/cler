@@ -40,7 +40,7 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
             if (_socket.send(slice.data, slice.len) < 0) {
                 return cler::Error::IOError;
             }
-            _slab_free_slots.push(slice.slot_idx);
+            _slab_free_slots.push(slice.slot_idx); //free the slot for reuse
             if (_callback) {
                 _callback(slice, _callback_context);
             }

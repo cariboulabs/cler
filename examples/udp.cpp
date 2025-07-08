@@ -7,37 +7,43 @@
 #include <chrono>
 
 struct SourceDatagramBlock : public cler::BlockBase {
-    SourceDatagramBlock(const char* name, uint8_t* slab, size_t blob_size, std::queue<size_t>& free_slots)
-        : cler::BlockBase(name), _slab(slab), _blob_size(blob_size), _free_slots(free_slots) {}
+    SourceDatagramBlock(const char* name)
+        : cler::BlockBase(name) {}
 
-    cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<UDPBlock::BlobSlice>* out) {
-        if (_free_slots.empty()) {
-            return cler::Error::NotEnoughSpace;
-        }
-        if (out->space() == 0) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<UDPBlock::BlobSlice> out) {
+        if (out.space() == 0) {
             return cler::Error::NotEnoughSpace;
         }
 
-        const char* msg = "hello udp\n";
+        auto result = _slab.take_slot();
+        if (result.is_err()) {
+            return result.unwrap_err();
+        }
+
+        UDPBlock::BlobSlice slice = result.unwrap();
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Hello, UDP! #%zu", counter++);
+
+        //always be cautious
         size_t msg_len = strlen(msg);
+        if (msg_len > slice.len) {
+            _slab.release_slot(slice.slot_idx);
+            return cler::Error::ProcedureError;
+        }
 
-        size_t slot_idx = _free_slots.front();
-        _free_slots.pop();
-        uint8_t* ptr = _slab + (slot_idx * _blob_size);
+        memcpy(slice.data, msg, msg_len);
+        slice.len = msg_len;
 
-        memcpy(ptr, msg, msg_len);
-
-        UDPBlock::BlobSlice slice { ptr, msg_len, slot_idx };
-        out->push(slice);
+        out.push(slice);
 
         return cler::Empty{};
     }
 
 private:
-    uint8_t* _slab;
-    size_t _blob_size;
-    std::queue<size_t>& _free_slots;
+    size_t counter = 0;
+    UDPBlock::Slab _slab {100, 256}; // 100 slots, each 256 bytes
 };
+
 
 int main() {
     constexpr size_t BLOB_SIZE = 1024;
@@ -49,9 +55,9 @@ int main() {
         free_slots.push(i);
     }
 
-    SourceDatagramBlock source_datagram("SourceDatagram", slab, BLOB_SIZE, free_slots);
-    UDPBlock::SinkUDPSocketBlock sink_udp("SinkUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001, free_slots);
-    UDPBlock::SourceUDPSocketBlock source_udp("SourceUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001, slab, BLOB_SIZE, free_slots);
+    SourceDatagramBlock source_datagram("SourceDatagram");
+    SinkUDPSocketBlock sink_udp("SinkUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001, free_slots);
+    SourceUDPSocketBlock source_udp("SourceUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001, slab, BLOB_SIZE, free_slots);
 
     // Flow: SourceDatagram -> SinkUDPSocket -> UDP network -> SourceUDPSocket
     source_datagram.out.connect(&sink_udp.in);
