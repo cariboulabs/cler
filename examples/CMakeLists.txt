@@ -5,6 +5,9 @@ include_directories(
   SYSTEM ${zf_log_SOURCE_DIR}/zf_log
 )
 
+add_executable(hello_world hello_world.cpp)
+target_link_libraries(hello_world cler_gui)
+
 add_executable(streamlined streamlined.cpp)
 add_executable(flowgraph flowgraph.cpp)
 
