@@ -24,6 +24,44 @@ struct BlobSlice {
     size_t slot_idx; // slab index for recycling
 };
 
+struct Slab {
+    Slab(size_t num_slots, size_t max_blob_size)
+        : _num_slots(num_slots), _max_blob_size(max_blob_size)
+    {
+        _data = std::make_unique<uint8_t[]>(num_slots * max_blob_size);
+        for (size_t i = 0; i < num_slots; ++i) {
+            _free_slots.push(i);
+        }
+    }
+
+    // Allocate a slice: pops a free slot, returns pointer to region
+    // Returns nullptr if no space
+    cler::Result<BlobSlice, cler::Error> take_slot() {
+        if (_free_slots.empty()) {
+            return cler::Error::NotEnoughSamples;
+        }
+        size_t slot_idx = _free_slots.front();
+        _free_slots.pop();
+        uint8_t* ptr = _data.get() + (slot_idx * _max_blob_size);
+        return BlobSlice{ptr, _max_blob_size, slot_idx};
+    }
+
+    void release_slot(size_t slot_idx) {
+        _free_slots.push(slot_idx);
+    }
+
+    size_t capacity() const { return _num_slots; }
+    size_t available_slots() const { return _free_slots.size(); }
+    size_t max_blob_size() const { return _max_blob_size;}
+    std::queue<size_t>* free_slots() { return &_free_slots; }
+
+private:
+    size_t _num_slots;
+    size_t _max_blob_size;
+    std::unique_ptr<uint8_t[]> _data;
+    std::queue<size_t> _free_slots;
+};
+
 struct GenericDatagramSocket {
     GenericDatagramSocket(SocketType type,
                           const std::string& host_or_path,
