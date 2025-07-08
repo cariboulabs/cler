@@ -7,7 +7,10 @@
 namespace UDPBlock {
 
     struct SourceUDPSocketBlock : public cler::BlockBase {
-        cler::Channel<BlobSlice> out { cler::DEFAULT_BUFFER_SIZE };
+
+        //we add a callback because sometimes we want to do something with the received data
+        //that is not just pushing it to the output channel
+        typedef void (*OnReceiveCallback)(const BlobSlice&, void* context);
 
         SourceUDPSocketBlock(const char* name,
                              SocketType type,
@@ -15,17 +18,25 @@ namespace UDPBlock {
                              uint16_t port,
                              uint8_t* slab,
                              size_t blob_size,
-                             std::queue<size_t>& free_slots)
+                             std::queue<size_t>& free_slots,
+                            OnReceiveCallback callback = nullptr,
+                            void* callback_context = nullptr)
             : cler::BlockBase(name),
-              _socket(type, "", 0),
-              _slab(slab),
-              _blob_size(blob_size),
-              _free_slots(free_slots)
+            _socket(type, "", 0),
+            _slab(slab),
+            _blob_size(blob_size),
+            _free_slots(free_slots),
+            _callback(callback)
+              
         {
             _socket.bind(bind_addr_or_path, port);
         }
 
-        cler::Result<cler::Empty, cler::Error> procedure() {
+        void set_callback(OnReceiveCallback cb) {
+            _callback = cb;
+        }
+
+        cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<BlobSlice>* out) {
             if (!_socket.is_valid()) {
                 return cler::Error::IOError;
             }
@@ -41,8 +52,12 @@ namespace UDPBlock {
             }
 
             BlobSlice slice { slot_ptr, static_cast<size_t>(n), slot_idx };
-            out.push(slice);
+            out->push(slice);
             _free_slots.pop();
+
+            if (_callback) {
+                _callback(slice, _callback_context);
+            }
 
             return cler::Empty{};
         }
@@ -52,6 +67,8 @@ namespace UDPBlock {
         uint8_t* _slab;
         size_t _blob_size;
         std::queue<size_t>& _free_slots;
+        OnReceiveCallback _callback;
+        void* _callback_context = nullptr; // Optional context for callback
     };
 
 } // namespace UDPBlock
