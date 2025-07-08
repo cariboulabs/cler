@@ -8,9 +8,14 @@ template <typename T>
 struct FanoutBlock : public cler::BlockBase {
     cler::Channel<T> in;  // Single input channel
 
-    FanoutBlock(const char* name, size_t num_outputs)
-        : cler::BlockBase(name), in(cler::DEFAULT_BUFFER_SIZE), _num_outputs(num_outputs) {
-        _tmp = new T[cler::DEFAULT_BUFFER_SIZE];
+    FanoutBlock(const char* name, size_t num_outputs, size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(name), in(buffer_size), _num_outputs(num_outputs) {
+
+        assert(num_outputs > 0 && "Number of outputs must be greater than zero");
+        assert(buffer_size > 0 && "Buffer size must be greater than zero");
+
+        _tmp = new T[buffer_size];
+        _buffer_size = buffer_size;
     }
 
     ~FanoutBlock() {
@@ -41,7 +46,7 @@ struct FanoutBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSpace;
         }
 
-        size_t transferable = cler::floor2(std::min({available_samples, min_output_space, cler::DEFAULT_BUFFER_SIZE}));
+        size_t transferable = cler::floor2(std::min({available_samples, min_output_space, _buffer_size}));
 
         in.readN(_tmp, transferable);
         auto write_to_output = [&](auto* out) {
@@ -55,4 +60,5 @@ struct FanoutBlock : public cler::BlockBase {
     private:
         size_t _num_outputs;
         T* _tmp;
+        size_t _buffer_size;
 };

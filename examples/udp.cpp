@@ -48,16 +48,13 @@ private:
     size_t counter = 0;
 };
 
-void on_udp_source_receive(const UDPBlock::BlobSlice& slice, [[maybe_unused]] void* context) {
-    std::cout << "Received UDP data: " << std::string(reinterpret_cast<char*>(slice.data), slice.len) << std::endl;
-}
-
 size_t on_sink_terminal_receive(cler::Channel<UDPBlock::BlobSlice>& channel, [[maybe_unused]] void* context) {
     UDPBlock::Slab* slab = static_cast<UDPBlock::Slab*>(context);
     UDPBlock::BlobSlice slice;
     size_t work_size = channel.size();
     for (size_t i = 0; i < work_size; ++i) {
         channel.pop(slice);
+        std::cout << "Received: " << std::string(reinterpret_cast<char*>(slice.data), slice.len) << std::endl;
         slab->release_slot(slice.slot_idx);
     }
     return work_size;
@@ -67,7 +64,7 @@ int main() {
     SourceDatagramBlock source_datagram("SourceDatagram");
     SinkUDPSocketBlock sink_udp("SinkUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001, source_datagram._slab.get_free_slots_q());
     SourceUDPSocketBlock source_udp("SourceUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001,
-                      MAX_UDP_BLOB_SIZE, 100, on_udp_source_receive, nullptr);
+                      MAX_UDP_BLOB_SIZE, 100, nullptr, nullptr);
     SinkTerminalBlock<UDPBlock::BlobSlice> sink_terminal("SinkTerminal", on_sink_terminal_receive, &source_datagram._slab);
 
     cler::BlockRunner source_datagram_runner(&source_datagram, &sink_udp.in);

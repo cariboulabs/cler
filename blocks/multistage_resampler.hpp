@@ -13,12 +13,9 @@ template <typename T>
 struct MultiStageResamplerBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
-    MultiStageResamplerBlock(const char* name, float ratio, float attenuation)
-        : cler::BlockBase(name), in(cler::DEFAULT_BUFFER_SIZE), _ratio(ratio)
+    MultiStageResamplerBlock(const char* name, float ratio, float attenuation, size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(name), in(buffer_size), _ratio(ratio)
     {
-        _tmp_in = new T[cler::DEFAULT_BUFFER_SIZE];
-        _tmp_out = new T[cler::DEFAULT_BUFFER_SIZE];
-
         if constexpr (std::is_same_v<T, float>) {
             _msresamp_r = msresamp_rrrf_create(ratio, attenuation);
         } else if constexpr (std::is_same_v<T, std::complex<float>>) {
@@ -26,6 +23,21 @@ struct MultiStageResamplerBlock : public cler::BlockBase {
         } else {
             static_assert(dependent_false_v<T>, "MultiStageResamplerBlock only supports float or std::complex<float>");
         }
+
+        if (buffer_size == 0) {
+            throw std::invalid_argument("Buffer size must be greater than zero.");
+        }
+        if (ratio <= 0.0f) {
+            throw std::invalid_argument("Ratio must be greater than zero.");
+        }
+        if (attenuation < 0.0f) {
+            throw std::invalid_argument("Attenuation must be non-negative.");
+        }
+
+
+        _tmp_in = new T[buffer_size];
+        _tmp_out = new T[buffer_size];
+        _buffer_size = buffer_size;
     }
 
     ~MultiStageResamplerBlock() {
@@ -45,7 +57,7 @@ struct MultiStageResamplerBlock : public cler::BlockBase {
         size_t output_space = out->space();
         size_t input_limit_by_output = output_space / _ratio;
 
-        size_t transferable = cler::floor2(std::min({available_samples, input_limit_by_output, cler::DEFAULT_BUFFER_SIZE}));
+        size_t transferable = cler::floor2(std::min({available_samples, input_limit_by_output, _buffer_size}));
 
         if (transferable == 0) {
             return cler::Error::NotEnoughSamples;
@@ -82,6 +94,7 @@ private:
     T* _tmp_in;
     T* _tmp_out;
     float _ratio;
+    size_t _buffer_size;
 
     msresamp_rrrf _msresamp_r = nullptr;
     msresamp_crcf _msresamp_c = nullptr;
