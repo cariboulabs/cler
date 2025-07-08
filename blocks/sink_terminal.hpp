@@ -10,9 +10,13 @@ struct SinkTerminalBlock : public cler::BlockBase {
 
     SinkTerminalBlock(const char* name,
                       OnReceiveCallback callback = nullptr,
-                      [[maybe_unusued]] void* callback_context = nullptr)
-        : cler::BlockBase(name), in(cler::DEFAULT_BUFFER_SIZE), 
-          _callback(callback), _callback_context(callback_context) {
+                      [[maybe_unused]] void* callback_context = nullptr,
+                      size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(name), in(buffer_size), _callback(callback), _callback_context(callback_context) {
+
+        if (buffer_size == 0) {
+            throw std::invalid_argument("Buffer size must be greater than zero.");
+        };
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() {

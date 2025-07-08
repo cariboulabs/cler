@@ -5,7 +5,8 @@
 struct PlotTimeSeriesBlock : public cler::BlockBase {
     cler::Channel<float>* in;
 
-    PlotTimeSeriesBlock(const char* name, size_t num_inputs, const char** signal_labels, size_t sps, float duration_s) 
+    PlotTimeSeriesBlock(const char* name, const size_t num_inputs, const char** signal_labels,
+        const size_t sps, const float duration_s) 
         : BlockBase(name), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps) 
     {
         if (num_inputs < 1) {

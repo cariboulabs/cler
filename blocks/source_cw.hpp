@@ -9,7 +9,7 @@ struct SourceCWBlock : public cler::BlockBase {
     static_assert(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>,
                   "SourceCWBlock only supports float or std::complex<float>");
 
-    SourceCWBlock(const char* name, float amplitude, float frequency_hz, size_t sps)
+    SourceCWBlock(const char* name, const float amplitude, const float frequency_hz, const size_t sps)
         : cler::BlockBase(name),
         _amplitude(amplitude),
         _frequency_hz(frequency_hz),

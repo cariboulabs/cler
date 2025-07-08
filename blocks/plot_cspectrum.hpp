@@ -7,7 +7,8 @@
 struct PlotCSpectrumBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
 
-    PlotCSpectrumBlock(const char* name, size_t num_inputs, const char** signal_labels, size_t sps, size_t buffer_size) 
+    PlotCSpectrumBlock(const char* name, const size_t num_inputs, const char** signal_labels,
+        const size_t sps, const size_t buffer_size) 
         : BlockBase(name), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps) 
     {
         if (num_inputs < 1) {

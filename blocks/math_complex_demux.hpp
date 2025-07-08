@@ -12,7 +12,7 @@ struct ComplexToMagPhaseBlock : public cler::BlockBase {
         RealImag = 1
     };
 
-    ComplexToMagPhaseBlock(const char* name, Mode block_mode, size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+    ComplexToMagPhaseBlock(const char* name, const Mode block_mode, const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
         : cler::BlockBase(name), in(buffer_size), _block_mode(block_mode)
     {
         if (buffer_size == 0) {

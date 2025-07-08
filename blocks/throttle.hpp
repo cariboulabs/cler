@@ -6,13 +6,16 @@ template <typename T>
 struct ThrottleBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
-    ThrottleBlock(const char* name, const size_t sps)
+    ThrottleBlock(const char* name, const size_t sps, size_t const buffer_size = cler::DEFAULT_BUFFER_SIZE)
         : cler::BlockBase(name),
-          in(cler::DEFAULT_BUFFER_SIZE),
+          in(buffer_size),
           _sps(sps),
           _interval(1.0 / static_cast<double>(sps)),
           _next_tick(std::chrono::high_resolution_clock::now())
     {
+        if (buffer_size == 0) {
+            throw std::invalid_argument("Buffer size must be greater than zero.");
+        }
         if (_sps == 0) {
             throw std::invalid_argument("Sample rate must be greater than zero.");
         }

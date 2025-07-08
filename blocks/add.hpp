@@ -5,11 +5,18 @@ template <typename T>
 struct AddBlock : public cler::BlockBase {
     cler::Channel<T>* in;
 
-    AddBlock(const char* name, size_t num_inputs):
-     cler::BlockBase(name), _num_inputs(num_inputs) {
+    AddBlock(const char* name, const size_t num_inputs, const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(name), _num_inputs(num_inputs) {
+
+        if (buffer_size == 0) {
+            throw std::invalid_argument("Buffer size must be greater than zero.");
+        }
+
         if (num_inputs < 2) {
             throw std::invalid_argument("AddBlock requires at least two input channels");
         }
+
+        _buffer_size = buffer_size;
         
         // Our ringbuffers are not copy/move so we cant use std::vector
         // As such, we use a raw array of cler::Channel<T>
@@ -18,7 +25,7 @@ struct AddBlock : public cler::BlockBase {
             ::operator new[](num_inputs * sizeof(cler::Channel<T>))
         );
         for (size_t i = 0; i < num_inputs; ++i) {
-            new (&in[i]) cler::Channel<T>(cler::DEFAULT_BUFFER_SIZE);
+            new (&in[i]) cler::Channel<T>(buffer_size);
         }
      }
     ~AddBlock() {
@@ -46,7 +53,7 @@ struct AddBlock : public cler::BlockBase {
         return cler::Error::NotEnoughSamples;
     }
 
-    size_t transferable = cler::floor2(std::min({available_space, min_available_samples, cler::DEFAULT_BUFFER_SIZE}));
+    size_t transferable = cler::floor2(std::min({available_space, min_available_samples, _buffer_size}));
 
     for (size_t i = 0; i < transferable; ++i) {
         T sum = T{};
@@ -62,5 +69,5 @@ struct AddBlock : public cler::BlockBase {
 
     private:
         size_t _num_inputs;
-        size_t _work_size;
+        size_t _buffer_size;
 };

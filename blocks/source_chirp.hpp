@@ -10,11 +10,11 @@ struct SourceChirpBlock : public cler::BlockBase {
                   "SourceChirpBlock only supports float or std::complex<float>");
 
     SourceChirpBlock(const char* name,
-                     float amplitude,
-                     float f0_hz,
-                     float f1_hz,
-                     size_t sps,
-                     float chirp_duration_s)
+                    const float amplitude,
+                    const float f0_hz,
+                    const float f1_hz,
+                    const size_t sps,
+                    const float chirp_duration_s)
         : cler::BlockBase(name),
           _amplitude(amplitude),
           _f0_hz(f0_hz),

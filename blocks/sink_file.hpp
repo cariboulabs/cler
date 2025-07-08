@@ -7,10 +7,21 @@
 
 template <typename T>
 struct SinkFileBlock : public cler::BlockBase {
-    cler::Channel<T> in { cler::DEFAULT_BUFFER_SIZE };
+    cler::Channel<T> in;
 
-    SinkFileBlock(const char* name, const char* filename)
-        : cler::BlockBase(name), _filename(filename) {
+    SinkFileBlock(const char* name, const char* filename, size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(name), in(buffer_size), _filename(filename) {
+
+        if (buffer_size == 0) {
+            throw std::invalid_argument("Buffer size must be greater than zero.");
+        }
+        if (!filename || filename[0] == '\0') {
+            throw std::invalid_argument("Filename must not be empty.");
+        }
+
+        _filename = filename;
+        _buffer_size = buffer_size;
+
         _file.open(_filename, std::ios::binary | std::ios::out | std::ios::trunc);
         if (!_file.is_open()) {
             throw std::runtime_error("Failed to open file for writing: " + std::string(filename));
@@ -36,7 +47,7 @@ struct SinkFileBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSamples;
         }
 
-        size_t to_write = cler::floor2(std::min(available_samples, cler::DEFAULT_BUFFER_SIZE));
+        size_t to_write = cler::floor2(std::min(available_samples, _buffer_size));
 
         in.readN(_tmp, to_write);
         _file.write(reinterpret_cast<char*>(_tmp), to_write * sizeof(T));
@@ -52,4 +63,5 @@ private:
     const char* _filename;
     std::ofstream _file;
     T* _tmp;
+    size_t _buffer_size = cler::DEFAULT_BUFFER_SIZE;
 };
