@@ -195,7 +195,28 @@ struct GenericDatagramSocket {
     }
 
     ssize_t recv(uint8_t* buffer, size_t max_len) const {
-        return recvfrom(_sockfd, buffer, max_len, 0, nullptr, nullptr);
+        struct msghdr msg {};
+        struct iovec iov {};
+
+        iov.iov_base = buffer;
+        iov.iov_len  = max_len;
+
+        msg.msg_iov = &iov;
+        msg.msg_iovlen = 1;
+
+        msg.msg_name = nullptr;
+        msg.msg_namelen = 0;
+
+        ssize_t bytes_received = recvmsg(_sockfd, &msg, 0);
+        if (bytes_received < 0) {
+            return -1; // syscall error
+        }
+
+        if( (msg.msg_flags & MSG_TRUNC)) {
+            return -2; // message was truncated
+        }
+
+        return bytes_received;
     }
 
     bool is_valid() const { return _sockfd >= 0; }
