@@ -16,5 +16,7 @@ add_subdirectory(ezgmsk_demod)
 add_executable(mass-spring-damper mass-spring-damper.cpp)
 target_link_libraries(mass-spring-damper cler_gui)
 
+add_executable(udp udp.cpp)
+
 # add_executable(polyphase_channelizer polyphase_channelizer.cpp)
 # target_link_libraries(polyphase_channelizer PRIVATE liquid cler_gui)

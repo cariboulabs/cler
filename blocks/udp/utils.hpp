@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <queue>
 
 namespace UDPBlock {
 
@@ -53,7 +54,7 @@ struct Slab {
     size_t capacity() const { return _num_slots; }
     size_t available_slots() const { return _free_slots.size(); }
     size_t max_blob_size() const { return _max_blob_size;}
-    std::queue<size_t>* free_slots() { return &_free_slots; }
+    std::queue<size_t>& get_free_slots_q() { return _free_slots; }
 
 private:
     size_t _num_slots;
@@ -64,22 +65,26 @@ private:
 
 struct GenericDatagramSocket {
     GenericDatagramSocket(SocketType type,
-                          const std::string& host_or_path,
-                          uint16_t port = 0)
-        : _type(type)
+                      const std::string& host_or_path,
+                      uint16_t port = 0)
+    : _type(type)
     {
+        const bool is_receiver = host_or_path.empty() && port == 0;
+
         if (type == SocketType::INET_UDP) {
             _sockfd = socket(AF_INET, SOCK_DGRAM, 0);
             if (_sockfd < 0) {
                 throw std::runtime_error("GenericDatagramSocket: failed to create INET socket: " + std::string(strerror(errno)));
             }
 
-            memset(&_dest_inet, 0, sizeof(_dest_inet));
-            _dest_inet.sin_family = AF_INET;
-            _dest_inet.sin_port = htons(port);
-            if (inet_pton(AF_INET, host_or_path.c_str(), &_dest_inet.sin_addr) <= 0) {
-                close(_sockfd);
-                throw std::runtime_error("GenericDatagramSocket: invalid IPv4 address: " + host_or_path);
+            if (!is_receiver) {
+                memset(&_dest_inet, 0, sizeof(_dest_inet));
+                _dest_inet.sin_family = AF_INET;
+                _dest_inet.sin_port = htons(port);
+                if (inet_pton(AF_INET, host_or_path.c_str(), &_dest_inet.sin_addr) <= 0) {
+                    close(_sockfd);
+                    throw std::runtime_error("GenericDatagramSocket: invalid IPv4 address: " + host_or_path);
+                }
             }
         }
         else if (type == SocketType::INET6_UDP) {
@@ -88,12 +93,14 @@ struct GenericDatagramSocket {
                 throw std::runtime_error("GenericDatagramSocket: failed to create INET6 socket: " + std::string(strerror(errno)));
             }
 
-            memset(&_dest_inet6, 0, sizeof(_dest_inet6));
-            _dest_inet6.sin6_family = AF_INET6;
-            _dest_inet6.sin6_port = htons(port);
-            if (inet_pton(AF_INET6, host_or_path.c_str(), &_dest_inet6.sin6_addr) <= 0) {
-                close(_sockfd);
-                throw std::runtime_error("GenericDatagramSocket: invalid IPv6 address: " + host_or_path);
+            if (!is_receiver) {
+                memset(&_dest_inet6, 0, sizeof(_dest_inet6));
+                _dest_inet6.sin6_family = AF_INET6;
+                _dest_inet6.sin6_port = htons(port);
+                if (inet_pton(AF_INET6, host_or_path.c_str(), &_dest_inet6.sin6_addr) <= 0) {
+                    close(_sockfd);
+                    throw std::runtime_error("GenericDatagramSocket: invalid IPv6 address: " + host_or_path);
+                }
             }
         }
         else if (type == SocketType::UNIX_DGRAM) {
@@ -102,13 +109,15 @@ struct GenericDatagramSocket {
                 throw std::runtime_error("GenericDatagramSocket: failed to create UNIX socket: " + std::string(strerror(errno)));
             }
 
-            memset(&_dest_un, 0, sizeof(_dest_un));
-            _dest_un.sun_family = AF_UNIX;
-            if (host_or_path.size() >= sizeof(_dest_un.sun_path)) {
-                close(_sockfd);
-                throw std::runtime_error("GenericDatagramSocket: UNIX socket path too long");
+            if (!is_receiver) {
+                memset(&_dest_un, 0, sizeof(_dest_un));
+                _dest_un.sun_family = AF_UNIX;
+                if (host_or_path.size() >= sizeof(_dest_un.sun_path)) {
+                    close(_sockfd);
+                    throw std::runtime_error("GenericDatagramSocket: UNIX socket path too long");
+                }
+                std::strncpy(_dest_un.sun_path, host_or_path.c_str(), sizeof(_dest_un.sun_path) - 1);
             }
-            std::strncpy(_dest_un.sun_path, host_or_path.c_str(), sizeof(_dest_un.sun_path) - 1);
         }
         else {
             throw std::runtime_error("GenericDatagramSocket: unknown SocketType");

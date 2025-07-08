@@ -18,7 +18,7 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
                             size_t max_blob_size,
                             size_t num_slab_slots = cler::DEFAULT_BUFFER_SIZE,
                             OnReceiveCallback callback = nullptr,
-                            void* callback_context = nullptr)
+                            [[maybe_unused]] void* callback_context = nullptr)
         : cler::BlockBase(name),
         _socket(UDPBlock::GenericDatagramSocket::make_receiver(type, bind_addr_or_path, port)),
         _slab(UDPBlock::Slab(num_slab_slots, max_blob_size)),
@@ -30,7 +30,7 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
         _callback = cb;
     }
 
-    cler::Result<cler::Empty, cler::Error> procedure(cler::Channel<UDPBlock::BlobSlice>* out) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<UDPBlock::BlobSlice>* out) {
         if (!_socket.is_valid()) {
             return cler::Error::IOError;
         }
