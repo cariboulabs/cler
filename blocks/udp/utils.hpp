@@ -115,6 +115,22 @@ struct GenericDatagramSocket {
         }
     }
 
+    static GenericDatagramSocket make_receiver(SocketType type,
+                                           const std::string& bind_addr,
+                                           uint16_t port)
+    {
+        GenericDatagramSocket sock(type, "", 0); //place holders
+        sock.bind(bind_addr, port);
+        return sock;
+    }
+
+    static GenericDatagramSocket make_sender(SocketType type,
+                                            const std::string& dest_addr,
+                                            uint16_t port)
+    {
+        return GenericDatagramSocket(type, dest_addr, port);
+    }
+
     ~GenericDatagramSocket() {
         if (_sockfd >= 0) {
             close(_sockfd);

@@ -20,13 +20,11 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
                             OnReceiveCallback callback = nullptr,
                             void* callback_context = nullptr)
         : cler::BlockBase(name),
-        _socket(type, "", 0),
+        _socket(UDPBlock::GenericDatagramSocket::make_receiver(type, bind_addr_or_path, port)),
         _slab(UDPBlock::Slab(num_slab_slots, max_blob_size)),
         _callback(callback)
             
-    {
-        _socket.bind(bind_addr_or_path, port);
-    }
+    {}
 
     void set_callback(OnReceiveCallback cb) {
         _callback = cb;
