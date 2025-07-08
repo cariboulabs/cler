@@ -50,6 +50,8 @@ struct PlantBlock : public cler::BlockBase {
     }
 
     void render() {
+        ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
         ImGui::Begin("Plant");
 
         ImVec2 canvas_p0 = ImGui::GetCursorScreenPos();
@@ -136,9 +138,20 @@ struct PlantBlock : public cler::BlockBase {
 
         ImGui::End();
     }
+
+    void set_initial_window(float x, float y, float w, float h) {
+        _initial_window_position = ImVec2(x, y);
+        _initial_window_size = ImVec2(w, h);
+        _has_initial_window_position = true;
+    }
+
     private:
         float _x = 0.0;
         float _v = 0.0;
+
+        bool _has_initial_window_position = false;
+        ImVec2 _initial_window_position {0.0f, 0.0f};
+        ImVec2 _initial_window_size {600.0f, 300.0f};
 };
 
 struct ControllerBlock : public cler::BlockBase {
@@ -187,13 +200,13 @@ struct ControllerBlock : public cler::BlockBase {
     }
 
     void render() {
+        ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
         ImGui::Begin("Controller");
-
         ImGui::Text("PID Controller");
-
         // Use a local copy for ImGui input, then store atomically
         float tmp_target = _target.load();
-        if (ImGui::SliderFloat("Target Position", &tmp_target, -10.0f, 10.0f)) {
+        if (ImGui::SliderFloat("Target", &tmp_target, -10.0f, 10.0f)) {
             _target.store(tmp_target);
         }
 
@@ -215,6 +228,13 @@ struct ControllerBlock : public cler::BlockBase {
         ImGui::End();
     }
 
+
+    void set_initial_window(float x, float y, float w, float h) {
+        _initial_window_position = ImVec2(x, y);
+        _initial_window_size = ImVec2(w, h);
+        _has_initial_window_position = true;
+    }
+
 private:
     float _ekm1 = 0.0;
     float _dkm1 = 0.0;
@@ -224,25 +244,33 @@ private:
     std::atomic<float> _kp {2.0f};
     std::atomic<float> _ki {1.0f};
     std::atomic<float> _kd {1.0f};
+
+    bool _has_initial_window_position = false;
+    ImVec2 _initial_window_position {0.0f, 0.0f};
+    ImVec2 _initial_window_size {600.0f, 300.0f};
 };
 
 int main() {
-     cler::GuiManager gui (800, 600, "Mass-Spring-Damper Simulation");
-
+    cler::GuiManager gui (1000, 600, "Mass-Spring-Damper Simulation");
     ControllerBlock controller("Controller");
     ThrottleBlock<float> throttle("Throttle", SPS);
     PlantBlock plant("Plant");
 
+
     FanoutBlock<float> fanout("Fanout", 2);
 
-    const char* signal_labels[] = {"Position"};
+    const char* signal_labels[] = {"Measuerd Position"};
     PlotTimeSeriesBlock plot(
-        "Position Plot",
+        "Sensor Plot",
         1, // number of inputs
         signal_labels,
         SPS,
         100.0f // duration in seconds
     );
+
+    controller.set_initial_window(0.0f, 0.0f, 175.0f, 150.0f);
+    plot.set_initial_window(200.0f, 0.0f, 800.0f, 400.0f);
+    plant.set_initial_window(200.0f, 400.0f, 800.0f, 200.0f);
 
     cler::BlockRunner controller_runner(&controller, &throttle.in);
     cler::BlockRunner throttle_runner(&throttle, &plant.force_in);
@@ -260,11 +288,12 @@ int main() {
 
     flowgraph.run();
 
+
     while (!gui.should_close()) {
         gui.begin_frame();
-        controller.render();
         plant.render();
         plot.render();
+        controller.render();
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }

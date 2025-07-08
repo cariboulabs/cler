@@ -12,7 +12,9 @@
 int main() {
     size_t SPS = 100;
 
-    cler::GuiManager gui(1000, 400 , "Plots Example");
+    constexpr const size_t GW = 1500;
+    constexpr const size_t GH = 800;
+    cler::GuiManager gui(GW, GH , "Plots Example");
     
     SourceCWBlock<std::complex<float>> cw_source("CWSource", 1.0f, 2.0f, SPS);
     ThrottleBlock<std::complex<float>> cw_throttle("CWThrottle", SPS);
@@ -57,7 +59,11 @@ int main() {
         100 // tall
     );
 
-
+    cw_timeseries_plot.set_initial_window(0.0f, 0.0f, GW / 2.0f, GH / 2.0f);
+    chirp_timeseries_plot.set_initial_window(GW /2.0, 0.0f, GW / 2.0f, GH / 2.0f);
+    cspectrum_plot.set_initial_window(0.0, GH/2.0, GW / 2.0f, GH / 2.0f);
+    cspectrogram_plot.set_initial_window(GW/2.0, GH/2.0, GW / 2.0f, GH / 2.0f);
+    
     cler::BlockRunner cw_source_runner(&cw_source, &cw_throttle.in);
     cler::BlockRunner cw_throttle_runner(&cw_throttle, &cw_fanout.in);
     cler::BlockRunner cw_fanout_runner(&cw_fanout, &cw_complex2realimag.in, &cspectrum_plot.in[0], &cspectrogram_plot.in[0]);

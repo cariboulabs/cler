@@ -108,10 +108,11 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
     }
 
     void render() {
+        ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
         ImGui::Begin(name());
 
         for (size_t i = 0; i < _num_inputs; ++i) {
-            // ImPlot::SetNextAxesLimits(0, _buffer_size, 0, _tall, ImGuiCond_Always);
             if (ImPlot::BeginPlot(_signal_labels[i])) {
                 ImPlot::PlotHeatmap(
                     _signal_labels[i],
@@ -129,6 +130,12 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
         ImGui::End();
     }
 
+    void set_initial_window(float x, float y, float w, float h) {
+        _initial_window_position = ImVec2(x, y);
+        _initial_window_size = ImVec2(w, h);
+        _has_initial_window_position = true;
+    }
+
 private:
     size_t _num_inputs;
     const char** _signal_labels;
@@ -143,4 +150,8 @@ private:
 
     fftplan _fftplan;
     float* _freq_bins;
+
+    bool _has_initial_window_position = false;
+    ImVec2 _initial_window_position {0.0f, 0.0f};
+    ImVec2 _initial_window_size {600.0f, 300.0f};
 };

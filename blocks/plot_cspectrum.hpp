@@ -54,12 +54,6 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
             reinterpret_cast<liquid_float_complex*>(_liquid_inout),
             reinterpret_cast<liquid_float_complex*>(_liquid_inout),
              LIQUID_FFT_FORWARD, 0);
-
-        _gui_prev_window_size.x = 800.0f;
-        _gui_prev_window_size.y = 400.0f;
-        float offset_x = static_cast<float>(rand() % static_cast<int>(800.0f / 2));
-        float offset_y = static_cast<float>(rand() % static_cast<int>(400.0f / 2));
-        _gui_prev_window_pos = ImVec2(offset_x, offset_y);
     }
 
     ~PlotCSpectrumBlock() {
@@ -138,34 +132,14 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
             return; // nothing to render yet
         }
 
-        ImGui::SetNextWindowPos(_gui_prev_window_pos, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(_gui_prev_window_size, ImGuiCond_FirstUseEver);
-
         size_t available = _snapshot_ready_size.load(std::memory_order_acquire);
         if (available < _buffer_size) {
             return; // not enough data to render
         }
-
-        // Optional: Save current window flags
-        ImGuiWindowFlags window_flags = ImGuiWindowFlags_None;
-        if (_gui_fullscreen) {
-            window_flags |= ImGuiWindowFlags_NoTitleBar 
-                        | ImGuiWindowFlags_NoResize 
-                        | ImGuiWindowFlags_NoMove 
-                        | ImGuiWindowFlags_NoCollapse;
-            
-            // Set the next window position and size to cover the entire viewport
-            ImGuiViewport* viewport = ImGui::GetMainViewport();
-            ImGui::SetNextWindowPos(viewport->Pos);
-            ImGui::SetNextWindowSize(viewport->Size);
-        } else if (_gui_just_exited_fullscreen) {
-            // Apply the saved size/pos only once right after exiting fullscreen
-            ImGui::SetNextWindowPos(_gui_prev_window_pos, ImGuiCond_Always);
-            ImGui::SetNextWindowSize(_gui_prev_window_size, ImGuiCond_Always);
-            _gui_just_exited_fullscreen = false;  // Clear the flag so it doesn't repeat
-        }
         
-        ImGui::Begin(name(), nullptr, window_flags);
+        ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
+        ImGui::Begin(name());
 
         //buttons and stuff
         if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
@@ -175,16 +149,6 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
         ImGui::Checkbox("Auto Fit Axes", &_gui_auto_fit);
         if (_gui_auto_fit) {
             ImPlot::SetNextAxesToFit();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(_gui_fullscreen ? "Exit Fullscreen" : "Fullscreen")) {
-            if (!_gui_fullscreen) {
-            _gui_prev_window_pos = ImGui::GetWindowPos();
-            _gui_prev_window_size = ImGui::GetWindowSize();
-            } else {
-            _gui_just_exited_fullscreen = true;
-            }
-            _gui_fullscreen = !_gui_fullscreen;
         }
         //end buttons
 
@@ -204,6 +168,12 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
             ImPlot::EndPlot();
         }
         ImGui::End();
+    }
+
+    void set_initial_window(float x, float y, float w, float h) {
+        _initial_window_position = ImVec2(x, y);
+        _initial_window_size = ImVec2(w, h);
+        _has_initial_window_position = true;
     }
 
 private:
@@ -227,10 +197,9 @@ private:
     std::complex<float>* _liquid_inout;
     fftplan _fftplan;
 
-    bool _gui_fullscreen = false;
-    bool _gui_just_exited_fullscreen = false; 
     bool _gui_auto_fit = true; // Automatically fit axes to data
     std::atomic<bool> _gui_pause = false;
-    ImVec2 _gui_prev_window_pos;
-    ImVec2 _gui_prev_window_size;
+    bool _has_initial_window_position = false;
+    ImVec2 _initial_window_position {0.0f, 0.0f};
+    ImVec2 _initial_window_size {600.0f, 300.0f};
 };
