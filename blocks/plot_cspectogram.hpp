@@ -116,17 +116,42 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
         for (size_t i = 0; i < _num_inputs; ++i) {
             if (ImPlot::BeginPlot(_signal_labels[i])) {
                 ImPlot::SetupAxes("Frequency (Hz)", "Time (frames)");
+                ImPlot::PushColormap(ImPlotColormap_Plasma);
 
                 ImPlot::PlotHeatmap(
-                    _signal_labels[i],
+                    "##",
                     _spectrograms[i],
                     _tall,
                     _buffer_size,
-                    -160.0, 30.0,
+                    0.0, 0.0,
                     nullptr,
-                    ImPlotPoint(0, 0),
-                    ImPlotPoint(static_cast<double>(_sps), static_cast<double>(_tall))
+                    ImPlotPoint(0, static_cast<double>(_tall)),
+                    ImPlotPoint(static_cast<double>(_sps), 0)
                 );
+                ImPlot::PopColormap();
+
+                if (ImPlot::IsPlotHovered()) {
+                    ImPlotPoint mouse = ImPlot::GetPlotMousePos();
+
+                    double freq = mouse.x;
+                    double time = mouse.y;
+
+                    size_t freq_idx = static_cast<size_t>((freq / static_cast<double>(_sps)) * _buffer_size);
+                    size_t time_idx = static_cast<size_t>((time / static_cast<double>(_tall)) * _tall);
+                    if (freq_idx > _buffer_size - 1) {freq_idx = _buffer_size - 1;}
+                    if (time_idx > _tall - 1) {time_idx = _tall - 1;}
+
+                    // Flip Y index because bounds are inverted
+                    time_idx = _tall - time_idx - 1;
+                    size_t logical_row = _tall - 1 - time_idx;
+                    float dbm = _spectrograms[i][logical_row * _buffer_size + freq_idx];
+
+                    ImGui::BeginTooltip();
+                    ImGui::Text("Freq: %.1f Hz", freq);
+                    ImGui::Text("Frame: %.0f", time);
+                    ImGui::Text("Power: %.1f dB", dbm);
+                    ImGui::EndTooltip();
+                }
 
                 ImPlot::EndPlot();
             }
