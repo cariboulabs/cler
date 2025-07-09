@@ -4,22 +4,41 @@
 #include "blocks/polyphase_channelizer.hpp"
 #include "blocks/add.hpp"
 #include "blocks/plot_cspectrum.hpp"
+#include "blocks/noise_awgn.hpp"
+
+float channel_freq(float channel_bw, uint8_t index, uint8_t num_channels) {
+    float offset = static_cast<float>(index) - static_cast<float>(num_channels) / 2.0f;
+    return offset * channel_bw;
+}
 
 int main() {
-    static constexpr size_t SPS = 500'000;
-    static constexpr float dchannel_hz = 500e3f; // 500 kHz
+    static constexpr size_t SPS = 2'000'000;
+    static constexpr float channel_BW = static_cast<float>(SPS) / 4.0f; // 500kHz channel spacing
 
-    SourceCWBlock<std::complex<float>> cw_source1("CW Source1", 1.0f, -2.0 * dchannel_hz, SPS);
-    SourceCWBlock<std::complex<float>> cw_source2("CW Source2", 1.0f, -1.0 * dchannel_hz, SPS);
-    SourceCWBlock<std::complex<float>> cw_source3("CW Source3", 1.0f,  0.0 * dchannel_hz, SPS);
-    SourceCWBlock<std::complex<float>> cw_source4("CW Source4", 1.0f,  1.0 * dchannel_hz, SPS);
-    SourceCWBlock<std::complex<float>> cw_source5("CW Source5", 1.0f,  2.0 * dchannel_hz, SPS);
+    float ch0_freq = channel_freq(channel_BW, 0, 4);
+    float ch1_freq = channel_freq(channel_BW, 1, 4);
+    float ch2_freq = channel_freq(channel_BW, 2, 4);
+    float ch3_freq = channel_freq(channel_BW, 3, 4);
 
-    AddBlock<std::complex<float>> adder("Adder", 5);
+    printf("Channel frequencies:\n"
+           "  Channel 0: %.2f Hz\n"
+           "  Channel 1: %.2f Hz\n"
+           "  Channel 2: %.2f Hz\n"
+           "  Channel 3: %.2f Hz\n",
+           ch0_freq, ch1_freq, ch2_freq, ch3_freq);
+    printf("Please let the spectrum a few seconds windows to stabilize.\n");
+
+    SourceCWBlock<std::complex<float>> cw_source1("CW Source1", 0.0f, ch0_freq, SPS);
+    SourceCWBlock<std::complex<float>> cw_source2("CW Source2", 1.0f, ch1_freq, SPS);
+    SourceCWBlock<std::complex<float>> cw_source3("CW Source3", 0.0f, ch2_freq, SPS);
+    SourceCWBlock<std::complex<float>> cw_source4("CW Source4", 0.0f, ch3_freq, SPS);
+
+    AddBlock<std::complex<float>> adder("Adder", 4);
+    NoiseAWGNBlock<std::complex<float>> noise_block("AWGN Noise", 0.01f);
 
     PolyphaseChannelizerBlock channelizer(
         "Polyphase Channelizer",
-        5, // number of channels
+        4, // number of channels
         80.0f, // kaiser attenuation
         3 // kaiser filter semilength
     );
@@ -29,13 +48,12 @@ int main() {
         "pfch 2",
         "pfch 3",
         "pfch 4",
-        "pfch 5"
     };
     PlotCSpectrumBlock plot_cspectrum(
         "Plot Channelizer Spectrum",
-        5, // number of channels
+        4, // number of channels
         signal_labels,
-        SPS,
+        static_cast<size_t>(channel_BW),
         256 // FFT size
     );
  
@@ -43,14 +61,13 @@ int main() {
     cler::BlockRunner cw_source2_runner(&cw_source2, &adder.in[1]);
     cler::BlockRunner cw_source3_runner(&cw_source3, &adder.in[2]);
     cler::BlockRunner cw_source4_runner(&cw_source4, &adder.in[3]);
-    cler::BlockRunner cw_source5_runner(&cw_source5, &adder.in[4]);
-    cler::BlockRunner adder_runner(&adder, &channelizer.in);
+    cler::BlockRunner adder_runner(&adder, &noise_block.in);
+    cler::BlockRunner noise_block_runner(&noise_block, &channelizer.in);
     cler::BlockRunner channelizer_runner(&channelizer,
         &plot_cspectrum.in[0],
         &plot_cspectrum.in[1],
         &plot_cspectrum.in[2],
-        &plot_cspectrum.in[3],
-        &plot_cspectrum.in[4]
+        &plot_cspectrum.in[3]
     );
     cler::BlockRunner plot_cspectrum_runner(&plot_cspectrum);
 
@@ -59,8 +76,8 @@ int main() {
         cw_source2_runner,
         cw_source3_runner,
         cw_source4_runner,
-        cw_source5_runner,
         adder_runner,
+        noise_block_runner,
         channelizer_runner,
         plot_cspectrum_runner
     );

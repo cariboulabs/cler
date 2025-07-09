@@ -16,6 +16,7 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
 
         assert(kaiser_filter_semilength > 0 && kaiser_filter_semilength < 9 && 
                 "Filter length must be between 1 and 9, larger values ==> narrower transition band. 4 is usually a good default");
+        assert(num_channels % 2 == 0 && "Number of channels must be even");
 
         _pfch = firpfbch2_crcf_create_kaiser(LIQUID_ANALYZER,
                                             num_channels,
