@@ -47,8 +47,7 @@ struct CustomSourceBlock : public cler::BlockBase {
 
         // Fanout the signal to multiple outputs
         return fanout_block.procedure(out1, out2);
-    }
-    
+    }    
 
     private:
         SourceCWBlock<std::complex<float>> cw_source_block;
@@ -74,9 +73,9 @@ int main() {
            ch0_freq, ch1_freq, ch2_freq, ch3_freq);
 
     CustomSourceBlock cw_source1("CW Source 1", 1.0f, ch0_freq, SPS);
-    CustomSourceBlock cw_source2("CW Source 2", 1.0f, ch1_freq, SPS);
-    CustomSourceBlock cw_source3("CW Source 3", 1.0f, ch2_freq, SPS);
-    CustomSourceBlock cw_source4("CW Source 4", 1.0f, ch3_freq, SPS);
+    CustomSourceBlock cw_source2("CW Source 2", 10.0f, ch1_freq, SPS);
+    CustomSourceBlock cw_source3("CW Source 3", 100.0f, ch2_freq, SPS);
+    CustomSourceBlock cw_source4("CW Source 4", 1000.0f, ch3_freq, SPS);
 
     AddBlock<std::complex<float>> adder("Adder", 4);
 

@@ -35,8 +35,6 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
         constexpr size_t num_outs = sizeof...(OChannels);
         assert(num_outs == _num_channels && "Number of output channels must match the number of polyphase channels");
-        // static_assert((std::is_same_v<OChannels, cler::ChannelBase<std::complex<float>>> && ...), 
-        //               "All output channels must be of type cler::Channel<std::complex<float>>");
 
         if (in.size() < _num_channels) {
             return cler::Error::NotEnoughSamples;
