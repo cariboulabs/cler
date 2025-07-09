@@ -113,13 +113,19 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
         ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
         ImGui::Begin(name());
 
+
+        const ImPlotAxisFlags x_flags = ImPlotAxisFlags_Lock;
+        const ImPlotAxisFlags y_flags = ImPlotAxisFlags_Lock;
         for (size_t i = 0; i < _num_inputs; ++i) {
             if (ImPlot::BeginPlot(_signal_labels[i])) {
-                ImPlot::SetupAxes("Frequency (Hz)", "Time (frames)");
+                ImPlot::SetupAxes("Frequency (Hz)", "Time (frames)", x_flags, y_flags);
+                ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, static_cast<double>(_sps));
+                ImPlot::SetupAxisLimits(ImAxis_Y1, static_cast<double>(_tall), 0.0);  // flipped Y!
                 ImPlot::PushColormap(ImPlotColormap_Plasma);
 
+                std::string label = "##" + std::string(_signal_labels[i]); //ignore label
                 ImPlot::PlotHeatmap(
-                    "##",
+                    label.c_str(),
                     _spectrograms[i],
                     _tall,
                     _buffer_size,
