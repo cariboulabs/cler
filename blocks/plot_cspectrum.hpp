@@ -105,8 +105,6 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
             _y_channels[i].writeN(_tmp_y_buffer, work_size);
         }
 
-        _samples_counter += work_size;
-
         if (_snapshot_requested.load(std::memory_order_acquire)) {
             _snapshot_ready_size.store(0, std::memory_order_release); //reset snapshot ready size
             const std::complex<float>* ptr1, *ptr2;
@@ -194,8 +192,6 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
     }
 
 private:
-    size_t _samples_counter = 0;
-
     size_t _num_inputs;
     const char** _signal_labels;
     size_t _sps;
