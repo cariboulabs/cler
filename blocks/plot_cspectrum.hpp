@@ -16,6 +16,9 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
         if (buffer_size <= 2) {
             throw std::invalid_argument("Buffer size must be greater than two.");
         }
+        if (buffer_size % 2 != 0) {
+            throw std::invalid_argument("Buffer size must be even.");
+        }
 
         _buffer_size = buffer_size;
 

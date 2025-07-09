@@ -6,7 +6,7 @@
 #include "blocks/plot_cspectrum.hpp"
 #include "blocks/noise_awgn.hpp"
 #include "blocks/fanout.hpp"
-#include <algorithm>
+#include "blocks/throughput.hpp"
 
 float channel_freq(float channel_bw, uint8_t index, uint8_t num_channels) {
     float offset = static_cast<float>(index) - static_cast<float>(num_channels) / 2.0 + 0.5f;
@@ -83,6 +83,8 @@ int main() {
 
     AddBlock<std::complex<float>> adder("Adder", NUM_CHANNELS);
 
+    ThroughputBlock<std::complex<float>> throughput("Throughput");
+
     PolyphaseChannelizerBlock channelizer(
         "Polyphase Channelizer",
         NUM_CHANNELS, // number of channels
@@ -102,7 +104,7 @@ int main() {
         NUM_CHANNELS, // number of channels
         pfch_signal_labels,
         static_cast<size_t>(channel_BW),
-        256 // FFT size
+        1024 // FFT size
     );
 
     const char* input_signal_labels[] = {
@@ -117,7 +119,7 @@ int main() {
         NUM_CHANNELS, // number of channels
         input_signal_labels,
         SPS,
-        256 // FFT size
+        1024 // FFT size
     );
  
     cler::BlockRunner cw_source0_runner(&cw_source0, &adder.in[0], &plot_input_cspectrum.in[0]);
@@ -125,7 +127,8 @@ int main() {
     cler::BlockRunner cw_source2_runner(&cw_source2, &adder.in[2], &plot_input_cspectrum.in[2]);
     cler::BlockRunner cw_source3_runner(&cw_source3, &adder.in[3], &plot_input_cspectrum.in[3]);
     cler::BlockRunner cw_source4_runner(&cw_source4, &adder.in[4], &plot_input_cspectrum.in[4]);
-    cler::BlockRunner adder_runner(&adder, &channelizer.in);
+    cler::BlockRunner adder_runner(&adder, &throughput.in);
+    cler::BlockRunner throughput_runner(&throughput, &channelizer.in);
     cler::BlockRunner channelizer_runner(&channelizer,
         &plot_polyphase_cspectrum.in[0],
         &plot_polyphase_cspectrum.in[1],
@@ -143,6 +146,7 @@ int main() {
         cw_source3_runner,
         cw_source4_runner,
         adder_runner,
+        throughput_runner,
         channelizer_runner,
         plot_polyphase_cspectrum_runner,
         plot_input_cspectrum_runner

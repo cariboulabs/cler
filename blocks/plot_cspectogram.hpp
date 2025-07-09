@@ -16,6 +16,9 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
         if (buffer_size <= 2 || tall < 1) {
             throw std::invalid_argument("Buffer size and tall must be > 0");
         }
+        if (buffer_size % 2 != 0) {
+            throw std::invalid_argument("Buffer size must be even.");
+        }
 
         // Allocate input channels
         in = static_cast<cler::Channel<std::complex<float>>*>(
