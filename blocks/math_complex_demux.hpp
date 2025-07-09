@@ -1,8 +1,6 @@
 #pragma once
 
 #include "cler.hpp"
-#include <complex>
-#include <algorithm>
 
 struct ComplexToMagPhaseBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;

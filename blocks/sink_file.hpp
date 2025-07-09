@@ -3,7 +3,6 @@
 #include "cler.hpp"
 #include <fstream>
 #include <stdexcept>
-#include <algorithm>
 
 template <typename T>
 struct SinkFileBlock : public cler::BlockBase {

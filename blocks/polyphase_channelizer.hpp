@@ -1,6 +1,5 @@
 #include "cler.hpp"
 #include "liquid.h"
-#include <vector>
 #include <memory>
 #include <complex>
 #include <cassert>

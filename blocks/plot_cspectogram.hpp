@@ -2,7 +2,6 @@
 #include "cler.hpp"
 #include "gui/gui_manager.hpp"
 #include "liquid.h"
-#include <complex>
 
 struct PlotCSpectrogramBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
