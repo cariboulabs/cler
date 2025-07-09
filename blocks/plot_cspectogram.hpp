@@ -115,19 +115,22 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
 
         for (size_t i = 0; i < _num_inputs; ++i) {
             if (ImPlot::BeginPlot(_signal_labels[i])) {
+                ImPlot::SetupAxes("Frequency (Hz)", "Time (frames)");
+
                 ImPlot::PlotHeatmap(
                     _signal_labels[i],
                     _spectrograms[i],
-                    _buffer_size,
                     _tall,
-                    -160.0f,  // scale min
-                    30.0f, // scale max
-                    nullptr // label format
+                    _buffer_size,
+                    -160.0, 30.0,
+                    nullptr,
+                    ImPlotPoint(0, 0),
+                    ImPlotPoint(static_cast<double>(_sps), static_cast<double>(_tall))
                 );
-                ImPlot::EndPlot();;
+
+                ImPlot::EndPlot();
             }
         }
-
         ImGui::End();
     }
 

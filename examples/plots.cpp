@@ -55,7 +55,7 @@ int main() {
         2, // number of inputs
         cspectrum_labels,
         SPS,
-        256, // buffer size for FFT
+        128, // buffer size for FFT
         100 // tall
     );
 
