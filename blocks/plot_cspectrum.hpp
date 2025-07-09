@@ -150,18 +150,36 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
             ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]");
 
             for (size_t i = 0; i < _num_inputs; ++i) {
-                mempcpy(_liquid_inout, _snapshot_y_buffers[i], available * sizeof(liquid_float_complex));
-                //shift the signal to center around 0Hz (-1^n == exp(j * pi * n))
+                // Copy snapshot buffer into FFT input
+                memcpy(_liquid_inout, _snapshot_y_buffers[i], available * sizeof(liquid_float_complex));
+
+                // Compute coherent gain for Hamming window
+                float coherent_gain = 0.0f;
                 for (size_t n = 0; n < available; ++n) {
-                    float w = 0.54f - 0.46f * cosf(2 * M_PI * n / (_buffer_size - 1)); // Hamming
-                    _liquid_inout[n] *= (n % 2 == 0) ? w : -w;
+                    float w = 0.54f - 0.46f * cosf(2.0f * M_PI * n / (_buffer_size - 1)); // Hamming
+                    coherent_gain += w;
+
+                    // Apply window and shift to center spectrum (-1)^n
+                    _liquid_inout[n] *= w * ((n % 2 == 0) ? 1.0f : -1.0f);
                 }
+                coherent_gain /= static_cast<float>(available);
+
+                // Run FFT
                 fft_execute(_fftplan);
+
+                // Normalize bin power by (N * CG)^2
+                float scale = static_cast<float>(available) * coherent_gain;
+                float scale2 = scale * scale;
+
+                // Fill magnitude buffer in dBFS
                 for (size_t j = 0; j < available; ++j) {
                     float re = _liquid_inout[j].real();
                     float im = _liquid_inout[j].imag();
-                    _tmp_magnitude_buffer[j] = 10.0f * log10f(sqrtf(re * re + im * im) + 1e-15f);
+                    float power = (re * re + im * im) / scale2;
+                    _tmp_magnitude_buffer[j] = 10.0f * log10f(power + 1e-20f); // dBFS
                 }
+
+                // Plot
                 ImPlot::PlotLine(_signal_labels[i], _freq_bins, _tmp_magnitude_buffer, _buffer_size);
             }
             ImPlot::EndPlot();

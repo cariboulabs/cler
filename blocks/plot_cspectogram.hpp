@@ -95,7 +95,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
             for (size_t j = 0; j < _buffer_size; ++j) {
                 float re = _liquid_inout[j].real();
                 float im = _liquid_inout[j].imag();
-                _tmp_magnitude_buffer[j] = 10.0f * log10f(sqrtf(re * re + im * im) + 1e-15f);
+                _tmp_magnitude_buffer[j] = 10.0f * log10f(re * re + im * im + 1e-15f);
             }
 
             // Push magnitude row into spectrogram: shift up
@@ -147,7 +147,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
                     double freq = mouse.x;
                     double time = mouse.y;
 
-                    size_t freq_idx = static_cast<size_t>((freq / static_cast<double>(_sps)) * _buffer_size);
+                    size_t freq_idx = static_cast<size_t>(((freq + (_sps / 2.0)) / static_cast<double>(_sps)) * _buffer_size);
                     size_t time_idx = static_cast<size_t>((time / static_cast<double>(_tall)) * _tall);
                     if (freq_idx > _buffer_size - 1) {freq_idx = _buffer_size - 1;}
                     if (time_idx > _tall - 1) {time_idx = _tall - 1;}
@@ -155,12 +155,12 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
                     // Flip Y index because bounds are inverted
                     time_idx = _tall - time_idx - 1;
                     size_t logical_row = _tall - 1 - time_idx;
-                    float dbm = _spectrograms[i][logical_row * _buffer_size + freq_idx];
+                    float dbFS = _spectrograms[i][logical_row * _buffer_size + freq_idx];
 
                     ImGui::BeginTooltip();
                     ImGui::Text("Freq: %.1f Hz", freq);
                     ImGui::Text("Frame: %.0f", time);
-                    ImGui::Text("Power: %.1f dB", dbm);
+                    ImGui::Text("Power: %.1f dB(FS)", dbFS);
                     ImGui::EndTooltip();
                 }
 

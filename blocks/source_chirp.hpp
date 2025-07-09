@@ -2,6 +2,7 @@
 #include "cler.hpp"
 #include <cmath>
 #include <complex>
+#include <numbers>
 #include <type_traits>
 
 template <typename T>
@@ -10,11 +11,11 @@ struct SourceChirpBlock : public cler::BlockBase {
                   "SourceChirpBlock only supports float or std::complex<float>");
 
     SourceChirpBlock(const char* name,
-                    const float amplitude,
-                    const float f0_hz,
-                    const float f1_hz,
-                    const size_t sps,
-                    const float chirp_duration_s)
+                     float amplitude,
+                     float f0_hz,
+                     float f1_hz,
+                     size_t sps,
+                     float chirp_duration_s)
         : cler::BlockBase(name),
           _amplitude(amplitude),
           _f0_hz(f0_hz),
@@ -30,32 +31,35 @@ struct SourceChirpBlock : public cler::BlockBase {
         }
 
         _num_samples = static_cast<size_t>(_chirp_duration_s * _sps);
-        _k = (_f1_hz - _f0_hz) / _chirp_duration_s; // sweep rate (Hz/s)
+        _k = (_f1_hz - _f0_hz) / _chirp_duration_s; // Hz/s sweep rate
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
-        size_t n_samples = cler::floor2(out->space());
-        for (size_t i = 0; i < n_samples; ++i) {
-            float t = static_cast<float>(_sample_idx) / _sps;
+        const size_t n_samples = cler::floor2(out->space());
 
-            // Instantaneous frequency: f(t) = f0 + k*t
+        for (size_t i = 0; i < n_samples; ++i) {
+            float t = static_cast<float>(_sample_idx) / static_cast<float>(_sps);
+
+            // Instantaneous frequency f(t)
             float instant_freq = _f0_hz + _k * t;
 
             // Increment phase
-            _phase += 2.0f * PI * instant_freq / _sps;
+            _phase += 2.0f * PI * instant_freq / static_cast<float>(_sps);
 
-            // Keep phase in [0, 2π) for numerical stability
+            // Keep phase bounded
             if (_phase >= 2.0f * PI) {
                 _phase -= 2.0f * PI;
-            } else if (_phase < 0.0f) {
+            } else if (_phase <= -2.0f * PI) {
                 _phase += 2.0f * PI;
             }
 
-            // Generate sample
+            // Always generate complex
+            std::complex<float> chirp = _amplitude * std::polar(1.0f, _phase);
+
             if constexpr (std::is_same_v<T, std::complex<float>>) {
-                out->push(_amplitude * std::polar(1.0f, _phase));
+                out->push(chirp);
             } else {
-                out->push(_amplitude * std::cos(_phase));
+                out->push(chirp.real());
             }
 
             _sample_idx++;
@@ -76,7 +80,7 @@ private:
     float _chirp_duration_s;
 
     size_t _num_samples;
-    float _k;              // sweep rate
+    float _k;              // Sweep rate (Hz/s)
     size_t _sample_idx = 0;
     float _phase = 0.0f;
 };
