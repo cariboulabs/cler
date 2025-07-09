@@ -6,34 +6,40 @@
 
 struct PolyphaseChannelizerBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
+
     PolyphaseChannelizerBlock(const char* name,
-                        size_t num_channels,
-                        float  kaiser_attenuation,
-                        size_t kaiser_filter_semilength,
-                        size_t in_buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(name), in(in_buffer_size), _num_channels(num_channels) {
-
-        assert(kaiser_filter_semilength > 0 && kaiser_filter_semilength < 9 && 
+                              size_t num_channels,
+                              float kaiser_attenuation,
+                              size_t kaiser_filter_semilength,
+                              size_t in_buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(name), in(in_buffer_size), _num_channels(num_channels)
+    {
+         assert(kaiser_filter_semilength > 0 && kaiser_filter_semilength < 9 && 
                 "Filter length must be between 1 and 9, larger values ==> narrower transition band. 4 is usually a good default");
-        assert(num_channels % 2 == 0 && "Number of channels must be even");
+        assert(num_channels > 0 && "Number of channels must be positive");
 
-        _pfch = firpfbch2_crcf_create_kaiser(LIQUID_ANALYZER,
-                                            num_channels,
-                                            kaiser_filter_semilength,
-                                            kaiser_attenuation);
+        // Use critically sampled channelizer!
+        _pfch = firpfbch_crcf_create_kaiser(
+            LIQUID_ANALYZER,
+            num_channels,
+            kaiser_filter_semilength,
+            kaiser_attenuation);
+
         _tmp_in = new std::complex<float>[num_channels];
         _tmp_out = new std::complex<float>[num_channels];
     }
+
     ~PolyphaseChannelizerBlock() {
         delete[] _tmp_in;
         delete[] _tmp_out;
-        if (_pfch) firpfbch2_crcf_destroy(_pfch);
+        if (_pfch) firpfbch_crcf_destroy(_pfch);
     }
 
     template <typename... OChannels>
     cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
         constexpr size_t num_outs = sizeof...(OChannels);
-        assert(num_outs == _num_channels && "Number of output channels must match the number of polyphase channels");
+        assert(num_outs == _num_channels &&
+               "Number of output channels must match the number of polyphase channels");
 
         if (in.size() < _num_channels) {
             return cler::Error::NotEnoughSamples;
@@ -49,15 +55,13 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
 
         for (size_t i = 0; i < num_frames; ++i) {
             in.readN(_tmp_in, _num_channels);
-            firpfbch2_crcf_execute(
-                _pfch, 
-                /*liquid uses float complex, which has same layout in memory as std::complex<float>,
-                reinterpret_cast is required as static_cast wont work*/
+
+            firpfbch_crcf_analyzer_execute(
+                _pfch,
                 reinterpret_cast<liquid_float_complex*>(_tmp_in),
                 reinterpret_cast<liquid_float_complex*>(_tmp_out)
             );
 
-            //cant for loop on varaiadic templates, so declaring a function and then calling it
             size_t idx = 0;
             auto push_outputs = [&](auto*... chs) {
                 ((chs->push(_tmp_out[idx++])), ...);
@@ -72,5 +76,5 @@ private:
     size_t _num_channels;
     std::complex<float>* _tmp_in;
     std::complex<float>* _tmp_out;
-    firpfbch2_crcf _pfch = nullptr;
+    firpfbch_crcf _pfch = nullptr;
 };

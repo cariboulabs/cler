@@ -9,7 +9,7 @@
 #include <algorithm>
 
 float channel_freq(float channel_bw, uint8_t index, uint8_t num_channels) {
-    float offset = static_cast<float>(index) - static_cast<float>(num_channels) / 2.0f + 0.5f;
+    float offset = static_cast<float>(index) - static_cast<float>(num_channels) / 2.0f;
     return offset * channel_bw;
 }
 
