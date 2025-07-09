@@ -140,15 +140,11 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
         if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
             _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
         }
-        ImGui::SameLine();
-        ImGui::Checkbox("Auto Fit Axes", &_gui_auto_fit);
-        if (_gui_auto_fit) {
-            ImPlot::SetNextAxesToFit();
-        }
-        //end buttons
 
         if (ImPlot::BeginPlot(name())) {
-            ImPlot::SetupAxes("Time [s]", "Y");
+            ImPlot::SetupAxis(ImAxis_X1, "Time [s]", ImPlotAxisFlags_AutoFit);
+            ImPlot::SetupAxis(ImAxis_Y1, "Y", ImPlotAxisFlags_AutoFit);
+            
 
             for (size_t i = 0; i < _num_inputs; ++i) {
                 ImPlot::PlotLine(_signal_labels[i], _snapshot_x_buffer, _snapshot_y_buffers[i], static_cast<int>(available));
@@ -183,7 +179,6 @@ private:
     float* _tmp_y_buffer = nullptr;
     float* _tmp_x_buffer = nullptr;
 
-    bool _gui_auto_fit = true; // Automatically fit axes to data
     std::atomic<bool> _gui_pause = false;
 
     bool _has_initial_window_position = false;

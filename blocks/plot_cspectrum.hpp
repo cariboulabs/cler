@@ -146,12 +146,6 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
         if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
             _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
         }
-        ImGui::SameLine();
-        ImGui::Checkbox("Auto Fit Axes", &_gui_auto_fit);
-        if (_gui_auto_fit) {
-            ImPlot::SetNextAxesToFit();
-        }
-        //end buttons
 
         if (ImPlot::BeginPlot(name())) {
             ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]");
@@ -198,7 +192,6 @@ private:
     std::complex<float>* _liquid_inout;
     fftplan _fftplan;
 
-    bool _gui_auto_fit = true; // Automatically fit axes to data
     std::atomic<bool> _gui_pause = false;
     bool _has_initial_window_position = false;
     ImVec2 _initial_window_position {0.0f, 0.0f};

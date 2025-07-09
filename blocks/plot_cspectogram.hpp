@@ -120,7 +120,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
             if (ImPlot::BeginPlot(_signal_labels[i])) {
                 ImPlot::SetupAxes("Frequency (Hz)", "Time (frames)", x_flags, y_flags);
                 ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, static_cast<double>(_sps));
-                ImPlot::SetupAxisLimits(ImAxis_Y1, static_cast<double>(_tall), 0.0);  // flipped Y!
+                ImPlot::SetupAxisLimits(ImAxis_Y1, static_cast<double>(_tall), 0.0);  // flipped Y! (tall -> 0)
                 ImPlot::PushColormap(ImPlotColormap_Plasma);
 
                 std::string label = "##" + std::string(_signal_labels[i]); //ignore label
@@ -131,7 +131,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
                     _buffer_size,
                     0.0, 0.0,
                     nullptr,
-                    ImPlotPoint(0, static_cast<double>(_tall)),
+                    ImPlotPoint(0, static_cast<double>(_tall)), //flipped Y! (tall -> 0)
                     ImPlotPoint(static_cast<double>(_sps), 0)
                 );
                 ImPlot::PopColormap();

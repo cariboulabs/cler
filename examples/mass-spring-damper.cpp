@@ -188,7 +188,13 @@ struct ControllerBlock : public cler::BlockBase {
             float dk = 0.95f * _dkm1 + 0.05f * derivative; // Low-pass filter for derivative term
             _int_state += ek * DT; // Integral term
 
-            float force = kp * ek + ki * _int_state + kd * dk;
+            //Feed forward control
+            float feed_forward = 0.0f;
+            if (_feed_forward.load(std::memory_order_relaxed)) {
+                feed_forward = K * target;
+            }
+
+            float force = kp * ek + ki * _int_state + kd * dk + feed_forward;
 
             _ekm1 = ek; // Update previous error
             _dkm1 = dk; // Update previous derivative
@@ -225,6 +231,14 @@ struct ControllerBlock : public cler::BlockBase {
             _kd.store(tmp_kd);
         }
 
+        bool feed_forward = _feed_forward.load();
+        ImGui::Checkbox("Feed Forward", &feed_forward);
+        if (feed_forward) {
+            _feed_forward.store(true);
+        } else {
+            _feed_forward.store(false);
+        }
+
         ImGui::End();
     }
 
@@ -244,6 +258,7 @@ private:
     std::atomic<float> _kp {2.0f};
     std::atomic<float> _ki {1.0f};
     std::atomic<float> _kd {1.0f};
+    std::atomic<bool>  _feed_forward {false};
 
     bool _has_initial_window_position = false;
     ImVec2 _initial_window_position {0.0f, 0.0f};
@@ -268,7 +283,7 @@ int main() {
         100.0f // duration in seconds
     );
 
-    controller.set_initial_window(0.0f, 0.0f, 175.0f, 150.0f);
+    controller.set_initial_window(0.0f, 0.0f, 175.0f, 200.0f);
     plot.set_initial_window(200.0f, 0.0f, 800.0f, 400.0f);
     plant.set_initial_window(200.0f, 400.0f, 800.0f, 200.0f);
 
