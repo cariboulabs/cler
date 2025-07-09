@@ -38,9 +38,8 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
 
         _freq_bins = new float[buffer_size];
         for (size_t i = 0; i < buffer_size; ++i) {
-            _freq_bins[i] = i * (static_cast<float>(_sps) / static_cast<float>(buffer_size));
+            _freq_bins[i] = (_sps * (static_cast<float>(i) / static_cast<float>(buffer_size))) - (_sps / 2.0f);
         }
-
         //allocate snapshot buffers
         _snapshot_y_buffers = new std::complex<float>*[_num_inputs];
         for (size_t i = 0; i < num_inputs; ++i) {
@@ -113,7 +112,7 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
             const std::complex<float>* ptr1, *ptr2;
             size_t size1, size2;
 
-            size_t available = 0; //all the same by design
+            size_t available = 0; //all the same by design, always <= _buffer_size
             for (size_t i = 0; i < _num_inputs; ++i) {
                 available = _y_channels[i].peek_read(ptr1, size1, ptr2, size2);
                 memcpy(_snapshot_y_buffers[i], ptr1, size1 * sizeof(std::complex<float>));
@@ -152,6 +151,11 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
 
             for (size_t i = 0; i < _num_inputs; ++i) {
                 mempcpy(_liquid_inout, _snapshot_y_buffers[i], available * sizeof(liquid_float_complex));
+                //shift the signal to center around 0Hz (-1^n == exp(j * pi * n))
+                for (size_t n = 0; n < available; ++n) {
+                    float w = 0.54f - 0.46f * cosf(2 * M_PI * n / (_buffer_size - 1)); // Hamming
+                    _liquid_inout[n] *= (n % 2 == 0) ? w : -w;
+                }
                 fft_execute(_fftplan);
                 for (size_t j = 0; j < available; ++j) {
                     float re = _liquid_inout[j].real();

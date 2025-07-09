@@ -18,9 +18,6 @@ struct SourceCWBlock : public cler::BlockBase {
         if (_sps == 0) {
             throw std::invalid_argument("Sample rate must be greater than zero.");
         }
-        if (_frequency_hz < 0) {
-            throw std::invalid_argument("Frequency must be non-negative.");
-        }
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {

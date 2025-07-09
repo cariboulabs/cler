@@ -6,20 +6,20 @@ include_directories(
 )
 
 add_executable(hello_world hello_world.cpp)
-target_link_libraries(hello_world cler_gui)
+target_link_libraries(hello_world PRIVATE cler_gui)
 
 add_executable(streamlined streamlined.cpp)
 add_executable(flowgraph flowgraph.cpp)
 
 add_executable(plots plots.cpp)
-target_link_libraries(plots cler_gui liquid)
+target_link_libraries(plots PRIVATE cler_gui liquid)
 
 add_subdirectory(ezgmsk_demod)
 
 add_executable(mass-spring-damper mass-spring-damper.cpp)
-target_link_libraries(mass-spring-damper cler_gui)
+target_link_libraries(mass-spring-damper PRIVATE cler_gui)
 
 add_executable(udp udp.cpp)
 
-# add_executable(polyphase_channelizer polyphase_channelizer.cpp)
-# target_link_libraries(polyphase_channelizer PRIVATE liquid cler_gui)
+add_executable(polyphase_channelizer polyphase_channelizer.cpp)
+target_link_libraries(polyphase_channelizer PRIVATE liquid cler_gui)

@@ -43,7 +43,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
 
         _freq_bins = new float[_buffer_size];
         for (size_t i = 0; i < _buffer_size; ++i) {
-            _freq_bins[i] = i * (static_cast<float>(_sps) / static_cast<float>(_buffer_size));
+            _freq_bins[i] = (_sps * (static_cast<float>(i) / static_cast<float>(buffer_size))) - (_sps / 2.0f);
         }
     }
 
@@ -84,6 +84,11 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
 
             // Assume we want exactly buffer_size for the FFT
             memcpy(_liquid_inout, _tmp_y_buffer, _buffer_size * sizeof(std::complex<float>));
+            //shift the signal to center around 0Hz (-1^n == exp(j * pi * n))
+            for (size_t n = 0; n < available; ++n) {
+                float w = 0.54f - 0.46f * cosf(2 * M_PI * n / (_buffer_size - 1)); // Hamming
+                _liquid_inout[n] *= (n % 2 == 0) ? w : -w;
+            }
             fft_execute(_fftplan);
 
             // Compute magnitude
@@ -119,7 +124,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
         for (size_t i = 0; i < _num_inputs; ++i) {
             if (ImPlot::BeginPlot(_signal_labels[i])) {
                 ImPlot::SetupAxes("Frequency (Hz)", "Time (frames)", x_flags, y_flags);
-                ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, static_cast<double>(_sps));
+                ImPlot::SetupAxisLimits(ImAxis_X1, -static_cast<double>(_sps)/2.0, static_cast<double>(_sps)/2.0);
                 ImPlot::SetupAxisLimits(ImAxis_Y1, static_cast<double>(_tall), 0.0);  // flipped Y! (tall -> 0)
                 ImPlot::PushColormap(ImPlotColormap_Plasma);
 
@@ -131,8 +136,8 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
                     _buffer_size,
                     0.0, 0.0,
                     nullptr,
-                    ImPlotPoint(0, static_cast<double>(_tall)), //flipped Y! (tall -> 0)
-                    ImPlotPoint(static_cast<double>(_sps), 0)
+                    ImPlotPoint(-static_cast<double>(_sps)/2.0, static_cast<double>(_tall)), //flipped Y! (tall -> 0)
+                    ImPlotPoint(static_cast<double>(_sps)/2.0, 0)
                 );
                 ImPlot::PopColormap();
 
