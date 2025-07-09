@@ -7,12 +7,12 @@
 struct PolyphaseChannelizerBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
 
-    PolyphaseChannelizerBlock(const char* name,
+    PolyphaseChannelizerBlock(std::string name,
                               size_t num_channels,
                               float kaiser_attenuation,
                               size_t kaiser_filter_semilength,
                               size_t in_buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(name), in(in_buffer_size), _num_channels(num_channels)
+        : cler::BlockBase(std::move(name)), in(in_buffer_size), _num_channels(num_channels)
     {
          assert(kaiser_filter_semilength > 0 && kaiser_filter_semilength < 9 && 
                 "Filter length must be between 1 and 9, larger values ==> narrower transition band. 4 is usually a good default");

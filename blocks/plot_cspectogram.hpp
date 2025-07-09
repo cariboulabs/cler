@@ -6,9 +6,9 @@
 struct PlotCSpectrogramBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
 
-    PlotCSpectrogramBlock(const char* name, const size_t num_inputs, const char** signal_labels,
+    PlotCSpectrogramBlock(std::string name, const size_t num_inputs, const char** signal_labels,
         const size_t sps, const size_t buffer_size, const size_t tall) 
-        : BlockBase(name), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps), _buffer_size(buffer_size), _tall(tall)
+        : BlockBase(std::move(name)), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps), _buffer_size(buffer_size), _tall(tall)
     {
         if (num_inputs < 1) {
             throw std::invalid_argument("PlotCSpectrogramBlock requires at least one input channel");
@@ -128,7 +128,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
     void render() {
         ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
-        ImGui::Begin(name());
+        ImGui::Begin(name().c_str());
 
 
         const ImPlotAxisFlags x_flags = ImPlotAxisFlags_Lock;

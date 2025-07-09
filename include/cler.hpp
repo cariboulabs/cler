@@ -8,6 +8,7 @@
 #include <bit>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
 #include <complex> //again, a lot of cler blocks use complex numbers
+#include <string>
 
 namespace cler {
 
@@ -112,8 +113,8 @@ namespace cler {
     };
 
     struct BlockBase {
-        explicit BlockBase(const char* name) : _name(name) {}
-        const char* name() const { return _name; }
+        explicit BlockBase(std::string name) : _name(std::move(name)) {}
+        const std::string& name() const { return _name; }
 
         // Non-copyable
         BlockBase(const BlockBase&) = delete;
@@ -123,7 +124,7 @@ namespace cler {
         BlockBase(BlockBase&&) = delete;
         BlockBase& operator=(BlockBase&&) = delete;
     private:
-        const char* _name;
+       std::string _name;
     };
     template<typename Block, typename... Channels>
     struct BlockRunner {

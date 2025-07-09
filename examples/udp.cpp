@@ -12,8 +12,8 @@ constexpr const size_t MAX_UDP_BLOB_SIZE = 256;
 struct SourceDatagramBlock : public cler::BlockBase {
     UDPBlock::Slab _slab {100, MAX_UDP_BLOB_SIZE}; // 100 slots, each 256 bytes
 
-    SourceDatagramBlock(const char* name)
-        : cler::BlockBase(name) {}
+    SourceDatagramBlock(std::string name)
+        : cler::BlockBase(std::move(name)) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<UDPBlock::BlobSlice>* out) {
         if (out->space() == 0) {

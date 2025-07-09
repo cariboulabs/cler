@@ -5,8 +5,8 @@ template <typename T>
 struct AddBlock : public cler::BlockBase {
     cler::Channel<T>* in;
 
-    AddBlock(const char* name, const size_t num_inputs, const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(name), _num_inputs(num_inputs) {
+    AddBlock(std::string name, const size_t num_inputs, const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(std::move(name)), _num_inputs(num_inputs) {
 
         if (buffer_size == 0) {
             throw std::invalid_argument("Buffer size must be greater than zero.");

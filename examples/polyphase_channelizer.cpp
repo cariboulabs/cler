@@ -14,13 +14,13 @@ float channel_freq(float channel_bw, uint8_t index, uint8_t num_channels) {
 }
 
 struct CustomSourceBlock : public cler::BlockBase {
-    CustomSourceBlock(const char* name,
+    CustomSourceBlock(std::string name,
                 const float amplitude,
                 const float noise_stddev,
                 const float frequency_hz,
                 const size_t sps)
-        : BlockBase(name), 
-        cw_source_block(name, amplitude, frequency_hz, sps),
+        : BlockBase(std::move(name)),
+        cw_source_block("check", amplitude, frequency_hz, sps),
         noise_block("AWGN Noise", noise_stddev / 100.0f),
         fanout_block("Fanout", 2) {}
 

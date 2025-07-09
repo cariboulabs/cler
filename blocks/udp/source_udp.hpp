@@ -11,7 +11,7 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
     //that is not just pushing it to the output channel
     typedef void (*OnReceiveCallback)(const UDPBlock::BlobSlice&, void* context);
 
-    SourceUDPSocketBlock(const char* name,
+    SourceUDPSocketBlock(std::string name,
                             UDPBlock::SocketType type,
                             const std::string& bind_addr_or_path,
                             uint16_t port,
@@ -19,7 +19,7 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
                             size_t num_slab_slots = cler::DEFAULT_BUFFER_SIZE,
                             OnReceiveCallback callback = nullptr,
                             [[maybe_unused]] void* callback_context = nullptr)
-        : cler::BlockBase(name),
+        : cler::BlockBase(std::move(name)),
         _socket(UDPBlock::GenericDatagramSocket::make_receiver(type, bind_addr_or_path, port)),
         _slab(UDPBlock::Slab(num_slab_slots, max_blob_size)),
         _callback(callback)

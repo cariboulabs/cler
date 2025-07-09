@@ -9,13 +9,13 @@ struct SourceChirpBlock : public cler::BlockBase {
     static_assert(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>,
                   "SourceChirpBlock only supports float or std::complex<float>");
 
-    SourceChirpBlock(const char* name,
-                     float amplitude,
-                     float f0_hz,
-                     float f1_hz,
-                     size_t sps,
-                     float chirp_duration_s)
-        : cler::BlockBase(name),
+    SourceChirpBlock(std::string name,
+                    const float amplitude,
+                    const float f0_hz,
+                    const float f1_hz,
+                    const size_t sps,
+                    const float chirp_duration_s)
+        : cler::BlockBase(std::move(name)),
           _amplitude(amplitude),
           _f0_hz(f0_hz),
           _f1_hz(f1_hz),

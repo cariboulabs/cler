@@ -11,7 +11,7 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
     //that is not just pushing it to the output channel
     typedef void (*OnSendCallback)(const UDPBlock::BlobSlice&, void* context);
 
-    SinkUDPSocketBlock(const char* name,
+    SinkUDPSocketBlock(std::string name,
                         const UDPBlock::SocketType type,
                         const std::string& dest_host_or_path,
                         const uint16_t port,
@@ -19,7 +19,7 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
                         OnSendCallback callback = nullptr,
                         void* callback_context = nullptr,
                         const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(name),
+        : cler::BlockBase(std::move(name)),
         in(buffer_size),
         _socket(UDPBlock::GenericDatagramSocket::make_sender(type, dest_host_or_path, port)),
         _slab_free_slots(slab_free_slots),

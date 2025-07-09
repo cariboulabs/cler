@@ -6,8 +6,8 @@ template <typename T>
 struct ThrottleBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
-    ThrottleBlock(const char* name, const size_t sps, size_t const buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(name),
+    ThrottleBlock(std::string name, const size_t sps, size_t const buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(std::move(name)),
           in(buffer_size),
           _sps(sps),
           _interval(1.0 / static_cast<double>(sps)),

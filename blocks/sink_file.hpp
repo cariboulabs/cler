@@ -8,8 +8,8 @@ template <typename T>
 struct SinkFileBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
-    SinkFileBlock(const char* name, const char* filename, size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(name), in(buffer_size), _filename(filename) {
+    SinkFileBlock(std::string name, const char* filename, size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(std::move(name)), in(buffer_size), _filename(filename) {
 
         if (buffer_size == 0) {
             throw std::invalid_argument("Buffer size must be greater than zero.");

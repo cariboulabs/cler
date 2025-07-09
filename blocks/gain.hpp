@@ -5,8 +5,8 @@ template <typename T>
 struct GainBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
-    GainBlock(const char* name, const T gain_value, const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(name), in(buffer_size), _gain(gain_value) {
+    GainBlock(std::string name, const T gain_value, const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(std::move(name)), in(buffer_size), _gain(gain_value) {
         _tmp = new T[buffer_size];
         _buffer_size = buffer_size;
     }

@@ -8,11 +8,11 @@ struct SinkTerminalBlock : public cler::BlockBase {
 
     cler::Channel<T> in;
 
-    SinkTerminalBlock(const char* name,
+    SinkTerminalBlock(std::string name,
                       OnReceiveCallback callback = nullptr,
                       [[maybe_unused]] void* callback_context = nullptr,
                       size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(name), in(buffer_size), _callback(callback), _callback_context(callback_context) {
+        : cler::BlockBase(std::move(name)), in(buffer_size), _callback(callback), _callback_context(callback_context) {
 
         if (buffer_size == 0) {
             throw std::invalid_argument("Buffer size must be greater than zero.");

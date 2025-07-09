@@ -6,9 +6,9 @@
 struct PlotCSpectrumBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
 
-    PlotCSpectrumBlock(const char* name, const size_t num_inputs, const char** signal_labels,
+    PlotCSpectrumBlock(std::string name, const size_t num_inputs, const char** signal_labels,
         const size_t sps, const size_t buffer_size) 
-        : BlockBase(name), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps) 
+        : BlockBase(std::move(name)), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps) 
     {
         if (num_inputs < 1) {
             throw std::invalid_argument("PlotCSpectrumBlock requires at least one input channel");
@@ -136,14 +136,14 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
         
         ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
-        ImGui::Begin(name());
+        ImGui::Begin(name().c_str());
 
         //buttons and stuff
         if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
             _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
         }
 
-        if (ImPlot::BeginPlot(name())) {
+        if (ImPlot::BeginPlot(name().c_str())) {
             ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]");
 
             for (size_t i = 0; i < _num_inputs; ++i) {

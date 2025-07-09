@@ -8,8 +8,8 @@ template <typename T>
 struct SourceFileBlock : public cler::BlockBase {
     typedef void (*on_eof)(const char* filename);
 
-    SourceFileBlock(const char* name, const char* filename, const bool repeat = true, on_eof callback = nullptr)
-        : cler::BlockBase(name),
+    SourceFileBlock(std::string name, const char* filename, const bool repeat = true, on_eof callback = nullptr)
+        : cler::BlockBase(std::move(name)),
           _filename(filename),
           _repeat(repeat),
           _callback(callback)
