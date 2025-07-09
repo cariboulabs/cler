@@ -10,25 +10,18 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
     PolyphaseChannelizerBlock(const char* name,
                         size_t num_channels,
                         float  kaiser_attenuation,
-                        size_t kaiser_filter_length,
-                        size_t in_buffer_size,
-                        size_t in_work_size)
-        : cler::BlockBase(name), in(in_buffer_size), _work_size(in_work_size), _num_channels(num_channels) {
+                        size_t kaiser_filter_semilength,
+                        size_t in_buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(name), in(in_buffer_size), _num_channels(num_channels) {
 
-        assert(kaiser_filter_length > 0 && kaiser_filter_length < 5 && "Filter length must be positive");
-        // Remember!
-        // work_in_samples = num_frames * num_channels
-        // each output channel receives num_frames samples
-        // each frame in input consists of num_channels samples
-        if (in_work_size % num_channels != 0) {
-            throw std::invalid_argument("Input work size must be a multiple of the number of channels");
-        }
-        _num_frames = in_work_size / num_channels;
+        assert(kaiser_filter_semilength > 0 && kaiser_filter_semilength < 9 && 
+                "Filter length must be between 1 and 9, larger values ==> narrower transition band. 4 is usually a good default");
 
-        _pfch = firpfbch2_crcf_create_kaiser(LIQUID_ANALYZER, num_channels,
-                                                kaiser_filter_length,
-                                                kaiser_attenuation);
-        _tmp_in = new std::complex<float>[in_work_size];
+        _pfch = firpfbch2_crcf_create_kaiser(LIQUID_ANALYZER,
+                                            num_channels,
+                                            kaiser_filter_semilength,
+                                            kaiser_attenuation);
+        _tmp_in = new std::complex<float>[num_channels];
         _tmp_out = new std::complex<float>[num_channels];
     }
     ~PolyphaseChannelizerBlock() {
@@ -44,24 +37,27 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
         static_assert((std::is_same_v<OChannels, cler::Channel<std::complex<float>>> && ...), 
                       "All output channels must be of type cler::Channel<std::complex<float>>");
 
-        if (in.size() < _work_size) {
+        if (in.size() < _num_channels) {
             return cler::Error::NotEnoughSamples;
         }
 
-        //valdiate outs have enough space (cpp 17 fold expression) as we cant forloop on variadic templates
-        if (( (outs->size() < _num_frames) || ... )) {
+        size_t n_frames_by_samples = in.size() / _num_channels;
+        size_t n_frames_by_space = std::min({outs->space()...});
+        size_t num_frames = std::min(n_frames_by_samples, n_frames_by_space);
+
+        if (num_frames == 0) {
             return cler::Error::NotEnoughSpace;
         }
 
-        in.readN(_tmp_in, _work_size);
-        for (size_t i = 0; i < _num_frames; ++i) {
-             firpfbch2_crcf_execute(
+        for (size_t i = 0; i < num_frames; ++i) {
+            in.readN(_tmp_in, _num_channels);
+            firpfbch2_crcf_execute(
                 _pfch, 
                 /*liquid uses float complex, which has same layout in memory as std::complex<float>,
                 reinterpret_cast is required as static_cast wont work*/
-                reinterpret_cast<liquid_float_complex*>(&_tmp_in[i * _num_channels]),
+                reinterpret_cast<liquid_float_complex*>(_tmp_in),
                 reinterpret_cast<liquid_float_complex*>(_tmp_out)
-                );
+            );
 
             //cant for loop on varaiadic templates, so declaring a function and then calling it
             size_t idx = 0;
@@ -75,9 +71,7 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
     }
 
 private:
-    size_t _work_size;
     size_t _num_channels;
-    size_t _num_frames;
     std::complex<float>* _tmp_in;
     std::complex<float>* _tmp_out;
     firpfbch2_crcf _pfch = nullptr;
