@@ -6,11 +6,56 @@
 #include "blocks/plot_cspectrum.hpp"
 #include "blocks/noise_awgn.hpp"
 #include "blocks/fanout.hpp"
+#include <algorithm>
 
 float channel_freq(float channel_bw, uint8_t index, uint8_t num_channels) {
-    float offset = static_cast<float>(index) - static_cast<float>(num_channels) / 2.0f;
+    float offset = static_cast<float>(index) - static_cast<float>(num_channels) / 2.0f + 0.5f;
     return offset * channel_bw;
 }
+
+struct CustomSourceBlock : public cler::BlockBase {
+    CustomSourceBlock(const char* name, float amplitude, float frequency_hz, size_t sps)
+        : BlockBase(name), 
+        cw_source_block(name, amplitude, frequency_hz, sps),
+        noise_block("AWGN Noise", amplitude / 100),
+        fanout_block("Fanout", 2) {}
+
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out1, 
+                                                      cler::ChannelBase<std::complex<float>>* out2) {
+    
+        size_t transferable = std::min({
+            out1->space(),
+            out2->space(),
+            noise_block.in.space(),
+            fanout_block.in.space()
+        });
+        if (transferable == 0) {
+            return cler::Error::NotEnoughSpace;
+        }
+    
+        // Generate a continuous wave signal
+        auto result = cw_source_block.procedure(&noise_block.in);
+        if (result.is_err()) {
+            return result.unwrap_err();
+        }
+
+        // Add noise to the signal
+        result = noise_block.procedure(&fanout_block.in);
+        if (result.is_err()) {
+            return result.unwrap_err();
+        }
+
+        // Fanout the signal to multiple outputs
+        return fanout_block.procedure(out1, out2);
+    }
+    
+
+    private:
+        SourceCWBlock<std::complex<float>> cw_source_block;
+        NoiseAWGNBlock<std::complex<float>> noise_block;
+        FanoutBlock<std::complex<float>> fanout_block;
+
+};
 
 int main() {
     static constexpr size_t SPS = 2'000'000;
@@ -27,16 +72,13 @@ int main() {
            "  Channel 2: %.2f Hz\n"
            "  Channel 3: %.2f Hz\n",
            ch0_freq, ch1_freq, ch2_freq, ch3_freq);
-    printf("Please let the spectrum a few seconds windows to stabilize.\n");
 
-    SourceCWBlock<std::complex<float>> cw_source1("CW Source1", 1.0f, ch0_freq, SPS);
-    SourceCWBlock<std::complex<float>> cw_source2("CW Source2", 1.0f, ch1_freq, SPS);
-    SourceCWBlock<std::complex<float>> cw_source3("CW Source3", 1.0f, ch2_freq, SPS);
-    SourceCWBlock<std::complex<float>> cw_source4("CW Source4", 1.0f, ch3_freq, SPS);
+    CustomSourceBlock cw_source1("CW Source 1", 1.0f, ch0_freq, SPS);
+    CustomSourceBlock cw_source2("CW Source 2", 1.0f, ch1_freq, SPS);
+    CustomSourceBlock cw_source3("CW Source 3", 1.0f, ch2_freq, SPS);
+    CustomSourceBlock cw_source4("CW Source 4", 1.0f, ch3_freq, SPS);
 
     AddBlock<std::complex<float>> adder("Adder", 4);
-    NoiseAWGNBlock<std::complex<float>> noise_block("AWGN Noise", 0.01f);
-    FanoutBlock<std::complex<float>> fanout("Fanout", 2);
 
     PolyphaseChannelizerBlock channelizer(
         "Polyphase Channelizer",
@@ -60,23 +102,24 @@ int main() {
     );
 
     const char* input_signal_labels[] = {
-        "Input",
+        "source 1",
+        "source 2",
+        "source 3",
+        "source 4"
     };
     PlotCSpectrumBlock plot_input_cspectrum(
         "Plot Input Spectrum",
-        1, 
+        4, 
         input_signal_labels,
         SPS,
         256 // FFT size
     );
  
-    cler::BlockRunner cw_source1_runner(&cw_source1, &adder.in[0]);
-    cler::BlockRunner cw_source2_runner(&cw_source2, &adder.in[1]);
-    cler::BlockRunner cw_source3_runner(&cw_source3, &adder.in[2]);
-    cler::BlockRunner cw_source4_runner(&cw_source4, &adder.in[3]);
-    cler::BlockRunner adder_runner(&adder, &noise_block.in);
-    cler::BlockRunner noise_block_runner(&noise_block, &fanout.in);
-    cler::BlockRunner fanout_runner(&fanout, &channelizer.in, &plot_input_cspectrum.in[0]);
+    cler::BlockRunner cw_source1_runner(&cw_source1, &adder.in[0], &plot_input_cspectrum.in[0]);
+    cler::BlockRunner cw_source2_runner(&cw_source2, &adder.in[1], &plot_input_cspectrum.in[1]);
+    cler::BlockRunner cw_source3_runner(&cw_source3, &adder.in[2], &plot_input_cspectrum.in[2]);
+    cler::BlockRunner cw_source4_runner(&cw_source4, &adder.in[3], &plot_input_cspectrum.in[3]);
+    cler::BlockRunner adder_runner(&adder, &channelizer.in);
     cler::BlockRunner channelizer_runner(&channelizer,
         &plot_polyphase_cspectrum.in[0],
         &plot_polyphase_cspectrum.in[1],
@@ -92,8 +135,6 @@ int main() {
         cw_source3_runner,
         cw_source4_runner,
         adder_runner,
-        noise_block_runner,
-        fanout_runner,
         channelizer_runner,
         plot_polyphase_cspectrum_runner,
         plot_input_cspectrum_runner
