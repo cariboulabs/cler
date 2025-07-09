@@ -6,6 +6,8 @@
 #include <array>
 #include <set>
 #include <bit>
+#include <algorithm> // for std::min, which a-lot of cler blocks use
+#include <complex> //again, a lot of cler blocks use complex numbers
 
 namespace cler {
 
