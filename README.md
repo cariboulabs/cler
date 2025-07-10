@@ -1,4 +1,4 @@
-# Cler: Compile-Time DSP Flowgraph Framework
+# Cler: Compile Time DSP Flowgraph Framework
 
 Cler is a C++ header only template-based framework for constructing and executing flowgraphs of DSP processing blocks.
 Its goal is to keep a tiny core while allowing maximal flexability:
