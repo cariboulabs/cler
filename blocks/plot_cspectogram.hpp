@@ -25,7 +25,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
             ::operator new[](num_inputs * sizeof(cler::Channel<std::complex<float>>))
         );
         for (size_t i = 0; i < num_inputs; ++i) {
-            new (&in[i]) cler::Channel<std::complex<float>>(2*_buffer_size);
+            new (&in[i]) cler::Channel<std::complex<float>>(5*_buffer_size);
         }
 
         // Allocate FFT plan and temporary buffers
@@ -87,10 +87,14 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
 
             memcpy(_liquid_inout, _tmp_y_buffer, _buffer_size * sizeof(std::complex<float>));
             
-            // Compute coherent gain for Hamming window
             float coherent_gain = 0.0f;
             for (size_t n = 0; n < available; ++n) {
-                float w = 0.54f - 0.46f * cosf(2.0f * M_PI * n / (_buffer_size - 1)); // Hamming
+
+                float w = 0.35875f //blackman-harris
+                    - 0.48829f * cosf(2.0f * M_PI * n / (available - 1))
+                    + 0.14128f * cosf(4.0f * M_PI * n / (available - 1))
+                    - 0.01168f * cosf(6.0f * M_PI * n / (available - 1));
+
                 coherent_gain += w;
 
                 // Apply window and shift to center spectrum (-1)^n

@@ -136,6 +136,7 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
         if (available < _buffer_size) {
             return; // not enough data to render
         }
+        assert(available == _buffer_size);
         
         ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
@@ -153,10 +154,14 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
                 // Copy snapshot buffer into FFT input
                 memcpy(_liquid_inout, _snapshot_y_buffers[i], available * sizeof(liquid_float_complex));
 
-                // Compute coherent gain for Hamming window
                 float coherent_gain = 0.0f;
                 for (size_t n = 0; n < available; ++n) {
-                    float w = 0.54f - 0.46f * cosf(2.0f * M_PI * n / (_buffer_size - 1)); // Hamming
+
+                    float w = 0.35875f //blackman-harris
+                        - 0.48829f * cosf(2.0f * M_PI * n / (available - 1))
+                        + 0.14128f * cosf(4.0f * M_PI * n / (available - 1))
+                        - 0.01168f * cosf(6.0f * M_PI * n / (available - 1));
+
                     coherent_gain += w;
 
                     // Apply window and shift to center spectrum (-1)^n
