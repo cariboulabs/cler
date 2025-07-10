@@ -20,7 +20,7 @@ int main() {
         1,
         signal_labels,
         SPS,
-        10.0f // duration in seconds
+        3.0f // duration in seconds
     );
     plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f); //x,y, width, height
 
