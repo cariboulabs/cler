@@ -14,28 +14,20 @@ Its goal is to keep a tiny core while allowing maximal flexability:
 **What's so special?** Most flowgraph implementations rely on inheritance or code generation to abstract over blocks and channels. This can constrain the architecture and lead to compromises — for example, GNURadio uses void* inputs/outputs in its procedure calls to achieve runtime flexibility. Instead, Cler uses variadic templates to achieve type safety and flexibility without runtime overhead. This approach was made possible by C++17 features like std::apply and forward deduction guide.
 
 **How to use it?** Just Include `cler.hpp` and you are good for the basics.
-Want to use included blocks? See the `examples` folder.
+Want to try out some examples?
+```
+mkdir build
+cd build
+cmake ..
+make -j"$(nproc --ignore=1)"   # Use all cores minus one (if supported)
+cd examples
+./hello_world
+```
+You should see sinosindes running on you screen
 
-⚠️ Just one thing to look out for... because Cler is template heavy, error messages can be overwhelming. But no worries, with the small context window that is Cler, any LLM can help you out with ease.
+⚠️ Just one thing to look out for... because Cler is template heavy, error messages can be overwhelming. But no worries, with the small context window that is Cler, any LLM can help you out with ease. Eventuallty we will have a validator that can help debug common issues.
 
 # Things to Know
-
-* **Buffers** </br>
-Our buffers are modified version of `https://github.com/drogalis/SPSC-Queue`. They allow for static or heap allocation. See the gain block in `streamlined.cpp` for an example.</br> 
-
-* **Peek-Commit or ReadWrite**: </br>
-Cler supports three buffer access patterns: 
-    * **Push/Pop** </br>
-    For single values. there is also a try push/pop you can use if you dont inspect size() beforehand.
-    Remember though, after you have poped a value, you must not put it back! Cler channels are lock-free SPSC that *ASSUME* that one thread is a writer while another is a reader. No mixin' it up. </br>
-    Also, this is *SLOW*. Always prefer the other access patterns.
-
-    * **Peek/Commit** </br>
-    Allows you to inspect (peek) data in the buffer without removing it, then explicitly commit the number of items you’ve processed.
-    The downside is that you can only access data up to the physical end of the ring buffer at a time — so if your logical window wraps, you may need to handle two chunks.
-    
-    * **Read/Write**. </br>
-    Provides access to the full available buffer space for larger chunks of data. You’ll typically copy data to a temporary buffer for processing. Read/Write automatically advances the ring buffer pointers for you — no manual commit needed. This should be your *go to* pattern.
 
 * **Flowgraph vs Streamlined** </br>
 Cler supports two architectural styles:
@@ -48,14 +40,27 @@ Cler supports two architectural styles:
     When the blocks are simple, the streamlined approach will be faster than the flowgraph becuase of the thread overhead. As a compromise, you can create `superblocks` which combine multiple small blocks.
     See `streamlined` and  `flowgraph` as examples for the two architectural styles, and `polyphase_channelizer` for a superblock implementation.
 
-
-
 * **Blocks**: </br>
 Blocks is a library of useful blocks for quick "plug and play". Its soft depedencies are `liquid`, `imdeargui` and `zf_log` brought in by CMAKE's fetch content. </br>
 In CLER, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
 
 * **Blocks/GUI**: </br>
 Cler is a header only library, but includes a gui library (dearimgui) that is compiled. To use it, include `gui_manager.hpp` and link your executable against `cler_gui`. See the `plots` or `mass_spring_damper` examples.
+
+* **Buffers** </br>
+Our buffers are modified version of `https://github.com/drogalis/SPSC-Queue`. They allow for static or heap allocation. See the gain block in `streamlined.cpp` for an example.</br> 
+Cler supports three buffer access patterns: 
+    * **Push/Pop** </br>
+    For single values. there is also a try push/pop you can use if you dont inspect size() beforehand.
+    Remember though, after you have poped a value, you must not put it back! Cler channels are lock-free SPSC that *ASSUME* that one thread is a writer while another is a reader. No mixin' it up. </br>
+    This is **SLOW** in our context. Always prefer the other access patterns.
+
+    * **Peek/Commit** </br>
+    Allows you to inspect (peek) data in the buffer without removing it, then explicitly commit the number of items you’ve processed.
+    The downside is that you can only access data up to the physical end of the ring buffer at a time — so if your logical window wraps, you may need to handle two chunks.
+
+    * **Read/Write (your go-to)**. </br>
+    Provides access to the full available buffer space for larger chunks of data. You’ll typically copy data to a temporary buffer for processing. Read/Write automatically advances the ring buffer pointers for you — no manual commit needed. This should be your *go to* pattern.
 
 # RoadMap
 * <ins>Flowgraph validation:</ins><br/>
@@ -90,7 +95,7 @@ GPU can be instrumental on processing higher volumes. Creating ChannelGPU which 
 # Contributing
 - ✅ **Modern C++ (C++20)** — but always mindful of embedded constraints.
 - ⚙️ **Keep the hardware interface size warning enabled** — so users understand what’s happening under the hood.
-- ⚡ **Prefer templates and function pointers** — avoid `std::function` and lambdas if not required.
+- ⚡ **Prefer templates and function pointers** — avoid `std::function` and use lambdas only if required.
 - 🧩 **Avoid `std::any`** — to keep type safety explicit and predictable.
 - 🔗 **Favor composition over inheritance** — except for simple interfaces.
 - 🔒 **No try/catch for flow control** — use `Result` for recoverable errors; `throw` only for unrecoverable states. `assert` is fine for startup guarantees.

@@ -209,9 +209,10 @@ namespace cler {
             }
 
             if (_print_execution_report) {
-                printf("Execution Report Warnning:\n");
-                printf("If the flowgraph is working correctly, then blocks with a *higher* success rate can be the bottlenecks that block traffic.\n");
-                printf("This is exactly like the WWII bomber bullet hole tale\n");
+                printf("Execution Report Warning!!!:\n");
+                printf("If the flowgraph is working correctly, then blocks with a *higher* "
+                       "procedure success rates can be the bottlenecks that block traffic.\n");
+                printf("This is a classic case of `survivor bias`");
             }
         }
 
