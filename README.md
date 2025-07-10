@@ -11,9 +11,10 @@ Its goal is to keep a tiny core while allowing maximal flexability:
 * Built for radio, but can also be used for control and dynamic simulations (supports cyclic graphs, and online modifiable params)
 * Cross-Platform
 
-**What's so special?** Most flowgraph implementations rely on polymorphism to abstract over blocks and channels. This can constrain the architecture and lead to compromises — for example, GNURadio uses void* inputs/outputs in its procedure calls to achieve runtime flexibility. Instead, Cler uses variadic templates to achieve type safety and flexibility without runtime overhead. This approach was made possible by C++17 features like std::apply and forward deduction guide.
+**What's so special?** historically DSP flowgraph implementations rely on polymorphism to abstract over blocks and channels. This can constrain the architecture and lead to compromises — for example, GNURadio uses void* inputs/outputs in its procedure calls to achieve runtime flexibility. Instead, Cler uses variadic templates to achieve type safety and flexibility without runtime overhead. This approach was made possible by C++17 features like std::apply and forward deduction guide. The same approach can be taken in Rust with Traits and Zig with CompTime, but these languages still don't have the facilities for mature DSP on **embedded system**.
 
-**How to use it?** Just Include `cler.hpp` and you are good for the basics.
+**How to use it?** Just Include `include/cler.hpp` and you are good for the basics. Want to use already written blocks? Inlcude them from `blocks/*`
+
 Want to try out some examples?
 ```
 mkdir build
@@ -21,9 +22,8 @@ cd build
 cmake ..
 make -j"$(nproc --ignore=1)"   # Use all cores-1
 cd examples
-./hello_world
+./hello_world (or mass_spring_damper if you want to see somthing cool)
 ```
-You should see sinosindes running on you screen...and try `mass_spring_dampper` next! That is a cool one.
 
 ⚠️ Just one thing to look out for... because Cler is template heavy, error messages can be overwhelming. But no worries, with the small context window that is Cler, any LLM can help you out with ease. Eventuallty we will have a validator that can help debug common issues.
 
