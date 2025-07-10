@@ -154,7 +154,8 @@ namespace cler {
         FlowGraph& operator=(const FlowGraph&) = delete;
         FlowGraph& operator=(FlowGraph&&) = delete;
 
-        void run() {
+        void run(const bool print_execution_report = true) {
+            _print_execution_report = print_execution_report;
             if (!valid()) {
                 throw std::runtime_error("Invalid FlowGraph: "
                         "duplicate channels detected. Each channel can be connected once.");
@@ -186,11 +187,13 @@ namespace cler {
                         }
                     }
                     
-                    size_t total_procedures = succesful_procedures + failed_procedures;
-                    float success_rate = total_procedures > 0 ? 
-                        (static_cast<float>(succesful_procedures) / total_procedures) * 100.0f : 0.0f;
-                    printf("Block %s finished with success rate: %.2f%%\n", 
-                        runner.block->name().c_str(), success_rate);
+                    if (_print_execution_report) {
+                        size_t total_procedures = succesful_procedures + failed_procedures;
+                        float success_rate = total_procedures > 0 ? 
+                            (static_cast<float>(succesful_procedures) / total_procedures) * 100.0f : 0.0f;
+                        printf("Block %s finished with success rate: %.2f%%\n", 
+                            runner.block->name().c_str(), success_rate);
+                    }
 
                 })), ...);
             };
@@ -203,6 +206,12 @@ namespace cler {
             _stop_flag = true;
             for (auto& t : _threads) {
                 if (t.joinable()) t.join();
+            }
+
+            if (_print_execution_report) {
+                printf("Execution Report Warnning:\n");
+                printf("If the flowgraph is working correctly, then blocks with a *higher* success rate can be the bottlenecks that block traffic.\n");
+                printf("This is exactly like the WWII bomber bullet hole tale\n");
             }
         }
 
@@ -226,5 +235,6 @@ namespace cler {
         std::tuple<BlockRunners...> _runners;
         std::array<std::thread, _N> _threads;
         std::atomic<bool> _stop_flag = false;
+        bool _print_execution_report = false;
     };
 }
