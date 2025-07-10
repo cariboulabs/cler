@@ -1,4 +1,4 @@
-# Cler: Compile Time DSP Flowgraph Framework
+# Cler: Compile Time DSP Flowgraph Framework for SDRs and Embedded Systems
 
 Cler is a C++ header only template-based framework for constructing and executing flowgraphs of DSP processing blocks.
 Its goal is to keep a tiny core while allowing maximal flexability:
@@ -11,15 +11,17 @@ Its goal is to keep a tiny core while allowing maximal flexability:
 * Built for radio, but can also be used for control and dynamic simulations (supports cyclic graphs, and online modifiable params)
 * Cross-Platform
 
-How to use it? Just Include `cler.hpp` and you are good for the basics.
+**What's so special?** Most flowgraph implementations rely on inheritance or code generation to abstract over blocks and channels. This can constrain the architecture and lead to compromises — for example, GNURadio uses void* inputs/outputs in its procedure calls to achieve runtime flexibility. Instead, Cler uses variadic templates to achieve type safety and flexibility without runtime overhead. This approach was made possible by C++17 features like std::apply and forward deduction guide.
+
+**How to use it?** Just Include `cler.hpp` and you are good for the basics.
 Want to use included blocks? See the `examples` folder.
 
-Just one thing to look out for... because Cler is template heavy, error messages can be overwhelming. But no worries, with the small context window that is Cler, any LLM can help you out with ease.
+⚠️ Just one thing to look out for... because Cler is template heavy, error messages can be overwhelming. But no worries, with the small context window that is Cler, any LLM can help you out with ease.
 
 # Things to Know
 
 * **Buffers** </br>
-Our buffers are modified version of `https://github.com/drogalis/SPSC-Queue`. They allow for static or heap allocation. See the gain block in `streamlined.cpp` for an example. This framework would not be possible without Drogalis's implementation. So go check it out!
+Our buffers are modified version of `https://github.com/drogalis/SPSC-Queue`. They allow for static or heap allocation. See the gain block in `streamlined.cpp` for an example.</br> 
 
 * **Peek-Commit or ReadWrite**: </br>
 Cler supports three buffer access patterns: 
@@ -86,10 +88,19 @@ If we are serious about this, we need to support workflows that use the ubiquito
 GPU can be instrumental on processing higher volumes. Creating ChannelGPU which uses the ChannelBase interface would allow users to write their GPU blocks.
 
 # Contributing
-- ✅ **C++20**, but without killing embedded use cases.
-- 🚫 **No Disabling the hardware interface size warning** — It's important that that user knows about this.
-- 🚫 **No `std::function`** — use templates or raw function pointers instead.
-- 🚫 **No `std::any`** — avoid hidden type-erasure overhead. Templates areheavy as it is.
-- 🚫 **No inheritance** — except for simple interfaces; prefer composition.
-- 🚫 **No try/catch** — use `Result` for handled errors and `throw` only for panics. `assert` is fine for initialization guarantees.
-- 🚫 **No Nonsense** — we’re happy to share this code with the community, but we can’t let this openness backfire. Tiny pull requests (like fixing a single typo) won’t be accepted — keep PRs meaningful.
+- ✅ **Modern C++ (C++20)** — but always mindful of embedded constraints.
+- ⚙️ **Keep the hardware interface size warning enabled** — so users understand what’s happening under the hood.
+- ⚡ **Prefer templates and function pointers** — avoid `std::function` and lambdas if not required.
+- 🧩 **Avoid `std::any`** — to keep type safety explicit and predictable.
+- 🔗 **Favor composition over inheritance** — except for simple interfaces.
+- 🔒 **No try/catch for flow control** — use `Result` for recoverable errors; `throw` only for unrecoverable states. `assert` is fine for startup guarantees.
+- 🗒️ **Metadata inline** — no separate tag streams; encode what you need in the channel type or pass via callbacks.
+- ✅ **Meaningful pull requests** — improvements, bug fixes, and useful features are all welcome. Please bundle small changes together when possible.
+
+# Acknowledgements
+Special thanks to:
+* Drogalis — for the excellent SPSC-Queue implementation that our buffers are based on.
+* Bastian Bloessl and the FutureSDR community — Your design choices inspired some of ours.
+* Joseph D. Gaeddert and the liquid-dsp community — In our opinion, the best DSP library out there by a margin.
+* Omar Ocornut and The Dear ImGui community — A fast "batteries included" GUI library that meets all of our needs.
+* The GNU Radio community — The benchmark to beat for open-source SDR frameworks.
