@@ -9,7 +9,7 @@ Its goal is to keep a tiny core while allowing maximal flexability:
 * Flowgraphs are, and Blocks can be made completely static
 * Tailored for Embedded Systems -  even MCUs
 * Built for radio, but can also be used for control and dynamic simulations (supports cyclic graphs, and online modifiable params)
-* Cross-Platform (Linux, Windows and MacOS)
+* Cross-Platform
 
 How to use it? Just Include `cler.hpp` and you are good for the basics.
 Want to use included blocks? See the `examples` folder.
@@ -19,7 +19,7 @@ Just one thing to look out for... because Cler is template heavy, error messages
 # Things to Know
 
 * **Buffers** </br>
-Our buffers are modified version of `https://github.com/drogalis/SPSC-Queue`. They allow for static or heap allocation. See  the gain block in `streamlined.cpp` for an example.
+Our buffers are modified version of `https://github.com/drogalis/SPSC-Queue`. They allow for static or heap allocation. See the gain block in `streamlined.cpp` for an example. This framework would not be possible without Drogalis's implementation. So go check it out!
 
 * **Peek-Commit or ReadWrite**: </br>
 Cler supports three buffer access patterns: 
@@ -87,6 +87,7 @@ GPU can be instrumental on processing higher volumes. Creating ChannelGPU which 
 
 # Contributing
 - ✅ **C++20**, but without killing embedded use cases.
+- 🚫 **No Disabling the hardware interface size warning** — It's important that that user knows about this.
 - 🚫 **No `std::function`** — use templates or raw function pointers instead.
 - 🚫 **No `std::any`** — avoid hidden type-erasure overhead. Templates areheavy as it is.
 - 🚫 **No inheritance** — except for simple interfaces; prefer composition.
