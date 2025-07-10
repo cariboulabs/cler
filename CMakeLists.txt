@@ -11,6 +11,7 @@ add_compile_options(-Wall -Wextra -Wno-unused-variable -Wno-missing-braces)
 
 #this is super important for our core ring buffers. can be the difference of 20% throughput
 set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
+add_compile_options(-O3)
 
 add_subdirectory(blocks)
 add_subdirectory(examples)

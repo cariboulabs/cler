@@ -165,12 +165,15 @@ namespace cler {
             auto launch_threads = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
                 ((_threads[Is] = std::thread([this]() {
                     auto& runner = std::get<Is>(_runners);
+                    size_t succesful_procedures = 0;
+                    size_t failed_procedures = 0;
 
                     while (!_stop_flag) {
                         Result<Empty, Error> result = std::apply([&](auto*... outs) {
                             return runner.block->procedure(outs...);
                         }, runner.outputs);
                         if (result.is_err()) {
+                            failed_procedures++;
                             auto err = result.unwrap_err();
                             if (err == Error::InvalidChannelIndex) {
                                 stop();
@@ -178,8 +181,17 @@ namespace cler {
                             } else {
                                 std::this_thread::yield();
                             }
+                        } else {
+                            succesful_procedures++;
                         }
                     }
+                    
+                    size_t total_procedures = succesful_procedures + failed_procedures;
+                    float success_rate = total_procedures > 0 ? 
+                        (static_cast<float>(succesful_procedures) / total_procedures) * 100.0f : 0.0f;
+                    printf("Block %s finished with success rate: %.2f%%\n", 
+                        runner.block->name().c_str(), success_rate);
+
                 })), ...);
             };
 

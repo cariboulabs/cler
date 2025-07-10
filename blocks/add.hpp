@@ -27,6 +27,9 @@ struct AddBlock : public cler::BlockBase {
         for (size_t i = 0; i < num_inputs; ++i) {
             new (&in[i]) cler::Channel<T>(buffer_size);
         }
+
+        _tmp_buffer = new T[buffer_size];
+        _sum_buffer = new T[buffer_size];
      }
     ~AddBlock() {
         using TChannel = cler::Channel<T>; //cant template on Destructor...
@@ -34,6 +37,8 @@ struct AddBlock : public cler::BlockBase {
             in[i].~TChannel();
         }
         ::operator delete[](in);
+        delete[] _tmp_buffer;
+        delete[] _sum_buffer;
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
@@ -55,19 +60,20 @@ struct AddBlock : public cler::BlockBase {
 
     size_t transferable = cler::floor2(std::min({available_space, min_available_samples, _buffer_size}));
 
-    for (size_t i = 0; i < transferable; ++i) {
-        T sum = T{};
-        for (size_t j = 0; j < _num_inputs; ++j) {
-            T val;
-            in[j].pop(val);
-            sum += val;
+    std::fill_n(_sum_buffer, _buffer_size, T{});
+    for (size_t i = 0; i < _num_inputs; ++i) {
+        in[i].readN(_tmp_buffer, transferable);
+        for (size_t j = 0; j < transferable; ++j) {
+            _sum_buffer[j] += _tmp_buffer[j];
         }
-        out->push(sum);
     }
+    out->writeN(_sum_buffer, transferable);
     return cler::Empty{};
 }
 
     private:
         size_t _num_inputs;
         size_t _buffer_size;
+        T*  _tmp_buffer = nullptr;
+        T*  _sum_buffer = nullptr;
 };

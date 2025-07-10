@@ -16,8 +16,8 @@ target_link_libraries(plots PRIVATE cler_gui liquid)
 
 add_subdirectory(ezgmsk_demod)
 
-add_executable(mass-spring-damper mass-spring-damper.cpp)
-target_link_libraries(mass-spring-damper PRIVATE cler_gui)
+add_executable(mass_spring_damper mass_spring_damper.cpp)
+target_link_libraries(mass_spring_damper PRIVATE cler_gui)
 
 add_executable(udp udp.cpp)
 
