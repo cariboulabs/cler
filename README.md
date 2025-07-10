@@ -88,7 +88,7 @@ GPU can be instrumental on processing higher volumes. Creating ChannelGPU which 
 # Contributing
 - ✅ **C++20**, but without killing embedded use cases.
 - 🚫 **No `std::function`** — use templates or raw function pointers instead.
-- 🚫 **No `std::any`** — avoid hidden type-erasure overhead.
-- 🚫 **No inheritance** — except for simple interfaces; prefer composition or CRTP.
+- 🚫 **No `std::any`** — avoid hidden type-erasure overhead. Templates areheavy as it is.
+- 🚫 **No inheritance** — except for simple interfaces; prefer composition.
 - 🚫 **No try/catch** — use `Result` for handled errors and `throw` only for panics. `assert` is fine for initialization guarantees.
 - 🚫 **No Nonsense** — we’re happy to share this code with the community, but we can’t let this openness backfire. Tiny pull requests (like fixing a single typo) won’t be accepted — keep PRs meaningful.
