@@ -44,7 +44,7 @@ Cler supports two architectural styles:
     In streamlined mode, you are in charge of writing the loop, and you are in charge of passing samples from one block to the other.
 
     When the blocks are simple, the streamlined approach will be faster than the flowgraph becuase of the thread overhead. As a compromise, you can create `superblocks` which combine multiple small blocks.
-    See `streamlined` and  `flowgraph` as an examples for the two architectural styles, and `polyphase_channelizer` for a superblock implementation
+    See `streamlined` and  `flowgraph` as examples for the two architectural styles, and `polyphase_channelizer` for a superblock implementation.
 
 
 
@@ -60,6 +60,7 @@ Cler is a header only library, but includes a gui library (dearimgui) that is co
 To keep the blocks/channels structure free of overbearing boilerplate validation logic, the best approach is to create an external tool that analyzes the application’s C++ code and validates it:
    - Do all blocks have runners?
    - Are all runners provided to the flowgraph?
+   - etc..
 
     Additionally, we could develop a VS Code extension to automate these checks.
 
@@ -68,6 +69,9 @@ Its important that we know where we stand. We need to measure our performence ag
 
 * <ins>Testing / CI / Profiling:</ins> </br>
 If we are already producing a report, might aswell build a benchmark for core patterns to endure performence doesnt regress with updates
+
+* <ins>Documentation:</ins> </br>
+We need something that helps new developers start their journey. Doxygen / Sphinx via Breath? 
 
 * <ins>GUI FrontEnd:</ins> </br>
 While not a preference, if we are already creating a reflection tool for FlowGraph validation, we could also create an interactive FlowGraph generator. Could be some Desktop Application, that scans the /blocks folders, generates an interface markup file for each block, and then uses this information to allow the user to connect blocks on a canvas.
