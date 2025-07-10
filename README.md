@@ -129,7 +129,7 @@ Its important that we know where we stand. We need to measure our performence ag
 If we are already producing a report, might aswell build a benchmark for core patterns to endure performence doesnt regress with updates
 
 * <ins>Blocks for Embedded Systems:</ins>
-Our /Blocks library is built as a broad, general-purpose toolkit for desktop experiments and quick testing — but for real end-node applications, we need an /EmbeddedBlocks library focused on minimal RAM/flash use, deterministic execution, static allocation where possible, and practical hardware interfaces like ADC/DAC, GPIO, and simple fixed-point DSP building blocks that run efficiently on MCUs and DSP cores.
+Our /Blocks library is built as a broad, general-purpose toolkit for desktop experiments and quick testing — but for real end-node applications, we need an /EmbeddedBlocks.
 
 * <ins>Hardware Support:</ins> </br>
 If we are serious about this, we need to support real hardware: FPGAs, SDRs, DAC/ADC boards, RF transceivers, and similar peripherals. For this, we must ensure support for commodity hardware by introducing source/sink blocks for them.
