@@ -11,7 +11,9 @@ Its goal is to keep a tiny core while allowing maximal flexability:
 * Built for radio, but can also be used for control and dynamic simulations (supports cyclic graphs, and online modifiable params)
 * Cross-Platform
 
-**What's so special?** historically DSP flowgraph implementations rely on polymorphism to abstract over blocks and channels. This can constrain the architecture and lead to compromises — for example, GNURadio uses void* inputs/outputs in its procedure calls to achieve runtime flexibility. Instead, Cler uses variadic templates to achieve type safety and flexibility without runtime overhead. This approach was made possible by C++17 features like std::apply and forward deduction guide. The same approach can be taken in Rust with Traits and Zig with CompTime, but these languages still don't have the facilities for mature DSP on **embedded system**.
+**What's so special?** historically DSP flowgraph implementations rely on polymorphism to abstract over blocks and channels. This can constrain the architecture and lead to compromises — for example, GNURadio uses void* inputs/outputs in its procedure calls to achieve runtime flexibility. Instead, Cler uses variadic templates to achieve type safety and flexibility without runtime overhead. This approach was made possible by C++17 features like std::apply and forward deduction guide. The same approach can be taken in Rust with Traits and Zig with CompTime, but these languages still don't have the facilities for mature DSP on small embedded systems (STM32 for example).
+
+**How does it compare to GNURadio or FutureSDR**? Unlike GNU Radio or FutureSDR, Cler doesn’t try to compete on massive throughput or complex scheduling — instead, it keeps things simpler with explicit, statically defined ring buffers and minimal runtime coordination, making data flow more predictable and practical for small embedded systems where buffer pools are rarely practical — yet still good enough for many commercial SDRs and thier applications.
 
 **How to use it?** Just Include `include/cler.hpp` and you are good for the basics. Want to use already written blocks? Inlcude them from `blocks/*`
 
@@ -26,6 +28,61 @@ cd examples
 ```
 
 ⚠️ Just one thing to look out for... because Cler is template heavy, error messages can be overwhelming. But no worries, with the small context window that is Cler, any LLM can help you out with ease. Eventuallty we will have a validator that can help debug common issues.
+
+# Okay, but how does it write?
+
+Below is `examples/hello_world.cpp`
+
+```
+#include "cler.hpp"
+#include "blocks/source_cw.hpp"
+#include "blocks/throttle.hpp"
+#include "blocks/add.hpp"
+#include "blocks/plot_timeseries.hpp"
+#include "gui_manager.hpp"
+
+int main() {
+   cler::GuiManager gui(800, 400, "Hello World Example");
+
+    const size_t SPS = 1000;
+    SourceCWBlock<float> source1("CWSource1", 1.0f, 1.0f, SPS);
+    SourceCWBlock<float> source2("CWSource2", 1.0f, 20.0f, SPS);
+    ThrottleBlock<float> throttle("Throttle", SPS);
+    AddBlock<float> adder("Adder", 2);
+
+    PlotTimeSeriesBlock plot(
+        "Hello World Plot",
+        {"Added Sources"},
+        SPS,
+        3.0f //window duration
+    );
+    plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f); 
+
+    cler::BlockRunner source1_runner{&source1, &adder.in[0]};
+    cler::BlockRunner source2_runner{&source2, &adder.in[1]};
+    cler::BlockRunner adder_runner{&adder, &throttle.in};
+    cler::BlockRunner throttle_runner{&throttle, &plot.in[0]};
+    cler::BlockRunner plot_runner{&plot};
+
+    cler::FlowGraph flowgraph(
+        source1_runner,
+        source2_runner,
+        adder_runner,
+        throttle_runner,
+        plot_runner
+    );
+
+    flowgraph.run();
+
+    while (gui.should_close() == false) {
+        gui.begin_frame();
+        plot.render();
+        gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return 0;
+}
+```
 
 # Things to Know
 
@@ -42,7 +99,7 @@ Cler supports two architectural styles:
 
 * **Blocks**: </br>
 Blocks is a library of useful blocks for quick "plug and play". Its soft depedencies are `liquid`, `imdeargui` and `zf_log` brought in by CMAKE's fetch content. </br>
-In CLER, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
+In Cler, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
 
 * **Blocks/GUI**: </br>
 Cler is a header only library, but includes a gui library (dearimgui) that is compiled. To use it, include `gui_manager.hpp` and link your executable against `cler_gui`. See the `plots` or `mass_spring_damper` examples.
@@ -63,13 +120,7 @@ Cler supports three buffer access patterns:
     Provides access to the full available buffer space for larger chunks of data. You’ll typically copy data to a temporary buffer for processing. Read/Write automatically advances the ring buffer pointers for you — no manual commit needed. This should be your *go to* pattern.
 
 # RoadMap
-* <ins>Flowgraph validation:</ins><br/>
-To keep the blocks/channels structure free of overbearing boilerplate validation logic, the best approach is to create an external tool that analyzes the application’s C++ code and validates it:
-   - Do all blocks have runners?
-   - Are all runners provided to the flowgraph?
-   - etc..
-
-    Additionally, we could develop a VS Code extension to automate these checks.
+Below is a wish-list for this library, sorted by importance.
 
 * <ins>Comparing to GnuRadio / FutureSDR:</ins> </br>
 Its important that we know where we stand. We need to measure our performence against the best in the buissness and produce a report.
@@ -77,20 +128,37 @@ Its important that we know where we stand. We need to measure our performence ag
 * <ins>Testing / CI / Profiling:</ins> </br>
 If we are already producing a report, might aswell build a benchmark for core patterns to endure performence doesnt regress with updates
 
+* <ins>Blocks for Embedded Systems:</ins>
+Our /Blocks library is built as a broad, general-purpose toolkit for desktop experiments and quick testing — but for real end-node applications, we need an /EmbeddedBlocks library focused on minimal RAM/flash use, deterministic execution, static allocation where possible, and practical hardware interfaces like ADC/DAC, GPIO, and simple fixed-point DSP building blocks that run efficiently on MCUs and DSP cores.
+
+* <ins>Hardware Support:</ins> </br>
+If we are serious about this, we need to support real hardware: FPGAs, SDRs, DAC/ADC boards, RF transceivers, and similar peripherals. For this, we must ensure support for commodity hardware by introducing source/sink blocks for them.
+
+* <ins>Adapting Flowgraph for RTOS:</ins> </br>
+The Cler flowgraph currently uses std::thread which are not available in FreeRTOS/Zephyr/ThreadX. We need to create the alternatives.
+
+* <ins>Flowgraph validation:</ins><br/>
+We need to address the current situation where small mistakes can lead to pages of confusing compiler errors. While it’s possible to add validation logic directly into the blocks and flowgraph, this would introduce unnecessary boilerplate and clutter. A better approach is to create an external tool that analyzes the application’s C++ code and validates it:
+
+   - Do all blocks have runners?
+   - Are all runners provided to the flowgraph?
+   - Are there any missing or misconfigured connections?
+   - ...
+
+    Additionally, we could develop a VS Code extension to automate watch files and squiggle errors.
+
 * <ins>Documentation:</ins> </br>
-We need something that helps new developers start their journey. Doxygen / Sphinx via Breath? 
+We need something that helps new developers start their journey. A kick off page that can get someone up to speed in less then 30 mintues.
+
+* <ins>GPU Support:</ins> </br>
+If this library turns out to be useful, developers might use it outside of tiny devices. In such a case, a GPU can be instrumental on processing higher volumes. Creating ChannelGPU which uses the ChannelBase interface would allow users to write their GPU blocks.
 
 * <ins>GUI FrontEnd:</ins> </br>
-While not a preference, if we are already creating a reflection tool for FlowGraph validation, we could also create an interactive FlowGraph generator. Could be some Desktop Application, that scans the /blocks folders, generates an interface markup file for each block, and then uses this information to allow the user to connect blocks on a canvas.
+This is more of a nice to have, but if we are already creating a reflection tool for Flowgraph validation, we could also create an interactive FlowGraph generator.
+Could be some Desktop Application, that scans the /blocks folders, generates an interface markup file for each block, and then uses this information to allow the user to connect blocks on a canvas.
 Importat:
     - Has to be cross platform.
     - Will not force blocks to implement markup files. Has to be generated from their .hpp code.
-
-* <ins>Hardware Support:</ins> </br>
-If we are serious about this, we need to support workflows that use the ubiquitous 2.4 GHz and 5.2 GHz bands. For this, we must ensure support for commodity hardware. So introducing source/sink blocks for these devices is welome.
-
-* <ins>GPU Support:</ins> </br>
-GPU can be instrumental on processing higher volumes. Creating ChannelGPU which uses the ChannelBase interface would allow users to write their GPU blocks.
 
 # Contributing
 - ✅ **Modern C++ (C++20)** — but always mindful of embedded constraints.

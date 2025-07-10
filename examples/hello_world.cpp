@@ -43,6 +43,7 @@ int main() {
         gui.begin_frame();
         plot.render();
         gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
     return 0;
 }
