@@ -1,9 +1,9 @@
 # Cler: Compile-Time DSP Flowgraph Framework
 
 Cler is a C++ header only template-based framework for constructing and executing flowgraphs of DSP processing blocks.
-Its goal is to be tiny, and allow maximal flexability:
+Its goal is to keep a tiny core while allowing maximal flexability:
 
-* All code, no frontend.
+* Code first, UI second.
 * Defining blocks amounts to implementing a struct with a method.
 * Channels are type agnostic.
 * Flowgraphs are, and Blocks can be made completely static
@@ -66,17 +66,25 @@ To keep the blocks/channels structure free of overbearing boilerplate validation
 * <ins>Comparing to GnuRadio / FutureSDR:</ins> </br>
 Its important that we know where we stand. We need to measure our performence against the best in the buissness and produce a report.
 
-* <ins>Testing / CI:</ins> </br>
-If we are already producing a report 
+* <ins>Testing / CI / Profiling:</ins> </br>
+If we are already producing a report, might aswell build a benchmark for core patterns to endure performence doesnt regress with updates
 
 * <ins>GUI FrontEnd:</ins> </br>
 While not a preference, if we are already creating a reflection tool for FlowGraph validation, we could also create an interactive FlowGraph generator. Could be some Desktop Application, that scans the /blocks folders, generates an interface markup file for each block, and then uses this information to allow the user to connect blocks on a canvas.
 Importat:
     - Has to be cross platform.
-    - Will not force blocks to implement markup files. Has to be generated.
+    - Will not force blocks to implement markup files. Has to be generated from their .hpp code.
 
 * <ins>Hardware Support:</ins> </br>
-If we are serious about this, we need to support workflows that can process Wi-Fi in both the 2.4 GHz and 5.2 GHz bands. For this, we must ensure support for commodity hardware. So introducing source/sink blocks for these devices is welome.
+If we are serious about this, we need to support workflows that use the ubiquitous 2.4 GHz and 5.2 GHz bands. For this, we must ensure support for commodity hardware. So introducing source/sink blocks for these devices is welome.
 
 * <ins>GPU Support:</ins> </br>
 GPU can be instrumental on processing higher volumes. Creating ChannelGPU which uses the ChannelBase interface would allow users to write their GPU blocks.
+
+# Contributing
+- ✅ **C++20**, but without killing embedded use cases.
+- 🚫 **No `std::function`** — use templates or raw function pointers instead.
+- 🚫 **No `std::any`** — avoid hidden type-erasure overhead.
+- 🚫 **No inheritance** — except for simple interfaces; prefer composition or CRTP.
+- 🚫 **No try/catch** — use `Result` for handled errors and `throw` only for panics. `assert` is fine for initialization guarantees.
+- 🚫 **No Nonsense** — we’re happy to share this code with the community, but we can’t let this openness backfire. Tiny pull requests (like fixing a single typo) won’t be accepted — keep PRs meaningful.
