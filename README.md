@@ -11,7 +11,7 @@ Its goal is to keep a tiny core while allowing maximal flexability:
 * Built for radio, but can also be used for control and dynamic simulations (supports cyclic graphs, and online modifiable params)
 * Cross-Platform
 
-**What's so special?** Most flowgraph implementations rely on inheritance or code generation to abstract over blocks and channels. This can constrain the architecture and lead to compromises — for example, GNURadio uses void* inputs/outputs in its procedure calls to achieve runtime flexibility. Instead, Cler uses variadic templates to achieve type safety and flexibility without runtime overhead. This approach was made possible by C++17 features like std::apply and forward deduction guide.
+**What's so special?** Most flowgraph implementations rely on polymorphism to abstract over blocks and channels. This can constrain the architecture and lead to compromises — for example, GNURadio uses void* inputs/outputs in its procedure calls to achieve runtime flexibility. Instead, Cler uses variadic templates to achieve type safety and flexibility without runtime overhead. This approach was made possible by C++17 features like std::apply and forward deduction guide.
 
 **How to use it?** Just Include `cler.hpp` and you are good for the basics.
 Want to try out some examples?
