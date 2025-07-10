@@ -1,13 +1,13 @@
 #include "cler.hpp"
 #include "gui_manager.hpp"
-#include "blocks/plot_timeseries.hpp"
+#include "blocks/plots/plot_timeseries.hpp"
 #include "blocks/source_cw.hpp"
 #include "blocks/source_chirp.hpp"
 #include "blocks/throttle.hpp"
 #include "blocks/math_complex_demux.hpp"
-#include "blocks/plot_cspectrum.hpp"
+#include "blocks/plots/plot_cspectrum.hpp"
 #include "blocks/fanout.hpp"
-#include "blocks/plot_cspectogram.hpp"
+#include "blocks/plots/plot_cspectogram.hpp"
 
 int main() {
     size_t SPS = 100;

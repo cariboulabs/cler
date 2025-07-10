@@ -3,7 +3,7 @@
 #include <algorithm>
 #include "gui_manager.hpp"
 #include "blocks/throttle.hpp"
-#include "blocks/plot_timeseries.hpp"
+#include "blocks/plots/plot_timeseries.hpp"
 #include "blocks/fanout.hpp"
 #include <atomic>
 #include <numbers>

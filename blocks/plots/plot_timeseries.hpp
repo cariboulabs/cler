@@ -1,6 +1,6 @@
 #pragma once
 #include "cler.hpp"
-#include "gui/gui_manager.hpp"
+#include "../gui/gui_manager.hpp"
 #include <vector>
 
 struct PlotTimeSeriesBlock : public cler::BlockBase {

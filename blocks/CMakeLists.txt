@@ -21,3 +21,4 @@ FetchContent_MakeAvailable(zf_log)
 
 add_subdirectory(gui)
 add_subdirectory(ezgmsk_demod)
+add_subdirectory(plots)

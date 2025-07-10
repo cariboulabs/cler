@@ -3,7 +3,7 @@
 #include "blocks/source_cw.hpp"
 #include "blocks/polyphase_channelizer.hpp"
 #include "blocks/add.hpp"
-#include "blocks/plot_cspectrum.hpp"
+#include "blocks/plots/plot_cspectrum.hpp"
 #include "blocks/noise_awgn.hpp"
 #include "blocks/fanout.hpp"
 #include "blocks/throughput.hpp"

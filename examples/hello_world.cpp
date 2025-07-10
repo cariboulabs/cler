@@ -2,7 +2,7 @@
 #include "blocks/source_cw.hpp"
 #include "blocks/throttle.hpp"
 #include "blocks/add.hpp"
-#include "blocks/plot_timeseries.hpp"
+#include "blocks/plots/plot_timeseries.hpp"
 #include "gui_manager.hpp"
 
 int main() {
