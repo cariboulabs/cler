@@ -23,7 +23,7 @@ make -j"$(nproc --ignore=1)"   # Use all cores minus one (if supported)
 cd examples
 ./hello_world
 ```
-You should see sinosindes running on you screen
+You should see sinosindes running on you screen...and try `mass_spring_dampper` next! That is a cool one.
 
 ⚠️ Just one thing to look out for... because Cler is template heavy, error messages can be overwhelming. But no worries, with the small context window that is Cler, any LLM can help you out with ease. Eventuallty we will have a validator that can help debug common issues.
 
@@ -98,8 +98,9 @@ GPU can be instrumental on processing higher volumes. Creating ChannelGPU which 
 - ⚡ **Prefer templates and function pointers** — avoid `std::function` and use lambdas only if required.
 - 🧩 **Avoid `std::any`** — to keep type safety explicit and predictable.
 - 🔗 **Favor composition over inheritance** — except for simple interfaces.
-- 🔒 **No try/catch for flow control** — use `Result` for recoverable errors; `throw` only for unrecoverable states. `assert` is fine for startup guarantees.
+- 🔒 **No try/catch for flow control** — use `cler::Result` for recoverable errors; `throw` only for unrecoverable states. `assert` is fine for startup guarantees.
 - 🗒️ **Metadata inline** — no separate tag streams; encode what you need in the channel type or pass via callbacks.
+- 🛠️ **Implementation guidelines** — Keep heavy implementations in `.cpp` files when possible (for example, when dealing with a single data type). Templated libraries already add compile-time cost, so we want to reduce that load whenever possible.
 - ✅ **Meaningful pull requests** — improvements, bug fixes, and useful features are all welcome. Please bundle small changes together when possible.
 
 # Acknowledgements

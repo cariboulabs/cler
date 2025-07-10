@@ -274,11 +274,10 @@ int main() {
 
     FanoutBlock<float> fanout("Fanout", 2);
 
-    const char* signal_labels[] = {"Measuerd Position"};
     PlotTimeSeriesBlock plot(
         "Sensor Plot",
         1, // number of inputs
-        signal_labels,
+        {"Measured Position"}, // signal labels
         SPS,
         100.0f // duration in seconds
     );

@@ -6,9 +6,9 @@
 struct PlotTimeSeriesBlock : public cler::BlockBase {
     cler::Channel<float>* in;
 
-    PlotTimeSeriesBlock(std::string name, const size_t num_inputs, const char** signal_labels,
+    PlotTimeSeriesBlock(std::string name, const size_t num_inputs, std::vector<std::string> signal_labels,
         const size_t sps, const float duration_s) 
-        : BlockBase(std::move(name)), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps) 
+        : BlockBase(std::move(name)), _num_inputs(num_inputs), _signal_labels(std::move(signal_labels)), _sps(sps) 
     {
         if (num_inputs < 1) {
             throw std::invalid_argument("PlotTimeSeriesBlock requires at least one input channel");
@@ -148,7 +148,7 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
             
 
             for (size_t i = 0; i < _num_inputs; ++i) {
-                ImPlot::PlotLine(_signal_labels[i], _snapshot_x_buffer, _snapshot_y_buffers[i], static_cast<int>(available));
+                ImPlot::PlotLine(_signal_labels[i].c_str(), _snapshot_x_buffer, _snapshot_y_buffers[i], static_cast<int>(available));
             }
             ImPlot::EndPlot();
         }
@@ -165,7 +165,7 @@ private:
     size_t _samples_counter = 0;
 
     size_t _num_inputs;
-    const char** _signal_labels;
+    std::vector<std::string> _signal_labels;
     size_t _sps;
     size_t _buffer_size;
 

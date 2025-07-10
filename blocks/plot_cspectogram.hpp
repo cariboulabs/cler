@@ -6,9 +6,9 @@
 struct PlotCSpectrogramBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
 
-    PlotCSpectrogramBlock(std::string name, const size_t num_inputs, const char** signal_labels,
+    PlotCSpectrogramBlock(std::string name, const size_t num_inputs, std::vector<std::string> signal_labels,
         const size_t sps, const size_t buffer_size, const size_t tall) 
-        : BlockBase(std::move(name)), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps), _buffer_size(buffer_size), _tall(tall)
+        : BlockBase(std::move(name)), _num_inputs(num_inputs), _signal_labels(std::move(signal_labels)), _sps(sps), _buffer_size(buffer_size), _tall(tall)
     {
         if (num_inputs < 1) {
             throw std::invalid_argument("PlotCSpectrogramBlock requires at least one input channel");
@@ -141,7 +141,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
         const ImPlotAxisFlags x_flags = ImPlotAxisFlags_Lock;
         const ImPlotAxisFlags y_flags = ImPlotAxisFlags_Lock;
         for (size_t i = 0; i < _num_inputs; ++i) {
-            if (ImPlot::BeginPlot(_signal_labels[i])) {
+            if (ImPlot::BeginPlot(_signal_labels[i].c_str())) {
                 ImPlot::SetupAxes("Frequency (Hz)", "Time (frames)", x_flags, y_flags);
                 ImPlot::SetupAxisLimits(ImAxis_X1, -static_cast<double>(_sps)/2.0, static_cast<double>(_sps)/2.0);
                 ImPlot::SetupAxisLimits(ImAxis_Y1, static_cast<double>(_tall), 0.0);  // flipped Y! (tall -> 0)
@@ -197,7 +197,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
 
 private:
     size_t _num_inputs;
-    const char** _signal_labels;
+    std::vector<std::string> _signal_labels;
     size_t _sps;
     size_t _buffer_size;
     size_t _tall;

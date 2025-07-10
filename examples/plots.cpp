@@ -20,11 +20,10 @@ int main() {
     ThrottleBlock<std::complex<float>> cw_throttle("CWThrottle", SPS);
     FanoutBlock<std::complex<float>> cw_fanout("CWFanout", 3);
     ComplexToMagPhaseBlock cw_complex2realimag("CWComplex2RealImag", ComplexToMagPhaseBlock::Mode::RealImag);
-    const char* signal_labels[] = {"Real", "Imaginary"};
     PlotTimeSeriesBlock cw_timeseries_plot(
         "CW-TimeSeriesPlot",
         2, // number of inputs
-        signal_labels,
+        {"Real", "Imaginary"},
         SPS,
         10.0f //duration in seconds
     );
@@ -36,16 +35,15 @@ int main() {
     PlotTimeSeriesBlock chirp_timeseries_plot(
         "Chirp-TimeSeriesPlot",
         2, // number of inputs
-        signal_labels,
+        {"Real", "Imaginary"},
         SPS,
         10.0f //duration in seconds
     );
     
-    const char* cspectrum_labels[] = {"CW","Chirp"};
     PlotCSpectrumBlock cspectrum_plot(
         "Chirp-CSpectrumPlot",
         2, // number of inputs
-        cspectrum_labels,
+        {"CW", "Chirp"},
         SPS,
         256 // buffer size for FFT
     );
@@ -53,7 +51,7 @@ int main() {
     PlotCSpectrogramBlock cspectrogram_plot(
         "CW-SpectrogramPlot",
         2, // number of inputs
-        cspectrum_labels,
+        {"CW", "Chirp"},
         SPS,
         128, // buffer size for FFT
         100 // tall

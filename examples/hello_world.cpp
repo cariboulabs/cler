@@ -14,11 +14,10 @@ int main() {
     ThrottleBlock<float> throttle("Throttle", SPS);
     AddBlock<float> adder("Adder", 2); // 2 inputs
 
-    const char* signal_labels[] = {"Added Sources"};
     PlotTimeSeriesBlock plot(
         "Hello World Plot",
         1,
-        signal_labels,
+        {"Added Sources"},
         SPS,
         3.0f // duration in seconds
     );

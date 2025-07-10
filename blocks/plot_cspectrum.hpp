@@ -2,13 +2,14 @@
 #include "cler.hpp"
 #include "gui/gui_manager.hpp"
 #include "liquid.h"
+#include <vector>
 
 struct PlotCSpectrumBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
 
-    PlotCSpectrumBlock(std::string name, const size_t num_inputs, const char** signal_labels,
+    PlotCSpectrumBlock(std::string name, const size_t num_inputs, const std::vector<std::string> signal_labels,
         const size_t sps, const size_t buffer_size) 
-        : BlockBase(std::move(name)), _num_inputs(num_inputs), _signal_labels(signal_labels), _sps(sps) 
+        : BlockBase(std::move(name)), _num_inputs(num_inputs), _signal_labels(std::move(signal_labels)), _sps(sps) 
     {
         if (num_inputs < 1) {
             throw std::invalid_argument("PlotCSpectrumBlock requires at least one input channel");
@@ -185,7 +186,7 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
                 }
 
                 // Plot
-                ImPlot::PlotLine(_signal_labels[i], _freq_bins, _tmp_magnitude_buffer, _buffer_size);
+                ImPlot::PlotLine(_signal_labels[i].c_str(), _freq_bins, _tmp_magnitude_buffer, _buffer_size);
             }
             ImPlot::EndPlot();
         }
@@ -200,7 +201,7 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
 
 private:
     size_t _num_inputs;
-    const char** _signal_labels;
+    std::vector<std::string> _signal_labels;
     size_t _sps;
     size_t _buffer_size;
 
