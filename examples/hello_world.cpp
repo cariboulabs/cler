@@ -8,7 +8,7 @@
 int main() {
     cler::GuiManager gui(800, 400, "Hello World Plot Example");
 
-    constexpr const size_t SPS = 1000;
+    const size_t SPS = 1000;
     SourceCWBlock<float> source1("CWSource", 1.0f, 1.0f, SPS); //amplitude, frequency
     SourceCWBlock<float> source2("CWSource2", 1.0f, 20.0f, SPS);
     ThrottleBlock<float> throttle("Throttle", SPS);
@@ -16,7 +16,6 @@ int main() {
 
     PlotTimeSeriesBlock plot(
         "Hello World Plot",
-        1,
         {"Added Sources"},
         SPS,
         3.0f // duration in seconds

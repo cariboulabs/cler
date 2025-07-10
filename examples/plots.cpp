@@ -12,8 +12,8 @@
 int main() {
     size_t SPS = 100;
 
-    constexpr const size_t GW = 1500;
-    constexpr const size_t GH = 800;
+    const size_t GW = 1500;
+    const size_t GH = 800;
     cler::GuiManager gui(GW, GH , "Plots Example");
     
     SourceCWBlock<std::complex<float>> cw_source("CWSource", 1.0f, 2.0f, SPS);
@@ -22,7 +22,6 @@ int main() {
     ComplexToMagPhaseBlock cw_complex2realimag("CWComplex2RealImag", ComplexToMagPhaseBlock::Mode::RealImag);
     PlotTimeSeriesBlock cw_timeseries_plot(
         "CW-TimeSeriesPlot",
-        2, // number of inputs
         {"Real", "Imaginary"},
         SPS,
         10.0f //duration in seconds
@@ -34,7 +33,6 @@ int main() {
     ComplexToMagPhaseBlock chirp_c2realimag("ChirpComplex2RealImag", ComplexToMagPhaseBlock::Mode::RealImag);
     PlotTimeSeriesBlock chirp_timeseries_plot(
         "Chirp-TimeSeriesPlot",
-        2, // number of inputs
         {"Real", "Imaginary"},
         SPS,
         10.0f //duration in seconds
@@ -42,7 +40,6 @@ int main() {
     
     PlotCSpectrumBlock cspectrum_plot(
         "Chirp-CSpectrumPlot",
-        2, // number of inputs
         {"CW", "Chirp"},
         SPS,
         256 // buffer size for FFT
@@ -50,7 +47,6 @@ int main() {
 
     PlotCSpectrogramBlock cspectrogram_plot(
         "CW-SpectrogramPlot",
-        2, // number of inputs
         {"CW", "Chirp"},
         SPS,
         128, // buffer size for FFT

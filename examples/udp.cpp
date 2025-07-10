@@ -7,7 +7,7 @@
 #include <thread>
 #include <chrono>
 
-constexpr const size_t MAX_UDP_BLOB_SIZE = 256;
+const size_t MAX_UDP_BLOB_SIZE = 256;
 
 struct SourceDatagramBlock : public cler::BlockBase {
     UDPBlock::Slab _slab {100, MAX_UDP_BLOB_SIZE}; // 100 slots, each 256 bytes

@@ -7,11 +7,11 @@
 struct PlotCSpectrumBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
 
-    PlotCSpectrumBlock(std::string name, const size_t num_inputs, const std::vector<std::string> signal_labels,
+    PlotCSpectrumBlock(std::string name, const std::vector<std::string> signal_labels,
         const size_t sps, const size_t buffer_size) 
-        : BlockBase(std::move(name)), _num_inputs(num_inputs), _signal_labels(std::move(signal_labels)), _sps(sps) 
+        : BlockBase(std::move(name)), _num_inputs(signal_labels.size()), _signal_labels(std::move(signal_labels)), _sps(sps) 
     {
-        if (num_inputs < 1) {
+        if (_num_inputs < 1) {
             throw std::invalid_argument("PlotCSpectrumBlock requires at least one input channel");
         }
         if (buffer_size <= 2) {
@@ -25,17 +25,17 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
 
         // Allocate input channels
         in = static_cast<cler::Channel<std::complex<float>>*>(
-            ::operator new[](num_inputs * sizeof(cler::Channel<std::complex<float>>))
+            ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
         );
-        for (size_t i = 0; i < num_inputs; ++i) {
+        for (size_t i = 0; i < _num_inputs; ++i) {
             new (&in[i]) cler::Channel<std::complex<float>>(_buffer_size);
         }
 
         // Allocate y buffers as channels
         _y_channels = static_cast<cler::Channel<std::complex<float>>*>(
-            ::operator new[](num_inputs * sizeof(cler::Channel<std::complex<float>>))
+            ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
         );
-        for (size_t i = 0; i < num_inputs; ++i) {
+        for (size_t i = 0; i < _num_inputs; ++i) {
             new (&_y_channels[i]) cler::Channel<std::complex<float>>(_buffer_size);
         }
 
@@ -45,7 +45,7 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
         }
         //allocate snapshot buffers
         _snapshot_y_buffers = new std::complex<float>*[_num_inputs];
-        for (size_t i = 0; i < num_inputs; ++i) {
+        for (size_t i = 0; i < _num_inputs; ++i) {
             _snapshot_y_buffers[i] = new std::complex<float>[_buffer_size];
         }
 

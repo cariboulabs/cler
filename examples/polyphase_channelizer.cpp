@@ -94,7 +94,6 @@ int main() {
 
     PlotCSpectrumBlock plot_polyphase_cspectrum(
         "Plot Channelizer Spectrum",
-        NUM_CHANNELS, // number of channels
         {"pfch 0", "pfch 1", "pfch 2", "pfch 3", "pfch 4"},
         static_cast<size_t>(channel_BW),
         1024 // FFT size
@@ -102,7 +101,6 @@ int main() {
 
     PlotCSpectrumBlock plot_input_cspectrum(
         "Plot Input Spectrum",
-        NUM_CHANNELS, // number of channels
         {"source 0", "source 1", "source 2", "source 3", "source 4"},
         SPS,
         1024 // FFT size

@@ -4,19 +4,31 @@
 #include "result.hpp"
 #include <thread>
 #include <array>
-#include <set>
-#include <bit>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
 #include <complex> //again, a lot of cler blocks use complex numbers
-#include <string>
+#include <string> //block names are self owning strings
 
 namespace cler {
 
     static constexpr size_t DEFAULT_BUFFER_SIZE = 1024;
 
-    size_t floor2(size_t x) {
-        if (x == 0) return 0;
-        return size_t(1) << (std::bit_width(x) - 1);
+    inline size_t floor2(size_t x) {
+    if (x == 0) return 0;
+    #if SIZE_MAX == UINT32_MAX
+        x |= (x >> 1);
+        x |= (x >> 2);
+        x |= (x >> 4);
+        x |= (x >> 8);
+        x |= (x >> 16);
+    #elif SIZE_MAX == UINT64_MAX
+        x |= (x >> 1);
+        x |= (x >> 2);
+        x |= (x >> 4);
+        x |= (x >> 8);
+        x |= (x >> 16);
+        x |= (x >> 32);
+    #endif
+        return x - (x >> 1);
     }
 
     enum class Error {
@@ -156,10 +168,6 @@ namespace cler {
 
         void run(const bool print_execution_report = true) {
             _print_execution_report = print_execution_report;
-            if (!valid()) {
-                throw std::runtime_error("Invalid FlowGraph: "
-                        "duplicate channels detected. Each channel can be connected once.");
-            }
             _stop_flag = false;
 
             // This lambda takes an index sequence (0, 1, ..., N-1) and expands it at compile time.
@@ -217,21 +225,6 @@ namespace cler {
         }
 
     private:
-
-        bool valid() const {
-            std::set<const void*> output_ptrs;
-            bool ok = true;
-
-            //check that each output pointer is unique
-            std::apply([&](const auto&... runners) {
-                ((std::apply([&](auto*... outs) {
-                    ((ok &= output_ptrs.insert(static_cast<const void*>(outs)).second), ...);
-                }, runners.outputs)), ...);
-            }, _runners);
-
-            return ok;
-        }
-
         static constexpr std::size_t _N = sizeof...(BlockRunners);
         std::tuple<BlockRunners...> _runners;
         std::array<std::thread, _N> _threads;

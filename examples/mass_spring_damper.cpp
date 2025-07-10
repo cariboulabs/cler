@@ -9,14 +9,13 @@
 #include <numbers>
 #include <cmath>
 
-constexpr const size_t SPS = 100; // Samples per second
-constexpr const float DT = 1.0f / static_cast<float>(SPS);
-constexpr const float wn = 1.0f; // Natural frequency
-
-constexpr const float zeta = 0.5f; // Damping ratio
-constexpr const float M = 1.0f; // Mass
-constexpr const float K = wn * wn * M; // Spring constant
-constexpr const float C = 2.0f * zeta * wn * M;
+const size_t SPS = 100; // Samples per second
+const float DT = 1.0f / static_cast<float>(SPS);
+const float wn = 1.0f; // Natural frequency
+const float zeta = 0.5f; // Damping ratio
+const float M = 1.0f; // Mass
+const float K = wn * wn * M; // Spring constant
+const float C = 2.0f * zeta * wn * M;
 
 struct PlantBlock : public cler::BlockBase {
     cler::Channel<float> force_in;
@@ -276,7 +275,6 @@ int main() {
 
     PlotTimeSeriesBlock plot(
         "Sensor Plot",
-        1, // number of inputs
         {"Measured Position"}, // signal labels
         SPS,
         100.0f // duration in seconds

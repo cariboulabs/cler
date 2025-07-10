@@ -135,7 +135,7 @@ Our /Blocks library is built as a broad, general-purpose toolkit for desktop exp
 If we are serious about this, we need to support real hardware: FPGAs, SDRs, DAC/ADC boards, RF transceivers, and similar peripherals. For this, we must ensure support for commodity hardware by introducing source/sink blocks for them.
 
 * <ins>Adapting Flowgraph for RTOS:</ins> </br>
-The Cler flowgraph currently uses std::thread which are not available in FreeRTOS/Zephyr/ThreadX. We need to create the alternatives.
+The Cler flowgraph currently uses std::thread which is not available in FreeRTOS/Zephyr/ThreadX. We need to create the alternatives.
 
 * <ins>Flowgraph validation:</ins><br/>
 We need to address the current situation where small mistakes can lead to pages of confusing compiler errors. While it’s possible to add validation logic directly into the blocks and flowgraph, this would introduce unnecessary boilerplate and clutter. A better approach is to create an external tool that analyzes the application’s C++ code and validates it:
@@ -148,10 +148,7 @@ We need to address the current situation where small mistakes can lead to pages 
     Additionally, we could develop a VS Code extension to automate watch files and squiggle errors.
 
 * <ins>Documentation:</ins> </br>
-We need something that helps new developers start their journey. A kick off page that can get someone up to speed in less then 30 mintues.
-
-* <ins>GPU Support:</ins> </br>
-If this library turns out to be useful, developers might use it outside of tiny devices. In such a case, a GPU can be instrumental on processing higher volumes. Creating ChannelGPU which uses the ChannelBase interface would allow users to write their GPU blocks.
+A kick off page that can get someone up to speed in less then 30 mintues will be nice.
 
 * <ins>GUI FrontEnd:</ins> </br>
 This is more of a nice to have, but if we are already creating a reflection tool for Flowgraph validation, we could also create an interactive FlowGraph generator.

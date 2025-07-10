@@ -6,11 +6,11 @@
 struct PlotTimeSeriesBlock : public cler::BlockBase {
     cler::Channel<float>* in;
 
-    PlotTimeSeriesBlock(std::string name, const size_t num_inputs, std::vector<std::string> signal_labels,
+    PlotTimeSeriesBlock(std::string name, std::vector<std::string> signal_labels,
         const size_t sps, const float duration_s) 
-        : BlockBase(std::move(name)), _num_inputs(num_inputs), _signal_labels(std::move(signal_labels)), _sps(sps) 
+        : BlockBase(std::move(name)), _num_inputs(signal_labels.size()), _signal_labels(std::move(signal_labels)), _sps(sps) 
     {
-        if (num_inputs < 1) {
+        if (_num_inputs < 1) {
             throw std::invalid_argument("PlotTimeSeriesBlock requires at least one input channel");
         }
         if (duration_s <= 0) {
@@ -21,17 +21,17 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
 
         // Allocate input channels
         in = static_cast<cler::Channel<float>*>(
-            ::operator new[](num_inputs * sizeof(cler::Channel<float>))
+            ::operator new[](_num_inputs * sizeof(cler::Channel<float>))
         );
-        for (size_t i = 0; i < num_inputs; ++i) {
+        for (size_t i = 0; i < _num_inputs; ++i) {
             new (&in[i]) cler::Channel<float>(_buffer_size);
         }
 
         // Allocate y buffers as channels
         _y_channels = static_cast<cler::Channel<float>*>(
-            ::operator new[](num_inputs * sizeof(cler::Channel<float>))
+            ::operator new[](_num_inputs * sizeof(cler::Channel<float>))
         );
-        for (size_t i = 0; i < num_inputs; ++i) {
+        for (size_t i = 0; i < _num_inputs; ++i) {
             new (&_y_channels[i]) cler::Channel<float>(_buffer_size);
         }
         // X buffer as channel too
@@ -40,7 +40,7 @@ struct PlotTimeSeriesBlock : public cler::BlockBase {
         //allocate snapshot buffers
         _snapshot_x_buffer = new float[_buffer_size];
         _snapshot_y_buffers = new float*[_num_inputs];
-        for (size_t i = 0; i < num_inputs; ++i) {
+        for (size_t i = 0; i < _num_inputs; ++i) {
             _snapshot_y_buffers[i] = new float[_buffer_size];
         }
 

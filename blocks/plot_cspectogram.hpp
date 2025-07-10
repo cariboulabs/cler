@@ -6,11 +6,11 @@
 struct PlotCSpectrogramBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
 
-    PlotCSpectrogramBlock(std::string name, const size_t num_inputs, std::vector<std::string> signal_labels,
+    PlotCSpectrogramBlock(std::string name, std::vector<std::string> signal_labels,
         const size_t sps, const size_t buffer_size, const size_t tall) 
-        : BlockBase(std::move(name)), _num_inputs(num_inputs), _signal_labels(std::move(signal_labels)), _sps(sps), _buffer_size(buffer_size), _tall(tall)
+        : BlockBase(std::move(name)), _num_inputs(signal_labels.size()), _signal_labels(std::move(signal_labels)), _sps(sps), _buffer_size(buffer_size), _tall(tall)
     {
-        if (num_inputs < 1) {
+        if (_num_inputs < 1) {
             throw std::invalid_argument("PlotCSpectrogramBlock requires at least one input channel");
         }
         if (buffer_size <= 2 || tall < 1) {
@@ -22,9 +22,9 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
 
         // Allocate input channels
         in = static_cast<cler::Channel<std::complex<float>>*>(
-            ::operator new[](num_inputs * sizeof(cler::Channel<std::complex<float>>))
+            ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
         );
-        for (size_t i = 0; i < num_inputs; ++i) {
+        for (size_t i = 0; i < _num_inputs; ++i) {
             new (&in[i]) cler::Channel<std::complex<float>>(5*_buffer_size);
         }
 
