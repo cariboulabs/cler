@@ -74,6 +74,7 @@
         "liquid.h": "c",
         "mutex": "cpp",
         "charconv": "cpp",
-        "__config": "cpp"
+        "__config": "cpp",
+        "typeindex": "cpp"
     }
 }

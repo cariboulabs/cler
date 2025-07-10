@@ -7,7 +7,7 @@
 #include "blocks/math_complex_demux.hpp"
 #include "blocks/plots/plot_cspectrum.hpp"
 #include "blocks/fanout.hpp"
-#include "blocks/plots/plot_cspectogram.hpp"
+#include "blocks/plots/plot_cspectrogram.hpp"
 
 int main() {
     size_t SPS = 100;

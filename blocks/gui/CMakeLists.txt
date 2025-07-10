@@ -1,8 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Optional but clear
-project(ClerGUI)
-
 # === Dependencies (GLFW, OpenGL, ImGui, ImPlot) ===
 find_package(PkgConfig REQUIRED)
 pkg_search_module(GLFW REQUIRED glfw3)
@@ -28,7 +25,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(implot)
 
 # === Create static library ===
-add_library(cler_gui STATIC
+add_library(blocks_gui STATIC
   gui_manager.cpp
 
   # ImGui core
@@ -46,8 +43,8 @@ add_library(cler_gui STATIC
   ${implot_SOURCE_DIR}/implot_items.cpp
 )
 
-# === Include paths for anyone linking cler_gui ===
-target_include_directories(cler_gui PUBLIC
+# === Include paths for anyone linking blocks_gui ===
+target_include_directories(blocks_gui PUBLIC
   ${GLFW_INCLUDE_DIRS}
   ${imgui_SOURCE_DIR}
   ${imgui_SOURCE_DIR}/backends
@@ -56,15 +53,15 @@ target_include_directories(cler_gui PUBLIC
 )
 
 # === Link dependencies ===
-target_link_libraries(cler_gui PUBLIC
+target_link_libraries(blocks_gui PUBLIC
   glfw
   OpenGL::GL
   Threads::Threads
 )
 
 if(UNIX AND NOT APPLE)
-  target_link_libraries(cler_gui PUBLIC dl)
+  target_link_libraries(blocks_gui PUBLIC dl)
 endif()
 
 # Optional: Show status
-message(STATUS "Built cler_gui library with GLFW: ${GLFW_LIBRARIES}")
+message(STATUS "Built blocks_gui library with GLFW: ${GLFW_LIBRARIES}")
