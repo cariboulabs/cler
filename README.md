@@ -19,7 +19,7 @@ Want to try out some examples?
 mkdir build
 cd build
 cmake ..
-make -j"$(nproc --ignore=1)"   # Use all cores minus one (if supported)
+make -j"$(nproc --ignore=1)"   # Use all cores-1
 cd examples
 ./hello_world
 ```
