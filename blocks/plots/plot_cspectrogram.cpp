@@ -3,7 +3,8 @@
 
 PlotCSpectrogramBlock::PlotCSpectrogramBlock(std::string name, std::vector<std::string> signal_labels,
     const size_t sps, const size_t n_fft_samples, const size_t tall) 
-    : BlockBase(std::move(name)), _num_inputs(signal_labels.size()), _signal_labels(std::move(signal_labels)), _sps(sps), _n_fft_samples(n_fft_samples), _tall(tall)
+    : BlockBase(std::move(name)), _num_inputs(signal_labels.size()), _signal_labels(std::move(signal_labels)), _sps(sps),
+             _n_fft_samples(n_fft_samples), _tall(tall)
 {
     if (_num_inputs < 1) {
         throw std::invalid_argument("PlotCSpectrogramBlock requires at least one input channel");

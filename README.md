@@ -165,7 +165,7 @@ Importat:
 - 🔗 **Favor composition over inheritance** — except for simple interfaces.
 - 🔒 **No try/catch for flow control** — use `cler::Result` for recoverable errors; `throw` only for unrecoverable states. `assert` is fine for startup guarantees.
 - 🗒️ **Metadata inline** — no separate tag streams; encode what you need in the channel type or pass via callbacks.
-- 🛠️ **Implementation guidelines** — Keep heavy implementations in `.cpp` files when possible (for example, when dealing with a single data type). Templated libraries already add compile-time cost, so we want to reduce that load whenever possible.
+- 🛠️ **Implementation guidelines** — Keep heavy implementations in `.cpp` files when possible (for example, when dealing with a single data type). Templated libraries already add compile-time cost, so we want to reduce that load wherever possible.
 - ✅ **Meaningful pull requests** — improvements, bug fixes, and useful features are all welcome. Please bundle small changes together when possible.
 
 # Acknowledgements

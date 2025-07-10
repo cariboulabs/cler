@@ -2,27 +2,26 @@
 #include "implot.h"
 
 PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::string> signal_labels,
-        const size_t sps, const size_t buffer_size) 
-        : BlockBase(std::move(name)), _num_inputs(signal_labels.size()), _signal_labels(std::move(signal_labels)), _sps(sps) 
+        const size_t sps, const size_t n_fft_samples) 
+        : BlockBase(std::move(name)), _num_inputs(signal_labels.size()), _signal_labels(std::move(signal_labels)), _sps(sps),
+                     _n_fft_samples(n_fft_samples)
     {
         if (_num_inputs < 1) {
             throw std::invalid_argument("PlotCSpectrumBlock requires at least one input channel");
         }
-        if (buffer_size <= 2) {
+        if (n_fft_samples <= 2) {
             throw std::invalid_argument("Buffer size must be greater than two.");
         }
-        if (buffer_size % 2 != 0) {
+        if (n_fft_samples % 2 != 0) {
             throw std::invalid_argument("Buffer size must be even.");
         }
-
-        _buffer_size = buffer_size;
 
         // Allocate input channels
         in = static_cast<cler::Channel<std::complex<float>>*>(
             ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
         );
         for (size_t i = 0; i < _num_inputs; ++i) {
-            new (&in[i]) cler::Channel<std::complex<float>>(_buffer_size);
+            new (&in[i]) cler::Channel<std::complex<float>>(BUFFER_SIZE_MULTIPLIER * n_fft_samples);
         }
 
         // Allocate y buffers as channels
@@ -30,24 +29,24 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::
             ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
         );
         for (size_t i = 0; i < _num_inputs; ++i) {
-            new (&_y_channels[i]) cler::Channel<std::complex<float>>(_buffer_size);
+            new (&_y_channels[i]) cler::Channel<std::complex<float>>(_n_fft_samples);
         }
 
-        _freq_bins = new float[buffer_size];
-        for (size_t i = 0; i < buffer_size; ++i) {
-            _freq_bins[i] = (_sps * (static_cast<float>(i) / static_cast<float>(buffer_size))) - (_sps / 2.0f);
+        _freq_bins = new float[n_fft_samples];
+        for (size_t i = 0; i < n_fft_samples; ++i) {
+            _freq_bins[i] = (_sps * (static_cast<float>(i) / static_cast<float>(n_fft_samples))) - (_sps / 2.0f);
         }
         //allocate snapshot buffers
         _snapshot_y_buffers = new std::complex<float>*[_num_inputs];
         for (size_t i = 0; i < _num_inputs; ++i) {
-            _snapshot_y_buffers[i] = new std::complex<float>[_buffer_size];
+            _snapshot_y_buffers[i] = new std::complex<float>[_n_fft_samples];
         }
 
-        _tmp_y_buffer = new std::complex<float>[_buffer_size];
-        _tmp_magnitude_buffer = new float[_buffer_size];
+        _tmp_y_buffer = new std::complex<float>[_n_fft_samples];
+        _tmp_magnitude_buffer = new float[_n_fft_samples];
 
-        _liquid_inout = new std::complex<float>[_buffer_size];
-        _fftplan = fft_create_plan(buffer_size, 
+        _liquid_inout = new std::complex<float>[_n_fft_samples];
+        _fftplan = fft_create_plan(n_fft_samples, 
             reinterpret_cast<liquid_float_complex*>(_liquid_inout),
             reinterpret_cast<liquid_float_complex*>(_liquid_inout),
              LIQUID_FFT_FORWARD, 0);
@@ -92,8 +91,8 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::
         }
         work_size = cler::floor2(work_size);
 
-        size_t commit_read_size = (_y_channels[0].size() + work_size) > _buffer_size ?
-            _y_channels[0].size() + work_size - _buffer_size : 0;
+        size_t commit_read_size = (_y_channels[0].size() + work_size) > _n_fft_samples ?
+            _y_channels[0].size() + work_size - _n_fft_samples : 0;
 
         // Read & push to y buffers
         for (size_t i = 0; i < _num_inputs; ++i) {
@@ -128,10 +127,10 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::
         }
 
         size_t available = _snapshot_ready_size.load(std::memory_order_acquire);
-        if (available < _buffer_size) {
+        if (available < _n_fft_samples) {
             return; // not enough data to render
         }
-        assert(available == _buffer_size);
+        assert(available == _n_fft_samples);
         
         ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
@@ -180,7 +179,7 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::
                 }
 
                 // Plot
-                ImPlot::PlotLine(_signal_labels[i].c_str(), _freq_bins, _tmp_magnitude_buffer, _buffer_size);
+                ImPlot::PlotLine(_signal_labels[i].c_str(), _freq_bins, _tmp_magnitude_buffer, _n_fft_samples);
             }
             ImPlot::EndPlot();
         }

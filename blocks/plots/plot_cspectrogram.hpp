@@ -4,7 +4,7 @@
 #include "imgui.h"
 
 struct PlotCSpectrogramBlock : public cler::BlockBase {
-    const size_t BUFFER_SIZE_MULTIPLIER = 5;
+    const size_t BUFFER_SIZE_MULTIPLIER = 3;
 
     cler::Channel<std::complex<float>>* in;
 

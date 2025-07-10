@@ -5,6 +5,8 @@
 #include "imgui.h"
 
 struct PlotCSpectrumBlock : public cler::BlockBase {
+    const size_t BUFFER_SIZE_MULTIPLIER = 3;
+
     cler::Channel<std::complex<float>>* in;
 
     PlotCSpectrumBlock(std::string name, const std::vector<std::string> signal_labels,
@@ -18,7 +20,7 @@ private:
     size_t _num_inputs;
     std::vector<std::string> _signal_labels;
     size_t _sps;
-    size_t _buffer_size;
+    size_t _n_fft_samples;
 
     cler::Channel<std::complex<float>>* _y_channels;  // ring buffers for each signal
     float* _freq_bins;
