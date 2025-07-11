@@ -2,6 +2,7 @@
 #include "cler.hpp"
 #include "liquid.h"
 #include "imgui.h"
+#include "spectral_windows.hpp"
 
 struct PlotCSpectrogramBlock : public cler::BlockBase {
     const size_t BUFFER_SIZE_MULTIPLIER = 3;
@@ -9,7 +10,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
 
     PlotCSpectrogramBlock(std::string name, std::vector<std::string> signal_labels,
-        const size_t sps, const size_t n_fft_samples, const size_t tall);
+        const size_t sps, const size_t n_fft_samples, const size_t tall, const SpectralWindow window_type = SpectralWindow::BlackmanHarris);
     ~PlotCSpectrogramBlock();
     cler::Result<cler::Empty, cler::Error> procedure();
 
@@ -31,6 +32,7 @@ private:
 
     fftplan _fftplan;
     float* _freq_bins;
+    SpectralWindow _window_type;
 
     bool _has_initial_window_position = false;
     ImVec2 _initial_window_position {0.0f, 0.0f};

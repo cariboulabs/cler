@@ -3,6 +3,7 @@
 #include <vector>
 #include "liquid.h"
 #include "imgui.h"
+#include "spectral_windows.hpp"
 
 struct PlotCSpectrumBlock : public cler::BlockBase {
     const size_t BUFFER_SIZE_MULTIPLIER = 3;
@@ -10,7 +11,7 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
 
     PlotCSpectrumBlock(std::string name, const std::vector<std::string> signal_labels,
-        const size_t sps, const size_t buffer_size);
+        const size_t sps, const size_t buffer_size, const SpectralWindow window_type = SpectralWindow::BlackmanHarris);
     ~PlotCSpectrumBlock();
     cler::Result<cler::Empty, cler::Error> procedure();
     void render();
@@ -34,6 +35,7 @@ private:
 
     std::complex<float>* _liquid_inout;
     fftplan _fftplan;
+    SpectralWindow _window_type;
 
     std::atomic<bool> _gui_pause = false;
     bool _has_initial_window_position = false;

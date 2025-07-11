@@ -96,14 +96,16 @@ int main() {
         "Plot Channelizer Spectrum",
         {"pfch 0", "pfch 1", "pfch 2", "pfch 3", "pfch 4"},
         static_cast<size_t>(channel_BW),
-        1024 // FFT size
+        1024,
+        SpectralWindow::BlackmanHarris
     );
 
     PlotCSpectrumBlock plot_input_cspectrum(
         "Plot Input Spectrum",
         {"source 0", "source 1", "source 2", "source 3", "source 4"},
         SPS,
-        1024 // FFT size
+        1024,
+        SpectralWindow::BlackmanHarris
     );
  
     cler::BlockRunner cw_source0_runner(&cw_source0, &adder.in[0], &plot_input_cspectrum.in[0]);

@@ -2,9 +2,9 @@
 #include "implot.h"
 
 PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::string> signal_labels,
-        const size_t sps, const size_t n_fft_samples) 
+        const size_t sps, const size_t n_fft_samples, const SpectralWindow window_type) 
         : BlockBase(std::move(name)), _num_inputs(signal_labels.size()), _signal_labels(std::move(signal_labels)), _sps(sps),
-                     _n_fft_samples(n_fft_samples)
+                     _n_fft_samples(n_fft_samples), _window_type(window_type)
     {
         if (_num_inputs < 1) {
             throw std::invalid_argument("PlotCSpectrumBlock requires at least one input channel");
@@ -150,11 +150,7 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::
                 float coherent_gain = 0.0f;
                 for (size_t n = 0; n < available; ++n) {
 
-                    float w = 0.35875f //blackman-harris
-                        - 0.48829f * cosf(2.0f * M_PI * n / (available - 1))
-                        + 0.14128f * cosf(4.0f * M_PI * n / (available - 1))
-                        - 0.01168f * cosf(6.0f * M_PI * n / (available - 1));
-
+                    float w = spectral_window_function(_window_type, n / static_cast<float>(available - 1));
                     coherent_gain += w;
 
                     // Apply window and shift to center spectrum (-1)^n
