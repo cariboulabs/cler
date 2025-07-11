@@ -58,7 +58,7 @@ struct AddBlock : public cler::BlockBase {
         return cler::Error::NotEnoughSamples;
     }
 
-    size_t transferable = cler::floor2(std::min({available_space, min_available_samples, _buffer_size}));
+    size_t transferable = std::min({available_space, min_available_samples, _buffer_size});
 
     std::fill_n(_sum_buffer, _buffer_size, T{});
     for (size_t i = 0; i < _num_inputs; ++i) {

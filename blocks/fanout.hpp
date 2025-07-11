@@ -46,7 +46,7 @@ struct FanoutBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSpace;
         }
 
-        size_t transferable = cler::floor2(std::min({available_samples, min_output_space, _buffer_size}));
+        size_t transferable = std::min({available_samples, min_output_space, _buffer_size});
 
         in.readN(_tmp, transferable);
         auto write_to_output = [&](auto* out) {

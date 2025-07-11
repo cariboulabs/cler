@@ -78,7 +78,6 @@ cler::Result<cler::Empty, cler::Error> PlotTimeSeriesBlock::procedure() {
     if (work_size == 0) {
         return cler::Error::NotEnoughSamples;
     }
-    work_size = cler::floor2(work_size);
 
     size_t commit_read_size = (_x_channel->size() + work_size) > _buffer_size ?
         _x_channel->size() + work_size - _buffer_size : 0;

@@ -40,7 +40,7 @@ struct SourceFileBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSpace;
         }
 
-        size_t to_read = cler::floor2(std::min(available_space, cler::DEFAULT_BUFFER_SIZE));
+        size_t to_read = std::min(available_space, cler::DEFAULT_BUFFER_SIZE);
 
         _file.read(reinterpret_cast<char*>(_tmp), to_read * sizeof(T));
         size_t samples_read = _file.gcount() / sizeof(T);

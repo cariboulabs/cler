@@ -56,7 +56,7 @@ struct MultiStageResamplerBlock : public cler::BlockBase {
         size_t output_space = out->space();
         size_t input_limit_by_output = output_space / _ratio;
 
-        size_t transferable = cler::floor2(std::min({available_samples, input_limit_by_output, _buffer_size}));
+        size_t transferable = std::min({available_samples, input_limit_by_output, _buffer_size});
 
         if (transferable == 0) {
             return cler::Error::NotEnoughSamples;

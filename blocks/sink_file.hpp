@@ -46,7 +46,7 @@ struct SinkFileBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSamples;
         }
 
-        size_t to_write = cler::floor2(std::min(available_samples, _buffer_size));
+        size_t to_write = std::min(available_samples, _buffer_size);
 
         in.readN(_tmp, to_write);
         _file.write(reinterpret_cast<char*>(_tmp), to_write * sizeof(T));

@@ -35,7 +35,7 @@ struct ComplexToMagPhaseBlock : public cler::BlockBase {
         cler::ChannelBase<float>* a_out,
         cler::ChannelBase<float>* b_out)
     {
-        size_t transferable = cler::floor2(std::min({in.size(), a_out->space(), b_out->space(), _buffer_size}));
+        size_t transferable = std::min({in.size(), a_out->space(), b_out->space(), _buffer_size});
 
         if (transferable == 0) {
             return cler::Error::NotEnoughSamples;

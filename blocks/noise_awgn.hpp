@@ -36,7 +36,7 @@ struct NoiseAWGNBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSamples;
         }
 
-        size_t transferable = cler::floor2(std::min({available_space, available_samples, _buffer_size}));
+        size_t transferable = std::min({available_space, available_samples, _buffer_size});
 
         size_t read = in.readN(_tmp, transferable);
 
