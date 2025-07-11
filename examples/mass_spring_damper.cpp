@@ -309,6 +309,5 @@ int main() {
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
-    flowgraph.stop();
     return 0;
 }

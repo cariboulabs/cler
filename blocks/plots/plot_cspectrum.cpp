@@ -90,7 +90,7 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::
         if (work_size == 0) {
             return cler::Error::NotEnoughSamples;
         }
-        // work_size = cler::floor2p2(work_size);
+        work_size = cler::floor2p2(work_size);
 
         size_t commit_read_size = (_y_channels[0].size() + work_size) > _buffer_size ?
             _y_channels[0].size() + work_size - _buffer_size : 0;
