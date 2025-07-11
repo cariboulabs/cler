@@ -6,8 +6,6 @@
 #include "spectral_windows.hpp"
 
 struct PlotCSpectrumBlock : public cler::BlockBase {
-    const size_t BUFFER_SIZE_MULTIPLIER = 3;
-
     cler::Channel<std::complex<float>>* in;
 
     PlotCSpectrumBlock(std::string name, const std::vector<std::string> signal_labels,
@@ -21,16 +19,14 @@ private:
     size_t _num_inputs;
     std::vector<std::string> _signal_labels;
     size_t _sps;
-    size_t _n_fft_samples;
+    size_t _buffer_size;
 
     cler::Channel<std::complex<float>>* _y_channels;  // ring buffers for each signal
     float* _freq_bins;
 
     std::atomic<size_t> _snapshot_ready_size = 0;
     std::atomic<bool> _snapshot_requested = false;
-    std::atomic<int> _active_snapshot_idx = 0;
-    std::complex<float>** _snapshot0_y_buffers = nullptr;
-    std::complex<float>** _snapshot1_y_buffers = nullptr;
+    std::complex<float>** _snapshot_y_buffers = nullptr;
 
     std::complex<float>* _tmp_y_buffer = nullptr;
     float* _tmp_magnitude_buffer = nullptr;
