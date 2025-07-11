@@ -37,18 +37,20 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::
             _freq_bins[i] = (_sps * (static_cast<float>(i) / static_cast<float>(n_fft_samples))) - (_sps / 2.0f);
         }
         //allocate snapshot buffers
-        _snapshot_y_buffers = new std::complex<float>*[_num_inputs];
+        _snapshot0_y_buffers = new std::complex<float>*[_num_inputs];
+        _snapshot1_y_buffers = new std::complex<float>*[_num_inputs];
         for (size_t i = 0; i < _num_inputs; ++i) {
-            _snapshot_y_buffers[i] = new std::complex<float>[_n_fft_samples];
+            _snapshot0_y_buffers[i] = new std::complex<float>[_n_fft_samples];
+            _snapshot1_y_buffers[i] = new std::complex<float>[_n_fft_samples];
         }
 
         _tmp_y_buffer = new std::complex<float>[_n_fft_samples];
         _tmp_magnitude_buffer = new float[_n_fft_samples];
 
-        _liquid_inout = new std::complex<float>[_n_fft_samples];
+        _liquid_inout = new liquid_float_complex[_n_fft_samples];
         _fftplan = fft_create_plan(n_fft_samples, 
-            reinterpret_cast<liquid_float_complex*>(_liquid_inout),
-            reinterpret_cast<liquid_float_complex*>(_liquid_inout),
+            _liquid_inout,
+            _liquid_inout,
              LIQUID_FFT_FORWARD, 0);
     }
 
@@ -64,9 +66,11 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::
         delete[] _freq_bins;
 
         for (size_t i = 0; i < _num_inputs; ++i) {
-            delete[] _snapshot_y_buffers[i];
+            delete[] _snapshot0_y_buffers[i];
+            delete[] _snapshot1_y_buffers[i];
         }
-        delete[] _snapshot_y_buffers;
+        delete[] _snapshot0_y_buffers;
+        delete[] _snapshot1_y_buffers;
 
         delete[] _liquid_inout;
         fft_destroy_plan(_fftplan);
@@ -102,16 +106,24 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::
 
         if (_snapshot_requested.load(std::memory_order_acquire)) {
             _snapshot_ready_size.store(0, std::memory_order_release); //reset snapshot ready size
+            int write_idx = (_active_snapshot_idx.load(std::memory_order_acquire) + 1) % 2;
+            
             const std::complex<float>* ptr1, *ptr2;
             size_t size1, size2;
-
             size_t available = 0; //all the same by design, always <= _buffer_size
             for (size_t i = 0; i < _num_inputs; ++i) {
                 available = _y_channels[i].peek_read(ptr1, size1, ptr2, size2);
-                memcpy(_snapshot_y_buffers[i], ptr1, size1 * sizeof(std::complex<float>));
-                memcpy(_snapshot_y_buffers[i] + size1, ptr2, size2 * sizeof(std::complex<float>));
+                if (write_idx == 0) {
+                    memcpy(_snapshot0_y_buffers[i], ptr1, size1 * sizeof(std::complex<float>));
+                    memcpy(_snapshot0_y_buffers[i] + size1, ptr2, size2 * sizeof(std::complex<float>));
+                } else {
+                    memcpy(_snapshot1_y_buffers[i], ptr1, size1 * sizeof(std::complex<float>));
+                    memcpy(_snapshot1_y_buffers[i] + size1, ptr2, size2 * sizeof(std::complex<float>));
+                }
             }
-            _snapshot_ready_size.store(available, std::memory_order_release); //update available samples
+            
+            _active_snapshot_idx.store(write_idx, std::memory_order_release);
+            _snapshot_ready_size.store(available, std::memory_order_release);
             _snapshot_requested.store(false, std::memory_order_release);
         }
 
@@ -121,16 +133,12 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::
     void PlotCSpectrumBlock::render() {
         _snapshot_requested.store(true, std::memory_order_release);
 
-        if (_snapshot_ready_size.load(std::memory_order_acquire) == 0) {
-            return; // nothing to render yet
-        }
-
         size_t available = _snapshot_ready_size.load(std::memory_order_acquire);
-        if (available < _n_fft_samples) {
-            return; // not enough data to render
-        }
+        if (available < _n_fft_samples) return;
         assert(available == _n_fft_samples);
-        
+
+        int read_idx = _active_snapshot_idx.load(std::memory_order_acquire);
+
         ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
         ImGui::Begin(name().c_str());
@@ -139,13 +147,20 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::
         if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
             _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
         }
-
+        
         if (ImPlot::BeginPlot(name().c_str())) {
             ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]");
 
             for (size_t i = 0; i < _num_inputs; ++i) {
-                // Copy snapshot buffer into FFT input
-                memcpy(_liquid_inout, _snapshot_y_buffers[i], available * sizeof(liquid_float_complex));
+                if (read_idx == 0) {
+                    for (size_t k = 0; k < available; ++k) {
+                        _liquid_inout[k] = { _snapshot0_y_buffers[i][k].real(), _snapshot0_y_buffers[i][k].imag() };
+                    }
+                } else {
+                    for (size_t k = 0; k < available; ++k) {
+                        _liquid_inout[k] = { _snapshot1_y_buffers[i][k].real(), _snapshot1_y_buffers[i][k].imag() };
+                    }
+                }
 
                 float coherent_gain = 0.0f;
                 for (size_t n = 0; n < available; ++n) {

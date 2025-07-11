@@ -28,7 +28,9 @@ private:
 
     std::atomic<size_t> _snapshot_ready_size = 0;
     std::atomic<bool> _snapshot_requested = false;
-    std::complex<float>** _snapshot_y_buffers = nullptr;
+    std::atomic<int> _active_snapshot_idx = 0;
+    std::complex<float>** _snapshot0_y_buffers = nullptr;
+    std::complex<float>** _snapshot1_y_buffers = nullptr;
 
     std::complex<float>* _tmp_y_buffer = nullptr;
     float* _tmp_magnitude_buffer = nullptr;
