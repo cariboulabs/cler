@@ -1,5 +1,6 @@
 #include "plot_cspectrum.hpp"
 #include "implot.h"
+#include "cler_addons.hpp"
 
 PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name, const std::vector<std::string> signal_labels,
         const size_t sps, const size_t buffer_size, const SpectralWindow window_type) 

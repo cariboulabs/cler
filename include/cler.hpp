@@ -1,7 +1,7 @@
 #pragma once
 
 #include "SPSC-Queue/include/dro/spsc-queue.hpp"
-#include "result.hpp"
+#include "cler_result.hpp"
 #include <thread>
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
