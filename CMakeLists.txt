@@ -16,3 +16,4 @@ add_compile_options(-O3)
 
 add_subdirectory(blocks)
 add_subdirectory(examples)
+add_subdirectory(throughput_comparisons)

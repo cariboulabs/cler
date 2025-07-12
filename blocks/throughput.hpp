@@ -21,7 +21,6 @@ struct ThroughputBlock : public cler::BlockBase {
 
     ~ThroughputBlock() {
         delete[] _tmp;
-        report();
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
@@ -51,6 +50,10 @@ struct ThroughputBlock : public cler::BlockBase {
         std::cout << "  Total samples passed: " << _samples_passed << "\n";
         std::cout << "  Elapsed time (s):     " << seconds << "\n";
         std::cout << "  Throughput (samples/s): " << throughput << "\n";
+    }
+
+    size_t samples_passed() const {
+        return _samples_passed;
     }
 
 private:

@@ -159,6 +159,7 @@ int main() {
 
     flowgraph.stop();
     print_flowgraph_execution_report(flowgraph);
+    throughput.report();
 
     return 0;
 }
