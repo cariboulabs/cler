@@ -136,12 +136,16 @@ namespace cler {
         double avg_dead_time_us = 0.0;
         double total_dead_time_s = 0.0;
         double final_adaptive_sleep_us = 0.0;
-        size_t final_consecutive_fails = 0;
         double total_runtime_s = 0.0;
     };
 
     struct FlowGraphConfig {
-        bool adaptive_sleep = true;
+        bool adaptive_sleep = true;           // Enable or disable adaptive backoff when idle
+        double adaptive_sleep_ramp_up_factor = 1.5; // Multiplier to ramp up sleep when stalling
+        double adaptive_sleep_max_us = 5000.0;      // Cap sleep to avoid excessive delays (us)
+        double adaptive_sleep_target_gain = 0.5;    // Portion of measured dead time to use as target
+        double adaptive_sleep_decay_factor = 0.8;   // How fast to shrink sleep when conditions improve
+        size_t adaptive_sleep_consecutive_fail_threshold = 50; // Number of consecutive failures before ramping up sleep
     };
 
     template<typename... BlockRunners>
@@ -159,79 +163,91 @@ namespace cler {
         FlowGraph& operator=(const FlowGraph&) = delete;
         FlowGraph& operator=(FlowGraph&&) = delete;
 
-        void run(FlowGraphConfig config = FlowGraphConfig{}) {
-            _config = config;
-            _stop_flag = false;
+    void run(FlowGraphConfig config = FlowGraphConfig{}) {
+        _config = config;
+        _stop_flag = false;
 
-            auto launch_threads = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
-                ((_threads[Is] = std::thread([this]() {
-                    auto& runner = std::get<Is>(_runners);
-                    auto& stats  = _stats[Is];
+        auto launch_threads = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+            ((_threads[Is] = std::thread([this]() {
+                auto& runner = std::get<Is>(_runners);
+                auto& stats  = _stats[Is];
 
-                    stats.name = runner.block->name();
+                stats.name = runner.block->name();
 
-                    auto t_start = std::chrono::steady_clock::now();
-                    auto t_last  = t_start;
+                auto t_start = std::chrono::steady_clock::now();
+                auto t_last  = t_start;
 
-                    size_t successful = 0;
-                    size_t failed = 0;
-                    double avg_dead = 0.0;
-                    double total_dead = 0.0;
-                    double sleep_us = 0.0;
-                    size_t consecutive_fails = 0;
+                size_t successful = 0;
+                size_t failed = 0;
+                double avg_dead_time_s = 0.0;
+                double total_dead_time_s = 0.0;
+                double adaptive_sleep_us = 0.0;
+                size_t consecutive_fails = 0;
 
-                    while (!_stop_flag) {
-                        auto t_now = std::chrono::steady_clock::now();
-                        std::chrono::duration<double> dt = t_now - t_last;
-                        t_last = t_now;
+                while (!_stop_flag) {
+                    auto t_now = std::chrono::steady_clock::now();
+                    std::chrono::duration<double> dt = t_now - t_last;
+                    t_last = t_now;
 
-                        Result<Empty, Error> result = std::apply([&](auto*... outs) {
-                            return runner.block->procedure(outs...);
-                        }, runner.outputs);
+                    Result<Empty, Error> result = std::apply([&](auto*... outs) {
+                        return runner.block->procedure(outs...);
+                    }, runner.outputs);
 
-                        if (result.is_err()) {
-                            failed++;
-                            auto err = result.unwrap_err();
-                            if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
-                                total_dead += dt.count();
-                                avg_dead += (dt.count() - avg_dead) / failed;
-                                consecutive_fails++;
+                    if (result.is_err()) {
+                        failed++;
+                        auto err = result.unwrap_err();
 
-                                if (_config.adaptive_sleep) {
-                                    if (consecutive_fails > 50) {
-                                        sleep_us = std::min(sleep_us * 1.5 + 1.0, 5000.0);
-                                    }
-                                    double desired = avg_dead * 1e6 * 0.5;
-                                    sleep_us = std::max(sleep_us, desired);
-                                    std::this_thread::sleep_for(std::chrono::microseconds(static_cast<int>(sleep_us)));
-                                } else {
-                                    std::this_thread::yield();
+                        if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
+                            total_dead_time_s += dt.count();
+                            avg_dead_time_s += (dt.count() - avg_dead_time_s) / failed;
+                            consecutive_fails++;
+
+                            if (_config.adaptive_sleep) {
+                                if (consecutive_fails > _config.adaptive_sleep_consecutive_fail_threshold) {
+                                    adaptive_sleep_us = std::min(
+                                        adaptive_sleep_us * _config.adaptive_sleep_ramp_up_factor + 1.0,
+                                        _config.adaptive_sleep_max_us
+                                    );
                                 }
+
+                                double desired_us = avg_dead_time_s * 1e6 * _config.adaptive_sleep_target_gain;
+                                adaptive_sleep_us = std::max(adaptive_sleep_us, desired_us);
+
+                                std::this_thread::sleep_for(std::chrono::microseconds(
+                                    static_cast<int>(adaptive_sleep_us)
+                                ));
                             } else {
                                 std::this_thread::yield();
                             }
+
                         } else {
-                            successful++;
-                            consecutive_fails = 0;
-                            sleep_us *= 0.8;
+                            std::this_thread::yield();
+                        }
+
+                    } else {
+                        successful++;
+                        consecutive_fails = 0;
+
+                        if (_config.adaptive_sleep) {
+                            adaptive_sleep_us *= _config.adaptive_sleep_decay_factor;
                         }
                     }
+                }
 
-                    auto t_end = std::chrono::steady_clock::now();
-                    std::chrono::duration<double> total_time = t_end - t_start;
+                auto t_end = std::chrono::steady_clock::now();
+                std::chrono::duration<double> total_runtime_s = t_end - t_start;
 
-                    stats.successful_procedures = successful;
-                    stats.failed_procedures = failed;
-                    stats.avg_dead_time_us = avg_dead * 1e6;
-                    stats.total_dead_time_s = total_dead;
-                    stats.final_adaptive_sleep_us = _config.adaptive_sleep ? sleep_us : 0.0;
-                    stats.final_consecutive_fails = consecutive_fails;
-                    stats.total_runtime_s = total_time.count();
-                })), ...);
-            };
+                stats.successful_procedures = successful;
+                stats.failed_procedures = failed;
+                stats.avg_dead_time_us = avg_dead_time_s * 1e6;
+                stats.total_dead_time_s = total_dead_time_s;
+                stats.final_adaptive_sleep_us = _config.adaptive_sleep ? adaptive_sleep_us : 0.0;
+                stats.total_runtime_s = total_runtime_s.count();
+            })), ...);
+        };
 
-            launch_threads(std::make_index_sequence<_N>{});
-        }
+        launch_threads(std::make_index_sequence<_N>{});
+    }
 
         void stop() {
             _stop_flag = true;

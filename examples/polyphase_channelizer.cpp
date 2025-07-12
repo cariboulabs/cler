@@ -139,7 +139,9 @@ int main() {
         plot_input_cspectrum_runner
     );
 
-    flowgraph.run();
+    cler::FlowGraphConfig config;
+    config.adaptive_sleep = false;
+    flowgraph.run(config);
     
     const float GW = 1800.0f;
     const float GH = 1000.0f;
