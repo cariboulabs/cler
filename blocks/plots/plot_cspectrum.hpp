@@ -1,16 +1,24 @@
 #pragma once
+
 #include "cler.hpp"
-#include <vector>
 #include "liquid.h"
 #include "imgui.h"
 #include "spectral_windows.hpp"
 
 struct PlotCSpectrumBlock : public cler::BlockBase {
+    // Channels: 1 per input signal
     cler::Channel<std::complex<float>>* in;
 
-    PlotCSpectrumBlock(std::string name, const std::vector<std::string> signal_labels,
-        const size_t sps, const size_t buffer_size, const SpectralWindow window_type = SpectralWindow::BlackmanHarris);
+    // Construct & destruct
+    PlotCSpectrumBlock(std::string name,
+                       const std::vector<std::string> signal_labels,
+                       const size_t sps,
+                       const size_t n_fft_samples,
+                       const SpectralWindow window_type  = SpectralWindow::BlackmanHarris);
+
     ~PlotCSpectrumBlock();
+
+    // Called in the flowgraph
     cler::Result<cler::Empty, cler::Error> procedure();
     void render();
     void set_initial_window(float x, float y, float w, float h);
@@ -18,25 +26,22 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
 private:
     size_t _num_inputs;
     std::vector<std::string> _signal_labels;
+
     size_t _sps;
-    size_t _buffer_size;
-
-    cler::Channel<std::complex<float>>* _y_channels;  // ring buffers for each signal
-    float* _freq_bins;
-
-    std::atomic<size_t> _snapshot_ready_size = 0;
-    std::atomic<bool> _snapshot_requested = false;
-    std::complex<float>** _snapshot_y_buffers = nullptr;
-
-    std::complex<float>* _tmp_y_buffer = nullptr;
-    float* _tmp_magnitude_buffer = nullptr;
-
-    std::complex<float>* _liquid_inout;
-    fftplan _fftplan;
+    size_t _n_fft_samples;
     SpectralWindow _window_type;
 
-    std::atomic<bool> _gui_pause = false;
+    // FFT plan and buffers
+    std::complex<float>* _liquid_inout;
+    std::complex<float>* _tmp_y_buffer;
+
+    float** _latest_magnitude_buffer; // [num_inputs][n_fft_samples]
+    float* _freq_bins;
+
+    fftplan _fftplan;
+
+    // GUI settings
+    ImVec2 _initial_window_position = ImVec2(200, 200);
+    ImVec2 _initial_window_size = ImVec2(600, 400);
     bool _has_initial_window_position = false;
-    ImVec2 _initial_window_position {0.0f, 0.0f};
-    ImVec2 _initial_window_size {600.0f, 300.0f};
 };

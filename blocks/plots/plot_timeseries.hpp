@@ -6,8 +6,10 @@
 struct PlotTimeSeriesBlock : public cler::BlockBase {
     cler::Channel<float>* in;
 
-    PlotTimeSeriesBlock(std::string name, std::vector<std::string> signal_labels,
-        const size_t sps, const float duration_s);
+    PlotTimeSeriesBlock(std::string name,
+        const std::vector<std::string> signal_labels,
+        const size_t sps,
+        const float duration_s);
     ~PlotTimeSeriesBlock();
     cler::Result<cler::Empty, cler::Error> procedure();
     void render();

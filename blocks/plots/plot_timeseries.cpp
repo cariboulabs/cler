@@ -1,9 +1,14 @@
 #include "plot_timeseries.hpp"
 #include "implot.h"
 
-PlotTimeSeriesBlock::PlotTimeSeriesBlock(std::string name, std::vector<std::string> signal_labels,
-    const size_t sps, const float duration_s) 
-    : BlockBase(std::move(name)), _num_inputs(signal_labels.size()), _signal_labels(std::move(signal_labels)), _sps(sps) 
+PlotTimeSeriesBlock::PlotTimeSeriesBlock(std::string name,
+    const std::vector<std::string> signal_labels,
+    const size_t sps,
+    const float duration_s) 
+    : BlockBase(std::move(name)),
+    _num_inputs(signal_labels.size()), 
+    _signal_labels(std::move(signal_labels)),
+     _sps(sps) 
 {
     if (_num_inputs < 1) {
         throw std::invalid_argument("PlotTimeSeriesBlock requires at least one input channel");

@@ -1,8 +1,12 @@
 #include "plot_cspectrogram.hpp"
 #include "implot.h"
 
-PlotCSpectrogramBlock::PlotCSpectrogramBlock(std::string name, std::vector<std::string> signal_labels,
-    const size_t sps, const size_t n_fft_samples, const size_t tall, const SpectralWindow window_type) 
+PlotCSpectrogramBlock::PlotCSpectrogramBlock(std::string name,
+    const std::vector<std::string> signal_labels,
+    const size_t sps,
+    const size_t n_fft_samples, 
+    const size_t tall,
+    const SpectralWindow window_type) 
     : BlockBase(std::move(name)), _num_inputs(signal_labels.size()), _signal_labels(std::move(signal_labels)), _sps(sps),
              _n_fft_samples(n_fft_samples), _tall(tall), _window_type(window_type)
 {

@@ -9,8 +9,12 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
 
     cler::Channel<std::complex<float>>* in;
 
-    PlotCSpectrogramBlock(std::string name, std::vector<std::string> signal_labels,
-        const size_t sps, const size_t n_fft_samples, const size_t tall, const SpectralWindow window_type = SpectralWindow::BlackmanHarris);
+    PlotCSpectrogramBlock(std::string name,
+        const std::vector<std::string> signal_labels,
+        const size_t sps,
+        const size_t n_fft_samples,
+        const size_t tall,
+        const SpectralWindow window_type = SpectralWindow::BlackmanHarris);
     ~PlotCSpectrogramBlock();
     cler::Result<cler::Empty, cler::Error> procedure();
 
