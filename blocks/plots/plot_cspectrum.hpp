@@ -6,7 +6,8 @@
 #include "spectral_windows.hpp"
 
 struct PlotCSpectrumBlock : public cler::BlockBase {
-    // Channels: 1 per input signal
+    const size_t BUFFER_SIZE_MULTIPLIER = 3;
+
     cler::Channel<std::complex<float>>* in;
 
     // Construct & destruct
@@ -33,9 +34,11 @@ private:
 
     // FFT plan and buffers
     std::complex<float>* _liquid_inout;
-    std::complex<float>* _tmp_y_buffer;
+    float* _tmp_mag_buffer;
 
-    float** _latest_magnitude_buffer; // [num_inputs][n_fft_samples]
+    std::complex<float>** _buffers0; // [num_inputs][n_fft_samples]
+    std::complex<float>** _buffers1; // [num_inputs][n_fft_samples]
+    std::atomic<uint8_t> _show_buffer = 0;
     float* _freq_bins;
 
     fftplan _fftplan;

@@ -29,14 +29,16 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name,
         ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
     );
     for (size_t i = 0; i < _num_inputs; ++i) {
-        new (&in[i]) cler::Channel<std::complex<float>>(_n_fft_samples * 2);
+        new (&in[i]) cler::Channel<std::complex<float>>(_n_fft_samples * BUFFER_SIZE_MULTIPLIER);
     }
 
     _liquid_inout = new std::complex<float>[_n_fft_samples];
-    _tmp_y_buffer = new std::complex<float>[_n_fft_samples];
-    _latest_magnitude_buffer = new float*[_num_inputs];
+    _tmp_mag_buffer = new float[_n_fft_samples];
+    _buffers0 = new std::complex<float>*[_num_inputs];
+    _buffers1 = new std::complex<float>*[_num_inputs];
     for (size_t i = 0; i < _num_inputs; ++i) {
-        _latest_magnitude_buffer[i] = new float[_n_fft_samples]();
+        _buffers0[i] = new std::complex<float>[_n_fft_samples]();
+        _buffers1[i] = new std::complex<float>[_n_fft_samples]();
     }
 
     _freq_bins = new float[_n_fft_samples];
@@ -58,12 +60,14 @@ PlotCSpectrumBlock::~PlotCSpectrumBlock() {
     ::operator delete[](in);
 
     delete[] _liquid_inout;
-    delete[] _tmp_y_buffer;
+    delete[] _tmp_mag_buffer;
 
     for (size_t i = 0; i < _num_inputs; ++i) {
-        delete[] _latest_magnitude_buffer[i];
+        delete[] _buffers0[i];
+        delete[] _buffers1[i];
     }
-    delete[] _latest_magnitude_buffer;
+    delete[] _buffers0;
+    delete[] _buffers1;
 
     delete[] _freq_bins;
     fft_destroy_plan(_fftplan);
@@ -80,31 +84,15 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
         return cler::Error::NotEnoughSamples;
     }
 
+    uint8_t load_buffer = (_show_buffer.load(std::memory_order_relaxed) + 1) % 2;
     for (size_t i = 0; i < _num_inputs; ++i) {
-        in[i].readN(_tmp_y_buffer, _n_fft_samples);
-
-        memcpy(_liquid_inout, _tmp_y_buffer, _n_fft_samples * sizeof(std::complex<float>));
-
-        float coherent_gain = 0.0f;
-        for (size_t n = 0; n < _n_fft_samples; ++n) {
-            float w = spectral_window_function(_window_type, n / static_cast<float>(_n_fft_samples - 1));
-            coherent_gain += w;
-            _liquid_inout[n] *= w * ((n % 2 == 0) ? 1.0f : -1.0f);
-        }
-        coherent_gain /= static_cast<float>(_n_fft_samples);
-
-        fft_execute(_fftplan);
-
-        float scale = static_cast<float>(_n_fft_samples) * coherent_gain;
-        float scale2 = scale * scale;
-
-        for (size_t j = 0; j < _n_fft_samples; ++j) {
-            float re = _liquid_inout[j].real();
-            float im = _liquid_inout[j].imag();
-            float power = (re * re + im * im) / scale2;
-            _latest_magnitude_buffer[i][j] = 10.0f * log10f(power + 1e-20f);
+        if (load_buffer == 0) {
+            in[i].readN(_buffers0[i], _n_fft_samples);
+        } else {
+            in[i].readN(_buffers1[i], _n_fft_samples);
         }
     }
+    _show_buffer.store(load_buffer, std::memory_order_release);
 
     return cler::Empty{};
 }
@@ -116,11 +104,40 @@ void PlotCSpectrumBlock::render() {
 
     if (ImPlot::BeginPlot(name().c_str())) {
         ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]");
+
+        uint8_t show_buffer = _show_buffer.load(std::memory_order_acquire);
         for (size_t i = 0; i < _num_inputs; ++i) {
-                ImPlot::PlotLine(_signal_labels[i].c_str(),
-                                _freq_bins,
-                                _latest_magnitude_buffer[i],
-                                _n_fft_samples);
+            if (show_buffer == 0) {
+                memcpy(_liquid_inout, _buffers0[i], _n_fft_samples * sizeof(std::complex<float>));
+            } else {
+                memcpy(_liquid_inout, _buffers1[i], _n_fft_samples * sizeof(std::complex<float>));
+            }
+
+            float coherent_gain = 0.0f;
+            for (size_t n = 0; n < _n_fft_samples; ++n) {
+                float w = spectral_window_function(_window_type, n / static_cast<float>(_n_fft_samples - 1));
+                coherent_gain += w;
+                _liquid_inout[n] *= w * ((n % 2 == 0) ? 1.0f : -1.0f);
+            } 
+
+            coherent_gain /= static_cast<float>(_n_fft_samples);
+
+            fft_execute(_fftplan);
+
+            float scale = static_cast<float>(_n_fft_samples) * coherent_gain;
+            float scale2 = scale * scale;
+
+            for (size_t j = 0; j < _n_fft_samples; ++j) {
+                float re = _liquid_inout[j].real();
+                float im = _liquid_inout[j].imag();
+                float power = (re * re + im * im) / scale2;
+                _tmp_mag_buffer[j] = 10.0f * log10f(power + 1e-20f);
+            }
+
+            ImPlot::PlotLine(_signal_labels[i].c_str(),
+                             _freq_bins,
+                             _tmp_mag_buffer,
+                             _n_fft_samples);
         }
         ImPlot::EndPlot();
     }
