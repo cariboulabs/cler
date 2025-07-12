@@ -140,7 +140,7 @@ int main() {
     );
 
     cler::FlowGraphConfig config;
-    config.adaptive_sleep = false;
+    config.adaptive_sleep = true;
     flowgraph.run(config);
     
     const float GW = 1800.0f;

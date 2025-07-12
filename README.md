@@ -13,7 +13,7 @@ Its goal is to keep a tiny core while allowing maximal flexability:
 
 **What's so special?** historically DSP flowgraph implementations rely on polymorphism to abstract over blocks and channels. This can constrain the architecture and lead to compromises — for example, GNURadio uses void* inputs/outputs in its procedure calls to achieve runtime flexibility. Instead, Cler uses variadic templates to achieve type safety and flexibility without runtime overhead. This approach was made possible by C++17 features like std::apply and forward deduction guide. The same approach can be taken in Rust with Traits and Zig with CompTime, but these languages still don't have the facilities for mature DSP on small embedded systems (STM32 for example).
 
-**How does it compare to GNURadio or FutureSDR**? Unlike GNU Radio or FutureSDR, Cler doesn’t try to compete on massive throughput or complex scheduling — instead, it keeps things simpler with explicit, statically defined ring buffers and minimal runtime coordination, making data flow more predictable and practical for small embedded systems where buffer pools are rarely practical — yet still good enough for many commercial SDRs and thier applications.
+**How does it compare to GNURadio or FutureSDR**? Well, it Doesn't. Unlike GNU Radio or FutureSDR, Cler doesn’t try to compete on massive throughput by complex scheduling and a ring buffer pool. Instead, it keeps things simpler with block owned ring buffers and minimal thread coordination. This makes data flow more predictable and practical for small embedded systems, yet still good enough for many commercial SDRs and thier applications. For example, we don't use  double-mapped buffers as we can't rely on having an MMU.
 
 **How to use it?** Just Include `include/cler.hpp` and you are good for the basics. Want to use already written blocks? Inlcude them from `blocks/*`
 
@@ -158,6 +158,10 @@ Importat:
     - Will not force blocks to implement markup files. Has to be generated from their .hpp code.
 
 # Contributing
+We welcome any contribution — and constructive criticism too!  
+There’s a lot we don’t know yet and plenty to learn from the SDR community.
+
+How to add code:
 - ✅ **Modern C++ (C++20)** — but always mindful of embedded constraints.
 - ⚙️ **Keep the hardware interface size warning enabled** — so users understand what’s happening under the hood.
 - ⚡ **Prefer templates and function pointers** — avoid `std::function` and use lambdas only if required.

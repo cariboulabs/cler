@@ -140,7 +140,7 @@ namespace cler {
     };
 
     struct FlowGraphConfig {
-        bool adaptive_sleep = true;           // Enable or disable adaptive backoff when idle
+        bool adaptive_sleep = false;           // Enable or disable adaptive backoff when idle
         double adaptive_sleep_ramp_up_factor = 1.5; // Multiplier to ramp up sleep when stalling
         double adaptive_sleep_max_us = 5000.0;      // Cap sleep to avoid excessive delays (us)
         double adaptive_sleep_target_gain = 0.5;    // Portion of measured dead time to use as target
