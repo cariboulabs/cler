@@ -54,6 +54,7 @@ struct SourceCWBlock : public cler::BlockBase {
             }
 
             _phasor *= _phasor_inc;
+            _phasor /= std::abs(_phasor); // Normalize to keep phasor on the unit circle, CRUCIAL for stability
         }
 
         out->writeN(_tmp, available_space);

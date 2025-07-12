@@ -28,7 +28,7 @@ struct SourceChirpBlock : public cler::BlockBase {
         if (_sps == 0) throw std::invalid_argument("Sample rate must be greater than zero.");
         if (_chirp_duration_s <= 0) throw std::invalid_argument("Chirp duration must be positive.");
 
-        _num_samples = static_cast<size_t>(_chirp_duration_s * _sps);
+        _n_samples_before_reset = static_cast<size_t>(_chirp_duration_s * _sps);
         _k = (_f1_hz - _f0_hz) / _chirp_duration_s; // Hz/s
 
         // Precompute per-sample sweep rate
@@ -60,18 +60,13 @@ struct SourceChirpBlock : public cler::BlockBase {
                 _tmp[i] = _amplitude * chirp.real();
             }
 
-            _phasor *= _psi; // Update phasor with current phase increment
+            _phasor *= _psi;
+            _phasor /= std::abs(_phasor); // Normalize to keep phasor on the unit circle, CRUCIAL for stability
             _psi *= _psi_inc; // Update phase increment for next sample
 
-            ++_sample_idx;
-            if (_sample_idx >= _num_samples) {
-                // Restart chirp
-                _sample_idx = 0;
-                _phasor = std::complex<float>(1.0f, 0.0f);
-                const float dt = 1.0f / static_cast<float>(_sps);
-                const float w0 = 2.0f * PI * _f0_hz * dt;
-                _psi = std::polar(1.0f, w0);
-                _psi_inc = std::polar(1.0f, 2.0f * PI * _k * dt * dt);
+            ++_samples_counter;
+            if (_samples_counter >= _n_samples_before_reset) {
+                reset();
             }
         }
 
@@ -81,6 +76,15 @@ struct SourceChirpBlock : public cler::BlockBase {
     }
 
 private:
+    void reset() {
+        _samples_counter = 0;
+        _phasor = std::complex<float>(1.0f, 0.0f);
+        const float dt = 1.0f / static_cast<float>(_sps);
+        const float w0 = 2.0f * PI * _f0_hz * dt;
+        _psi = std::polar(1.0f, w0);
+        _psi_inc = std::polar(1.0f, 2.0f * PI * _k * dt * dt);
+    }
+
     static constexpr float PI = std::numbers::pi_v<float>;
     float _amplitude;
     float _f0_hz;
@@ -88,9 +92,9 @@ private:
     size_t _sps;
     float _chirp_duration_s;
 
-    size_t _num_samples;
+    size_t _n_samples_before_reset;
     float _k;              // Sweep rate (Hz/s)
-    size_t _sample_idx = 0;
+    size_t _samples_counter = 0;
 
     // Recursive oscillator state
     std::complex<float> _phasor;   // Current sample phasor
