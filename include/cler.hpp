@@ -129,63 +129,107 @@ namespace cler {
     template<typename Block, typename... Channels>
     BlockRunner(Block*, Channels*...) -> BlockRunner<Block, Channels...>;
 
+    struct BlockExecutionStats {
+        std::string name;
+        size_t successful_procedures = 0;
+        size_t failed_procedures = 0;
+        double avg_dead_time_us = 0.0;
+        double total_dead_time_s = 0.0;
+        double final_adaptive_sleep_us = 0.0;
+        size_t final_consecutive_fails = 0;
+        double total_runtime_s = 0.0;
+    };
+
+    struct FlowGraphConfig {
+        bool adaptive_sleep = true;
+    };
+
     template<typename... BlockRunners>
     class FlowGraph {
     public:
         FlowGraph(BlockRunners&... runners)
-            : _runners(std::make_tuple(std::forward<BlockRunners>(runners)...)) {}
-
-        ~FlowGraph() {
-            stop(); // Ensure threads are stopped before destruction
+            : _runners(std::make_tuple(std::forward<BlockRunners>(runners)...)) {
+            _stats.resize(sizeof...(BlockRunners));
         }
 
-        //delete copy, move and assignment. Once created that thing does not go anywhere
+        ~FlowGraph() { stop(); }
+
         FlowGraph(const FlowGraph&) = delete;
         FlowGraph(FlowGraph&&) = delete;
         FlowGraph& operator=(const FlowGraph&) = delete;
         FlowGraph& operator=(FlowGraph&&) = delete;
 
-        void run(const bool print_execution_report = true) {
-            _print_execution_report = print_execution_report;
+        void run(FlowGraphConfig config = FlowGraphConfig{}) {
+            _config = config;
             _stop_flag = false;
 
-            // This lambda takes an index sequence (0, 1, ..., N-1) and expands it at compile time.
             auto launch_threads = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
                 ((_threads[Is] = std::thread([this]() {
                     auto& runner = std::get<Is>(_runners);
-                    size_t succesful_procedures = 0;
-                    size_t failed_procedures = 0;
+                    auto& stats  = _stats[Is];
+
+                    stats.name = runner.block->name();
+
+                    auto t_start = std::chrono::steady_clock::now();
+                    auto t_last  = t_start;
+
+                    size_t successful = 0;
+                    size_t failed = 0;
+                    double avg_dead = 0.0;
+                    double total_dead = 0.0;
+                    double sleep_us = 0.0;
+                    size_t consecutive_fails = 0;
 
                     while (!_stop_flag) {
+                        auto t_now = std::chrono::steady_clock::now();
+                        std::chrono::duration<double> dt = t_now - t_last;
+                        t_last = t_now;
+
                         Result<Empty, Error> result = std::apply([&](auto*... outs) {
                             return runner.block->procedure(outs...);
                         }, runner.outputs);
+
                         if (result.is_err()) {
-                            failed_procedures++;
+                            failed++;
                             auto err = result.unwrap_err();
-                            if (err == Error::InvalidChannelIndex) {
-                                stop();
-                                throw std::runtime_error(to_str(err)); //only crashes the current thread, so we stop
+                            if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
+                                total_dead += dt.count();
+                                avg_dead += (dt.count() - avg_dead) / failed;
+                                consecutive_fails++;
+
+                                if (_config.adaptive_sleep) {
+                                    if (consecutive_fails > 50) {
+                                        sleep_us = std::min(sleep_us * 1.5 + 1.0, 5000.0);
+                                    }
+                                    double desired = avg_dead * 1e6 * 0.5;
+                                    sleep_us = std::max(sleep_us, desired);
+                                    std::this_thread::sleep_for(std::chrono::microseconds(static_cast<int>(sleep_us)));
+                                } else {
+                                    std::this_thread::yield();
+                                }
                             } else {
                                 std::this_thread::yield();
                             }
                         } else {
-                            succesful_procedures++;
+                            successful++;
+                            consecutive_fails = 0;
+                            sleep_us *= 0.8;
                         }
                     }
-                    
-                    if (_print_execution_report) {
-                        size_t total_procedures = succesful_procedures + failed_procedures;
-                        float success_rate = total_procedures > 0 ? 
-                            (static_cast<float>(succesful_procedures) / total_procedures) * 100.0f : 0.0f;
-                        printf("Block %s finished with success rate: %.2f%%\n", 
-                            runner.block->name().c_str(), success_rate);
-                    }
 
+                    auto t_end = std::chrono::steady_clock::now();
+                    std::chrono::duration<double> total_time = t_end - t_start;
+
+                    stats.successful_procedures = successful;
+                    stats.failed_procedures = failed;
+                    stats.avg_dead_time_us = avg_dead * 1e6;
+                    stats.total_dead_time_s = total_dead;
+                    stats.final_adaptive_sleep_us = _config.adaptive_sleep ? sleep_us : 0.0;
+                    stats.final_consecutive_fails = consecutive_fails;
+                    stats.total_runtime_s = total_time.count();
                 })), ...);
             };
 
-            // Generate the index sequence and call the lambda to launch threads
             launch_threads(std::make_index_sequence<_N>{});
         }
 
@@ -194,13 +238,18 @@ namespace cler {
             for (auto& t : _threads) {
                 if (t.joinable()) t.join();
             }
+        }
 
-            if (_print_execution_report) {
-                printf("Execution Report Warning!!!:\n");
-                printf("If the flowgraph is working correctly, then blocks with a *higher* "
-                       "procedure success rates can be the bottlenecks that block traffic.\n");
-                printf("This is a classic case of `survivor bias`\n");
-            }
+        bool is_stopped() const {
+            return _stop_flag.load(std::memory_order_seq_cst);
+        }
+
+        const FlowGraphConfig& config() const {
+            return _config;
+        }
+
+        const std::vector<BlockExecutionStats>& stats() const {
+            return _stats;
         }
 
     private:
@@ -208,8 +257,10 @@ namespace cler {
         std::tuple<BlockRunners...> _runners;
         std::array<std::thread, _N> _threads;
         std::atomic<bool> _stop_flag = false;
-        bool _print_execution_report = false;
+        FlowGraphConfig _config;
+        std::vector<BlockExecutionStats> _stats;
     };
-    
+
     static constexpr size_t DEFAULT_BUFFER_SIZE = 1024;
-}
+
+} // namespace cler

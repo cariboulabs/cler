@@ -86,6 +86,7 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
 
     uint8_t load_buffer = (_show_buffer.load(std::memory_order_relaxed) + 1) % 2;
     for (size_t i = 0; i < _num_inputs; ++i) {
+        if (available > 2 * _n_fft_samples) {in[i].commit_read(available - _n_fft_samples);}
         if (load_buffer == 0) {
             in[i].readN(_buffers0[i], _n_fft_samples);
         } else {

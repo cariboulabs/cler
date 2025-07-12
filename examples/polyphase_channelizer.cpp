@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "cler_addons.hpp"
 #include "gui_manager.hpp"
 #include "blocks/source_cw.hpp"
 #include "blocks/polyphase_channelizer.hpp"
@@ -125,7 +126,7 @@ int main() {
     cler::BlockRunner plot_polyphase_cspectrum_runner(&plot_polyphase_cspectrum);
     cler::BlockRunner plot_input_cspectrum_runner(&plot_input_cspectrum);
 
-    cler::FlowGraph flow_graph(
+    cler::FlowGraph flowgraph(
         cw_source0_runner,
         cw_source1_runner,
         cw_source2_runner,
@@ -138,7 +139,7 @@ int main() {
         plot_input_cspectrum_runner
     );
 
-    flow_graph.run();
+    flowgraph.run();
     
     const float GW = 1800.0f;
     const float GH = 1000.0f;
@@ -153,6 +154,9 @@ int main() {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+
+    flowgraph.stop();
+    print_flowgraph_execution_report(flowgraph);
 
     return 0;
 }
