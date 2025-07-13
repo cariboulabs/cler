@@ -98,20 +98,13 @@ int main() {
     CopyBlock stage3("Stage3");
     SinkBlock sink("Sink", SAMPLES);
 
-    cler::BlockRunner source_runner(&source, &stage0.in);
-    cler::BlockRunner stage0_runner(&stage0, &stage1.in);
-    cler::BlockRunner stage1_runner(&stage1, &stage2.in);
-    cler::BlockRunner stage2_runner(&stage2, &stage3.in);
-    cler::BlockRunner stage3_runner(&stage3, &sink.in);
-    cler::BlockRunner sink_runner(&sink);
-
     auto fg = cler::FlowGraph(
-        source_runner,
-        stage0_runner,
-        stage1_runner,
-        stage2_runner,
-        stage3_runner,
-        sink_runner
+        cler::BlockRunner(&source, &stage0.in),
+        cler::BlockRunner(&stage0, &stage1.in),
+        cler::BlockRunner(&stage1, &stage2.in),
+        cler::BlockRunner(&stage2, &stage3.in),
+        cler::BlockRunner(&stage3, &sink.in),
+        cler::BlockRunner(&sink)
     );
 
     fg.run();

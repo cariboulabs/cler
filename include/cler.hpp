@@ -152,8 +152,8 @@ namespace cler {
     template<typename... BlockRunners>
     class FlowGraph {
     public:
-        FlowGraph(BlockRunners&... runners)
-            : _runners(std::make_tuple(std::forward<BlockRunners>(runners)...)) {
+        FlowGraph(BlockRunners... runners)
+            : _runners(std::make_tuple(std::forward<BlockRunners>(std::move(runners))...)) {
             _stats.resize(sizeof...(BlockRunners));
         }
 
