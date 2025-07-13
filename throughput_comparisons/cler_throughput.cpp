@@ -3,6 +3,7 @@
 #include <chrono>
 #include <thread>
 #include <algorithm>
+#include <random>
 
 constexpr size_t BUFFER_SIZE = 1024;
 
@@ -26,19 +27,26 @@ private:
 struct CopyBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
-    CopyBlock(std::string name) : BlockBase(std::move(name)), in(BUFFER_SIZE) {}
+    CopyBlock(std::string name)
+        : BlockBase(std::move(name)), in(BUFFER_SIZE),
+          _rng(std::random_device{}()), _dist(1, 512) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        size_t transferable = std::min(in.size(), out->space());
+        size_t chunk = _dist(_rng);
+        size_t transferable = std::min({in.size(), out->space(), chunk});
+
         if (transferable == 0) return cler::Error::NotEnoughSamples;
 
         in.readN(_tmp, transferable);
-        size_t written = out->writeN(_tmp, transferable);
+        out->writeN(_tmp, transferable);
+
         return cler::Empty{};
     }
 
-    private:
+private:
     float _tmp[BUFFER_SIZE];
+    std::mt19937 _rng;
+    std::uniform_int_distribution<size_t> _dist;
 };
 
 struct SinkBlock : public cler::BlockBase {
