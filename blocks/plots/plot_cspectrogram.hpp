@@ -1,8 +1,11 @@
 #pragma once
+
 #include "cler.hpp"
 #include "liquid.h"
 #include "imgui.h"
+#include "implot.h"
 #include "spectral_windows.hpp"
+#include <mutex>
 
 struct PlotCSpectrogramBlock : public cler::BlockBase {
     const size_t BUFFER_SIZE_MULTIPLIER = 3;
@@ -10,35 +13,41 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>>* in;
 
     PlotCSpectrogramBlock(std::string name,
-        const std::vector<std::string> signal_labels,
-        const size_t sps,
-        const size_t n_fft_samples,
-        const size_t tall,
-        const SpectralWindow window_type = SpectralWindow::BlackmanHarris);
+                          const std::vector<std::string> signal_labels,
+                          size_t sps,
+                          size_t n_fft_samples,
+                          size_t tall,
+                          SpectralWindow window_type = SpectralWindow::BlackmanHarris);
+
     ~PlotCSpectrogramBlock();
+
     cler::Result<cler::Empty, cler::Error> procedure();
-
     void render();
-
     void set_initial_window(float x, float y, float w, float h);
 
 private:
     size_t _num_inputs;
     std::vector<std::string> _signal_labels;
+
     size_t _sps;
     size_t _n_fft_samples;
     size_t _tall;
+    SpectralWindow _window_type;
 
     std::complex<float>* _liquid_inout;
     std::complex<float>* _tmp_y_buffer;
-    float* _tmp_magnitude_buffer;
-    float** _spectrograms;
+    float* _tmp_mag_buffer;
+
+    float** _spectrograms; // [num_inputs][tall * n_fft_samples]
+
+    float* _freq_bins;
 
     fftplan _fftplan;
-    float* _freq_bins;
-    SpectralWindow _window_type;
 
+    std::mutex _spectrogram_mutex;
+
+    // GUI
+    ImVec2 _initial_window_position = ImVec2(200, 200);
+    ImVec2 _initial_window_size = ImVec2(600, 400);
     bool _has_initial_window_position = false;
-    ImVec2 _initial_window_position {0.0f, 0.0f};
-    ImVec2 _initial_window_size {600.0f, 300.0f};
 };
