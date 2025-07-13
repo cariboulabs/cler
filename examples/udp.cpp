@@ -67,17 +67,11 @@ int main() {
                       MAX_UDP_BLOB_SIZE, 100, nullptr, nullptr);
     SinkTerminalBlock<UDPBlock::BlobSlice> sink_terminal("SinkTerminal", on_sink_terminal_receive, &source_datagram._slab);
 
-    cler::BlockRunner source_datagram_runner(&source_datagram, &sink_udp.in);
-    cler::BlockRunner sink_udp_runner(&sink_udp);
-    cler::BlockRunner sink_terminal_runner(&sink_terminal);
-    cler::BlockRunner source_udp_runner(&source_udp, &sink_terminal.in);
-
-
     cler::FlowGraph fg(
-                    source_datagram_runner,
-                    sink_udp_runner,
-                    source_udp_runner,
-                    sink_terminal_runner
+                    cler::BlockRunner(&source_datagram, &sink_udp.in),
+                    cler::BlockRunner(&sink_udp),
+                    cler::BlockRunner(&sink_terminal),
+                    cler::BlockRunner(&source_udp, &sink_terminal.in)
                     );
 
     fg.run();

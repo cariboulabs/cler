@@ -99,16 +99,11 @@ int main() {
     GainBlock gain("Gain", 2.0f);
     SinkBlock sink("Sink");
 
-    cler::BlockRunner source_runner{&source, &adder.in0, &adder.in1};
-    cler::BlockRunner adder_runner{&adder, static_cast<cler::ChannelBase<float>*>(&gain.in)};
-    cler::BlockRunner gain_runner{&gain, &sink.in};
-    cler::BlockRunner sink_runner{&sink};
-
     cler::FlowGraph flowgraph(
-        source_runner,
-        adder_runner,
-        gain_runner,
-        sink_runner
+        cler::BlockRunner(&source, &adder.in0, &adder.in1),
+        cler::BlockRunner(&adder, static_cast<cler::ChannelBase<float>*>(&gain.in)),
+        cler::BlockRunner(&gain, &sink.in),
+        cler::BlockRunner(&sink)
     );
 
     flowgraph.run();

@@ -284,18 +284,12 @@ int main() {
     plot.set_initial_window(200.0f, 0.0f, 800.0f, 400.0f);
     plant.set_initial_window(200.0f, 400.0f, 800.0f, 200.0f);
 
-    cler::BlockRunner controller_runner(&controller, &throttle.in);
-    cler::BlockRunner throttle_runner(&throttle, &plant.force_in);
-    cler::BlockRunner plant_runner(&plant, &fanout.in);
-    cler::BlockRunner fanout_runner(&fanout, &plot.in[0], &controller.measured_position_in);
-    cler::BlockRunner plot_runner(&plot);
-
     cler::FlowGraph flowgraph(
-    controller_runner,
-    throttle_runner,
-    plant_runner,
-    fanout_runner,
-    plot_runner
+    cler::BlockRunner(&controller, &throttle.in),
+    cler::BlockRunner(&throttle, &plant.force_in),
+    cler::BlockRunner(&plant, &fanout.in),
+    cler::BlockRunner(&fanout, &plot.in[0], &controller.measured_position_in),
+    cler::BlockRunner(&plot)
     );
 
     flowgraph.run();

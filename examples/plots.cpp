@@ -57,37 +57,22 @@ int main() {
     chirp_timeseries_plot.set_initial_window(GW /2.0, 0.0f, GW / 2.0f, GH / 2.0f);
     cspectrum_plot.set_initial_window(0.0, GH/2.0, GW / 2.0f, GH / 2.0f);
     cspectrogram_plot.set_initial_window(GW/2.0, GH/2.0, GW / 2.0f, GH / 2.0f);
-    
-    cler::BlockRunner cw_source_runner(&cw_source, &cw_throttle.in);
-    cler::BlockRunner cw_throttle_runner(&cw_throttle, &cw_fanout.in);
-    cler::BlockRunner cw_fanout_runner(&cw_fanout, &cw_complex2realimag.in, &cspectrum_plot.in[0], &cspectrogram_plot.in[0]);
-    cler::BlockRunner cw_complex2realimag_runner(&cw_complex2realimag, &cw_timeseries_plot.in[0], &cw_timeseries_plot.in[1]);
-    cler::BlockRunner cw_timeseries_plot_runner(&cw_timeseries_plot);
-
-    cler::BlockRunner chirp_source_runner(&chirp_source, &chirp_throttle.in);
-    cler::BlockRunner chirp_throttle_runner(&chirp_throttle, &chirp_fanout.in);
-    cler::BlockRunner chirp_fanout_runner(&chirp_fanout, &chirp_c2realimag.in, &cspectrum_plot.in[1], &cspectrogram_plot.in[1]);
-    cler::BlockRunner chirp_complex2realimag_runner(&chirp_c2realimag, &chirp_timeseries_plot.in[0], &chirp_timeseries_plot.in[1]);
-    cler::BlockRunner chirp_timeseries_plot_runner(&chirp_timeseries_plot);
-    
-    cler::BlockRunner cspectrum_plot_runner(&cspectrum_plot);
-    cler::BlockRunner cspectrogram_plot_runner(&cspectrogram_plot);
 
     cler::FlowGraph flowgraph(
-        cw_source_runner,
-        cw_throttle_runner,
-        cw_fanout_runner,
-        cw_complex2realimag_runner,
-        cw_timeseries_plot_runner,
+        cler::BlockRunner(&cw_source, &cw_throttle.in),
+        cler::BlockRunner(&cw_throttle, &cw_fanout.in),
+        cler::BlockRunner(&cw_fanout, &cw_complex2realimag.in, &cspectrum_plot.in[0], &cspectrogram_plot.in[0]),
+        cler::BlockRunner(&cw_complex2realimag, &cw_timeseries_plot.in[0], &cw_timeseries_plot.in[1]),
+        cler::BlockRunner(&cw_timeseries_plot), 
 
-        chirp_source_runner,
-        chirp_throttle_runner,
-        chirp_fanout_runner,
-        chirp_complex2realimag_runner,
-        chirp_timeseries_plot_runner,
+        cler::BlockRunner(&chirp_source, &chirp_throttle.in),
+        cler::BlockRunner(&chirp_throttle, &chirp_fanout.in),
+        cler::BlockRunner(&chirp_fanout, &chirp_c2realimag.in, &cspectrum_plot.in[1], &cspectrogram_plot.in[1]),
+        cler::BlockRunner(&chirp_c2realimag, &chirp_timeseries_plot.in[0], &chirp_timeseries_plot.in[1]),
+        cler::BlockRunner(&chirp_timeseries_plot),
 
-        cspectrum_plot_runner,
-        cspectrogram_plot_runner
+        cler::BlockRunner(&cspectrum_plot),
+        cler::BlockRunner(&cspectrogram_plot)
     );
 
     flowgraph.run();

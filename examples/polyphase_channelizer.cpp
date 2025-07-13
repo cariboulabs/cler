@@ -109,34 +109,23 @@ int main() {
         SpectralWindow::BlackmanHarris
     );
  
-    cler::BlockRunner cw_source0_runner(&cw_source0, &adder.in[0], &plot_input_cspectrum.in[0]);
-    cler::BlockRunner cw_source1_runner(&cw_source1, &adder.in[1], &plot_input_cspectrum.in[1]);
-    cler::BlockRunner cw_source2_runner(&cw_source2, &adder.in[2], &plot_input_cspectrum.in[2]);
-    cler::BlockRunner cw_source3_runner(&cw_source3, &adder.in[3], &plot_input_cspectrum.in[3]);
-    cler::BlockRunner cw_source4_runner(&cw_source4, &adder.in[4], &plot_input_cspectrum.in[4]);
-    cler::BlockRunner adder_runner(&adder, &throughput.in);
-    cler::BlockRunner throughput_runner(&throughput, &channelizer.in);
-    cler::BlockRunner channelizer_runner(&channelizer,
-        &plot_polyphase_cspectrum.in[0],
-        &plot_polyphase_cspectrum.in[1],
-        &plot_polyphase_cspectrum.in[2],
-        &plot_polyphase_cspectrum.in[3],
-        &plot_polyphase_cspectrum.in[4]
-    );
-    cler::BlockRunner plot_polyphase_cspectrum_runner(&plot_polyphase_cspectrum);
-    cler::BlockRunner plot_input_cspectrum_runner(&plot_input_cspectrum);
-
     cler::FlowGraph flowgraph(
-        cw_source0_runner,
-        cw_source1_runner,
-        cw_source2_runner,
-        cw_source3_runner,
-        cw_source4_runner,
-        adder_runner,
-        throughput_runner,
-        channelizer_runner,
-        plot_polyphase_cspectrum_runner,
-        plot_input_cspectrum_runner
+        cler::BlockRunner(&cw_source0, &adder.in[0], &plot_input_cspectrum.in[0]),
+        cler::BlockRunner(&cw_source1, &adder.in[1], &plot_input_cspectrum.in[1]),
+        cler::BlockRunner(&cw_source2, &adder.in[2], &plot_input_cspectrum.in[2]),
+        cler::BlockRunner(&cw_source3, &adder.in[3], &plot_input_cspectrum.in[3]),
+        cler::BlockRunner(&cw_source4, &adder.in[4], &plot_input_cspectrum.in[4]),
+        cler::BlockRunner(&adder, &throughput.in),
+        cler::BlockRunner(&throughput, &channelizer.in),
+        cler::BlockRunner(&channelizer,
+            &plot_polyphase_cspectrum.in[0],
+            &plot_polyphase_cspectrum.in[1],
+            &plot_polyphase_cspectrum.in[2],
+            &plot_polyphase_cspectrum.in[3],
+            &plot_polyphase_cspectrum.in[4]
+        ),
+        cler::BlockRunner(&plot_polyphase_cspectrum),
+        cler::BlockRunner(&plot_input_cspectrum)
     );
 
     cler::FlowGraphConfig config;

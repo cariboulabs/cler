@@ -38,14 +38,14 @@ Below is `examples/hello_world.cpp`
 #include "blocks/source_cw.hpp"
 #include "blocks/throttle.hpp"
 #include "blocks/add.hpp"
-#include "blocks/plot_timeseries.hpp"
+#include "blocks/plots/plot_timeseries.hpp"
 #include "gui_manager.hpp"
 
 int main() {
-   cler::GuiManager gui(800, 400, "Hello World Example");
+    cler::GuiManager gui(800, 400, "Hello World Plot Example");
 
     const size_t SPS = 1000;
-    SourceCWBlock<float> source1("CWSource1", 1.0f, 1.0f, SPS);
+    SourceCWBlock<float> source1("CWSource", 1.0f, 1.0f, SPS);
     SourceCWBlock<float> source2("CWSource2", 1.0f, 20.0f, SPS);
     ThrottleBlock<float> throttle("Throttle", SPS);
     AddBlock<float> adder("Adder", 2);
@@ -54,22 +54,16 @@ int main() {
         "Hello World Plot",
         {"Added Sources"},
         SPS,
-        3.0f //window duration
+        3.0f // duration in seconds
     );
-    plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f); 
-
-    cler::BlockRunner source1_runner{&source1, &adder.in[0]};
-    cler::BlockRunner source2_runner{&source2, &adder.in[1]};
-    cler::BlockRunner adder_runner{&adder, &throttle.in};
-    cler::BlockRunner throttle_runner{&throttle, &plot.in[0]};
-    cler::BlockRunner plot_runner{&plot};
+    plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f);
 
     cler::FlowGraph flowgraph(
-        source1_runner,
-        source2_runner,
-        adder_runner,
-        throttle_runner,
-        plot_runner
+        cler::BlockRunner(&source1, &adder.in[0]),
+        cler::BlockRunner(&source2, &adder.in[1]),
+        cler::BlockRunner(&adder, &throttle.in),
+        cler::BlockRunner(&throttle, &plot.in[0]),
+        cler::BlockRunner(&plot)
     );
 
     flowgraph.run();
