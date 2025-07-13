@@ -8,9 +8,10 @@
 #include <chrono>
 
 const size_t MAX_UDP_BLOB_SIZE = 256;
+const size_t SLAB_SLOTS = 100; // Number of slots in the slab
 
 struct SourceDatagramBlock : public cler::BlockBase {
-    UDPBlock::Slab _slab {100, MAX_UDP_BLOB_SIZE}; // 100 slots, each 256 bytes
+    UDPBlock::Slab _slab {SLAB_SLOTS, MAX_UDP_BLOB_SIZE}; // 100 slots, each 256 bytes
 
     SourceDatagramBlock(std::string name)
         : cler::BlockBase(std::move(name)) {}
@@ -43,29 +44,27 @@ struct SourceDatagramBlock : public cler::BlockBase {
 
         return cler::Empty{};
     }
-
 private:
     size_t counter = 0;
 };
 
 size_t on_sink_terminal_receive(cler::Channel<UDPBlock::BlobSlice>& channel, [[maybe_unused]] void* context) {
-    UDPBlock::Slab* slab = static_cast<UDPBlock::Slab*>(context);
     UDPBlock::BlobSlice slice;
     size_t work_size = channel.size();
     for (size_t i = 0; i < work_size; ++i) {
         channel.pop(slice);
-        std::cout << "Received: " << std::string(reinterpret_cast<char*>(slice.data), slice.len) << std::endl;
-        slab->release_slot(slice.slot_idx);
+        // std::cout << "Received: " << std::string(reinterpret_cast<char*>(slice.data), slice.len) << std::endl;
+        slice.release();
     }
     return work_size;
 }
 
 int main() {
     SourceDatagramBlock source_datagram("SourceDatagram");
-    SinkUDPSocketBlock sink_udp("SinkUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001, source_datagram._slab.get_free_slots_q());
+    SinkUDPSocketBlock sink_udp("SinkUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001);
     SourceUDPSocketBlock source_udp("SourceUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001,
-                      MAX_UDP_BLOB_SIZE, 100, nullptr, nullptr);
-    SinkTerminalBlock<UDPBlock::BlobSlice> sink_terminal("SinkTerminal", on_sink_terminal_receive, &source_datagram._slab);
+                      MAX_UDP_BLOB_SIZE, SLAB_SLOTS, nullptr, nullptr);
+    SinkTerminalBlock<UDPBlock::BlobSlice> sink_terminal("SinkTerminal", on_sink_terminal_receive);
 
     cler::FlowGraph fg(
                     cler::BlockRunner(&source_datagram, &sink_udp.in),

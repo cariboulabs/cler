@@ -15,14 +15,12 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
                         const UDPBlock::SocketType type,
                         const std::string& dest_host_or_path,
                         const uint16_t port,
-                        std::queue<size_t>& slab_free_slots,
                         OnSendCallback callback = nullptr,
                         void* callback_context = nullptr,
                         const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
         : cler::BlockBase(std::move(name)),
         in(buffer_size),
         _socket(UDPBlock::GenericDatagramSocket::make_sender(type, dest_host_or_path, port)),
-        _slab_free_slots(slab_free_slots),
         _callback(callback),
         _callback_context(callback_context)
     {
@@ -47,10 +45,11 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
             if (_socket.send(slice.data, slice.len) < 0) {
                 return cler::Error::IOError;
             }
-            _slab_free_slots.push(slice.slot_idx); //free the slot for reuse
             if (_callback) {
                 _callback(slice, _callback_context);
             }
+
+            slice.release();
         }
 
         return cler::Empty{};
@@ -58,7 +57,6 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
 
 private:
     UDPBlock::GenericDatagramSocket _socket;
-    std::queue<size_t>& _slab_free_slots;
     OnSendCallback _callback = nullptr;
     void* _callback_context = nullptr;
     size_t _buffer_size;

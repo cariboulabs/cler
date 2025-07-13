@@ -19,10 +19,18 @@ enum class SocketType {
     UNIX_DGRAM    // UNIX datagram
 };
 
+
 struct BlobSlice {
     uint8_t* data;   // pointer to slab region
     size_t len;      // valid length
     size_t slot_idx; // slab index for recycling
+    UDPBlock::Slab* owner_slab;
+
+    void release() {
+        if (owner_slab) {
+            owner_slab->release_slot(slot_idx);
+        }
+    }
 };
 
 struct Slab {
@@ -44,7 +52,7 @@ struct Slab {
         size_t slot_idx = _free_slots.front();
         _free_slots.pop();
         uint8_t* ptr = _data.get() + (slot_idx * _max_blob_size);
-        return BlobSlice{ptr, _max_blob_size, slot_idx};
+        return BlobSlice{ptr, _max_blob_size, slot_idx, this};
     }
 
     void release_slot(size_t slot_idx) {

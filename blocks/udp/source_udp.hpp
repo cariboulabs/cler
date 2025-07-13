@@ -48,11 +48,11 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
             // Receive data into the allocated slab slot
             ssize_t bytes_received = _socket.recv(slice.data, slice.len);
             if (bytes_received  == -1) {
-                _slab.release_slot(slice.slot_idx);
+                slice.release();
                 return cler::Error::IOError;
             }
             if (bytes_received == -2) {
-                _slab.release_slot(slice.slot_idx);
+                slice.release();
                 continue;
             }
 
