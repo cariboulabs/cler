@@ -10,6 +10,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <queue>
+#include <assert.h>
 
 namespace UDPBlock {
 
@@ -19,18 +20,15 @@ enum class SocketType {
     UNIX_DGRAM    // UNIX datagram
 };
 
+struct Slab;
 
 struct BlobSlice {
     uint8_t* data;   // pointer to slab region
     size_t len;      // valid length
     size_t slot_idx; // slab index for recycling
-    UDPBlock::Slab* owner_slab;
+    Slab* owner_slab;
 
-    void release() {
-        if (owner_slab) {
-            owner_slab->release_slot(slot_idx);
-        }
-    }
+    void release();
 };
 
 struct Slab {
@@ -52,6 +50,7 @@ struct Slab {
         size_t slot_idx = _free_slots.front();
         _free_slots.pop();
         uint8_t* ptr = _data.get() + (slot_idx * _max_blob_size);
+        printf("Allocated slot %zu at %p\n", slot_idx, ptr);
         return BlobSlice{ptr, _max_blob_size, slot_idx, this};
     }
 
@@ -62,7 +61,6 @@ struct Slab {
     size_t capacity() const { return _num_slots; }
     size_t available_slots() const { return _free_slots.size(); }
     size_t max_blob_size() const { return _max_blob_size;}
-    std::queue<size_t>& get_free_slots_q() { return _free_slots; }
 
 private:
     size_t _num_slots;
@@ -70,6 +68,15 @@ private:
     std::unique_ptr<uint8_t[]> _data;
     std::queue<size_t> _free_slots;
 };
+
+inline void BlobSlice::release() {
+  assert(owner_slab != nullptr && "BUG: double release");
+  assert(slot_idx < owner_slab->capacity() && "slot_idx out of bounds!");
+  if (owner_slab) {
+    owner_slab->release_slot(slot_idx);
+  }
+  owner_slab = nullptr; // Prevent double release
+}
 
 struct GenericDatagramSocket {
     GenericDatagramSocket(SocketType type,

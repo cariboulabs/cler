@@ -48,7 +48,10 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
             // Receive data into the allocated slab slot
             ssize_t bytes_received = _socket.recv(slice.data, slice.len);
             if (bytes_received  == -1) {
+                printf("slice.data: %p, slice.len: %zu\n, slice.slab: %p\n, slice.index : %zu\n",
+                       slice.data, slice.len, slice.owner_slab, slice.slot_idx);
                 slice.release();
+                printf("Error receiving data: %s\n", strerror(errno));
                 return cler::Error::IOError;
             }
             if (bytes_received == -2) {
