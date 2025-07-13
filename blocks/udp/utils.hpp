@@ -9,7 +9,6 @@
 #include <arpa/inet.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include <queue>
 #include <assert.h>
 
 namespace UDPBlock {
@@ -33,7 +32,8 @@ struct BlobSlice {
 
 struct Slab {
     Slab(size_t num_slots, size_t max_blob_size)
-        : _num_slots(num_slots), _max_blob_size(max_blob_size)
+        : _num_slots(num_slots), _max_blob_size(max_blob_size), 
+          _free_slots(num_slots)
     {
         _data = std::make_unique<uint8_t[]>(num_slots * max_blob_size);
         for (size_t i = 0; i < num_slots; ++i) {
@@ -44,18 +44,16 @@ struct Slab {
     // Allocate a slice: pops a free slot, returns pointer to region
     // Returns nullptr if no space
     cler::Result<BlobSlice, cler::Error> take_slot() {
-        if (_free_slots.empty()) {
+        size_t slot_idx;
+        if (!_free_slots.try_pop(slot_idx)) {
             return cler::Error::NotEnoughSamples;
         }
-        size_t slot_idx = _free_slots.front();
-        _free_slots.pop();
         uint8_t* ptr = _data.get() + (slot_idx * _max_blob_size);
-        printf("Allocated slot %zu at %p\n", slot_idx, ptr);
         return BlobSlice{ptr, _max_blob_size, slot_idx, this};
     }
 
     void release_slot(size_t slot_idx) {
-        _free_slots.push(slot_idx);
+        assert(_free_slots.try_push(slot_idx));
     }
 
     size_t capacity() const { return _num_slots; }
@@ -66,7 +64,7 @@ private:
     size_t _num_slots;
     size_t _max_blob_size;
     std::unique_ptr<uint8_t[]> _data;
-    std::queue<size_t> _free_slots;
+    cler::Channel<size_t> _free_slots;
 };
 
 inline void BlobSlice::release() {
