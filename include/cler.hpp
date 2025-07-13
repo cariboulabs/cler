@@ -104,7 +104,7 @@ namespace cler {
     };
 
     struct BlockBase {
-        explicit BlockBase(std::string name) : _name(std::move(name)) {}
+        explicit BlockBase(std::string&& name) : _name(name) {}
         const std::string& name() const { return _name; }
 
         // Non-copyable
