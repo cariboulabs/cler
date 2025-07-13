@@ -1,90 +1,119 @@
 #include "cler.hpp"
-#include "blocks/sink_terminal.hpp"
-#include "blocks/throughput.hpp"
-#include "cler_addons.hpp"
+#include <iostream>
+#include <chrono>
+#include <thread>
+#include <algorithm>
 
-const size_t BUFFER_SIZE = 2;
+constexpr size_t BUFFER_SIZE = 1024;
 
 struct SourceBlock : public cler::BlockBase {
-    SourceBlock(std::string name)  : BlockBase(std::move(name)) {} 
+    SourceBlock(std::string name)
+        : BlockBase(std::move(name)) {
+        std::fill(_buffer, _buffer + BUFFER_SIZE, 1.0f);
+    }
 
-    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
-        size_t out_space = out->space();
-        if (out_space < BUFFER_SIZE) {
-            return cler::Error::NotEnoughSpace;
-        }
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
+        size_t to_write = std::min({out->space(), BUFFER_SIZE});
+        out->writeN(_buffer, to_write);
 
-        out->writeN(_tmp, BUFFER_SIZE);
         return cler::Empty{};
     }
 
-    private:
-    std::complex<float> _tmp[BUFFER_SIZE] = {0.0f, 0.0f}; // Example data
+private:
+    float _buffer[BUFFER_SIZE];
 };
 
-struct TransferBlock : public cler::BlockBase {
-    cler::Channel<std::complex<float>> in;
+struct CopyBlock : public cler::BlockBase {
+    cler::Channel<float> in;
 
-    TransferBlock(std::string name)  : BlockBase(std::move(name)), in(BUFFER_SIZE) {} 
+    CopyBlock(std::string name) : BlockBase(std::move(name)), in(BUFFER_SIZE) {}
 
-    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
-        size_t in_size = in.size();
-        size_t out_space = out->space();
-        if (in_size == 0) {
-            return cler::Error::NotEnoughSamples;
-        }
-        if (out_space < in_size) {
-            return cler::Error::NotEnoughSpace;
-        }
-        size_t transferable = std::min(in_size, out_space);
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
+        size_t transferable = std::min(in.size(), out->space());
+        if (transferable == 0) return cler::Error::NotEnoughSamples;
 
         in.readN(_tmp, transferable);
-        out->writeN(_tmp, transferable);
+        size_t written = out->writeN(_tmp, transferable);
         return cler::Empty{};
     }
 
     private:
-    std::complex<float> _tmp[BUFFER_SIZE];
+    float _tmp[BUFFER_SIZE];
+};
 
+struct SinkBlock : public cler::BlockBase {
+    cler::Channel<float> in;
+
+    SinkBlock(std::string name, size_t expected)
+        : BlockBase(std::move(name)), in(BUFFER_SIZE), _expected_samples(expected) {
+        _start_time = std::chrono::steady_clock::now();
+    }
+
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        size_t to_read = std::min(in.size(), BUFFER_SIZE);
+        if (to_read == 0) {
+            return cler::Error::NotEnoughSamples;
+        }
+
+        in.commit_read(to_read);
+        _received += to_read;
+
+        return cler::Empty{};
+    }
+
+    bool is_done() const {
+        return _received >= _expected_samples;
+    }
+
+    void print_execution() const {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration<double>(now - _start_time).count();
+        std::cout << "Processed " << _received << " samples in "
+                  << elapsed << "s → Throughput: "
+                  << (_received / elapsed) << " samples/s" << std::endl;
+    }
+
+private:
+    size_t _received = 0;
+    size_t _expected_samples;
+    std::chrono::steady_clock::time_point _start_time;
 };
 
 int main() {
+    constexpr size_t STAGES = 4;
+    constexpr size_t SAMPLES = 256'000'000;
 
     SourceBlock source("Source");
-    TransferBlock transfer1("Transfer1");
-    TransferBlock transfer2("Transfer2");
-    TransferBlock transfer3("Transfer3");
-    TransferBlock transfer4("Transfer4");
-    ThroughputBlock<std::complex<float>> throughput("Throughput1", BUFFER_SIZE);
-    SinkTerminalBlock<std::complex<float>> sink("Sink", nullptr, nullptr, BUFFER_SIZE);
+    CopyBlock stage0("Stage0");
+    CopyBlock stage1("Stage1");
+    CopyBlock stage2("Stage2");
+    CopyBlock stage3("Stage3");
+    SinkBlock sink("Sink", SAMPLES);
 
-    cler::BlockRunner source_runner(&source, &transfer1.in);
-    cler::BlockRunner transfer1_runner(&transfer1, &transfer2.in);
-    cler::BlockRunner transfer2_runner(&transfer2, &transfer3.in);
-    cler::BlockRunner transfer3_runner(&transfer3, &transfer4.in);
-    cler::BlockRunner transfer4_runner(&transfer4, &throughput.in);
-    cler::BlockRunner throughput_runner(&throughput, &sink.in);
+    cler::BlockRunner source_runner(&source, &stage0.in);
+    cler::BlockRunner stage0_runner(&stage0, &stage1.in);
+    cler::BlockRunner stage1_runner(&stage1, &stage2.in);
+    cler::BlockRunner stage2_runner(&stage2, &stage3.in);
+    cler::BlockRunner stage3_runner(&stage3, &sink.in);
     cler::BlockRunner sink_runner(&sink);
 
-    cler::FlowGraph flowgraph(
+    auto fg = cler::FlowGraph(
         source_runner,
-        transfer1_runner,
-        transfer2_runner,
-        transfer3_runner,
-        transfer4_runner,
-        throughput_runner,
+        stage0_runner,
+        stage1_runner,
+        stage2_runner,
+        stage3_runner,
         sink_runner
     );
-    
-    
-    printf("Running CLER throughput comparison example. Please wait 10 seconds...\n");
-    flowgraph.run();
-    for (size_t i = 0; i < 10; ++i) {
-        // Simulate continuous operation
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-    flowgraph.stop();
-    throughput.report();
 
+    fg.run();
+
+    while (!sink.is_done()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    fg.stop();
+
+    sink.print_execution();
     return 0;
 }

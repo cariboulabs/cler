@@ -107,6 +107,7 @@ namespace cler {
         explicit BlockBase(std::string&& name) : _name(name) {}
         const std::string& name() const { return _name; }
 
+        //OUR CHANNELS ARE NOT COPYABLE OR MOVABLE, SO OUR BLOCKS CAN'T BE EITHER
         // Non-copyable
         BlockBase(const BlockBase&) = delete;
         BlockBase& operator=(const BlockBase&) = delete;
