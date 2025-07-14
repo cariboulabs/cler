@@ -25,7 +25,7 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name,
         throw std::invalid_argument("FFT size must be > 2 and even");
     }
 
-    _buffer_size = BUFFER_SIZE_MULTIPLIER * _sps;
+    _buffer_size = BUFFER_SIZE_MULTIPLIER * _n_fft_samples;
 
     // Input channels
     in = static_cast<cler::Channel<std::complex<float>>*>(
@@ -97,46 +97,61 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
         return cler::Error::NotEnoughSamples;
     }
 
-    size_t commit_size = (_signal_channels[0].size() + work_size > _buffer_size)
-        ? (_signal_channels[0].size() + work_size - _buffer_size) : 0;
-
     for (size_t i = 0; i < _num_inputs; ++i) {
+        size_t commit_size = (_signal_channels[i].size() + work_size > _buffer_size)
+            ? (_signal_channels[i].size() + work_size - _buffer_size) : 0;
+
         in[i].readN(_tmp_buffer, work_size);
         _signal_channels[i].commit_read(commit_size);
         _signal_channels[i].writeN(_tmp_buffer, work_size);
     }
 
     _samples_counter += work_size;
-    _snapshot_requested.store(true, std::memory_order_release);
     return cler::Empty{};
 }
 
+
 void PlotCSpectrumBlock::render() {
-    if (_snapshot_requested.load(std::memory_order_acquire)) {
-        _snapshot_ready_size.store(0, std::memory_order_release);
+    // Take snapshot inside render, protected by mutex
+    size_t available = 0;
+
+    if (_snapshot_mutex.try_lock()) {
 
         const std::complex<float>* ptr1; const std::complex<float>* ptr2;
         size_t size1, size2;
 
-        size_t available = _signal_channels[0].peek_read(ptr1, size1, ptr2, size2);
-        for (size_t i = 0; i < _num_inputs; ++i) {
+        available = _signal_channels[0].peek_read(ptr1, size1, ptr2, size2);
+        for (size_t i = 1; i < _num_inputs; ++i) {
             size_t a = _signal_channels[i].peek_read(ptr1, size1, ptr2, size2);
-            assert(a == available);
-            memcpy(_snapshot_buffers[i], ptr1, size1 * sizeof(std::complex<float>));
-            memcpy(_snapshot_buffers[i] + size1, ptr2, size2 * sizeof(std::complex<float>));
+            if (a != available) {
+                fprintf(stderr, "Channel %zu: a = %zu, available = %zu\n", i, a, available);
+                available = std::min(available, a);
+            }
         }
-        _snapshot_ready_size.store(available, std::memory_order_release);
-        _snapshot_requested.store(false, std::memory_order_release);
+
+        _snapshot_ready_size = available;
+
+        // Only snapshot if enough samples
+        if (available >= _n_fft_samples) {
+            for (size_t i = 0; i < _num_inputs; ++i) {
+                size_t dummy1, dummy2;
+                const std::complex<float>* p1;
+                const std::complex<float>* p2;
+
+                _signal_channels[i].peek_read(p1, dummy1, p2, dummy2);
+                memcpy(_snapshot_buffers[i], p1, dummy1 * sizeof(std::complex<float>));
+                memcpy(_snapshot_buffers[i] + dummy1, p2, dummy2 * sizeof(std::complex<float>));
+            }
+        }
+         _snapshot_mutex.unlock();
     }
 
-    size_t available = _snapshot_ready_size.load(std::memory_order_acquire);
-    if (available < _n_fft_samples) {
+    if (_snapshot_ready_size < _n_fft_samples) {
         ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
         ImGui::Begin(name().c_str());
-
         ImGui::Text("Not enough samples for FFT. Need at least %zu, got %zu.",
-                    _n_fft_samples, available);
+                    _n_fft_samples, _snapshot_ready_size);
         ImGui::End();
         return;
     }
@@ -150,14 +165,14 @@ void PlotCSpectrumBlock::render() {
 
         for (size_t i = 0; i < _num_inputs; ++i) {
             memcpy(_liquid_inout,
-                   &_snapshot_buffers[i][available - _n_fft_samples],
+                   &_snapshot_buffers[i][_snapshot_ready_size - _n_fft_samples],
                    _n_fft_samples * sizeof(std::complex<float>));
 
             float coherent_gain = 0.0f;
             for (size_t n = 0; n < _n_fft_samples; ++n) {
                 float w = spectral_window_function(_window_type, n / static_cast<float>(_n_fft_samples - 1));
                 coherent_gain += w;
-                _liquid_inout[n] *= w * ((n % 2 == 0) ? 1.0f : -1.0f);  // Center FFT
+                _liquid_inout[n] *= w * ((n % 2 == 0) ? 1.0f : -1.0f);
             }
             coherent_gain /= static_cast<float>(_n_fft_samples);
 

@@ -5,6 +5,7 @@
 #include "spectral_windows.hpp"
 #include "imgui.h"
 #include <vector>
+#include <mutex> 
 
 struct PlotCSpectrumBlock : public cler::BlockBase {
     const size_t BUFFER_SIZE_MULTIPLIER = 3;
@@ -35,9 +36,6 @@ private:
 
     cler::Channel<std::complex<float>>* _signal_channels;
 
-    std::atomic<size_t> _snapshot_ready_size = 0;
-    std::atomic<bool> _snapshot_requested = false;
-
     std::complex<float>** _snapshot_buffers = nullptr;
     std::complex<float>* _tmp_buffer = nullptr;
 
@@ -50,4 +48,7 @@ private:
     bool _has_initial_window_position = false;
     ImVec2 _initial_window_position {0.0f, 0.0f};
     ImVec2 _initial_window_size {600.0f, 300.0f};
+
+    std::mutex _snapshot_mutex;
+    size_t _snapshot_ready_size = 0;
 };
