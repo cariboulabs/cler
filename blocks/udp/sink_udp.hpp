@@ -32,7 +32,7 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
 
     cler::Result<cler::Empty, cler::Error> procedure() {
         if (!_socket.is_valid()) {
-            return cler::Error::IOError;
+            return cler::Error::TERM_IOError;
         }
         if (in.size() == 0) {
             return cler::Error::NotEnoughSamples;
@@ -43,7 +43,7 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
             UDPBlock::BlobSlice slice;
             in.pop(slice);
             if (_socket.send(slice.data, slice.len) < 0) {
-                return cler::Error::IOError;
+                return cler::Error::TERM_IOError;
             }
             if (_callback) {
                 _callback(slice, _callback_context);

@@ -32,7 +32,7 @@ struct SourceFileBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out)
     {
         if (!_file.is_open()) {
-            return cler::Error::IOError;
+            return cler::Error::TERM_IOError;
         }
 
         size_t available_space = out->space();

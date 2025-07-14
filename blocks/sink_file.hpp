@@ -38,7 +38,7 @@ struct SinkFileBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure()
     {
         if (!_file.is_open()) {
-            return cler::Error::IOError;
+            return cler::Error::TERM_IOError;
         }
 
         size_t available_samples = in.size();
@@ -52,7 +52,7 @@ struct SinkFileBlock : public cler::BlockBase {
         _file.write(reinterpret_cast<char*>(_tmp), to_write * sizeof(T));
 
         if (!_file) {
-            return cler::Error::IOError;
+            return cler::Error::TERM_IOError;
         }
 
         return cler::Empty{};

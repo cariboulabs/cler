@@ -232,7 +232,7 @@ struct GenericDatagramSocket {
         return -1;
     }
 
-    ssize_t recv(uint8_t* buffer, size_t max_len) const {
+    ssize_t recv(uint8_t* buffer, size_t max_len, int flags = 0) const {
         struct msghdr msg {};
         struct iovec iov {};
 
@@ -244,14 +244,15 @@ struct GenericDatagramSocket {
 
         msg.msg_name = nullptr;
         msg.msg_namelen = 0;
+        msg.msg_flags = 0;
 
-        ssize_t bytes_received = recvmsg(_sockfd, &msg, 0);
+        ssize_t bytes_received = recvmsg(_sockfd, &msg, flags);
         if (bytes_received < 0) {
-            return -1; // syscall error
+            return -errno; // propagate real reason
         }
 
-        if( (msg.msg_flags & MSG_TRUNC)) {
-            return -2; // message was truncated
+        if (msg.msg_flags & MSG_TRUNC) {
+            return -EMSGSIZE; // standard POSIX error for truncation
         }
 
         return bytes_received;

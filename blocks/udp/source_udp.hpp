@@ -32,7 +32,7 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<UDPBlock::BlobSlice>* out) {
         if (!_socket.is_valid()) {
-            return cler::Error::IOError;
+            return cler::Error::TERM_IOError;
         }
         if (out->space() == 0) {
             return cler::Error::NotEnoughSpace;
@@ -47,16 +47,25 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
 
             // Receive data into the allocated slab slot
             ssize_t bytes_received = _socket.recv(slice.data, slice.len);
-            if (bytes_received  == -1) {
-                printf("slice.data: %p, slice.len: %zu\n, slice.slab: %p\n, slice.index : %zu\n",
-                       slice.data, slice.len, slice.owner_slab, slice.slot_idx);
+            if (bytes_received == 0) {
                 slice.release();
-                printf("Error receiving data: %s\n", strerror(errno));
-                return cler::Error::IOError;
-            }
-            if (bytes_received == -2) {
-                slice.release();
-                continue;
+                return cler::Empty{};
+            } else if (bytes_received  < 0 ) {
+                int err = -bytes_received;  // recover real errno
+                if (err == EAGAIN || err == EWOULDBLOCK || err == EINTR) {
+                    // Retry later: harmless, no message delivered
+                    slice.release();
+                    return cler::Empty{};
+                }
+                else if (err == EMSGSIZE) { // Message truncated: drop this one
+                    slice.release();
+                    return cler::Empty{};
+                }
+                else {
+                    // Real IO error — propagate
+                    slice.release();
+                    return cler::Error::TERM_IOError;
+                }
             }
 
             slice.len = static_cast<size_t>(bytes_received);

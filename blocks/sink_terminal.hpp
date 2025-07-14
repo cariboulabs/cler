@@ -4,7 +4,7 @@
 template <typename T>
 struct SinkTerminalBlock : public cler::BlockBase {
     
-    typedef size_t (*OnReceiveCallback)(cler::Channel<T>&, void* context);
+    typedef size_t (*OnReceiveCallback)(cler::Channel<T>*, void* context);
 
     cler::Channel<T> in;
 
@@ -22,7 +22,7 @@ struct SinkTerminalBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure() {
         size_t to_commit;
         if (_callback) {
-            to_commit = _callback(in, _callback_context);
+            to_commit = _callback(&in, _callback_context);
         } else {
             to_commit = in.size();
         }

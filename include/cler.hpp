@@ -11,27 +11,29 @@
 namespace cler {
 
     enum class Error {
-        InvalidChannelIndex,
         NotEnoughSamples,
         NotEnoughSpace,
-        ProcedureError,
-        IOError,
-        EOFReached,
+        BadData,
+        TERMINATE_FLOWGRAPH,
+        TERM_InvalidChannelIndex,
+        TERM_ProcedureError,
+        TERM_IOError,
+        TERM_EOFReached,
     };
 
     inline const char* to_str(Error error) {
         switch (error) {
-            case Error::InvalidChannelIndex:
-                return "Invalid channel index";
             case Error::NotEnoughSpace:
                 return "Not enough space in output buffers";
             case Error::NotEnoughSamples:
                 return "Not enough samples in input buffers";
-            case Error::ProcedureError:
+            case Error::TERM_InvalidChannelIndex:
+                return "Invalid channel index";
+            case Error::TERM_ProcedureError:
                 return "Procedure error";
-            case Error::IOError:
+            case Error::TERM_IOError:
                 return "I/O error";
-            case Error::EOFReached:
+            case Error::TERM_EOFReached:
                 return "End of file reached";
             default:
                 return "Unknown error";
@@ -197,6 +199,11 @@ namespace cler {
                     if (result.is_err()) {
                         failed++;
                         auto err = result.unwrap_err();
+
+                        if (err > Error::TERMINATE_FLOWGRAPH) {
+                            _stop_flag = true;
+                            return; // Terminate the flow graph
+                        }
 
                         if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
                             total_dead_time_s += dt.count();
