@@ -20,6 +20,7 @@ add_executable(mass_spring_damper mass_spring_damper.cpp)
 target_link_libraries(mass_spring_damper PRIVATE blocks_plots)
 
 add_executable(udp udp.cpp)
+target_link_libraries(udp PRIVATE blocks_udp)
 
 add_executable(polyphase_channelizer polyphase_channelizer.cpp)
 target_link_libraries(polyphase_channelizer PRIVATE blocks_plots)
