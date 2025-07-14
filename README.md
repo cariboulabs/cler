@@ -27,7 +27,7 @@ cd build
 cmake ..
 make -j"$(nproc --ignore=1)"   # Use all cores-1
 cd examples
-./hello_world (or mass_spring_damper if you want to see somthing cool)
+./hello_world #(or mass_spring_damper if you want to see somthing cool)
 ```
 
 ⚠️ Just one thing to watch for: Cler’s template-heavy design can produce overwhelming errors, but any LLM can help with the small context window that is Cler. 
