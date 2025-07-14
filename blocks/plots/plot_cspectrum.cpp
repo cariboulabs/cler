@@ -131,6 +131,13 @@ void PlotCSpectrumBlock::render() {
 
     size_t available = _snapshot_ready_size.load(std::memory_order_acquire);
     if (available < _n_fft_samples) {
+        ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
+        ImGui::Begin(name().c_str());
+
+        ImGui::Text("Not enough samples for FFT. Need at least %zu, got %zu.",
+                    _n_fft_samples, available);
+        ImGui::End();
         return;
     }
 
