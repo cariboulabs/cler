@@ -22,13 +22,8 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
         : cler::BlockBase(std::move(name)),
         _socket(UDPBlock::GenericDatagramSocket::make_receiver(type, bind_addr_or_path, port)),
         _slab(UDPBlock::Slab(num_slab_slots, max_blob_size)),
-        _callback(callback)
-            
+        _callback(callback)    
     {}
-
-    void set_callback(OnReceiveCallback cb) {
-        _callback = cb;
-    }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<UDPBlock::BlobSlice>* out) {
         if (!_socket.is_valid()) {
@@ -44,7 +39,6 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
                 return result.unwrap_err();
             }
             UDPBlock::BlobSlice slice = result.unwrap();
-
             // Receive data into the allocated slab slot
             ssize_t bytes_received = _socket.recv(slice.data, slice.len);
             if (bytes_received == 0) {
@@ -52,8 +46,7 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
                 return cler::Empty{};
             } else if (bytes_received  < 0 ) {
                 int err = -bytes_received;  // recover real errno
-                if (err == EAGAIN || err == EWOULDBLOCK || err == EINTR) {
-                    // Retry later: harmless, no message delivered
+                if (err == EAGAIN || err == EWOULDBLOCK || err == EINTR) { // Retry later: harmless, no message delivered
                     slice.release();
                     return cler::Empty{};
                 }

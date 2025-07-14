@@ -46,7 +46,7 @@ struct Slab {
     cler::Result<BlobSlice, cler::Error> take_slot() {
         size_t slot_idx;
         if (!_free_slots.try_pop(slot_idx)) {
-            return cler::Error::NotEnoughSamples;
+            return cler::Error::ProcedureError;
         }
         uint8_t* ptr = _data.get() + (slot_idx * _max_blob_size);
         return BlobSlice{ptr, _max_blob_size, slot_idx, this};

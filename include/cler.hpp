@@ -13,6 +13,7 @@ namespace cler {
     enum class Error {
         NotEnoughSamples,
         NotEnoughSpace,
+        ProcedureError,
         BadData,
         TERMINATE_FLOWGRAPH,
         TERM_InvalidChannelIndex,
@@ -27,14 +28,18 @@ namespace cler {
                 return "Not enough space in output buffers";
             case Error::NotEnoughSamples:
                 return "Not enough samples in input buffers";
-            case Error::TERM_InvalidChannelIndex:
-                return "Invalid channel index";
-            case Error::TERM_ProcedureError:
+            case Error::ProcedureError:
                 return "Procedure error";
+            case Error::BadData:
+                return "Bad data received";
+            case Error::TERM_InvalidChannelIndex:
+                return "TERM: Invalid channel index";
+            case Error::TERM_ProcedureError:
+                return "TERM: Procedure error";
             case Error::TERM_IOError:
-                return "I/O error";
+                return "TERM: IO error";
             case Error::TERM_EOFReached:
-                return "End of file reached";
+                return "TERM: EOF reached";
             default:
                 return "Unknown error";
         }

@@ -8,7 +8,7 @@
 #include <chrono>
 
 const size_t MAX_UDP_BLOB_SIZE = 100;
-const size_t SLAB_SLOTS = 10; // Number of slots in the slab
+const size_t SLAB_SLOTS = 3; // Number of slots in the slab
 
 struct SourceDatagramBlock : public cler::BlockBase {
     UDPBlock::Slab _slab {SLAB_SLOTS, MAX_UDP_BLOB_SIZE}; // 100 slots, each 256 bytes
@@ -49,25 +49,24 @@ private:
 };
 
 void on_sink_udp_send(const UDPBlock::BlobSlice& slice, [[maybe_unused]] void* context) {
-    // printf("Sending: %.*s\n", static_cast<int>(slice.len), slice.data);
+    assert(slice.data != nullptr);
+    assert(slice.len > 0);
 }
 
 void on_source_udp_recv(const UDPBlock::BlobSlice& slice, [[maybe_unused]] void* context) {
     assert(slice.data != nullptr);
     assert(slice.len > 0);
-    printf("Received: %.*s\n", static_cast<int>(slice.len), slice.data);
 }
 
 size_t on_sink_terminal_recv(cler::Channel<UDPBlock::BlobSlice>* channel, [[maybe_unused]] void* context) {
     UDPBlock::BlobSlice slice;
     size_t work_size = channel->size();
-    printf("--------------------Work size: %zu--------------------\n", work_size);
     for (size_t i = 0; i < work_size; ++i) {
         channel->pop(slice);
         std::cout << "Received: " << std::string(reinterpret_cast<char*>(slice.data), slice.len) << std::endl;
-        // slice.release();
+        slice.release();
     }
-    return work_size;
+    return 0; //we are doing the popping!
 }
 
 int main() {
@@ -80,8 +79,8 @@ int main() {
     cler::FlowGraph fg(
                     cler::BlockRunner(&source_datagram, &sink_udp.in),
                     cler::BlockRunner(&sink_udp),
-                    cler::BlockRunner(&sink_terminal),
-                    cler::BlockRunner(&source_udp, &sink_terminal.in)
+                    cler::BlockRunner(&source_udp, &sink_terminal.in),
+                    cler::BlockRunner(&sink_terminal)
                     );
 
     fg.run();
