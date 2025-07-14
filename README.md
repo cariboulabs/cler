@@ -27,7 +27,7 @@ cd examples
 ./hello_world (or mass_spring_damper if you want to see somthing cool)
 ```
 
-⚠️ Just one thing to look out for... because Cler is template heavy, error messages can be overwhelming. But no worries, with the small context window that is Cler, any LLM can help you out with ease. Eventuallty we will have a validator that can help debug common issues.
+⚠️ Just one thing to watch for: Cler’s template-heavy design can produce overwhelming errors, but any LLM can help—and soon a built-in validator will handle common issues.
 
 # Okay, but how does it write?
 
