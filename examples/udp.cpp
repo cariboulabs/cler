@@ -7,6 +7,16 @@
 #include <thread>
 #include <chrono>
 
+/*
+NOTE: SourceDatagramBlock is an ANTI-PATTERN in CLER!
+Usually we would have the same block that generates data and send it over UDP.
+Also, the the same block that receives datagrams can instiantiate data from the blobs before sending them to the next block.
+No reason to burden computer with unnecessary work
+still, it is here showcase capabilities
+
+You can, and should use GenericDatagramSocket directly in your blocks.
+ */
+
 const size_t MAX_UDP_BLOB_SIZE = 100;
 const size_t SLAB_SLOTS = 10; // Number of slots in the slab
 
@@ -74,13 +84,13 @@ int main() {
     SinkUDPSocketBlock sink_udp("SinkUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001, on_sink_udp_send);
     SourceUDPSocketBlock source_udp("SourceUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001,
                       MAX_UDP_BLOB_SIZE, SLAB_SLOTS, on_source_udp_recv, nullptr);
-    SinkNullBlock<UDPBlock::BlobSlice> sink_terminal("SinkTerminal", on_sink_null_recv, nullptr, 20);
+    SinkNullBlock<UDPBlock::BlobSlice> sink_null("SinkTerminal", on_sink_null_recv, nullptr, 20);
 
     cler::FlowGraph fg(
                     cler::BlockRunner(&source_datagram, &sink_udp.in),
                     cler::BlockRunner(&sink_udp),
-                    cler::BlockRunner(&source_udp, &sink_terminal.in),
-                    cler::BlockRunner(&sink_terminal)
+                    cler::BlockRunner(&source_udp, &sink_null.in),
+                    cler::BlockRunner(&sink_null)
                     );
 
     fg.run();
