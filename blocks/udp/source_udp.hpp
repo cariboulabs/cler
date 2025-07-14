@@ -1,10 +1,5 @@
 #pragma once
-
-#include "cler.hpp"
 #include "utils.hpp"
-#include <queue>
-
-
 struct SourceUDPSocketBlock : public cler::BlockBase {
 
     //we add a callback because sometimes we want to do something with the received data

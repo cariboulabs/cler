@@ -2,13 +2,13 @@
 
 #include "cler.hpp"
 template <typename T>
-struct SinkTerminalBlock : public cler::BlockBase {
+struct SinkNullBlock : public cler::BlockBase {
     
     typedef size_t (*OnReceiveCallback)(cler::Channel<T>*, void* context);
 
     cler::Channel<T> in;
 
-    SinkTerminalBlock(std::string name,
+    SinkNullBlock(std::string name,
                       OnReceiveCallback callback = nullptr,
                       [[maybe_unused]] void* callback_context = nullptr,
                       size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)

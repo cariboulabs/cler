@@ -159,6 +159,8 @@ namespace cler {
     template<typename... BlockRunners>
     class FlowGraph {
     public:
+        typedef void (*OnCrashCallback)(void* context);
+
         FlowGraph(BlockRunners... runners)
             : _runners(std::make_tuple(std::forward<BlockRunners>(std::move(runners))...)) {
             _stats.resize(sizeof...(BlockRunners));
@@ -170,6 +172,14 @@ namespace cler {
         FlowGraph(FlowGraph&&) = delete;
         FlowGraph& operator=(const FlowGraph&) = delete;
         FlowGraph& operator=(FlowGraph&&) = delete;
+
+    void set_on_crash_cb(OnCrashCallback cb, void* context) {
+            _on_crash_cb = cb;
+            _on_crash_context = context;
+        }
+
+        OnCrashCallback on_crash_cb() const { return _on_crash_cb; }
+        void* on_crash_context() const { return _on_crash_context; }
 
     void run(FlowGraphConfig config = FlowGraphConfig{}) {
         _config = config;
@@ -207,6 +217,9 @@ namespace cler {
 
                         if (err > Error::TERMINATE_FLOWGRAPH) {
                             _stop_flag = true;
+                            if (_on_crash_cb) {
+                                _on_crash_cb(_on_crash_context);
+                            }
                             return; // Terminate the flow graph
                         }
 
@@ -288,6 +301,8 @@ namespace cler {
         std::atomic<bool> _stop_flag = false;
         FlowGraphConfig _config;
         std::vector<BlockExecutionStats> _stats;
+        OnCrashCallback _on_crash_cb = nullptr;
+        void* _on_crash_context = nullptr;
     };
 
     static constexpr size_t DEFAULT_BUFFER_SIZE = 1024;

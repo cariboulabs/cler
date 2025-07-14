@@ -1,7 +1,7 @@
 #include "cler.hpp"
 #include "blocks/udp/sink_udp.hpp"
 #include "blocks/udp/source_udp.hpp"
-#include "blocks/sink_terminal.hpp"
+#include "blocks/sink_null.hpp"
 #include <queue>
 #include <iostream>
 #include <thread>
@@ -58,7 +58,7 @@ void on_source_udp_recv(const UDPBlock::BlobSlice& slice, [[maybe_unused]] void*
     assert(slice.len > 0);
 }
 
-size_t on_sink_terminal_recv(cler::Channel<UDPBlock::BlobSlice>* channel, [[maybe_unused]] void* context) {
+size_t on_sink_null_recv(cler::Channel<UDPBlock::BlobSlice>* channel, [[maybe_unused]] void* context) {
     UDPBlock::BlobSlice slice;
     size_t work_size = channel->size();
     for (size_t i = 0; i < work_size; ++i) {
@@ -74,7 +74,7 @@ int main() {
     SinkUDPSocketBlock sink_udp("SinkUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001, on_sink_udp_send);
     SourceUDPSocketBlock source_udp("SourceUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001,
                       MAX_UDP_BLOB_SIZE, SLAB_SLOTS, on_source_udp_recv, nullptr);
-    SinkTerminalBlock<UDPBlock::BlobSlice> sink_terminal("SinkTerminal", on_sink_terminal_recv, nullptr, 20);
+    SinkNullBlock<UDPBlock::BlobSlice> sink_terminal("SinkTerminal", on_sink_null_recv, nullptr, 20);
 
     cler::FlowGraph fg(
                     cler::BlockRunner(&source_datagram, &sink_udp.in),
