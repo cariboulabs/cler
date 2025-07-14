@@ -3,10 +3,9 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/**",
-                "${workspaceFolder}/include/**",
-                "${workspaceFolder}/blocks/gui/**",
-                "${workspaceFolder}/blocks/ezgmsk_demod/**",
+                "${workspaceFolder}/include",
+                "${workspaceFolder}/blocks/gui",
+                "${workspaceFolder}/blocks/ezgmsk_demod",
                 "${workspaceFolder}/build/_deps/liquid-src/include",
                 "${workspaceFolder}/build/_deps/zf_log-src/zf_log"
             ],
