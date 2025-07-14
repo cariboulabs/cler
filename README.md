@@ -1,9 +1,7 @@
-<p align="center">
-  <img src="misc/logo.jpeg" alt="Logo" width="800"/>
-</p
-
-
-<h1 align="center">a Compile Time DSP Flowgraph for SDRs and Embedded Systems</h1>
+<div align="center">
+  <img src="misc/logo.jpeg" alt="CLER Logo" width="600"/>
+  <h1>a Compile Time DSP Flowgraph for SDRs and Embedded Systems</h1>
+</div>
 
 Cler is a C++ template-based framework for constructing and executing flowgraphs of DSP processing blocks.
 Its goal is to keep a tiny header only core allowing maximal flexability:
