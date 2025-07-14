@@ -1,12 +1,10 @@
 #include "cler.hpp"
 #include "utils.hpp"
-#include "ezgmsk_demod.hpp"
-#include "source_file.hpp"
-#include "multistage_resampler.hpp"
-#include "fanout.hpp"
-#include "sink_file.hpp"
-
-#include <atomic>
+#include "blocks/ezgmsk_demod/ezgmsk_demod.hpp"
+#include "blocks/sources/source_file.hpp"
+#include "blocks/resamplers/multistage_resampler.hpp"
+#include "blocks/utils/fanout.hpp"
+#include "blocks/sinks/sink_file.hpp"
 
 constexpr const char* INPUT_FILE = "recordings/recorded_stream_0x55904E.bin";
 constexpr const char* POST_DECIM_OUTPUT_FILE = "output/post_decim_output.bin";

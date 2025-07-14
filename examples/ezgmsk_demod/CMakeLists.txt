@@ -5,7 +5,7 @@ target_link_libraries(main PRIVATE
 )
 
 target_include_directories(main PRIVATE
-  ${PROJECT_SOURCE_DIR}/blocks
+  ${PROJECT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/include #for cler
 )
 

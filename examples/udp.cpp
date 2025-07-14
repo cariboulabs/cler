@@ -1,7 +1,7 @@
 #include "cler.hpp"
 #include "blocks/udp/sink_udp.hpp"
 #include "blocks/udp/source_udp.hpp"
-#include "blocks/sink_null.hpp"
+#include "blocks/sinks/sink_null.hpp"
 #include <queue>
 #include <iostream>
 #include <thread>

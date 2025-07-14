@@ -1,7 +1,7 @@
 #include "cler.hpp"
-#include "blocks/source_cw.hpp"
-#include "blocks/throttle.hpp"
-#include "blocks/add.hpp"
+#include "blocks/sources/source_cw.hpp"
+#include "blocks/utils/throttle.hpp"
+#include "blocks/math/add.hpp"
 #include "blocks/plots/plot_timeseries.hpp"
 #include "gui_manager.hpp"
 

@@ -2,9 +2,9 @@
 #include <chrono>
 #include <algorithm>
 #include "gui_manager.hpp"
-#include "blocks/throttle.hpp"
+#include "blocks/utils/throttle.hpp"
 #include "blocks/plots/plot_timeseries.hpp"
-#include "blocks/fanout.hpp"
+#include "blocks/utils/fanout.hpp"
 #include <atomic>
 #include <numbers>
 #include <cmath>

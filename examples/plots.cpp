@@ -1,12 +1,12 @@
 #include "cler.hpp"
 #include "gui_manager.hpp"
 #include "blocks/plots/plot_timeseries.hpp"
-#include "blocks/source_cw.hpp"
-#include "blocks/source_chirp.hpp"
-#include "blocks/throttle.hpp"
-#include "blocks/math_complex_demux.hpp"
+#include "blocks/sources/source_cw.hpp"
+#include "blocks/sources/source_chirp.hpp"
+#include "blocks/utils/throttle.hpp"
+#include "blocks/utils/fanout.hpp"
+#include "blocks/math/complex_demux.hpp"
 #include "blocks/plots/plot_cspectrum.hpp"
-#include "blocks/fanout.hpp"
 #include "blocks/plots/plot_cspectrogram.hpp"
 
 int main() {

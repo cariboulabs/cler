@@ -1,7 +1,7 @@
 # Cler: Compile Time DSP Flowgraph Framework for SDRs and Embedded Systems
 
-Cler is a C++ header only template-based framework for constructing and executing flowgraphs of DSP processing blocks.
-Its goal is to keep a tiny core while allowing maximal flexability:
+Cler is a C++ template-based framework for constructing and executing flowgraphs of DSP processing blocks.
+Its goal is to keep a tiny header only core allowing maximal flexability:
 
 * Defining blocks amounts to implementing a struct with a method.
 * Channels are type agnostic.
@@ -34,13 +34,6 @@ cd examples
 Below is `examples/hello_world.cpp`
 
 ```
-#include "cler.hpp"
-#include "blocks/source_cw.hpp"
-#include "blocks/throttle.hpp"
-#include "blocks/add.hpp"
-#include "blocks/plots/plot_timeseries.hpp"
-#include "gui_manager.hpp"
-
 int main() {
     cler::GuiManager gui(800, 400, "Hello World Plot Example");
 
