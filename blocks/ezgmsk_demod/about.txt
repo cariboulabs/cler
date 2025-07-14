@@ -1,0 +1,10 @@
+--------------EaslyLink--------------
+
+Easylink is a lightweight wireless communication API developed by Texas Instruments (TI). 
+It’s part of the SimpleLink™ software framework for TI’s Sub-1 GHz and 2.4 GHz radios,
+like the CC1101, CC1310, CC1350, and similar devices.
+Easylink’s purpose is to make low-power, narrowband, 
+point-to-point or star networks simple to implement without the overhead of complex wireless stacks. .
+
+--------------ezgmsk_demod------------
+This module provides software demodulation of GFSK signals sent by Easylink radios, enabling reception with an SDR.
