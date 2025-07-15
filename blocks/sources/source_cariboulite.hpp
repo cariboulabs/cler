@@ -4,7 +4,7 @@
 #include <fstream>
 #include <stdexcept>
 
-inline const bool detect_cariboulite_board()
+inline bool detect_cariboulite_board()
 {
     CaribouLite::SysVersion ver;
     std::string name;
@@ -24,6 +24,7 @@ inline const bool detect_cariboulite_board()
 struct SourceCaribouliteBlock : public cler::BlockBase {
     SourceCaribouliteBlock(std::string name,
         CaribouLiteRadio::RadioType radio_type,
+        float freq_hz,
         float samp_rate_hz,
         bool agc,
         float rx_gain_db = 0.0f,
@@ -39,7 +40,7 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             // std::vector<CaribouLiteFreqRange> ranges = _radio->GetFrequencyRange();
             // bool valid_freq = false;
             // for (const auto& range : ranges) {
-            //     if (range.min_hz <= samp_rate_hz && range.max_hz >= samp_rate_hz) {
+            //     if (range.min_hz <= freq_hz && range.max_hz >= samp_rate_hz) {
             //         valid_freq = true;
             //         break;
             //     }
@@ -48,11 +49,17 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             //     throw std::invalid_argument("Sample rate is out of range for the selected radio type.");
             // }
 
+            if (samp_rate_hz > 1e4 || samp_rate_hz <= 0) {
+                throw std::invalid_argument("samp_rate_hz must be between 1 and 4 Mhz.");
+            }
+
+            _radio->SetFrequency(freq_hz);
+            _radio->SetRxSampleRate(samp_rate_hz);            
             _radio->SetAgc(agc);
             if (agc) {_radio->SetRxGain(rx_gain_db);}
-            _radio->SetRxSampleRate(samp_rate_hz);
 
             _tmp = new std::complex<float>[buffer_size];
+            
             _radio->StartReceiving();
         }
 

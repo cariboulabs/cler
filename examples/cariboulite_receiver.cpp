@@ -3,17 +3,21 @@
 #include "blocks/plots/plot_cspectrum.hpp"
 
 int main() {
+    const size_t samp_rate = 4'000'000; // 4 MHz
+    const float freq_hz = 915e6; // 915 MHz
+
     SourceCaribouliteBlock source_cariboulite(
         "SourceCaribouLite",
         CaribouLiteRadio::RadioType::S1G,
-        915e6,
+        static_cast<float>(samp_rate),
+        freq_hz,
         true
     );
 
     PlotCSpectrumBlock plot_cspectrum(
         "Spectrum Plot",
         {"caribou_signal"},
-        4'000'000,
+        samp_rate,
         256);
 
     cler::FlowGraph flowgraph(
