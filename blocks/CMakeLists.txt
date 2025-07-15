@@ -29,12 +29,14 @@ add_subdirectory(gui)
 add_subdirectory(ezgmsk_demod)
 add_subdirectory(plots)
 add_subdirectory(udp)
+add_subdirectory(sources)
 
 target_link_libraries(cler_blocks INTERFACE 
   cler::blocks_gui
   cler::blocks_ezgmsk_demod
   cler::blocks_plots
   cler::blocks_udp
+  cler::blocks_sources
 )
 
 target_include_directories(cler_blocks INTERFACE #so people call #include "blocks/..."

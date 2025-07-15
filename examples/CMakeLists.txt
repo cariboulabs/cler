@@ -21,13 +21,9 @@ target_link_libraries(udp PRIVATE cler::cler_blocks)
 add_executable(polyphase_channelizer polyphase_channelizer.cpp)
 target_link_libraries(polyphase_channelizer PRIVATE cler::cler_blocks)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(CARIBOULITE cariboulite)
-if(CARIBOULITE_FOUND)
+if (CARIBOULITE_FOUND)
     add_executable(cariboulite_receiver cariboulite_receiver.cpp)
-    target_link_libraries(cariboulite_receiver PRIVATE cler::cler_blocks ${CARIBOULITE_LIBRARIES} -lcariboulite)
-    target_include_directories(cariboulite_receiver PRIVATE ${CARIBOULITE_INCLUDE_DIRS})
-else()
-  message(WARNING "Cariboulite not found: cariboulite_receiver example")
+    target_link_libraries(cariboulite_receiver PRIVATE cler::cler_blocks)
 endif()
+
 
