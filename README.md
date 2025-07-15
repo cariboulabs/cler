@@ -165,7 +165,7 @@ How to add code:
 
 # Acknowledgements
 Special thanks to:
-* Andrew Drogalis — for the excellent SPSC-Queue implementation that our buffers are based on.
+* Andrew Drogalis — for the excellent SPSC-Queue implementation that used as our channels.
 * Bastian Bloessl and the FutureSDR community — Your design choices inspired some of ours.
 * Joseph D. Gaeddert and the liquid-dsp community — In our opinion, the best DSP library out there by a margin.
 * Omar Ocornut and The Dear ImGui community — A fast "batteries included" GUI library that meets all of our needs.
