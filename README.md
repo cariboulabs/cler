@@ -20,7 +20,7 @@ Its goal is to keep a tiny header only core allowing maximal flexability:
 
 **How does it compare to GNURadio or FutureSDR**? it doesn't, though it can be competitive. Unlike GNURadio, FutureSDR or PothosFlow, Cler's main goal is DSP on embedded systems. It keeps things simpler with block owned ring buffers and minimal thread coordination. This makes data flow more predictable and practical for small embedded systems, yet still good enough for many commercial SDRs and thier applications. For example, we don't use  double-mapped buffers as we can't rely on having an MMU.
 
-**How to use it?** Just Include `include/cler.hpp` and you are good for the basics. Want to use already written blocks? Inlcude them from `blocks/*` </br>
+**How to use it?** Just Include `include/cler.hpp` and you are good for the basics. Want to use already written blocks? Inlcude them from `blocks/*` and link against cler::cler_blocks </br>
 Alternatively, you can use CMAKE to link against `cler::cler` and `cler::cler_blocks` which already interface the required headers.
 
 Want to try out some examples?
