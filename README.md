@@ -9,12 +9,12 @@ Its goal is to keep a tiny header only core allowing maximal flexability:
 * Defining blocks amounts to implementing a struct with a method
 * Channels are type agnostic
 * Blocks are not limited by number of input/output Channels
-* Callbacks can be used for unconnected blocks communication.
-* Flowgraphs are, and Blocks can be made almost completely static
+* Callbacks can be used for communication between unconnected blocks
+* Flowgraphs and Blocks can be made almost completely static
 * Tailored for Embedded Systems -  even MCUs
 * Built for radio, but can also be used for control and dynamic simulations (supports cyclic graphs, and online modifiable params)
 * Cross-Platform
-* Code first, UI second.
+* Code first, Flowgraph GUI second. While No-code is sweet, it also constrains applications
 
 **What's so special?** historically DSP flowgraph implementations rely on polymorphism to abstract over blocks and channels. This can constrain the architecture and lead to compromises — for example, GNURadio uses void* inputs/outputs in its procedure calls to achieve runtime flexibility. Instead, Cler uses variadic templates to achieve type safety and flexibility without runtime overhead. This approach was made possible by C++17 features like std::apply and forward deduction guide. The same approach can be taken in Rust with Traits and Zig with CompTime, but these languages still don't have the facilities for mature DSP on small embedded systems (STM32 for example).
 
