@@ -1,13 +1,6 @@
 add_executable(main main.cpp)
 
-target_link_libraries(main PRIVATE 
-    ezgmsk_demod
-)
-
-target_include_directories(main PRIVATE
-  ${PROJECT_SOURCE_DIR}
-  ${PROJECT_SOURCE_DIR}/include #for cler
-)
+target_link_libraries(main PRIVATE cler_blocks)
 
 set(RECORDED_STREAM1 recordings/recorded_stream_0x55904E.bin)
 add_custom_command(

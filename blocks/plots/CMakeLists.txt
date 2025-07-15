@@ -3,10 +3,7 @@ add_library(blocks_plots STATIC
     plot_cspectrogram.cpp
     plot_timeseries.cpp
 )
-
-target_link_libraries(blocks_plots PUBLIC liquid blocks_gui)
-target_include_directories(blocks_plots PUBLIC
-    ${PROJECT_SOURCE_DIR}/include
-    SYSTEM ${liquid_SOURCE_DIR}/include #system ignore warnings from liquid
-    SYSTEM ${liquid_SOURCE_DIR}/scripts #for config.h
+target_link_libraries(blocks_plots PUBLIC cler liquid blocks_gui)
+target_include_directories(blocks_plots PUBLIC 
+    ${CMAKE_CURRENT_SOURCE_DIR}
 )

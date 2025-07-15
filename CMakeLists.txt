@@ -23,16 +23,22 @@ endif()
 
 # For Release, force -O3
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-  message(STATUS "Configuring Release build with -O3")
+  message(STATUS "CLER sources: Configuring Release build with -O3")
   add_compile_options(-O3)
 endif()
 
 # For Debug, force debug symbols
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  message(STATUS "Configuring Debug build with -g")
+  message(STATUS "CLER sources: Configuring Debug build with -g")
   add_compile_options(-g)
 endif()
 
+add_library(cler INTERFACE)
+target_include_directories(cler INTERFACE
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include> #allows people to just #include "cler.hpp"
+)
+
+add_subdirectory(logger)
 add_subdirectory(blocks)
 add_subdirectory(examples)
 add_subdirectory(performance)

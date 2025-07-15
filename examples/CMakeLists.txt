@@ -1,26 +1,22 @@
-include_directories(
-  ${PROJECT_SOURCE_DIR}
-  ${PROJECT_SOURCE_DIR}/include
-  SYSTEM ${liquid_SOURCE_DIR}/include #system ignore warnings from liquid
-  SYSTEM ${zf_log_SOURCE_DIR}/zf_log
-)
-
 add_executable(hello_world hello_world.cpp)
-target_link_libraries(hello_world PRIVATE blocks_plots)
+target_link_libraries(hello_world PRIVATE cler_blocks)
 
 add_executable(streamlined streamlined.cpp)
+target_link_libraries(streamlined PRIVATE cler)
+
 add_executable(flowgraph flowgraph.cpp)
+target_link_libraries(flowgraph PRIVATE cler)
 
 add_executable(plots plots.cpp)
-target_link_libraries(plots PRIVATE blocks_plots)
+target_link_libraries(plots PRIVATE cler_blocks)
 
 add_subdirectory(ezgmsk_demod)
 
 add_executable(mass_spring_damper mass_spring_damper.cpp)
-target_link_libraries(mass_spring_damper PRIVATE blocks_plots)
+target_link_libraries(mass_spring_damper PRIVATE cler_blocks)
 
 add_executable(udp udp.cpp)
-target_link_libraries(udp PRIVATE blocks_udp)
+target_link_libraries(udp PRIVATE cler_blocks)
 
 add_executable(polyphase_channelizer polyphase_channelizer.cpp)
-target_link_libraries(polyphase_channelizer PRIVATE blocks_plots)
+target_link_libraries(polyphase_channelizer PRIVATE cler_blocks)
