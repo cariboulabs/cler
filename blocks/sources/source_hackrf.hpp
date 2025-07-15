@@ -14,7 +14,7 @@ struct SourceHackRFBlock : public cler::BlockBase {
                       int vga_gain_db = 16,  // 0-62 dB, multiple of 2
                       size_t buffer_size = 2 << 22)
         : cler::BlockBase(std::move(name)),
-          _iq(buffer_size),
+          _iq(buffer_size)
           
     {
         if (hackrf_open(&_dev) != HACKRF_SUCCESS) {

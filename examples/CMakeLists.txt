@@ -26,4 +26,9 @@ if (CARIBOULITE_FOUND)
     target_link_libraries(cariboulite_receiver PRIVATE cler::cler_blocks)
 endif()
 
+if (HACKRF_FOUND)
+    add_executable(hackrf_receiver hackrf_receiver.cpp)
+    target_link_libraries(hackrf_receiver PRIVATE cler::cler_blocks)
+endif()
+
 
