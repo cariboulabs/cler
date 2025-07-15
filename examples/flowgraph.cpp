@@ -1,7 +1,5 @@
 #include "cler.hpp"
 #include <iostream>
-#include <chrono>
-#include <algorithm>
 
 const size_t CHANNEL_SIZE = 512;
 
