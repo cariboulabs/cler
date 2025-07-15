@@ -35,4 +35,4 @@ endif()
 
 add_subdirectory(blocks)
 add_subdirectory(examples)
-add_subdirectory(throughput_comparisons)
+add_subdirectory(performance)

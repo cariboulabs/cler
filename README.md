@@ -6,8 +6,10 @@
 Cler is a C++ template-based framework for constructing and executing flowgraphs of DSP processing blocks.
 Its goal is to keep a tiny header only core allowing maximal flexability:
 
-* Defining blocks amounts to implementing a struct with a method.
-* Channels are type agnostic.
+* Defining blocks amounts to implementing a struct with a method
+* Channels are type agnostic
+* Blocks are not limited by number of input/output Channels
+* Callbacks can be used for unconnected blocks communication.
 * Flowgraphs are, and Blocks can be made almost completely static
 * Tailored for Embedded Systems -  even MCUs
 * Built for radio, but can also be used for control and dynamic simulations (supports cyclic graphs, and online modifiable params)
