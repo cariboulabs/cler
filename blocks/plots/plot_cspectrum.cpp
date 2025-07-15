@@ -87,6 +87,10 @@ PlotCSpectrumBlock::~PlotCSpectrumBlock() {
 }
 
 cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
+    if (_gui_pause.load(std::memory_order_acquire)) {
+        return cler::Empty{};
+    }
+
     size_t work_size = in[0].size();
     for (size_t i = 1; i < _num_inputs; ++i) {
         if (in[i].size() < work_size) {
@@ -159,6 +163,10 @@ void PlotCSpectrumBlock::render() {
     ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
     ImGui::Begin(name().c_str());
+
+    if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
+        _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
+    }
 
     if (ImPlot::BeginPlot(name().c_str())) {
         ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]");

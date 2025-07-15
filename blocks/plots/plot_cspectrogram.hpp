@@ -50,4 +50,6 @@ private:
     ImVec2 _initial_window_position = ImVec2(200, 200);
     ImVec2 _initial_window_size = ImVec2(600, 400);
     bool _has_initial_window_position = false;
+
+    std::atomic<bool> _gui_pause = false;
 };

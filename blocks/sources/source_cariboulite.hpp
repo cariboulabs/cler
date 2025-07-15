@@ -1,8 +1,6 @@
 #pragma once
 #include <CaribouLite.hpp>
 #include "cler.hpp"
-#include <fstream>
-#include <stdexcept>
 
 inline bool detect_cariboulite_board()
 {
@@ -37,6 +35,7 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             CaribouLite& cl = CaribouLite::GetInstance(false);
             _radio = cl.GetRadioChannel(radio_type);
 
+            //----------is there a way to verify range? they are private so cant read them
             // std::vector<CaribouLiteFreqRange> ranges = _radio->GetFrequencyRange();
             // bool valid_freq = false;
             // for (const auto& range : ranges) {

@@ -51,4 +51,6 @@ private:
 
     std::mutex _snapshot_mutex;
     size_t _snapshot_ready_size = 0;
+
+    std::atomic<bool> _gui_pause = false;
 };

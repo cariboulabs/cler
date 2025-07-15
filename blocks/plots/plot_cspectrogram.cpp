@@ -68,6 +68,10 @@ PlotCSpectrogramBlock::~PlotCSpectrogramBlock() {
 }
 
 cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
+    if (_gui_pause.load(std::memory_order_acquire)) {
+        return cler::Empty{};
+    }
+
     size_t available = in[0].size();
     for (size_t i = 1; i < _num_inputs; ++i) {
         if (in[i].size() < available) available = in[i].size();
@@ -127,6 +131,10 @@ void PlotCSpectrogramBlock::render() {
     const ImPlotAxisFlags y_flags = ImPlotAxisFlags_Lock;
 
     std::lock_guard<std::mutex> lock(_spectrogram_mutex);
+
+    if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
+        _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
+    }
 
     for (size_t i = 0; i < _num_inputs; ++i) {
         if (ImPlot::BeginPlot(_signal_labels[i].c_str())) {
