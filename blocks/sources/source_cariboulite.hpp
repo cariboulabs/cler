@@ -35,20 +35,19 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             CaribouLite& cl = CaribouLite::GetInstance(false);
             _radio = cl.GetRadioChannel(radio_type);
 
-            //----------is there a way to verify range? they are private so cant read them
-            // std::vector<CaribouLiteFreqRange> ranges = _radio->GetFrequencyRange();
-            // bool valid_freq = false;
-            // for (const auto& range : ranges) {
-            //     if (range.min_hz <= freq_hz && range.max_hz >= samp_rate_hz) {
-            //         valid_freq = true;
-            //         break;
-            //     }
-            // }
-            // if (!valid_freq) {
-            //     throw std::invalid_argument("Sample rate is out of range for the selected radio type.");
-            // }
+            std::vector<CaribouLiteFreqRange> ranges = _radio->GetFrequencyRange();
+            bool valid_freq = false;
+            for (const auto& range : ranges) {
+                if (range.fmin() <= freq_hz && range.fmax() >= samp_rate_hz) {
+                    valid_freq = true;
+                    break;
+                }
+            }
+            if (!valid_freq) {
+                throw std::invalid_argument("Sample rate is out of range for the selected radio type.");
+            }
 
-            if (samp_rate_hz > 1e4 || samp_rate_hz <= 0) {
+            if (samp_rate_hz > 4e6 || samp_rate_hz <= 0) {
                 throw std::invalid_argument("samp_rate_hz must be between 1 and 4 Mhz.");
             }
 
