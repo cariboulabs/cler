@@ -1,5 +1,5 @@
 #include "cler.hpp"
-#include "gui_manager.hpp"
+#include "blocks/gui/gui_manager.hpp"
 #include "blocks/plots/plot_timeseries.hpp"
 #include "blocks/sources/source_cw.hpp"
 #include "blocks/sources/source_chirp.hpp"

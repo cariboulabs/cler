@@ -48,7 +48,7 @@ target_include_directories(blocks_gui PUBLIC
   ${imgui_SOURCE_DIR}
   ${imgui_SOURCE_DIR}/backends
   ${implot_SOURCE_DIR}
-  ${CMAKE_CURRENT_SOURCE_DIR} # so #include "gui_manager.hpp" works
+  ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 # === Link dependencies ===

@@ -91,11 +91,9 @@ Cler supports two architectural styles:
     See `streamlined` and  `flowgraph` as examples for the two architectural styles, and `polyphase_channelizer` for a superblock implementation.
 
 * **Blocks**: </br>
-Blocks is a library of useful blocks for quick "plug and play". Its soft depedencies are `liquid`, `imdeargui`(with opengl,glfw) and `zf_log` brought in by CMAKE's fetch content. </br>
+Blocks is a library of useful blocks for quick "plug and play". Its soft depedencies are `liquid`, `imdeargui`(with opengl,glfw).
+To include its headers and link against it, link against `cler::cler_blocks` with CMake.
 In Cler, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
-
-* **Blocks/GUI**: </br>
-Cler is a header only library, but includes a gui library (dearimgui) that is compiled. To use it, include `gui_manager.hpp` and link your executable against `cler_gui`. See the `plots` or `mass_spring_damper` examples.
 
 * **Buffers** </br>
 Our buffers are modified version of `https://github.com/drogalis/SPSC-Queue`. They allow for static or heap allocation. See the gain block in `streamlined.cpp` for an example.</br> 

@@ -84,7 +84,7 @@ int main() {
     SinkUDPSocketBlock sink_udp("SinkUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001, on_sink_udp_send);
     SourceUDPSocketBlock source_udp("SourceUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001,
                       MAX_UDP_BLOB_SIZE, SLAB_SLOTS, on_source_udp_recv, nullptr);
-    SinkNullBlock<UDPBlock::BlobSlice> sink_null("SinkTerminal", on_sink_null_recv, nullptr, 20);
+    SinkNullBlock<UDPBlock::BlobSlice> sink_null("SinkNull", on_sink_null_recv, nullptr, 20);
 
     cler::FlowGraph fg(
                     cler::BlockRunner(&source_datagram, &sink_udp.in),

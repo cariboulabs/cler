@@ -3,7 +3,7 @@
 #include "blocks/utils/throttle.hpp"
 #include "blocks/math/add.hpp"
 #include "blocks/plots/plot_timeseries.hpp"
-#include "gui_manager.hpp"
+#include "blocks/gui/gui_manager.hpp"
 
 int main() {
     cler::GuiManager gui(800, 400, "Hello World Plot Example");

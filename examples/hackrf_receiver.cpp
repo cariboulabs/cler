@@ -4,7 +4,7 @@
 #include "blocks/plots/plot_cspectrum.hpp"
 #include "blocks/plots/plot_cspectrogram.hpp"
 #include "blocks/utils/fanout.hpp"
-#include "gui_manager.hpp"
+#include "blocks/gui/gui_manager.hpp"
 
 int main() {
     if (hackrf_init() != HACKRF_SUCCESS) {

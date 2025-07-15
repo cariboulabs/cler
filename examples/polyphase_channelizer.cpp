@@ -1,6 +1,6 @@
 #include "cler.hpp"
 #include "cler_addons.hpp"
-#include "gui_manager.hpp"
+#include "blocks/gui/gui_manager.hpp"
 #include "blocks/sources/source_cw.hpp"
 #include "blocks/channelizers/polyphase_channelizer.hpp"
 #include "blocks/math/add.hpp"
