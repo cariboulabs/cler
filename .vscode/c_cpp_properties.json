@@ -3,11 +3,13 @@
         {
             "name": "Linux",
             "includePath": [
+                "${workspaceFolder}",
                 "${workspaceFolder}/include",
                 "${workspaceFolder}/blocks/gui",
-                "${workspaceFolder}/blocks/ezgmsk_demod",
+                "${workspaceFolder}/build/_deps/imgui-src/",
+                "${workspaceFolder}/build/_deps/implot-src/",
                 "${workspaceFolder}/build/_deps/liquid-src/include",
-                "${workspaceFolder}/build/_deps/zf_log-src/zf_log"
+                "${workspaceFolder}/logger/**"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/clang",

@@ -34,6 +34,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 add_library(cler INTERFACE)
+add_library(cler::cler ALIAS cler)
 target_include_directories(cler INTERFACE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include> #allows people to just #include "cler.hpp"
 )

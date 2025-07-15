@@ -1,8 +1,8 @@
 add_subdirectory(zf_log)
 
-add_library(logger STATIC logger.c
-)
-target_include_directories(logger PRIVATE zf_log)
-target_include_directories(logger PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+add_library(cler_logger STATIC logger.c)
+add_library(cler::logger ALIAS cler_logger)
 
-target_link_libraries(logger PRIVATE zf_log)
+target_include_directories(cler_logger PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} zf_log)
+
+target_link_libraries(cler_logger PRIVATE zf_log)

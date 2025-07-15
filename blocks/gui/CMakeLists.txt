@@ -27,21 +27,20 @@ FetchContent_MakeAvailable(implot)
 # === Create static library ===
 add_library(blocks_gui STATIC
   gui_manager.cpp
-
   # ImGui core
   ${imgui_SOURCE_DIR}/imgui.cpp
   ${imgui_SOURCE_DIR}/imgui_draw.cpp
   ${imgui_SOURCE_DIR}/imgui_tables.cpp
   ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-
   # ImGui backends
   ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
   ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
-
   # ImPlot core
   ${implot_SOURCE_DIR}/implot.cpp
   ${implot_SOURCE_DIR}/implot_items.cpp
 )
+
+add_library(cler::blocks_gui ALIAS blocks_gui)
 
 # === Include paths for anyone linking blocks_gui ===
 target_include_directories(blocks_gui PUBLIC
