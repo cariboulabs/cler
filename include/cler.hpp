@@ -46,13 +46,6 @@ namespace cler {
         }
     }
 
-    // Threading policies are now in separate headers:
-    // - cler_stdthread_policy.hpp for desktop std::thread
-    // - cler_freertos_policy.hpp for FreeRTOS
-    // - cler_threadx_policy.hpp for ThreadX
-
-
-    // Channel now uses the existing SPSC queue directly
     template <typename T, size_t N = 0, typename Allocator = std::allocator<T>>
     using Channel = dro::SPSCQueue<T, N, Allocator>;
 
@@ -99,7 +92,32 @@ namespace cler {
         size_t adaptive_sleep_consecutive_fail_threshold = 50;
     };
 
-    // Unified FlowGraph with threading policy
+    
+    // Threading policies are now in separate headers:
+    // - cler_stdthread_policy.hpp for desktop std::thread
+    // - cler_freertos_policy.hpp for FreeRTOS
+    // - cler_threadx_policy.hpp for ThreadX
+    //
+    // Threading Policy Interface Requirements:
+    // All threading policies must implement the following interface:
+    //
+    // struct SomeThreadingPolicy {
+    //     using thread_type = /* platform-specific thread type */;
+    //     
+    //     // Create and start a new thread with the given function
+    //     template<typename Func>
+    //     static thread_type create_thread(Func&& f);
+    //     
+    //     // Wait for thread to complete (blocking)
+    //     static void join_thread(thread_type& t);
+    //     
+    //     // Yield current thread's time slice
+    //     static void yield();
+    //     
+    //     // Sleep for specified microseconds (for adaptive sleep)
+    //     static void sleep_us(size_t microseconds);
+    // };
+
     template<typename ThreadingPolicy, typename... BlockRunners>
     class FlowGraph {
     public:

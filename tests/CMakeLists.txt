@@ -30,7 +30,7 @@ endif()
 
 # Test executables
 set(TEST_SOURCES
-    test_simple.cpp
+    test_basic_functionality.cpp
     test_allocators.cpp
     test_spsc_queue.cpp
     test_threading_simple.cpp

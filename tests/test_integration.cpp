@@ -38,67 +38,98 @@ TEST_F(IntegrationTest, DSPPipelineWithSPSCQueues) {
     std::atomic<int> process_count{0};
     std::atomic<int> output_count{0};
     
-    // Input block: generates sine wave samples
-    auto input_block = [&]() -> cler::Result<void> {
-        static float phase = 0.0f;
-        constexpr float freq = 440.0f / 48000.0f;  // 440 Hz at 48kHz
+    // Input block: generates sine wave samples  
+    struct InputBlock : cler::BlockBase {
+        std::atomic<int>& counter;
+        dro::SPSCQueue<float, 0, cler::StaticPoolAllocator<16384>>& queue;
+        float phase = 0.0f;
         
-        for (int i = 0; i < 32; ++i) {  // Process in chunks
-            float sample = std::sin(2.0f * M_PI * phase);
-            if (input_queue.try_push(sample)) {
-                input_count++;
-                phase += freq;
-                if (phase > 1.0f) phase -= 1.0f;
-            } else {
-                break;  // Queue full
+        InputBlock(std::atomic<int>& c, auto& q) 
+            : cler::BlockBase("InputBlock"), counter(c), queue(q) {}
+        
+        cler::Result<cler::Empty, cler::Error> procedure() {
+            constexpr float freq = 440.0f / 48000.0f;  // 440 Hz at 48kHz
+            
+            for (int i = 0; i < 32; ++i) {  // Process in chunks
+                float sample = std::sin(2.0f * M_PI * phase);
+                if (queue.try_push(sample)) {
+                    counter++;
+                    phase += freq;
+                    if (phase > 1.0f) phase -= 1.0f;
+                } else {
+                    break;  // Queue full
+                }
             }
+            return cler::Empty{};
         }
-        return cler::ok();
     };
     
     // Processing block: applies simple gain
-    auto process_block = [&]() -> cler::Result<void> {
-        constexpr float gain = 0.5f;
-        float sample;
+    struct ProcessBlock : cler::BlockBase {
+        std::atomic<int>& counter;
+        dro::SPSCQueue<float, 0, cler::StaticPoolAllocator<16384>>& input_q;
+        dro::SPSCQueue<float, 0, cler::StaticPoolAllocator<16384>>& output_q;
         
-        for (int i = 0; i < 32; ++i) {  // Process in chunks
-            if (input_queue.try_pop(sample)) {
-                float processed = sample * gain;
-                if (output_queue.try_push(processed)) {
-                    process_count++;
+        ProcessBlock(std::atomic<int>& c, auto& in_q, auto& out_q) 
+            : cler::BlockBase("ProcessBlock"), counter(c), input_q(in_q), output_q(out_q) {}
+        
+        cler::Result<cler::Empty, cler::Error> procedure() {
+            constexpr float gain = 0.5f;
+            float sample;
+            
+            for (int i = 0; i < 32; ++i) {  // Process in chunks
+                if (input_q.try_pop(sample)) {
+                    float processed = sample * gain;
+                    if (output_q.try_push(processed)) {
+                        counter++;
+                    } else {
+                        // Put sample back if output queue is full
+                        input_q.try_push(sample);
+                        break;
+                    }
                 } else {
-                    // Put sample back if output queue is full
-                    input_queue.try_push(sample);
-                    break;
+                    break;  // No input samples
                 }
-            } else {
-                break;  // No input samples
             }
+            return cler::Empty{};
         }
-        return cler::ok();
     };
     
     // Output block: consumes processed samples
-    auto output_block = [&]() -> cler::Result<void> {
-        float sample;
+    struct OutputBlock : cler::BlockBase {
+        std::atomic<int>& counter;
+        dro::SPSCQueue<float, 0, cler::StaticPoolAllocator<16384>>& queue;
         
-        for (int i = 0; i < 32; ++i) {  // Process in chunks
-            if (output_queue.try_pop(sample)) {
-                output_count++;
-                // Verify sample is within expected range
-                EXPECT_GE(sample, -0.5f);
-                EXPECT_LE(sample, 0.5f);
-            } else {
-                break;  // No output samples
+        OutputBlock(std::atomic<int>& c, auto& q) 
+            : cler::BlockBase("OutputBlock"), counter(c), queue(q) {}
+        
+        cler::Result<cler::Empty, cler::Error> procedure() {
+            float sample;
+            
+            for (int i = 0; i < 32; ++i) {  // Process in chunks
+                if (queue.try_pop(sample)) {
+                    counter++;
+                    // Verify sample is within expected range (gain = 0.5)
+                    if (sample < -0.5f || sample > 0.5f) {
+                        return cler::Error::BadData;
+                    }
+                } else {
+                    break;  // No output samples
+                }
             }
+            return cler::Empty{};
         }
-        return cler::ok();
     };
     
+    // Create blocks
+    InputBlock input_block(input_count, input_queue);
+    ProcessBlock process_block(process_count, input_queue, output_queue);
+    OutputBlock output_block(output_count, output_queue);
+    
     // Create block runners
-    cler::BlockRunner input_runner(input_block);
-    cler::BlockRunner process_runner(process_block);
-    cler::BlockRunner output_runner(output_block);
+    cler::BlockRunner input_runner(&input_block);
+    cler::BlockRunner process_runner(&process_block);
+    cler::BlockRunner output_runner(&output_block);
     
     // Create flow graph
     cler::FlowGraph<cler::StdThreadPolicy, 
@@ -108,7 +139,7 @@ TEST_F(IntegrationTest, DSPPipelineWithSPSCQueues) {
         flowgraph(input_runner, process_runner, output_runner);
     
     // Run the pipeline
-    flowgraph.start();
+    flowgraph.run();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     flowgraph.stop();
     

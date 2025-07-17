@@ -29,7 +29,7 @@ TEST_F(ThreadingPolicyTest, StdThreadPolicyBasics) {
     ASSERT_TRUE(thread.joinable());
     
     // Test join functionality
-    cler::StdThreadPolicy::join(thread);
+    cler::StdThreadPolicy::join_thread(thread);
     EXPECT_TRUE(function_executed.load());
     EXPECT_FALSE(thread.joinable());
 }
@@ -38,31 +38,24 @@ TEST_F(ThreadingPolicyTest, StdThreadPolicyBasics) {
 TEST_F(ThreadingPolicyTest, StdThreadPolicyWithParameters) {
     std::atomic<int> result{0};
     
-    auto thread = cler::StdThreadPolicy::create_thread([&](int value) {
-        result = value * 2;
-    }, 21);
+    // Note: create_thread only accepts Func, not Args, so we need to capture the value
+    auto thread = cler::StdThreadPolicy::create_thread([&]() {
+        result = 21 * 2;
+    });
     
-    cler::StdThreadPolicy::join(thread);
+    cler::StdThreadPolicy::join_thread(thread);
     EXPECT_EQ(result.load(), 42);
 }
 
-// Test StdThreadPolicy detach functionality
-TEST_F(ThreadingPolicyTest, StdThreadPolicyDetach) {
-    std::atomic<bool> function_executed{false};
+// Test StdThreadPolicy basic functionality 
+TEST_F(ThreadingPolicyTest, StdThreadPolicyYield) {
+    // Test that yield doesn't crash (can't really test much more)
+    cler::StdThreadPolicy::yield();
     
-    auto thread = cler::StdThreadPolicy::create_thread([&]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        function_executed = true;
-    });
+    // Test sleep_us doesn't crash
+    cler::StdThreadPolicy::sleep_us(1);
     
-    ASSERT_TRUE(thread.joinable());
-    
-    cler::StdThreadPolicy::detach(thread);
-    EXPECT_FALSE(thread.joinable());
-    
-    // Give detached thread time to complete
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    EXPECT_TRUE(function_executed.load());
+    SUCCEED(); // If we get here, yield and sleep_us work
 }
 
 // Test simple block with std::thread policy
@@ -77,7 +70,7 @@ TEST_F(ThreadingPolicyTest, SimpleBlockWithStdThread) {
         
         cler::Result<cler::Empty, cler::Error> procedure() {
             counter++;
-            return cler::ok();
+            return cler::Empty{};
         }
     };
     
@@ -108,7 +101,7 @@ TEST_F(ThreadingPolicyTest, FlowGraphWithStdThread) {
         cler::Result<cler::Empty, cler::Error> procedure() {
             counter++;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            return cler::ok();
+            return cler::Empty{};
         }
     };
     
@@ -118,7 +111,7 @@ TEST_F(ThreadingPolicyTest, FlowGraphWithStdThread) {
         cler::Result<cler::Empty, cler::Error> procedure() {
             counter++;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            return cler::ok();
+            return cler::Empty{};
         }
     };
     
@@ -151,30 +144,34 @@ TEST_F(ThreadingPolicyTest, FlowGraphWithStdThread) {
 TEST_F(ThreadingPolicyTest, FlowGraphStatistics) {
     std::atomic<int> execution_count{0};
     
-    auto counting_block = [&execution_count]() -> cler::Result<void> {
-        execution_count++;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        return cler::ok();
+    struct CountingBlock : cler::BlockBase {
+        std::atomic<int>& counter;
+        CountingBlock(std::atomic<int>& c) : cler::BlockBase("CountingBlock"), counter(c) {}
+        cler::Result<cler::Empty, cler::Error> procedure() {
+            counter++;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return cler::Empty{};
+        }
     };
     
-    cler::BlockRunner runner(counting_block);
+    CountingBlock block(execution_count);
+    cler::BlockRunner runner(&block);
     cler::FlowGraph<cler::StdThreadPolicy, decltype(runner)> flowgraph(runner);
     
     // Start and run for a bit
-    flowgraph.start();
+    flowgraph.run();
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     flowgraph.stop();
     
     // Get statistics
-    auto stats = flowgraph.get_stats();
+    auto stats = flowgraph.stats();
     EXPECT_EQ(stats.size(), 1);  // One block
     
     const auto& block_stats = stats[0];
-    EXPECT_GT(block_stats.execution_count, 0);
-    EXPECT_GT(block_stats.total_execution_time.count(), 0);
+    EXPECT_GT(block_stats.successful_procedures, 0);
     
     // Verify execution count matches our atomic counter
-    EXPECT_EQ(block_stats.execution_count, execution_count.load());
+    EXPECT_EQ(block_stats.successful_procedures, execution_count.load());
 }
 
 // Test error handling in flow graph
@@ -182,24 +179,33 @@ TEST_F(ThreadingPolicyTest, FlowGraphErrorHandling) {
     std::atomic<int> successful_runs{0};
     std::atomic<int> failed_runs{0};
     
-    auto error_prone_block = [&]() -> cler::Result<void> {
-        static int counter = 0;
-        counter++;
+    struct ErrorProneBlock : cler::BlockBase {
+        std::atomic<int>& success_counter;
+        std::atomic<int>& failure_counter;
+        int call_count = 0;
         
-        if (counter % 3 == 0) {
-            failed_runs++;
-            return cler::err(cler::Error::ProcedureError);
-        } else {
-            successful_runs++;
-            return cler::ok();
+        ErrorProneBlock(std::atomic<int>& s, std::atomic<int>& f) 
+            : cler::BlockBase("ErrorProneBlock"), success_counter(s), failure_counter(f) {}
+        
+        cler::Result<cler::Empty, cler::Error> procedure() {
+            call_count++;
+            
+            if (call_count % 3 == 0) {
+                failure_counter++;
+                return cler::Error::ProcedureError;
+            } else {
+                success_counter++;
+                return cler::Empty{};
+            }
         }
     };
     
-    cler::BlockRunner runner(error_prone_block);
+    ErrorProneBlock block(successful_runs, failed_runs);
+    cler::BlockRunner runner(&block);
     cler::FlowGraph<cler::StdThreadPolicy, decltype(runner)> flowgraph(runner);
     
     // Start and run for a bit
-    flowgraph.start();
+    flowgraph.run();
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
     flowgraph.stop();
     
@@ -208,18 +214,19 @@ TEST_F(ThreadingPolicyTest, FlowGraphErrorHandling) {
     EXPECT_GT(failed_runs.load(), 0);
     
     // Get statistics and verify error counting
-    auto stats = flowgraph.get_stats();
+    auto stats = flowgraph.stats();
     EXPECT_EQ(stats.size(), 1);
     
     const auto& block_stats = stats[0];
-    EXPECT_EQ(block_stats.execution_count, successful_runs.load() + failed_runs.load());
-    EXPECT_GT(block_stats.error_count, 0);
+    EXPECT_EQ(block_stats.successful_procedures + block_stats.failed_procedures, 
+              successful_runs.load() + failed_runs.load());
+    EXPECT_GT(block_stats.failed_procedures, 0);
 }
 
 // Test thread policy type traits
 TEST_F(ThreadingPolicyTest, ThreadPolicyTraits) {
     // Verify StdThreadPolicy has the expected thread type
-    static_assert(std::is_same_v<cler::StdThreadPolicy::thread_type, std::thread>);
+    static_assert(std::is_same<cler::StdThreadPolicy::thread_type, std::thread>::value);
     
     // Test that we can create threads with the policy
     bool test_passed = false;
@@ -227,7 +234,7 @@ TEST_F(ThreadingPolicyTest, ThreadPolicyTraits) {
         test_passed = true;
     });
     
-    cler::StdThreadPolicy::join(thread);
+    cler::StdThreadPolicy::join_thread(thread);
     EXPECT_TRUE(test_passed);
 }
 
@@ -236,27 +243,34 @@ TEST_F(ThreadingPolicyTest, ConcurrentFlowGraphs) {
     constexpr int NUM_GRAPHS = 3;
     std::array<std::atomic<int>, NUM_GRAPHS> counters{};
     
-    std::vector<std::unique_ptr<cler::FlowGraph<cler::StdThreadPolicy, 
-        cler::BlockRunner<std::function<cler::Result<void>()>>>>> flowgraphs;
-    
-    // Create multiple flow graphs
-    for (int i = 0; i < NUM_GRAPHS; ++i) {
-        auto block = [&counters, i]() -> cler::Result<void> {
-            counters[i]++;
+    // Create blocks for each graph
+    struct TestBlock : cler::BlockBase {
+        std::atomic<int>& counter;
+        TestBlock(std::atomic<int>& c, int id) 
+            : cler::BlockBase("TestBlock" + std::to_string(id)), counter(c) {}
+        cler::Result<cler::Empty, cler::Error> procedure() {
+            counter++;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            return cler::ok();
-        };
-        
-        auto runner = std::make_unique<cler::BlockRunner<std::function<cler::Result<void>()>>>(block);
-        auto graph = std::make_unique<cler::FlowGraph<cler::StdThreadPolicy, 
-            cler::BlockRunner<std::function<cler::Result<void>()>>>>(*runner);
-        
-        flowgraphs.push_back(std::move(graph));
+            return cler::Empty{};
+        }
+    };
+    
+    // Create multiple blocks and flowgraphs
+    std::array<std::unique_ptr<TestBlock>, NUM_GRAPHS> blocks;
+    std::array<std::unique_ptr<cler::BlockRunner<TestBlock>>, NUM_GRAPHS> runners;
+    std::array<std::unique_ptr<cler::FlowGraph<cler::StdThreadPolicy, 
+        cler::BlockRunner<TestBlock>>>, NUM_GRAPHS> flowgraphs;
+    
+    for (int i = 0; i < NUM_GRAPHS; ++i) {
+        blocks[i] = std::make_unique<TestBlock>(counters[i], i);
+        runners[i] = std::make_unique<cler::BlockRunner<TestBlock>>(blocks[i].get());
+        flowgraphs[i] = std::make_unique<cler::FlowGraph<cler::StdThreadPolicy, 
+            cler::BlockRunner<TestBlock>>>(*runners[i]);
     }
     
     // Start all flow graphs
     for (auto& graph : flowgraphs) {
-        graph->start();
+        graph->run();
     }
     
     // Let them run

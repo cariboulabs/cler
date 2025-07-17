@@ -58,9 +58,9 @@ TEST_F(ThreadingSimpleTest, ThreadDetach) {
 TEST_F(ThreadingSimpleTest, SimpleBlockRunner) {
     std::atomic<int> counter{0};
     
-    auto simple_func = [&counter]() -> cler::SimpleResult<void> {
+    auto simple_func = [&counter]() -> cler::Result<cler::Empty, cler::Error> {
         counter++;
-        return cler::ok();
+        return cler::Empty{};
     };
     
     cler::BlockRunner runner(simple_func);
