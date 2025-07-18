@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="CLER is a compile-time DSP flowgraph framework for embedded systems and SDRs. Zero-overhead, type-safe, header-only C++ library supporting FreeRTOS, Zephyr, ThreadX.">
+    <meta name="keywords" content="DSP, embedded, SDR, C++, flowgraph, real-time, FreeRTOS, Zephyr, ThreadX, signal processing">
+    <title>CLER - Compile-time DSP Flowgraphs for Embedded Systems</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css">
+</head>
+<body>
+    <nav class="nav">
+        <div class="nav-brand">
+            <img src="cler-logo.jpeg" alt="CLER" class="logo">
+        </div>
+        <div class="nav-tabs">
+            <a href="index.html" class="nav-tab active">Home</a>
+            <a href="learn.html" class="nav-tab">Learn</a>
+            <a href="blog.html" class="nav-tab">Blog</a>
+        </div>
+        <div class="nav-links">
+            <a href="https://github.com/cariboulabs/cler" class="github-link" target="_blank">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                </svg>
+            </a>
+        </div>
+    </nav>
+
+    <main>
+        <section class="hero">
+            <h1>CLER</h1>
+            <p class="tagline">Compile Time DSP Flowgraph for SDRs and Embedded Systems</p>
+        </section>
+
+        <section class="why-exists">
+            <div class="container">
+                <h2>Why CLER?</h2>
+                <p class="problem">Embedded devices traditionally relied on dedicated chips for DSP — fusion, filtering, modulation. But with today's powerful SoCs and rise of agentic AI, it's often faster, cheaper, and more flexible to move DSP into software.</p>
+                
+                <p class="problem">Existing frameworks like GNU Radio use runtime polymorphism, void* buffers, and heavy machinery. This adds overhead, limits type safety, and complicates deployment on resource-constrained systems.</p>
+                
+                <p class="solution"><strong>CLER fills this gap.</strong> Using C++17 templates and compile-time safety, it achieves zero-cost abstraction with minimal runtime footprint — practical for everything from desktop SDR to bare-metal MCUs.</p>
+            </div>
+        </section>
+
+        <section class="hello-world">
+            <div class="container">
+                <h2>Hello World - Signal Generation & Plotting</h2>
+                <p>Here's a complete example that generates two sine waves, adds them together, and plots the result:</p>
+                <div class="code-block">
+                    <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                    <pre><code class="language-cpp line-numbers">#include "cler.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
+#include "desktop_blocks/sources/source_cw.hpp"
+#include "desktop_blocks/utils/throttle.hpp"
+#include "desktop_blocks/math/add.hpp"
+#include "desktop_blocks/plots/plot_timeseries.hpp"
+#include "desktop_blocks/gui/gui_manager.hpp"
+
+int main() {
+    cler::GuiManager gui(800, 400, "Hello World Plot Example");
+
+    const size_t SPS = 1000;
+    SourceCWBlock&lt;float&gt; source1("CWSource", 1.0f, 1.0f, SPS);  // amplitude, frequency
+    SourceCWBlock&lt;float&gt; source2("CWSource2", 1.0f, 20.0f, SPS);
+    ThrottleBlock&lt;float&gt; throttle("Throttle", SPS);
+    AddBlock&lt;float&gt; adder("Adder", 2); // 2 inputs
+
+    PlotTimeSeriesBlock plot(
+        "Hello World Plot",
+        {"Added Sources"},
+        SPS,
+        3.0f // duration in seconds
+    );
+
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&amp;source1, &amp;adder.in[0]),
+        cler::BlockRunner(&amp;source2, &amp;adder.in[1]),
+        cler::BlockRunner(&amp;adder, &amp;throttle.in),
+        cler::BlockRunner(&amp;throttle, &amp;plot.in[0]),
+        cler::BlockRunner(&amp;plot)
+    );
+
+    flowgraph.run();
+
+    while (gui.should_close() == false) {
+        gui.begin_frame();
+        plot.render();
+        gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return 0;
+}</code></pre>
+                </div>
+                <p class="explanation">This creates a flowgraph with signal sources → math → throttle → visualization. Each block runs in its own thread with lock-free channels between them. No complex XML configuration, just intuitive C++ code.</p>
+            </div>
+        </section>
+
+        <section class="get-started">
+            <div class="container">
+                <h2>Try the Examples</h2>
+                <div class="code-block">
+                    <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                    <pre><code class="language-bash line-numbers">git clone https://github.com/cariboulabs/cler.git
+cd cler
+mkdir build && cd build
+cmake ..
+make -j"$(nproc --ignore=1)"   # Use all cores-1
+cd desktop_examples
+./hello_world  # Basic signal processing
+./mass_spring_damper  # Interactive control system</code></pre>
+                </div>
+                <p>CLER is a header-only library — just include <code>cler.hpp</code> plus a platform task policy header.</p>
+            </div>
+        </section>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.js"></script>
+    <script>
+        function copyCode(button) {
+            const codeBlock = button.parentElement.querySelector('code');
+            const text = codeBlock.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                button.textContent = 'Copied!';
+                setTimeout(() => {
+                    button.textContent = 'Copy';
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>
