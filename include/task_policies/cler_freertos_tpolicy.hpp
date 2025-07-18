@@ -8,29 +8,8 @@
 
 namespace cler {
 
-/**
- * FreeRTOS Task Policy for CLER FlowGraph
- * 
- * Usage:
- * 1. Include this file after including FreeRTOS headers
- * 2. Use with FlowGraph template parameter:
- *    FlowGraph<FreeRTOSTaskPolicy, BlockRunner<...>, ...> flowgraph(...);
- *    Or use the convenient alias:
- *    FreeRTOSFlowGraph<BlockRunner<...>, ...> flowgraph(...);
- * 3. Call flowgraph.run() from a FreeRTOS task or before starting the scheduler
- * 
- * Requirements:
- * - FreeRTOS kernel must be running
- * - Sufficient heap for task stacks (configurable via CLER_FREERTOS_STACK_SIZE)
- * - Task priority can be set via CLER_FREERTOS_PRIORITY
- * 
- * Configuration (define before including this file):
- * #define CLER_FREERTOS_STACK_SIZE    2048    // Stack size in words
- * #define CLER_FREERTOS_PRIORITY      (tskIDLE_PRIORITY + 1)  // Task priority
- */
-
 #ifndef CLER_FREERTOS_STACK_SIZE
-#define CLER_FREERTOS_STACK_SIZE 2048
+#define CLER_FREERTOS_STACK_SIZE 4096
 #endif
 
 #ifndef CLER_FREERTOS_PRIORITY

@@ -6,29 +6,6 @@
 
 namespace cler {
 
-/**
- * ThreadX Task Policy for CLER FlowGraph
- * 
- * Usage:
- * 1. Include this file after including ThreadX headers
- * 2. Use with FlowGraph template parameter:
- *    FlowGraph<ThreadXTaskPolicy, BlockRunner<...>, ...> flowgraph(...);
- *    Or use the convenient alias:
- *    ThreadXFlowGraph<BlockRunner<...>, ...> flowgraph(...);
- * 3. Call flowgraph.run() from within a ThreadX application
- * 
- * Requirements:
- * - ThreadX kernel must be initialized (tx_kernel_enter() called)
- * - Sufficient memory for thread stacks (configurable via CLER_THREADX_STACK_SIZE)
- * - Thread priority can be set via CLER_THREADX_PRIORITY
- * 
- * Configuration (define before including this file):
- * #define CLER_THREADX_STACK_SIZE     4096    // Stack size in bytes
- * #define CLER_THREADX_PRIORITY       16      // Thread priority (1-31)
- * #define CLER_THREADX_TIME_SLICE     TX_NO_TIME_SLICE  // Time slice
- * #define CLER_THREADX_PREEMPT_THRESHOLD  16  // Preemption threshold
- */
-
 #ifndef CLER_THREADX_STACK_SIZE
 #define CLER_THREADX_STACK_SIZE 4096
 #endif

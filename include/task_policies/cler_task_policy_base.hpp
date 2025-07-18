@@ -20,26 +20,6 @@ struct is_valid_task_policy<T, std::void_t<
 template<typename T>
 constexpr bool is_valid_task_policy_v = is_valid_task_policy<T>::value;
 
-/**
- * CRTP base class for TaskPolicy interface enforcement
- * 
- * This base class uses the Curiously Recurring Template Pattern (CRTP) to
- * enforce that all TaskPolicy implementations provide the required interface
- * at compile time.
- * 
- * Required interface for TaskPolicy:
- * - using task_type = implementation-specific type;
- * - template<typename Func> static task_type create_task(Func&& f);
- * - static void join_task(task_type& t);
- * - static void yield();
- * - static void sleep_us(size_t microseconds);
- * 
- * Usage:
- * struct MyTaskPolicy : TaskPolicyBase<MyTaskPolicy> {
- *     using task_type = std::thread;
- *     // ... implement required methods
- * };
- */
 template<typename Derived>
 struct TaskPolicyBase {
     // Static assertions to ensure derived class implements required interface

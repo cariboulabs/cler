@@ -382,7 +382,7 @@ namespace cler {
         void* _on_crash_context = nullptr;
     };
 
-    constexpr size_t DEFAULT_BUFFER_SIZE = 1024;
+    constexpr size_t DEFAULT_BUFFER_SIZE = 256;
     constexpr float PI = 3.14159265358979323846f;
 
 } // namespace cler
