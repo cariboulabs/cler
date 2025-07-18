@@ -15,7 +15,6 @@
 
 #include <array>       // for std::array
 #include <atomic>      // for atomic, memory_order
-#include <concepts>    // for concept, requires
 #include <cstddef>     // for size_t
 #include <limits>      // for numeric_limits
 #include <new>         // for std::hardware_destructive_interference_size
@@ -38,24 +37,29 @@ static constexpr std::size_t cacheLineSize = 64;
 
 static constexpr std::size_t MAX_BYTES_ON_STACK = 2'097'152; // 2 MBs
 
+// C++17 version using type traits
 template <typename T>
-concept SPSC_Type =
+using SPSC_Type = std::enable_if_t<
     std::is_default_constructible<T>::value &&
     std::is_nothrow_destructible<T>::value &&
-    (std::is_move_assignable_v<T> || std::is_copy_assignable_v<T>);
+    (std::is_move_assignable_v<T> || std::is_copy_assignable_v<T>)
+>;
 
+// C++17 version using type traits
 template <typename T, typename... Args>
-concept SPSC_NoThrow_Type =
+using SPSC_NoThrow_Type = std::enable_if_t<
     std::is_nothrow_constructible_v<T, Args &&...> &&
     ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
-     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>));
+     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))
+>;
 
-// Prevents Stack Overflow
+// Prevents Stack Overflow - C++17 version
 template <typename T, std::size_t N>
-concept MAX_STACK_SIZE = (N <= (MAX_BYTES_ON_STACK / sizeof(T)));
+using MAX_STACK_SIZE = std::enable_if_t<(N <= (MAX_BYTES_ON_STACK / sizeof(T)))>;
 
 // Memory Allocated on the Heap (Default Option)
-template <SPSC_Type T, typename Allocator = std::allocator<T>>
+template <typename T, typename Allocator = std::allocator<T>,
+          typename = SPSC_Type<T>>
 struct HeapBuffer {
   const std::size_t capacity_;
   std::vector<T, Allocator> buffer_;
@@ -89,7 +93,8 @@ struct HeapBuffer {
 };
 
 // Memory Allocated on the Stack
-template <SPSC_Type T, std::size_t N, typename Allocator = std::allocator<T>>
+template <typename T, std::size_t N, typename Allocator = std::allocator<T>,
+          typename = SPSC_Type<T>>
 struct StackBuffer {
   // +1 prevents live lock e.g. reader and writer share 1 slot for size 1
   static constexpr std::size_t capacity_{N + 1};
@@ -115,9 +120,10 @@ struct StackBuffer {
 
 } // namespace details
 
-template <details::SPSC_Type T, std::size_t N = 0,
-          typename Allocator = std::allocator<T>>
-  requires details::MAX_STACK_SIZE<T, N>
+template <typename T, std::size_t N = 0,
+          typename Allocator = std::allocator<T>,
+          typename = details::SPSC_Type<T>,
+          typename = details::MAX_STACK_SIZE<T, N>>
 class SPSCQueue
     : public std::conditional_t<N == 0, details::HeapBuffer<T, Allocator>,
                                 details::StackBuffer<T, N>> {
@@ -125,7 +131,10 @@ private:
   using base_type =
       std::conditional_t<N == 0, details::HeapBuffer<T, Allocator>,
                          details::StackBuffer<T, N>>;
-  static constexpr bool nothrow_v = details::SPSC_NoThrow_Type<T>;
+  static constexpr bool nothrow_v = 
+    std::is_nothrow_constructible_v<T> &&
+    ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
+     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>));
 
   struct alignas(details::cacheLineSize) WriterCacheLine {
     std::atomic<std::size_t> writeIndex_{0};
@@ -155,10 +164,12 @@ public:
   SPSCQueue(SPSCQueue &&lhs) = delete;
   SPSCQueue &operator=(SPSCQueue &&lhs) = delete;
 
-  template <typename... Args>
-    requires std::constructible_from<T, Args &&...>
+  template <typename... Args,
+            typename = std::enable_if_t<std::is_constructible_v<T, Args &&...>>>
   void
-  emplace(Args &&...args) noexcept(details::SPSC_NoThrow_Type<T, Args &&...>) {
+  emplace(Args &&...args) noexcept(std::is_nothrow_constructible_v<T, Args &&...> &&
+    ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
+     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     const auto nextWriteIndex =
         (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
@@ -171,10 +182,12 @@ public:
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
   }
 
-  template <typename... Args>
-    requires std::constructible_from<T, Args &&...>
+  template <typename... Args,
+            typename = std::enable_if_t<std::is_constructible_v<T, Args &&...>>>
   void force_emplace(Args &&...args) noexcept(
-      details::SPSC_NoThrow_Type<T, Args &&...>) {
+      std::is_nothrow_constructible_v<T, Args &&...> &&
+    ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
+     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     const auto nextWriteIndex =
         (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
@@ -182,10 +195,12 @@ public:
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
   }
 
-  template <typename... Args>
-    requires std::constructible_from<T, Args &&...>
+  template <typename... Args,
+            typename = std::enable_if_t<std::is_constructible_v<T, Args &&...>>>
   [[nodiscard]] bool try_emplace(Args &&...args) noexcept(
-      details::SPSC_NoThrow_Type<T, Args &&...>) {
+      std::is_nothrow_constructible_v<T, Args &&...> &&
+    ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
+     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     const auto nextWriteIndex =
         (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
@@ -204,17 +219,21 @@ public:
 
   void push(const T &val) noexcept(nothrow_v) { emplace(val); }
 
-  template <typename P>
-    requires std::constructible_from<T, P &&>
-  void push(P &&val) noexcept(details::SPSC_NoThrow_Type<T, P &&>) {
+  template <typename P,
+            typename = std::enable_if_t<std::is_constructible_v<T, P &&>>>
+  void push(P &&val) noexcept(std::is_nothrow_constructible_v<T, P &&> &&
+    ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
+     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
     emplace(std::forward<P>(val));
   }
 
   void force_push(const T &val) noexcept(nothrow_v) { force_emplace(val); }
 
-  template <typename P>
-    requires std::constructible_from<T, P &&>
-  void force_push(P &&val) noexcept(details::SPSC_NoThrow_Type<T, P &&>) {
+  template <typename P,
+            typename = std::enable_if_t<std::is_constructible_v<T, P &&>>>
+  void force_push(P &&val) noexcept(std::is_nothrow_constructible_v<T, P &&> &&
+    ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
+     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
     force_emplace(std::forward<P>(val));
   }
 
@@ -222,10 +241,12 @@ public:
     return try_emplace(val);
   }
 
-  template <typename P>
-    requires std::constructible_from<T, P &&>
+  template <typename P,
+            typename = std::enable_if_t<std::is_constructible_v<T, P &&>>>
   [[nodiscard]] bool
-  try_push(P &&val) noexcept(details::SPSC_NoThrow_Type<T, P &&>) {
+  try_push(P &&val) noexcept(std::is_nothrow_constructible_v<T, P &&> &&
+    ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
+     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
     return try_emplace(std::forward<P>(val));
   }
 
@@ -496,46 +517,24 @@ void commit_read(std::size_t count) noexcept {
 private:
   // Note: The "+ padding" is a constant offset used to prevent false sharing
   // with memory in front of the SPSC allocations
-  T &read_value(const auto &readIndex) noexcept(nothrow_v)
-    requires std::is_copy_assignable_v<T> && (!std::is_move_assignable_v<T>)
-  {
-    return base_type::buffer_[readIndex + base_type::padding];
-  }
-
-  T &&read_value(const auto &readIndex) noexcept(nothrow_v)
-    requires std::is_move_assignable_v<T>
-  {
+  template <typename Index>
+  T read_value(const Index &readIndex) noexcept(nothrow_v) {
     return std::move(base_type::buffer_[readIndex + base_type::padding]);
   }
 
-  void write_value(const auto &writeIndex, T &val) noexcept(nothrow_v)
-    requires std::is_copy_assignable_v<T> && (!std::is_move_assignable_v<T>)
-  {
-    base_type::buffer_[writeIndex + writer_.paddingCache_] = val;
+  template <typename Index, typename U>
+  void write_value(const Index &writeIndex, U &&val) noexcept(nothrow_v) {
+    base_type::buffer_[writeIndex + writer_.paddingCache_] = std::forward<U>(val);
   }
 
-  void write_value(const auto &writeIndex, T &&val) noexcept(nothrow_v)
-    requires std::is_move_assignable_v<T>
-  {
-    base_type::buffer_[writeIndex + writer_.paddingCache_] = std::move(val);
-  }
-
-  template <typename... Args>
-    requires(std::constructible_from<T, Args && ...> &&
-             std::is_copy_assignable_v<T> && (!std::is_move_assignable_v<T>))
-  void write_value(const auto &writeIndex, Args &&...args) noexcept(
-      details::SPSC_NoThrow_Type<T, Args &&...>) {
-    T copyOnly{std::forward<Args>(args)...};
-    base_type::buffer_[writeIndex + writer_.paddingCache_] = copyOnly;
-  }
-
-  template <typename... Args>
-    requires(std::constructible_from<T, Args && ...> &&
-             std::is_move_assignable_v<T>)
-  void write_value(const auto &writeIndex, Args &&...args) noexcept(
-      details::SPSC_NoThrow_Type<T, Args &&...>) {
-    base_type::buffer_[writeIndex + writer_.paddingCache_] =
-        T(std::forward<Args>(args)...);
+  template <typename Index, typename... Args>
+  typename std::enable_if_t<
+    std::is_constructible_v<T, Args && ...> && (sizeof...(Args) > 1), void>
+  write_value(const Index &writeIndex, Args &&...args) noexcept(
+      std::is_nothrow_constructible_v<T, Args &&...> &&
+    ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
+     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
+    base_type::buffer_[writeIndex + writer_.paddingCache_] = T(std::forward<Args>(args)...);
   }
 };
 

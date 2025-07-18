@@ -1,6 +1,5 @@
 #pragma once
 #include <cmath>
-#include <numbers>
 
 enum class SpectralWindow {
     BlackmanHarris,
@@ -28,14 +27,14 @@ inline constexpr float bessel_i0(float x) {
 
 // Kaiser window needs beta parameter
 inline constexpr float kaiser_window(float x, float beta) {
-    constexpr float PI = std::numbers::pi_v<float>;
+    constexpr float PI = 3.14159265358979323846f;
     float t = 2.0f * x - 1.0f; // scale x to [-1, 1]
     return bessel_i0(beta * std::sqrt(1.0f - t * t)) / bessel_i0(beta);
 }
 
 // Flat Top window: flat in freq, poor res
 inline constexpr float flattop_window(float x) {
-    constexpr float PI = std::numbers::pi_v<float>;
+    constexpr float PI = 3.14159265358979323846f;
     return 1.0f
         - 1.93f * std::cos(2 * PI * x)
         + 1.29f * std::cos(4 * PI * x)
@@ -44,7 +43,7 @@ inline constexpr float flattop_window(float x) {
 }
 
 inline constexpr float spectral_window_function(SpectralWindow type, float x, float beta = 8.6f) {
-    constexpr float PI = std::numbers::pi_v<float>;
+    constexpr float PI = 3.14159265358979323846f;
 
     switch (type) {
         case SpectralWindow::BlackmanHarris:

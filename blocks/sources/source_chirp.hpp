@@ -1,7 +1,6 @@
 #pragma once
 #include "cler.hpp"
 #include <cmath>
-#include <numbers>
 #include <type_traits>
 #include <complex>
 
@@ -85,7 +84,7 @@ private:
         _psi_inc = std::polar(1.0f, 2.0f * PI * _k * dt * dt);
     }
 
-    static constexpr float PI = std::numbers::pi_v<float>;
+    static constexpr float PI = 3.14159265358979323846f;
     float _amplitude;
     float _f0_hz;
     float _f1_hz;

@@ -68,7 +68,10 @@ namespace cler {
         dro::SPSCQueue<T, N> _queue;
 
         Channel() = default;
-        Channel(size_t size) requires (N == 0) : _queue(size) {
+        
+        // Constructor for dynamic size (N == 0)
+        template<size_t M = N, typename = std::enable_if_t<M == 0>>
+        Channel(size_t size) : _queue(size) {
             if (size == 0) {
                 throw std::invalid_argument("Channel size must be greater than zero.");
             }

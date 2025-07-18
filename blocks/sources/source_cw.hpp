@@ -1,7 +1,6 @@
 #pragma once
 #include "cler.hpp"
 #include <cmath>
-#include <numbers>
 #include <type_traits>
 #include <complex>
 
@@ -25,7 +24,6 @@ struct SourceCWBlock : public cler::BlockBase {
             throw std::invalid_argument("Sample rate must be greater than zero.");
         }
 
-        static constexpr float PI = std::numbers::pi_v<float>;
         float phase_increment = 2.0f * PI * _frequency_hz / static_cast<float>(_sps);
 
         _phasor = std::complex<float>(1.0f, 0.0f);
@@ -63,7 +61,7 @@ struct SourceCWBlock : public cler::BlockBase {
     }
 
 private:
-    static constexpr float PI = std::numbers::pi_v<float>;
+    static constexpr float PI = 3.14159265358979323846f;
     float _amplitude;
     float _frequency_hz;
     size_t _sps;
