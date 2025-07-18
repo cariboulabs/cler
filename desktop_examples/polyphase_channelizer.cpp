@@ -1,5 +1,5 @@
 #include "cler.hpp"
-#include "cler_addons.hpp"
+#include "cler_desktop_utils.hpp"
 #include "blocks/gui/gui_manager.hpp"
 #include "blocks/sources/source_cw.hpp"
 #include "blocks/channelizers/polyphase_channelizer.hpp"

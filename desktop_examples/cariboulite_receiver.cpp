@@ -1,5 +1,5 @@
 #include "cler.hpp"
-#include "cler_addons.hpp"
+#include "cler_desktop_utils.hpp"
 #include "blocks/sources/source_cariboulite.hpp"
 #include "blocks/plots/plot_cspectrum.hpp"
 #include "gui_manager.hpp"

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SPSC-Queue/include/dro/spsc-queue.hpp"
+#include "cler_spsc-queue.hpp"
 #include "cler_result.hpp"
 #include <thread>
 #include <array>
