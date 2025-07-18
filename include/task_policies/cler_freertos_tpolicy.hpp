@@ -1,7 +1,6 @@
 #pragma once
 
-#include "cler.hpp"
-
+#include "cler_task_policy_base.hpp"
 // Include FreeRTOS headers
 #include "FreeRTOS.h"
 #include "task.h"
@@ -10,12 +9,14 @@
 namespace cler {
 
 /**
- * FreeRTOS Threading Policy for CLER FlowGraph
+ * FreeRTOS Task Policy for CLER FlowGraph
  * 
  * Usage:
  * 1. Include this file after including FreeRTOS headers
  * 2. Use with FlowGraph template parameter:
- *    FlowGraph<FreeRTOSThreadPolicy, BlockRunner<...>, ...> flowgraph(...);
+ *    FlowGraph<FreeRTOSTaskPolicy, BlockRunner<...>, ...> flowgraph(...);
+ *    Or use the convenient alias:
+ *    FreeRTOSFlowGraph<BlockRunner<...>, ...> flowgraph(...);
  * 3. Call flowgraph.run() from a FreeRTOS task or before starting the scheduler
  * 
  * Requirements:
@@ -36,55 +37,85 @@ namespace cler {
 #define CLER_FREERTOS_PRIORITY (tskIDLE_PRIORITY + 1)
 #endif
 
-struct FreeRTOSThreadPolicy {
+struct FreeRTOSTaskPolicy {
+    // Structure to hold task data
+    struct TaskData {
+        void* callable;
+        void (*invoke)(void*);
+        void (*destroy)(void*);
+        SemaphoreHandle_t completion_sem;
+        volatile bool* should_stop;
+    };
+    
     struct TaskWrapper {
-        std::function<void()>* task_function;
         TaskHandle_t handle;
         SemaphoreHandle_t completion_sem;
+        TaskData* task_data;
         volatile bool should_stop;
     };
     
-    using thread_type = TaskWrapper;
+    using task_type = TaskWrapper;
+    
+    // Template helper to generate invoke and destroy functions
+    template<typename Func>
+    struct TaskHelper {
+        static void invoke(void* callable) {
+            (*static_cast<Func*>(callable))();
+        }
+        
+        static void destroy(void* callable) {
+            delete static_cast<Func*>(callable);
+        }
+    };
     
     template<typename Func>
-    static thread_type create_thread(Func&& f) {
-        thread_type wrapper{};
+    static task_type create_task(Func&& f) {
+        task_type wrapper{};
         wrapper.should_stop = false;
-        
-        // Store the function in dynamically allocated memory
-        wrapper.task_function = new std::function<void()>(std::forward<Func>(f));
+        wrapper.handle = nullptr;
+        wrapper.task_data = nullptr;
         
         // Create completion semaphore
         wrapper.completion_sem = xSemaphoreCreateBinary();
         if (wrapper.completion_sem == nullptr) {
-            delete wrapper.task_function;
-            wrapper.task_function = nullptr;
             return wrapper;
         }
+        
+        // Allocate task data
+        using FuncType = typename std::decay<Func>::type;
+        auto* task_data = new TaskData;
+        task_data->callable = new FuncType(std::forward<Func>(f));
+        task_data->invoke = &TaskHelper<FuncType>::invoke;
+        task_data->destroy = &TaskHelper<FuncType>::destroy;
+        task_data->completion_sem = wrapper.completion_sem;
+        task_data->should_stop = &wrapper.should_stop;
+        wrapper.task_data = task_data;
         
         // Create FreeRTOS task
         BaseType_t result = xTaskCreate(
             task_entry_point,           // Task function
             "ClerTask",                 // Task name
             CLER_FREERTOS_STACK_SIZE,   // Stack size in words
-            &wrapper,                   // Parameters
+            task_data,                  // Parameters
             CLER_FREERTOS_PRIORITY,     // Priority
             &wrapper.handle             // Task handle
         );
         
         if (result != pdPASS) {
-            delete wrapper.task_function;
+            // Cleanup on failure
             vSemaphoreDelete(wrapper.completion_sem);
-            wrapper.task_function = nullptr;
+            task_data->destroy(task_data->callable);
+            delete task_data;
             wrapper.completion_sem = nullptr;
             wrapper.handle = nullptr;
+            wrapper.task_data = nullptr;
         }
         
         return wrapper;
     }
     
-    static void join_thread(thread_type& wrapper) {
-        if (wrapper.task_function && wrapper.handle) {
+    static void join_task(task_type& wrapper) {
+        if (wrapper.task_data && wrapper.handle) {
             // Signal task to stop
             wrapper.should_stop = true;
             
@@ -92,9 +123,10 @@ struct FreeRTOSThreadPolicy {
             xSemaphoreTake(wrapper.completion_sem, portMAX_DELAY);
             
             // Clean up
-            delete wrapper.task_function;
+            wrapper.task_data->destroy(wrapper.task_data->callable);
+            delete wrapper.task_data;
             vSemaphoreDelete(wrapper.completion_sem);
-            wrapper.task_function = nullptr;
+            wrapper.task_data = nullptr;
             wrapper.completion_sem = nullptr;
             wrapper.handle = nullptr;
         }
@@ -114,68 +146,27 @@ struct FreeRTOSThreadPolicy {
 private:
     // Task entry point for FreeRTOS
     static void task_entry_point(void* parameters) {
-        auto* wrapper = static_cast<TaskWrapper*>(parameters);
+        auto* data = static_cast<TaskData*>(parameters);
         
         // Execute the stored function
-        if (wrapper->task_function) {
-            (*wrapper->task_function)();
+        if (data->callable && data->invoke) {
+            data->invoke(data->callable);
         }
         
         // Signal completion
-        xSemaphoreGive(wrapper->completion_sem);
+        xSemaphoreGive(data->completion_sem);
         
         // Delete the task
         vTaskDelete(NULL);
     }
 };
 
+// Forward declaration
+template<typename TaskPolicy, typename... BlockRunners>
+class FlowGraph;
+
 // Convenient alias for FreeRTOS-based FlowGraph
 template<typename... BlockRunners>
-using FreeRTOSFlowGraph = FlowGraph<FreeRTOSThreadPolicy, BlockRunners...>;
+using FreeRTOSFlowGraph = FlowGraph<FreeRTOSTaskPolicy, BlockRunners...>;
 
 } // namespace cler
-
-/*
-Example usage:
-
-#include "FreeRTOS.h"
-#include "task.h"
-#include "cler.hpp"
-#include "cler_freertos_policy.hpp"
-
-void app_main(void* parameters) {
-    // Your blocks
-    MySourceBlock source("Source");
-    MyProcessBlock processor("Processor");
-    MySinkBlock sink("Sink");
-    
-    // Channels
-    cler::Channel<float, 1024> ch1;
-    cler::Channel<float, 1024> ch2;
-    
-    // Create FreeRTOS FlowGraph
-    cler::FreeRTOSFlowGraph flowgraph(
-        cler::BlockRunner(&source, &ch1),
-        cler::BlockRunner(&processor, &ch1, &ch2),
-        cler::BlockRunner(&sink, &ch2)
-    );
-    
-    flowgraph.run();
-    
-    // Let it run for some time or until external stop condition
-    vTaskDelay(pdMS_TO_TICKS(10000));
-    
-    flowgraph.stop();
-    vTaskDelete(NULL);
-}
-
-int main() {
-    // Create the main application task
-    xTaskCreate(app_main, "AppMain", 4096, NULL, 1, NULL);
-    
-    // Start FreeRTOS scheduler
-    vTaskStartScheduler();
-    
-    return 0;
-}
-*/

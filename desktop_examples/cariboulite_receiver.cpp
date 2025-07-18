@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
 #include "cler_desktop_utils.hpp"
 #include "blocks/sources/source_cariboulite.hpp"
 #include "blocks/plots/plot_cspectrum.hpp"
@@ -22,7 +23,7 @@ int main() {
         samp_rate,
         256);
 
-    cler::FlowGraph flowgraph(
+    cler::DesktopFlowGraph flowgraph(
         cler::BlockRunner(&source_cariboulite, &plot.in[0]),
         cler::BlockRunner(&plot)
     );

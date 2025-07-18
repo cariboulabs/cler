@@ -1,5 +1,5 @@
 #include "cler.hpp"
-#include "cler_addons.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
 #include "blocks/sources/source_hackrf.hpp"
 #include "blocks/plots/plot_cspectrum.hpp"
 #include "blocks/plots/plot_cspectrogram.hpp"
@@ -38,7 +38,7 @@ int main() {
         1000
     );
 
-    cler::FlowGraph flowgraph(
+    cler::DesktopFlowGraph flowgraph(
         cler::BlockRunner(&source_hackrf, &fanout.in),
         cler::BlockRunner(&fanout, &timeplot.in[0], &spectrogram.in[0]),
         cler::BlockRunner(&spectrogram),

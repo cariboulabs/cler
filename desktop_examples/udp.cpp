@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
 #include "blocks/udp/sink_udp.hpp"
 #include "blocks/udp/source_udp.hpp"
 #include "blocks/sinks/sink_null.hpp"
@@ -86,7 +87,7 @@ int main() {
                       MAX_UDP_BLOB_SIZE, SLAB_SLOTS, on_source_udp_recv, nullptr);
     SinkNullBlock<UDPBlock::BlobSlice> sink_null("SinkNull", on_sink_null_recv, nullptr, 20);
 
-    cler::FlowGraph fg(
+    cler::DesktopFlowGraph fg(
                     cler::BlockRunner(&source_datagram, &sink_udp.in),
                     cler::BlockRunner(&sink_udp),
                     cler::BlockRunner(&source_udp, &sink_null.in),

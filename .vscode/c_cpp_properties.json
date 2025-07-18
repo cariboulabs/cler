@@ -5,6 +5,7 @@
             "includePath": [
                 "${workspaceFolder}",
                 "${workspaceFolder}/include",
+                "${workspaceFolder}/include/task_policies",
                 "${workspaceFolder}/blocks/gui",
                 "${workspaceFolder}/build/_deps/imgui-src/",
                 "${workspaceFolder}/build/_deps/implot-src/",

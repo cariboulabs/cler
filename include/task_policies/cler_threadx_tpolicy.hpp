@@ -1,19 +1,20 @@
 #pragma once
 
-#include "cler.hpp"
-
+#include "cler_task_policy_base.hpp"
 // Include ThreadX headers
 #include "tx_api.h"
 
 namespace cler {
 
 /**
- * ThreadX Threading Policy for CLER FlowGraph
+ * ThreadX Task Policy for CLER FlowGraph
  * 
  * Usage:
  * 1. Include this file after including ThreadX headers
  * 2. Use with FlowGraph template parameter:
- *    FlowGraph<ThreadXThreadPolicy, BlockRunner<...>, ...> flowgraph(...);
+ *    FlowGraph<ThreadXTaskPolicy, BlockRunner<...>, ...> flowgraph(...);
+ *    Or use the convenient alias:
+ *    ThreadXFlowGraph<BlockRunner<...>, ...> flowgraph(...);
  * 3. Call flowgraph.run() from within a ThreadX application
  * 
  * Requirements:
@@ -44,32 +45,51 @@ namespace cler {
 #define CLER_THREADX_PREEMPT_THRESHOLD 16
 #endif
 
-struct ThreadXThreadPolicy {
-    struct ThreadWrapper {
+struct ThreadXTaskPolicy {
+    // Structure to hold task data
+    struct TaskData {
+        void* callable;
+        void (*invoke)(void*);
+        void (*destroy)(void*);
+        TX_SEMAPHORE* completion_sem;
+        volatile bool* should_stop;
+    };
+    
+    struct TaskWrapper {
         TX_THREAD thread;
         TX_SEMAPHORE completion_sem;
-        std::function<void()>* thread_function;
+        TaskData* task_data;
         UCHAR* stack_memory;
         volatile bool should_stop;
         bool is_valid;
     };
     
-    using thread_type = ThreadWrapper;
+    using task_type = TaskWrapper;
+    
+    // Template helper to generate invoke and destroy functions
+    template<typename Func>
+    struct TaskHelper {
+        static void invoke(void* callable) {
+            (*static_cast<Func*>(callable))();
+        }
+        
+        static void destroy(void* callable) {
+            delete static_cast<Func*>(callable);
+        }
+    };
     
     template<typename Func>
-    static thread_type create_thread(Func&& f) {
-        thread_type wrapper{};
+    static task_type create_task(Func&& f) {
+        task_type wrapper{};
         wrapper.is_valid = false;
         wrapper.should_stop = false;
+        wrapper.task_data = nullptr;
         
         // Allocate stack memory
         wrapper.stack_memory = new UCHAR[CLER_THREADX_STACK_SIZE];
         if (!wrapper.stack_memory) {
             return wrapper; // Failed allocation
         }
-        
-        // Store the function in dynamically allocated memory
-        wrapper.thread_function = new std::function<void()>(std::forward<Func>(f));
         
         // Create completion semaphore
         UINT status = tx_semaphore_create(
@@ -79,17 +99,26 @@ struct ThreadXThreadPolicy {
         );
         
         if (status != TX_SUCCESS) {
-            delete wrapper.thread_function;
             delete[] wrapper.stack_memory;
             return wrapper;
         }
+        
+        // Allocate task data
+        using FuncType = typename std::decay<Func>::type;
+        auto* task_data = new TaskData;
+        task_data->callable = new FuncType(std::forward<Func>(f));
+        task_data->invoke = &TaskHelper<FuncType>::invoke;
+        task_data->destroy = &TaskHelper<FuncType>::destroy;
+        task_data->completion_sem = &wrapper.completion_sem;
+        task_data->should_stop = &wrapper.should_stop;
+        wrapper.task_data = task_data;
         
         // Create ThreadX thread
         status = tx_thread_create(
             &wrapper.thread,                    // Thread control block
             "ClerThread",                       // Thread name
             thread_entry_point,                 // Thread entry function
-            (ULONG)&wrapper,                   // Thread input
+            (ULONG)task_data,                  // Thread input
             wrapper.stack_memory,               // Stack start
             CLER_THREADX_STACK_SIZE,           // Stack size
             CLER_THREADX_PRIORITY,             // Priority
@@ -100,8 +129,10 @@ struct ThreadXThreadPolicy {
         
         if (status != TX_SUCCESS) {
             tx_semaphore_delete(&wrapper.completion_sem);
-            delete wrapper.thread_function;
+            task_data->destroy(task_data->callable);
+            delete task_data;
             delete[] wrapper.stack_memory;
+            wrapper.task_data = nullptr;
             return wrapper;
         }
         
@@ -109,8 +140,8 @@ struct ThreadXThreadPolicy {
         return wrapper;
     }
     
-    static void join_thread(thread_type& wrapper) {
-        if (wrapper.is_valid && wrapper.thread_function) {
+    static void join_task(task_type& wrapper) {
+        if (wrapper.is_valid && wrapper.task_data) {
             // Signal thread to stop
             wrapper.should_stop = true;
             
@@ -123,10 +154,11 @@ struct ThreadXThreadPolicy {
             tx_semaphore_delete(&wrapper.completion_sem);
             
             // Clean up memory
-            delete wrapper.thread_function;
+            wrapper.task_data->destroy(wrapper.task_data->callable);
+            delete wrapper.task_data;
             delete[] wrapper.stack_memory;
             
-            wrapper.thread_function = nullptr;
+            wrapper.task_data = nullptr;
             wrapper.stack_memory = nullptr;
             wrapper.is_valid = false;
         }
@@ -147,83 +179,26 @@ struct ThreadXThreadPolicy {
 private:
     // Thread entry point for ThreadX
     static void thread_entry_point(ULONG parameters) {
-        auto* wrapper = reinterpret_cast<ThreadWrapper*>(parameters);
+        auto* data = reinterpret_cast<TaskData*>(parameters);
         
         // Execute the stored function
-        if (wrapper->thread_function) {
-            (*wrapper->thread_function)();
+        if (data->callable && data->invoke) {
+            data->invoke(data->callable);
         }
         
         // Signal completion
-        tx_semaphore_put(&wrapper->completion_sem);
+        tx_semaphore_put(data->completion_sem);
         
-        // Thread will be cleaned up by join_thread
+        // Thread will be cleaned up by join_task
     }
 };
 
+// Forward declaration
+template<typename TaskPolicy, typename... BlockRunners>
+class FlowGraph;
+
 // Convenient alias for ThreadX-based FlowGraph
 template<typename... BlockRunners>
-using ThreadXFlowGraph = FlowGraph<ThreadXThreadPolicy, BlockRunners...>;
+using ThreadXFlowGraph = FlowGraph<ThreadXTaskPolicy, BlockRunners...>;
 
 } // namespace cler
-
-/*
-Example usage:
-
-#include "tx_api.h"
-#include "cler.hpp"
-#include "cler_threadx_policy.hpp"
-
-// Define memory pool for ThreadX
-#define DEMO_STACK_SIZE         1024
-#define DEMO_BYTE_POOL_SIZE     9120
-#define DEMO_BLOCK_POOL_SIZE    100
-
-UCHAR memory_area[DEMO_BYTE_POOL_SIZE];
-TX_BYTE_POOL byte_pool_0;
-
-void tx_application_define(void *first_unused_memory) {
-    CHAR *pointer = TX_NULL;
-    
-    // Create a byte memory pool
-    tx_byte_pool_create(&byte_pool_0, "byte pool 0", memory_area, DEMO_BYTE_POOL_SIZE);
-    
-    // Allocate the stack for the main application thread
-    tx_byte_allocate(&byte_pool_0, (VOID **) &pointer, DEMO_STACK_SIZE, TX_NO_WAIT);
-    
-    // Create the main application thread
-    tx_thread_create(&main_thread, "main thread", main_thread_entry, 0,
-                     pointer, DEMO_STACK_SIZE, 1, 1, TX_NO_TIME_SLICE, TX_AUTO_START);
-}
-
-void main_thread_entry(ULONG thread_input) {
-    // Your blocks
-    MySourceBlock source("Source");
-    MyProcessBlock processor("Processor");  
-    MySinkBlock sink("Sink");
-    
-    // Channels (using static allocation for embedded)
-    cler::Channel<float, 1024> ch1;
-    cler::Channel<float, 1024> ch2;
-    
-    // Create ThreadX FlowGraph
-    cler::ThreadXFlowGraph flowgraph(
-        cler::BlockRunner(&source, &ch1),
-        cler::BlockRunner(&processor, &ch1, &ch2),
-        cler::BlockRunner(&sink, &ch2)
-    );
-    
-    flowgraph.run();
-    
-    // Let it run for some time
-    tx_thread_sleep(1000); // 10 seconds assuming 100 ticks/sec
-    
-    flowgraph.stop();
-}
-
-int main() {
-    // Enter the ThreadX kernel
-    tx_kernel_enter();
-    return 0;
-}
-*/

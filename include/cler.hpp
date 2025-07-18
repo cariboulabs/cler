@@ -2,11 +2,12 @@
 
 #include "cler_spsc-queue.hpp"
 #include "cler_result.hpp"
-#include <thread>
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
 #include <complex> //again, a lot of cler blocks use complex numbers
 #include <string> //block names are self owning strings
+#include <chrono> // for timing measurements in FlowGraph
+#include <tuple> // for storing block runners
 
 namespace cler {
 
@@ -222,7 +223,7 @@ namespace cler {
         size_t adaptive_sleep_consecutive_fail_threshold = 50; // Number of consecutive failures before ramping up sleep
     };
 
-    template<typename... BlockRunners>
+    template<typename TaskPolicy, typename... BlockRunners>
     class FlowGraph {
     public:
         static constexpr std::size_t _N = sizeof...(BlockRunners);
@@ -252,8 +253,8 @@ namespace cler {
         _config = config;
         _stop_flag = false;
 
-        auto launch_threads = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
-            ((_threads[Is] = std::thread([this]() {
+        auto launch_tasks = [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+            ((_tasks[Is] = TaskPolicy::create_task([this]() {
                 auto& runner = std::get<Is>(_runners);
                 auto& stats  = _stats[Is];
 
@@ -306,15 +307,13 @@ namespace cler {
                                 double desired_us = avg_dead_time_s * 1e6 * _config.adaptive_sleep_target_gain;
                                 adaptive_sleep_us = std::max(adaptive_sleep_us, desired_us);
 
-                                std::this_thread::sleep_for(std::chrono::microseconds(
-                                    static_cast<int>(adaptive_sleep_us)
-                                ));
+                                TaskPolicy::sleep_us(static_cast<size_t>(adaptive_sleep_us));
                             } else {
-                                std::this_thread::yield();
+                                TaskPolicy::yield();
                             }
 
                         } else {
-                            std::this_thread::yield();
+                            TaskPolicy::yield();
                         }
 
                     } else {
@@ -339,13 +338,13 @@ namespace cler {
             })), ...);
         };
 
-        launch_threads(std::make_index_sequence<_N>{});
+        launch_tasks(std::make_index_sequence<_N>{});
     }
 
         void stop() {
             _stop_flag = true;
-            for (auto& t : _threads) {
-                if (t.joinable()) t.join();
+            for (auto& t : _tasks) {
+                TaskPolicy::join_task(t);
             }
         }
 
@@ -363,7 +362,7 @@ namespace cler {
 
     private:
         std::tuple<BlockRunners...> _runners;
-        std::array<std::thread, _N> _threads;
+        std::array<typename TaskPolicy::task_type, _N> _tasks;
         std::atomic<bool> _stop_flag = false;
         FlowGraphConfig _config;
         std::array<BlockExecutionStats, _N> _stats;

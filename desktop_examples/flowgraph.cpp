@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
 #include <iostream>
 
 const size_t CHANNEL_SIZE = 512;
@@ -97,7 +98,7 @@ int main() {
     GainBlock gain("Gain", 2.0f);
     SinkBlock sink("Sink");
 
-    cler::FlowGraph flowgraph(
+    cler::DesktopFlowGraph flowgraph(
         cler::BlockRunner(&source, &adder.in0, &adder.in1),
         cler::BlockRunner(&adder, static_cast<cler::ChannelBase<float>*>(&gain.in)),
         cler::BlockRunner(&gain, &sink.in),

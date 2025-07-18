@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
 #include "utils.hpp"
 #include "blocks/ezgmsk_demod/ezgmsk_demod.hpp"
 #include "blocks/sources/source_file.hpp"
@@ -125,7 +126,7 @@ int main() {
     cler::BlockRunner ezgmsk_demod_runner(&ezgmsk_demod);
     cler::BlockRunner output_runner(&output_file_block);
 
-    cler::FlowGraph flowgraph(
+    cler::DesktopFlowGraph flowgraph(
         source_runner,
         decimator_runner,
         fanout_runner,

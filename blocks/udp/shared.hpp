@@ -9,6 +9,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <assert.h>
+#include <memory>
 
 namespace UDPBlock {
 

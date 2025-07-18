@@ -2,6 +2,7 @@
 
 #include "cler.hpp"
 #include "cler_general_utils.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
 #include <iostream>
 #include <thread>
 #include <string>
@@ -15,7 +16,7 @@ inline std::ostream& operator<<(std::ostream& os, cler::Error error) {
 }
 
 template<typename... BlockRunners>
-void print_flowgraph_execution_report(const FlowGraph<BlockRunners...>& fg) {
+void print_flowgraph_execution_report(const DesktopFlowGraph<BlockRunners...>& fg) {
     if (!fg.is_stopped()) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         if (!fg.is_stopped()) {

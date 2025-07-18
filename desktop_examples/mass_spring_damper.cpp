@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
 #include <chrono>
 #include <algorithm>
 #include "blocks/gui/gui_manager.hpp"
@@ -284,7 +285,7 @@ int main() {
     plot.set_initial_window(200.0f, 0.0f, 800.0f, 400.0f);
     plant.set_initial_window(200.0f, 400.0f, 800.0f, 200.0f);
 
-    cler::FlowGraph flowgraph(
+    cler::DesktopFlowGraph flowgraph(
     cler::BlockRunner(&controller, &throttle.in),
     cler::BlockRunner(&throttle, &plant.force_in),
     cler::BlockRunner(&plant, &fanout.in),

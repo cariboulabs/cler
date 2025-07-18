@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
 #include "blocks/sources/source_cw.hpp"
 #include "blocks/utils/throttle.hpp"
 #include "blocks/math/add.hpp"
@@ -22,7 +23,7 @@ int main() {
     );
     plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f); //x,y, width, height
 
-    cler::FlowGraph flowgraph(
+    cler::DesktopFlowGraph flowgraph(
         cler::BlockRunner(&source1, &adder.in[0]),
         cler::BlockRunner(&source2, &adder.in[1]),
         cler::BlockRunner(&adder, &throttle.in),
