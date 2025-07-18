@@ -13,8 +13,8 @@ struct SourceBlock : public cler::BlockBase {
     } 
 
     cler::Result<cler::Empty, cler::Error> procedure(
-        cler::Channel<float>* out0,
-        cler::Channel<double>* out1) {
+        cler::ChannelBase<float>* out0,
+        cler::ChannelBase<double>* out1) {
 
         out0->writeN(_ones, out0->space());
         out1->writeN(_twos, out1->space());
@@ -100,7 +100,7 @@ int main() {
 
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source, &adder.in0, &adder.in1),
-        cler::BlockRunner(&adder, static_cast<cler::ChannelBase<float>*>(&gain.in)),
+        cler::BlockRunner(&adder, &gain.in),
         cler::BlockRunner(&gain, &sink.in),
         cler::BlockRunner(&sink)
     );

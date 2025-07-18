@@ -192,17 +192,29 @@ namespace cler {
     private:
        EmbeddableString<64> _name;
     };
+    // Helper to convert Channel<T,N> to ChannelBase<T> for deduction
+    template<typename T>
+    struct channel_to_base { using type = T; };
+    
+    template<typename T, size_t N>
+    struct channel_to_base<Channel<T, N>> { using type = ChannelBase<T>; };
+    
+    template<typename T>
+    using channel_to_base_t = typename channel_to_base<T>::type;
+
     template<typename Block, typename... Channels>
     struct BlockRunner {
         Block* block;
         std::tuple<Channels*...> outputs;
 
-        BlockRunner(Block* blk, Channels*... outs)
-            : block(blk), outputs(outs...) {}
+        template<typename... InputChannels>
+        BlockRunner(Block* blk, InputChannels*... outs)
+            : block(blk), outputs(static_cast<Channels*>(outs)...) {}
     };
-    // Deduction guide for BlockRunner (C++17 and later)
+    
+    // Deduction guide that converts Channel<T,N> to ChannelBase<T>
     template<typename Block, typename... Channels>
-    BlockRunner(Block*, Channels*...) -> BlockRunner<Block, Channels...>;
+    BlockRunner(Block*, Channels*...) -> BlockRunner<Block, channel_to_base_t<Channels>...>;
 
     struct BlockExecutionStats {
         EmbeddableString<64> name;

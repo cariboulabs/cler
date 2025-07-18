@@ -161,7 +161,7 @@ struct ControllerBlock : public cler::BlockBase {
         : BlockBase(name), measured_position_in(cler::DEFAULT_BUFFER_SIZE) {} 
 
     cler::Result<cler::Empty, cler::Error> procedure(
-        cler::Channel<float>* force_out) {
+        cler::ChannelBase<float>* force_out) {
         if (measured_position_in.size() == 0) {
             return cler::Error::NotEnoughSamples;
         }
