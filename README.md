@@ -16,14 +16,17 @@ Its goal is to keep a tiny header only core allowing maximal flexability:
 * Cross-Platform
 * Code first, Flowgraph GUI second. While No-code is sweet, it also constrains applications
 
-**What's so special?** historically DSP flowgraph implementations rely on polymorphism to abstract over blocks and channels. This can constrain the architecture and lead to compromises — for example, GNURadio uses void* inputs/outputs in its procedure calls to achieve runtime flexibility. Instead, Cler uses variadic templates to achieve type safety and flexibility without runtime overhead. This approach was made possible by C++17 features like std::apply and forward deduction guide. The same approach can be taken in Rust with Traits and Zig with CompTime, but these languages still don't have the facilities for mature DSP on small embedded systems (STM32 for example).
+**But embedded devices dont need DSP do they?**
+Embedded Linux aside, most embedded devices traditionally relied on dedicated chips — for fusion, filtering, or modulation. But with today’s powerful SoCs and the rise of agentic AI, it’s often faster, cheaper, and more flexible to move DSP into software. Cler aims to fill that gap.
 
-**How does it compare to GNURadio or FutureSDR**? it doesn't, though it can be competitive. Unlike GNURadio, FutureSDR or PothosFlow, Cler's main goal is DSP on embedded systems. It keeps things simpler with block owned ring buffers and minimal thread coordination. This makes data flow more predictable and practical for small embedded systems, yet still good enough for many commercial SDRs and thier applications. For example, we don't use  double-mapped buffers as we can't rely on having an MMU.
+**Why reinvent the DSP wheel?** Existing frameworks rely heavily on runtime polymorphism to manage blocks and channels. This adds overhead, limits type safety, and complicates deployment on resource-constrained systems. For example, GNU Radio uses void* buffers in its work() calls to achieve flexibility, but that sacrifices clarity and static guarantees. Cler takes a different path: using C++17 features like variadic templates and std::apply, it achieves compile-time safety, zero-cost abstraction, and minimal runtime footprint — making it practical for everything from desktop SDR to bare-metal MCUs.
 
-**How to use it?** Just Include `include/cler.hpp` and you are good for the basics. Want to use already written blocks? Inlcude them from `blocks/*` and link against cler::cler_blocks </br>
+**How does it compare to GNURadio or FutureSDR**? It’s not trying to — though it can be competitive in desktop environments. Cler isn’t a general-purpose SDR toolkit; it’s built from the ground up for embedded systems, where memory is limited, timing is critical, and you can’t rely on having an MMU. Instead of shared runtime schedulers or double-mapped buffers, Cler uses block-owned ring buffers and minimal coordination to keep things simple and deterministic. Yet it remains powerful enough for many SDR and control applications — just without the overhead.
+
+**How to use it?** For Desktop, just Include `include/cler.hpp` and you are good for the basics. Want to use already written blocks? Inlcude them from `blocks/*` and link against cler::cler_blocks </br>
 Alternatively, you can use CMAKE to link against `cler::cler` and/or `cler::cler_blocks` which already interface the required headers.
 
-Want to try out some examples?
+Want to try out some examples on a Desktop?
 ```
 mkdir build
 cd build
