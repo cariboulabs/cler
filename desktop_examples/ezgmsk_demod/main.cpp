@@ -126,7 +126,7 @@ int main() {
     cler::BlockRunner ezgmsk_demod_runner(&ezgmsk_demod);
     cler::BlockRunner output_runner(&output_file_block);
 
-    cler::DesktopFlowGraph flowgraph(
+    auto flowgraph = cler::make_desktop_flowgraph(
         source_runner,
         decimator_runner,
         fanout_runner,

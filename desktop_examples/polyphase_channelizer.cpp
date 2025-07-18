@@ -109,7 +109,7 @@ int main() {
         SpectralWindow::BlackmanHarris
     );
  
-    cler::DesktopFlowGraph flowgraph(
+    auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&cw_source0, &adder.in[0], &plot_input_cspectrum.in[0]),
         cler::BlockRunner(&cw_source1, &adder.in[1], &plot_input_cspectrum.in[1]),
         cler::BlockRunner(&cw_source2, &adder.in[2], &plot_input_cspectrum.in[2]),

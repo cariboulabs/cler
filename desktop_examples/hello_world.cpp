@@ -23,7 +23,7 @@ int main() {
     );
     plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f); //x,y, width, height
 
-    cler::DesktopFlowGraph flowgraph(
+    auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source1, &adder.in[0]),
         cler::BlockRunner(&source2, &adder.in[1]),
         cler::BlockRunner(&adder, &throttle.in),

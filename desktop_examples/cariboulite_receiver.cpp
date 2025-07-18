@@ -23,7 +23,7 @@ int main() {
         samp_rate,
         256);
 
-    cler::DesktopFlowGraph flowgraph(
+    auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source_cariboulite, &plot.in[0]),
         cler::BlockRunner(&plot)
     );

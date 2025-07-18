@@ -59,7 +59,7 @@ int main() {
     cspectrum_plot.set_initial_window(0.0, GH/2.0, GW / 2.0f, GH / 2.0f);
     cspectrogram_plot.set_initial_window(GW/2.0, GH/2.0, GW / 2.0f, GH / 2.0f);
 
-    cler::DesktopFlowGraph flowgraph(
+    auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&cw_source, &cw_throttle.in),
         cler::BlockRunner(&cw_throttle, &cw_fanout.in),
         cler::BlockRunner(&cw_fanout, &cw_complex2realimag.in, &cspectrum_plot.in[0], &cspectrogram_plot.in[0]),

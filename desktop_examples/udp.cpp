@@ -87,7 +87,7 @@ int main() {
                       MAX_UDP_BLOB_SIZE, SLAB_SLOTS, on_source_udp_recv, nullptr);
     SinkNullBlock<UDPBlock::BlobSlice> sink_null("SinkNull", on_sink_null_recv, nullptr, 20);
 
-    cler::DesktopFlowGraph fg(
+    auto fg = cler::make_desktop_flowgraph(
                     cler::BlockRunner(&source_datagram, &sink_udp.in),
                     cler::BlockRunner(&sink_udp),
                     cler::BlockRunner(&source_udp, &sink_null.in),

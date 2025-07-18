@@ -38,7 +38,7 @@ int main() {
         1000
     );
 
-    cler::DesktopFlowGraph flowgraph(
+    auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source_hackrf, &fanout.in),
         cler::BlockRunner(&fanout, &timeplot.in[0], &spectrogram.in[0]),
         cler::BlockRunner(&spectrogram),

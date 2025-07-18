@@ -98,7 +98,7 @@ int main() {
     GainBlock gain("Gain", 2.0f);
     SinkBlock sink("Sink");
 
-    cler::DesktopFlowGraph flowgraph(
+    auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source, &adder.in0, &adder.in1),
         cler::BlockRunner(&adder, static_cast<cler::ChannelBase<float>*>(&gain.in)),
         cler::BlockRunner(&gain, &sink.in),
