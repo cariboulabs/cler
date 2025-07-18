@@ -1,6 +1,6 @@
 #include "source_udp.hpp"
 
-SourceUDPSocketBlock::SourceUDPSocketBlock(std::string name,
+SourceUDPSocketBlock::SourceUDPSocketBlock(const char* name,
                         UDPBlock::SocketType type,
                         const std::string& bind_addr_or_path,
                         uint16_t port,
@@ -8,7 +8,7 @@ SourceUDPSocketBlock::SourceUDPSocketBlock(std::string name,
                         size_t num_slab_slots,
                         OnReceiveCallback callback,
                         [[maybe_unused]] void* callback_context)
-    : cler::BlockBase(std::move(name)),
+    : cler::BlockBase(name),
     _socket(UDPBlock::GenericDatagramSocket::make_receiver(type, bind_addr_or_path, port)),
     _slab(UDPBlock::Slab(num_slab_slots, max_blob_size)),
     _callback(callback)    

@@ -5,7 +5,7 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
     cler::Channel<UDPBlock::BlobSlice> in;
     typedef void (*OnSendCallback)(const UDPBlock::BlobSlice&, void* context);
 
-    SinkUDPSocketBlock(std::string name,
+    SinkUDPSocketBlock(const char* name,
                         const UDPBlock::SocketType type,
                         const std::string& dest_host_or_path,
                         const uint16_t port,

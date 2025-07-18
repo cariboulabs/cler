@@ -6,7 +6,7 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
     //that is not just pushing it to the output channel
     typedef void (*OnReceiveCallback)(const UDPBlock::BlobSlice&, void* context);
 
-    SourceUDPSocketBlock(std::string name,
+    SourceUDPSocketBlock(const char* name,
                             UDPBlock::SocketType type,
                             const std::string& bind_addr_or_path,
                             uint16_t port,

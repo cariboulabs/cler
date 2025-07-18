@@ -1,13 +1,13 @@
 #include "sink_udp.hpp"
 
-SinkUDPSocketBlock::SinkUDPSocketBlock(std::string name,
+SinkUDPSocketBlock::SinkUDPSocketBlock(const char* name,
                     const UDPBlock::SocketType type,
                     const std::string& dest_host_or_path,
                     const uint16_t port,
                     OnSendCallback callback,
                     void* callback_context,
                     const size_t buffer_size)
-    : cler::BlockBase(std::move(name)),
+    : cler::BlockBase(name),
     in(buffer_size),
     _socket(UDPBlock::GenericDatagramSocket::make_sender(type, dest_host_or_path, port)),
     _callback(callback),
