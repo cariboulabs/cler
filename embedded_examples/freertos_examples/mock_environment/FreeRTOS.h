@@ -1,8 +1,14 @@
-// Mock FreeRTOS.h for compilation testing
+// Mock FreeRTOS.h for running flowgraph examples
 #pragma once
 
 #include <stdint.h>
 #include <stddef.h>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
+#include <functional>
+#include <memory>
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,9 +30,18 @@ typedef unsigned long UBaseType_t;
 // Mock macros
 #define pdMS_TO_TICKS(ms) ((ms) / 10)  // Mock conversion
 
+// Task creation structure
+struct MockTask {
+    std::thread thread;
+    std::function<void(void*)> taskFunc;
+    void* params;
+};
+
 // Mock functions
 static inline TickType_t xTaskGetTickCount(void) {
-    return 0;
+    auto now = std::chrono::steady_clock::now();
+    auto duration = now.time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count() / 10;
 }
 
 static inline BaseType_t xTaskCreate(
@@ -36,25 +51,47 @@ static inline BaseType_t xTaskCreate(
     void* const pvParameters,
     UBaseType_t uxPriority,
     TaskHandle_t* const pxCreatedTask) {
-    (void)taskCode; (void)pcName; (void)usStackDepth; 
-    (void)pvParameters; (void)uxPriority; (void)pxCreatedTask;
+    
+    (void)pcName; (void)usStackDepth; (void)uxPriority;
+    
+    // Create a real thread to run the task
+    auto* task = new MockTask();
+    task->taskFunc = taskCode;
+    task->params = pvParameters;
+    task->thread = std::thread([task]() {
+        task->taskFunc(task->params);
+    });
+    
+    if (pxCreatedTask) {
+        *pxCreatedTask = (TaskHandle_t)task;
+    }
+    
     return pdPASS;
 }
 
 static inline void vTaskStartScheduler(void) {
-    // Mock implementation
+    // In mock environment, threads are already running
+    // Just wait forever to simulate scheduler running
+    while (true) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
 }
 
 static inline void vTaskDelete(TaskHandle_t xTaskToDelete) {
-    (void)xTaskToDelete;
+    if (xTaskToDelete == NULL) {
+        // Delete current task - in mock, just exit thread
+        std::this_thread::yield();
+        return;
+    }
+    // For other tasks, would need to track them
 }
 
 static inline void vTaskDelay(const TickType_t xTicksToDelay) {
-    (void)xTicksToDelay;
+    std::this_thread::sleep_for(std::chrono::milliseconds(xTicksToDelay * 10));
 }
 
 static inline void taskYIELD(void) {
-    // Mock implementation
+    std::this_thread::yield();
 }
 
 #ifdef __cplusplus
