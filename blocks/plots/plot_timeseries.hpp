@@ -8,7 +8,7 @@
 struct PlotTimeSeriesBlock : public cler::BlockBase {
     cler::Channel<float>* in;
 
-    PlotTimeSeriesBlock(std::string name,
+    PlotTimeSeriesBlock(const char* name,
         const std::vector<std::string> signal_labels,
         const size_t sps,
         const float duration_s);

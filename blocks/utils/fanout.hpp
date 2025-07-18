@@ -8,8 +8,8 @@ template <typename T>
 struct FanoutBlock : public cler::BlockBase {
     cler::Channel<T> in;  // Single input channel
 
-    FanoutBlock(std::string name, const size_t num_outputs, const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(std::move(name)), in(buffer_size), _num_outputs(num_outputs) {
+    FanoutBlock(const char* name, const size_t num_outputs, const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(name), in(buffer_size), _num_outputs(num_outputs) {
 
         assert(num_outputs > 0 && "Number of outputs must be greater than zero");
         assert(buffer_size > 0 && "Buffer size must be greater than zero");

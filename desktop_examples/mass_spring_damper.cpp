@@ -19,8 +19,8 @@ const float C = 2.0f * zeta * wn * M;
 
 struct PlantBlock : public cler::BlockBase {
     cler::Channel<float> force_in;
-    PlantBlock(std::string name)  
-        : BlockBase(std::move(name)), force_in(cler::DEFAULT_BUFFER_SIZE) {
+    PlantBlock(const char* name)  
+        : BlockBase(name), force_in(cler::DEFAULT_BUFFER_SIZE) {
             force_in.push(0.0f); //<-----MUST PROVIDE INITIAL FORCE OR CYCLIC GRAPH WILL FAIL
         } 
 
@@ -156,8 +156,8 @@ struct PlantBlock : public cler::BlockBase {
 struct ControllerBlock : public cler::BlockBase {
     cler::Channel<float> measured_position_in;
 
-    ControllerBlock(std::string name)  
-        : BlockBase(std::move(name)), measured_position_in(cler::DEFAULT_BUFFER_SIZE) {} 
+    ControllerBlock(const char* name)  
+        : BlockBase(name), measured_position_in(cler::DEFAULT_BUFFER_SIZE) {} 
 
     cler::Result<cler::Empty, cler::Error> procedure(
         cler::Channel<float>* force_out) {

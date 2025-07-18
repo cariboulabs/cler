@@ -23,8 +23,8 @@ const size_t SLAB_SLOTS = 10; // Number of slots in the slab
 struct SourceDatagramBlock : public cler::BlockBase {
     UDPBlock::Slab _slab {SLAB_SLOTS, MAX_UDP_BLOB_SIZE};
 
-    SourceDatagramBlock(std::string name)
-        : cler::BlockBase(std::move(name)) {}
+    SourceDatagramBlock(const char* name)
+        : cler::BlockBase(name) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<UDPBlock::BlobSlice>* out) {
         if (out->space() == 0) {

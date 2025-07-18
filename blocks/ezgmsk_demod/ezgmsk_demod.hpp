@@ -11,7 +11,7 @@ extern "C" {
 struct EZGmskDemodBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
 
-    EZGmskDemodBlock(std::string name,
+    EZGmskDemodBlock(const char* name,
                    unsigned int k,
                    unsigned int m,
                    float BT,
@@ -24,7 +24,7 @@ struct EZGmskDemodBlock : public cler::BlockBase {
                    void* callback_context,
                    float detector_threshold = 0.9f,
                    float detector_dphi_max = 0.1f)
-    : BlockBase(std::move(name)),
+    : BlockBase(name),
       in(cler::DEFAULT_BUFFER_SIZE)
     {
         _demod = ezgmsk_demod_create_set(

@@ -10,6 +10,68 @@
 
 namespace cler {
 
+    template<size_t MaxLen = 64>
+    class EmbeddableString {
+    public:
+        // Constructors
+        constexpr EmbeddableString() : _data{}, _len(0) {}
+        
+        EmbeddableString(const char* str) : _data{}, _len(0) {
+            if (str) append(str);
+        }
+        
+        EmbeddableString(const std::string& str) : _data{}, _len(0) {
+            append(str.c_str());
+        }
+        
+        // Copy constructor
+        EmbeddableString(const EmbeddableString& other) : _data{}, _len(0) {
+            append(other._data);
+        }
+        
+        // Assignment
+        EmbeddableString& operator=(const EmbeddableString& other) {
+            if (this != &other) {
+                _len = 0;
+                _data[0] = '\0';
+                append(other._data);
+            }
+            return *this;
+        }
+        
+        // String concatenation
+        EmbeddableString operator+(const char* suffix) const {
+            EmbeddableString result(*this);
+            result.append(suffix);
+            return result;
+        }
+        
+        EmbeddableString operator+(const EmbeddableString& suffix) const {
+            EmbeddableString result(*this);
+            result.append(suffix._data);
+            return result;
+        }
+        
+        // Conversions
+        operator const char*() const { return _data; }
+        const char* c_str() const { return _data; }
+        size_t length() const { return _len; }
+        bool empty() const { return _len == 0; }
+        
+    private:
+        char _data[MaxLen];
+        size_t _len;
+        
+        void append(const char* str) {
+            if (!str) return;
+            size_t str_len = strlen(str);
+            size_t copy_len = std::min(str_len, MaxLen - _len - 1);
+            memcpy(_data + _len, str, copy_len);
+            _len += copy_len;
+            _data[_len] = '\0';
+        }
+    };
+
     enum class Error {
         NotEnoughSamples,
         NotEnoughSpace,
@@ -114,8 +176,9 @@ namespace cler {
     };
 
     struct BlockBase {
-        explicit BlockBase(std::string&& name) : _name(name) {}
-        const std::string& name() const { return _name; }
+        explicit BlockBase(const char* name) : _name(name) {}
+        explicit BlockBase(const EmbeddableString<64>& name) : _name(name) {}
+        const char* name() const { return _name.c_str(); }
 
         //OUR CHANNELS ARE NOT COPYABLE OR MOVABLE, SO OUR BLOCKS CAN'T BE EITHER
         // Non-copyable
@@ -126,7 +189,7 @@ namespace cler {
         BlockBase(BlockBase&&) = delete;
         BlockBase& operator=(BlockBase&&) = delete;
     private:
-       std::string _name;
+       EmbeddableString<64> _name;
     };
     template<typename Block, typename... Channels>
     struct BlockRunner {
@@ -141,7 +204,7 @@ namespace cler {
     BlockRunner(Block*, Channels*...) -> BlockRunner<Block, Channels...>;
 
     struct BlockExecutionStats {
-        std::string name;
+        EmbeddableString<64> name;
         size_t successful_procedures = 0;
         size_t failed_procedures = 0;
         double avg_dead_time_us = 0.0;

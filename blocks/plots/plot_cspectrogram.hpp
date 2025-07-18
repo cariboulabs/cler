@@ -13,7 +13,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
 
     cler::Channel<std::complex<float>>* in;
 
-    PlotCSpectrogramBlock(std::string name,
+    PlotCSpectrogramBlock(const char* name,
                           const std::vector<std::string> signal_labels,
                           size_t sps,
                           size_t n_fft_samples,

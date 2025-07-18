@@ -21,7 +21,6 @@
 #include <stdexcept>   // for std::logic_error
 #include <type_traits> // for std::is_default_constructible
 #include <utility>     // for forward
-// vector header removed for embedded compatibility
 #include <cstring>    // for std::memcpy
 
 namespace dro {

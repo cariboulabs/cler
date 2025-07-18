@@ -6,12 +6,12 @@
 #include <cassert>
 #include <cmath>
 
-PlotCSpectrumBlock::PlotCSpectrumBlock(std::string name,
+PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
     const std::vector<std::string>& signal_labels,
     size_t sps,
     size_t n_fft_samples,
     SpectralWindow window_type)
-    : BlockBase(std::move(name)),
+    : BlockBase(name),
       _num_inputs(signal_labels.size()),
       _signal_labels(signal_labels),
       _sps(sps),
@@ -153,7 +153,7 @@ void PlotCSpectrumBlock::render() {
     if (_snapshot_ready_size < _n_fft_samples) {
         ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
-        ImGui::Begin(name().c_str());
+        ImGui::Begin(name());
         ImGui::Text("Not enough samples for FFT. Need at least %zu, got %zu.",
                     _n_fft_samples, _snapshot_ready_size);
         ImGui::End();
@@ -162,13 +162,13 @@ void PlotCSpectrumBlock::render() {
 
     ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
-    ImGui::Begin(name().c_str());
+    ImGui::Begin(name());
 
     if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
         _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
     }
 
-    if (ImPlot::BeginPlot(name().c_str())) {
+    if (ImPlot::BeginPlot(name())) {
         ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]");
 
         for (size_t i = 0; i < _num_inputs; ++i) {

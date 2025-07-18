@@ -3,13 +3,13 @@
 #include <hackrf.h>
 
 struct SourceHackRFBlock : public cler::BlockBase {
-    SourceHackRFBlock(std::string name,
+    SourceHackRFBlock(const char* name,
                       uint64_t freq_hz,
                       uint32_t samp_rate_hz,
                       int lna_gain_db = 16,  // 0-40 dB, multiple of 8
                       int vga_gain_db = 16,  // 0-62 dB, multiple of 2
                       size_t buffer_size = 2 << 22)
-        : cler::BlockBase(std::move(name)),
+        : cler::BlockBase(name),
           _iq(buffer_size)
           
     {

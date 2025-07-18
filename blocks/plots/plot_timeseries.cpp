@@ -3,11 +3,11 @@
 #include <cstring>
 #include <stdexcept>
 
-PlotTimeSeriesBlock::PlotTimeSeriesBlock(std::string name,
+PlotTimeSeriesBlock::PlotTimeSeriesBlock(const char* name,
     const std::vector<std::string> signal_labels,
     const size_t sps,
     const float duration_s)
-    : BlockBase(std::move(name)),
+    : BlockBase(name),
       _num_inputs(signal_labels.size()),
       _signal_labels(signal_labels),
       _sps(sps)
@@ -145,13 +145,13 @@ void PlotTimeSeriesBlock::render() {
 
     ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
-    ImGui::Begin(name().c_str());
+    ImGui::Begin(name());
 
     if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
         _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
     }
 
-    if (ImPlot::BeginPlot(name().c_str())) {
+    if (ImPlot::BeginPlot(name())) {
         ImPlot::SetupAxis(ImAxis_X1, "Time [s]", ImPlotAxisFlags_AutoFit);
         ImPlot::SetupAxis(ImAxis_Y1, "Y", ImPlotAxisFlags_AutoFit);
 

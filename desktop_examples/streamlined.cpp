@@ -4,7 +4,7 @@
 const size_t CHANNEL_SIZE = 512;
 
 struct SourceBlock : public cler::BlockBase {
-    SourceBlock(std::string name)  : BlockBase(std::move(name)) {
+    SourceBlock(const char* name)  : BlockBase(name) {
         for (size_t i = 0; i < CHANNEL_SIZE; ++i) {
             _ones[i] = 1.0;
             _twos[i] = 2.0f;
@@ -29,7 +29,7 @@ struct AdderBlock : public cler::BlockBase {
     cler::Channel<float> in0;
     cler::Channel<double> in1;
 
-    AdderBlock(std::string name) : BlockBase(std::move(name)), in0(CHANNEL_SIZE), in1(CHANNEL_SIZE) {}
+    AdderBlock(const char* name) : BlockBase(name), in0(CHANNEL_SIZE), in1(CHANNEL_SIZE) {}
 
     //                                             Adderblock pushes to gain block which has a stack buffer!
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
@@ -49,7 +49,7 @@ struct GainBlock : public cler::BlockBase {
     cler::Channel<float, CHANNEL_SIZE> in; //this is a stack buffer!
     float gain;
 
-    GainBlock(std::string name, float gain_value) : BlockBase(std::move(name)), gain(gain_value) {}
+    GainBlock(const char* name, float gain_value) : BlockBase(name), gain(gain_value) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
         size_t transferable = std::min(in.size(), out->space());
@@ -65,7 +65,7 @@ struct GainBlock : public cler::BlockBase {
 struct SinkBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
-    SinkBlock(std::string name) : BlockBase(std::move(name)), in(CHANNEL_SIZE) {
+    SinkBlock(const char* name) : BlockBase(name), in(CHANNEL_SIZE) {
         _first_sample_time = std::chrono::steady_clock::now();
     }
 

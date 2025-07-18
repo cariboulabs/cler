@@ -15,17 +15,17 @@ float channel_freq(float channel_bw, uint8_t index, uint8_t num_channels) {
 }
 
 struct CustomSourceBlock : public cler::BlockBase {
-    CustomSourceBlock(std::string name,
+    CustomSourceBlock(const char* name,
                 const float amplitude,
                 const float noise_stddev,
                 const float frequency_hz,
                 const size_t sps)
-        : BlockBase(std::move(name)),
-        cw_source_block(std::string(this->name()) + "_CWSource",
+        : BlockBase(name),
+        cw_source_block(cler::EmbeddableString<64>(this->name()) + "_CWSource",
                         amplitude, frequency_hz, sps),
-        noise_block(std::string(this->name()) + "_AWGN",
+        noise_block(cler::EmbeddableString<64>(this->name()) + "_AWGN",
                     noise_stddev / 100.0f),
-        fanout_block(std::string(this->name()) + "_Fanout", 2)
+        fanout_block(cler::EmbeddableString<64>(this->name()) + "_Fanout", 2)
     { }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out1, 

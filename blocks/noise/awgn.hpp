@@ -12,8 +12,8 @@ struct NoiseAWGNBlock : public cler::BlockBase {
         std::is_same_v<T, std::complex<float>>, float,
         typename std::conditional<std::is_same_v<T, std::complex<double>>, double, T>::type>::type;
 
-    NoiseAWGNBlock(std::string name, scalar_type noise_stddev, const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(std::move(name)), in(buffer_size), _noise_stddev(noise_stddev), _buffer_size(buffer_size) {
+    NoiseAWGNBlock(const char* name, scalar_type noise_stddev, const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(name), in(buffer_size), _noise_stddev(noise_stddev), _buffer_size(buffer_size) {
         _tmp = new T[buffer_size];
 
         std::random_device rd;

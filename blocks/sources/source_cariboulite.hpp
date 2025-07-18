@@ -20,14 +20,14 @@ inline bool detect_cariboulite_board()
 }
 
 struct SourceCaribouliteBlock : public cler::BlockBase {
-    SourceCaribouliteBlock(std::string name,
+    SourceCaribouliteBlock(const char* name,
         CaribouLiteRadio::RadioType radio_type,
         float freq_hz,
         float samp_rate_hz,
         bool agc,
         float rx_gain_db = 0.0f,
         size_t buffer_size = cler::DEFAULT_BUFFER_SIZE
-        ) : cler::BlockBase(std::move(name)) {
+        ) : cler::BlockBase(name) {
             if (!detect_cariboulite_board()) {
                 throw std::runtime_error("CaribouLite board not detected!");
             }

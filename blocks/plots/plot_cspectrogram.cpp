@@ -1,13 +1,13 @@
 #include "plot_cspectrogram.hpp"
 #include "implot.h"
 
-PlotCSpectrogramBlock::PlotCSpectrogramBlock(std::string name,
+PlotCSpectrogramBlock::PlotCSpectrogramBlock(const char*name,
     const std::vector<std::string> signal_labels,
     size_t sps,
     size_t n_fft_samples,
     size_t tall,
     SpectralWindow window_type)
-    : BlockBase(std::move(name)),
+    : BlockBase(name),
       _num_inputs(signal_labels.size()),
       _signal_labels(std::move(signal_labels)),
       _sps(sps),
@@ -125,7 +125,7 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
 void PlotCSpectrogramBlock::render() {
     ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
-    ImGui::Begin(name().c_str());
+    ImGui::Begin(name());
 
     const ImPlotAxisFlags x_flags = ImPlotAxisFlags_Lock;
     const ImPlotAxisFlags y_flags = ImPlotAxisFlags_Lock;

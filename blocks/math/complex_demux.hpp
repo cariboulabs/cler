@@ -10,8 +10,8 @@ struct ComplexToMagPhaseBlock : public cler::BlockBase {
         RealImag = 1
     };
 
-    ComplexToMagPhaseBlock(std::string name, const Mode block_mode, const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(std::move(name)), in(buffer_size), _block_mode(block_mode)
+    ComplexToMagPhaseBlock(const char* name, const Mode block_mode, const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        : cler::BlockBase(name), in(buffer_size), _block_mode(block_mode)
     {
         if (buffer_size == 0) {
             throw std::invalid_argument("Buffer size must be greater than zero.");
