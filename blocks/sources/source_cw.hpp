@@ -24,7 +24,7 @@ struct SourceCWBlock : public cler::BlockBase {
             throw std::invalid_argument("Sample rate must be greater than zero.");
         }
 
-        float phase_increment = 2.0f * PI * _frequency_hz / static_cast<float>(_sps);
+        float phase_increment = 2.0f * cler::PI * _frequency_hz / static_cast<float>(_sps);
 
         _phasor = std::complex<float>(1.0f, 0.0f);
         _phasor_inc = std::polar(1.0f, phase_increment);
@@ -61,7 +61,6 @@ struct SourceCWBlock : public cler::BlockBase {
     }
 
 private:
-    static constexpr float PI = 3.14159265358979323846f;
     float _amplitude;
     float _frequency_hz;
     size_t _sps;

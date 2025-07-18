@@ -114,7 +114,7 @@ struct PlantBlock : public cler::BlockBase {
         for (int i = 1; i <= num_points; ++i) {
             float t = (float)i / (float)num_points;
             float x = spring_start_x + t * coil_length;
-            float phase = t * cycles * 2.0f * 3.14159265358979323846f; // full sine wave
+            float phase = t * cycles * 2.0f * cler::PI;
             float y = center_y + sinf(phase) * amplitude;
 
             draw_list->AddLine(prev, ImVec2(x, y), IM_COL32(255, 215, 0, 255), 3.0f);

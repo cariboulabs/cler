@@ -32,11 +32,11 @@ struct SourceChirpBlock : public cler::BlockBase {
 
         // Precompute per-sample sweep rate
         const float dt = 1.0f / static_cast<float>(_sps);
-        const float w0 = 2.0f * PI * _f0_hz * dt;
+        const float w0 = 2.0f * cler::PI * _f0_hz * dt;
 
         // Precompute second difference method constants
         _psi = std::polar(1.0f, w0);      // Initial phasor increment
-        _psi_inc = std::polar(1.0f, 2.0f * PI * _k * dt * dt); // Second difference (==acceleration)
+        _psi_inc = std::polar(1.0f, 2.0f * cler::PI * _k * dt * dt); // Second difference (==acceleration)
 
         _phasor = std::complex<float>(1.0f, 0.0f); // Unit phasor
 
@@ -79,12 +79,11 @@ private:
         _samples_counter = 0;
         _phasor = std::complex<float>(1.0f, 0.0f);
         const float dt = 1.0f / static_cast<float>(_sps);
-        const float w0 = 2.0f * PI * _f0_hz * dt;
+        const float w0 = 2.0f * cler::PI * _f0_hz * dt;
         _psi = std::polar(1.0f, w0);
-        _psi_inc = std::polar(1.0f, 2.0f * PI * _k * dt * dt);
+        _psi_inc = std::polar(1.0f, 2.0f * cler::PI * _k * dt * dt);
     }
 
-    static constexpr float PI = 3.14159265358979323846f;
     float _amplitude;
     float _f0_hz;
     float _f1_hz;
