@@ -37,21 +37,21 @@ namespace cler {
 #define CLER_FREERTOS_PRIORITY (tskIDLE_PRIORITY + 1)
 #endif
 
-struct FreeRTOSTaskPolicy {
+struct FreeRTOSTaskPolicy : TaskPolicyBase<FreeRTOSTaskPolicy> {
     // Structure to hold task data
     struct TaskData {
         void* callable;
         void (*invoke)(void*);
         void (*destroy)(void*);
         SemaphoreHandle_t completion_sem;
-        volatile bool* should_stop;
+        volatile bool task_completed;
     };
     
     struct TaskWrapper {
         TaskHandle_t handle;
         SemaphoreHandle_t completion_sem;
         TaskData* task_data;
-        volatile bool should_stop;
+        volatile bool task_completed;
     };
     
     using task_type = TaskWrapper;
@@ -71,7 +71,7 @@ struct FreeRTOSTaskPolicy {
     template<typename Func>
     static task_type create_task(Func&& f) {
         task_type wrapper{};
-        wrapper.should_stop = false;
+        wrapper.task_completed = false;
         wrapper.handle = nullptr;
         wrapper.task_data = nullptr;
         
@@ -88,7 +88,7 @@ struct FreeRTOSTaskPolicy {
         task_data->invoke = &TaskHelper<FuncType>::invoke;
         task_data->destroy = &TaskHelper<FuncType>::destroy;
         task_data->completion_sem = wrapper.completion_sem;
-        task_data->should_stop = &wrapper.should_stop;
+        task_data->task_completed = false;
         wrapper.task_data = task_data;
         
         // Create FreeRTOS task
@@ -115,10 +115,7 @@ struct FreeRTOSTaskPolicy {
     }
     
     static void join_task(task_type& wrapper) {
-        if (wrapper.task_data && wrapper.handle) {
-            // Signal task to stop
-            wrapper.should_stop = true;
-            
+        if (wrapper.task_data && wrapper.handle && !wrapper.task_completed) {
             // Wait for completion
             xSemaphoreTake(wrapper.completion_sem, portMAX_DELAY);
             
@@ -129,6 +126,7 @@ struct FreeRTOSTaskPolicy {
             wrapper.task_data = nullptr;
             wrapper.completion_sem = nullptr;
             wrapper.handle = nullptr;
+            wrapper.task_completed = true;
         }
     }
     
@@ -164,6 +162,14 @@ private:
 // Forward declaration
 template<typename TaskPolicy, typename... BlockRunners>
 class FlowGraph;
+
+// Convenient factory function for FreeRTOS-based FlowGraph
+template<typename... Runners>
+auto make_freertos_flowgraph(Runners&&... runners) {
+    return cler::FlowGraph<cler::FreeRTOSTaskPolicy, std::decay_t<Runners>...>(
+        std::forward<Runners>(runners)...
+    );
+}
 
 // Convenient alias for FreeRTOS-based FlowGraph
 template<typename... BlockRunners>

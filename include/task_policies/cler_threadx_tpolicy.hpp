@@ -45,14 +45,14 @@ namespace cler {
 #define CLER_THREADX_PREEMPT_THRESHOLD 16
 #endif
 
-struct ThreadXTaskPolicy {
+struct ThreadXTaskPolicy : TaskPolicyBase<ThreadXTaskPolicy> {
     // Structure to hold task data
     struct TaskData {
         void* callable;
         void (*invoke)(void*);
         void (*destroy)(void*);
         TX_SEMAPHORE* completion_sem;
-        volatile bool* should_stop;
+        volatile bool task_completed;
     };
     
     struct TaskWrapper {
@@ -60,7 +60,7 @@ struct ThreadXTaskPolicy {
         TX_SEMAPHORE completion_sem;
         TaskData* task_data;
         UCHAR* stack_memory;
-        volatile bool should_stop;
+        volatile bool task_completed;
         bool is_valid;
     };
     
@@ -82,7 +82,7 @@ struct ThreadXTaskPolicy {
     static task_type create_task(Func&& f) {
         task_type wrapper{};
         wrapper.is_valid = false;
-        wrapper.should_stop = false;
+        wrapper.task_completed = false;
         wrapper.task_data = nullptr;
         
         // Allocate stack memory
@@ -110,7 +110,7 @@ struct ThreadXTaskPolicy {
         task_data->invoke = &TaskHelper<FuncType>::invoke;
         task_data->destroy = &TaskHelper<FuncType>::destroy;
         task_data->completion_sem = &wrapper.completion_sem;
-        task_data->should_stop = &wrapper.should_stop;
+        task_data->task_completed = false;
         wrapper.task_data = task_data;
         
         // Create ThreadX thread
@@ -141,10 +141,7 @@ struct ThreadXTaskPolicy {
     }
     
     static void join_task(task_type& wrapper) {
-        if (wrapper.is_valid && wrapper.task_data) {
-            // Signal thread to stop
-            wrapper.should_stop = true;
-            
+        if (wrapper.is_valid && wrapper.task_data && !wrapper.task_completed) {
             // Wait for thread completion
             tx_semaphore_get(&wrapper.completion_sem, TX_WAIT_FOREVER);
             
@@ -161,6 +158,7 @@ struct ThreadXTaskPolicy {
             wrapper.task_data = nullptr;
             wrapper.stack_memory = nullptr;
             wrapper.is_valid = false;
+            wrapper.task_completed = true;
         }
     }
     
@@ -196,6 +194,14 @@ private:
 // Forward declaration
 template<typename TaskPolicy, typename... BlockRunners>
 class FlowGraph;
+
+// Convenient factory function for ThreadX-based FlowGraph
+template<typename... Runners>
+auto make_threadx_flowgraph(Runners&&... runners) {
+    return cler::FlowGraph<cler::ThreadXTaskPolicy, std::decay_t<Runners>...>(
+        std::forward<Runners>(runners)...
+    );
+}
 
 // Convenient alias for ThreadX-based FlowGraph
 template<typename... BlockRunners>

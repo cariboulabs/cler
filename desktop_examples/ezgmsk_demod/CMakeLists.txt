@@ -1,6 +1,6 @@
 add_executable(main main.cpp)
 
-target_link_libraries(main PRIVATE cler_blocks)
+target_link_libraries(main PRIVATE cler_desktop_blocks)
 
 set(RECORDED_STREAM1 recordings/recorded_stream_0x55904E.bin)
 add_custom_command(

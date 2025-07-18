@@ -1,12 +1,13 @@
 #pragma once
 
 #include "cler.hpp"
+#include "cler_task_policy_base.hpp"
 #include <thread>
 #include <chrono>
 
 namespace cler {
 
-struct DesktopTaskPolicy {
+struct DesktopTaskPolicy : TaskPolicyBase<DesktopTaskPolicy> {
     using task_type = std::thread;
 
     template <typename F>

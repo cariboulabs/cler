@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
 #include <iostream>
 #include <chrono>
 #include <thread>
@@ -98,7 +99,7 @@ int main() {
     CopyBlock stage3("Stage3");
     SinkBlock sink("Sink", SAMPLES);
 
-    auto fg = cler::FlowGraph(
+    auto fg = make_desktop_flowgraph(
         cler::BlockRunner(&source, &stage0.in),
         cler::BlockRunner(&stage0, &stage1.in),
         cler::BlockRunner(&stage1, &stage2.in),
