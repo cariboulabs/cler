@@ -10,7 +10,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/mock_environment)
 
 # Zephyr hello world compilation test
 add_executable(zph_hello_world
-    hello_world.cpp
+    zph_hello_world.cpp
 )
 
 # Compiler flags

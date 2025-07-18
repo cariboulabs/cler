@@ -10,7 +10,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 # Bare metal hello world compilation test
 add_executable(bm_hello_world
-    hello_world.cpp
+    bm_hello_world.cpp
 )
 
 # Compiler flags
