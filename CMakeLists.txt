@@ -21,6 +21,10 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
 endif()
 
+#Its more idomatic to link against cler::cler, 
+#but if provide this so that people can just include cler.hpp directly
+set(CLER_INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
 # For Release, force -O3
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
   message(STATUS "CLER sources: Configuring Release build with -O3")
