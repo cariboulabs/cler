@@ -155,7 +155,6 @@ There’s a lot we don’t know yet and plenty to learn from the SDR community.
 How to add code:
 - ✅ **Modern C++ (C++17)** — but always mindful of embedded constraints.
 - 🌲 **Improve existing blocks** — solo-developing also means one pair of eyes. Fresh looks are always welcome.
-- ⚙️ **Keep the hardware interface size warning enabled** — so users understand what’s happening under the hood.
 - ⚡ **Prefer templates and function pointers** — avoid `std::function` and use lambdas only if required.
 - 🧩 **Avoid `std::any`** — to keep type safety explicit and predictable.
 - 🔗 **Favor composition over inheritance** — except for simple interfaces.

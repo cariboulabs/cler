@@ -170,8 +170,9 @@ void tx_application_define(void* first_unused_memory) {
     static UCHAR hello_world_stack[2048];
     
     // Create the main application thread
+    char thread_name[] = "HelloWorldThread";
     tx_thread_create(&hello_world_thread,
-                     "HelloWorldThread",
+                     thread_name,
                      hello_world_thread_entry,
                      0,
                      hello_world_stack,

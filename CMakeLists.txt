@@ -39,6 +39,12 @@ target_include_directories(cler INTERFACE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include> #allows people to just #include "cler.hpp"
 )
 
+target_compile_options(cler INTERFACE
+  $<$<COMPILE_LANGUAGE:CXX>:
+    -Wno-interference-size
+  >
+)
+
 add_subdirectory(logger)
 add_subdirectory(desktop_blocks)
 add_subdirectory(desktop_examples)
