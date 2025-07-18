@@ -2,10 +2,10 @@
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include <chrono>
 #include <algorithm>
-#include "blocks/gui/gui_manager.hpp"
-#include "blocks/utils/throttle.hpp"
-#include "blocks/plots/plot_timeseries.hpp"
-#include "blocks/utils/fanout.hpp"
+#include "desktop_blocks/gui/gui_manager.hpp"
+#include "desktop_blocks/utils/throttle.hpp"
+#include "desktop_blocks/plots/plot_timeseries.hpp"
+#include "desktop_blocks/utils/fanout.hpp"
 #include <atomic>
 #include <numbers>
 #include <cmath>

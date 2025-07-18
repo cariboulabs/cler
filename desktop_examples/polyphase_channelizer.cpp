@@ -1,13 +1,13 @@
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
-#include "blocks/gui/gui_manager.hpp"
-#include "blocks/sources/source_cw.hpp"
-#include "blocks/channelizers/polyphase_channelizer.hpp"
-#include "blocks/math/add.hpp"
-#include "blocks/plots/plot_cspectrum.hpp"
-#include "blocks/noise/awgn.hpp"
-#include "blocks/utils/fanout.hpp"
-#include "blocks/utils/throughput.hpp"
+#include "desktop_blocks/gui/gui_manager.hpp"
+#include "desktop_blocks/sources/source_cw.hpp"
+#include "desktop_blocks/channelizers/polyphase_channelizer.hpp"
+#include "desktop_blocks/math/add.hpp"
+#include "desktop_blocks/plots/plot_cspectrum.hpp"
+#include "desktop_blocks/noise/awgn.hpp"
+#include "desktop_blocks/utils/fanout.hpp"
+#include "desktop_blocks/utils/throughput.hpp"
 
 float channel_freq(float channel_bw, uint8_t index, uint8_t num_channels) {
     float offset = static_cast<float>(index) - static_cast<float>(num_channels) / 2.0 + 0.5f;

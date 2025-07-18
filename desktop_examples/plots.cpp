@@ -1,14 +1,14 @@
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
-#include "blocks/gui/gui_manager.hpp"
-#include "blocks/plots/plot_timeseries.hpp"
-#include "blocks/sources/source_cw.hpp"
-#include "blocks/sources/source_chirp.hpp"
-#include "blocks/utils/throttle.hpp"
-#include "blocks/utils/fanout.hpp"
-#include "blocks/math/complex_demux.hpp"
-#include "blocks/plots/plot_cspectrum.hpp"
-#include "blocks/plots/plot_cspectrogram.hpp"
+#include "desktop_blocks/gui/gui_manager.hpp"
+#include "desktop_blocks/plots/plot_timeseries.hpp"
+#include "desktop_blocks/sources/source_cw.hpp"
+#include "desktop_blocks/sources/source_chirp.hpp"
+#include "desktop_blocks/utils/throttle.hpp"
+#include "desktop_blocks/utils/fanout.hpp"
+#include "desktop_blocks/math/complex_demux.hpp"
+#include "desktop_blocks/plots/plot_cspectrum.hpp"
+#include "desktop_blocks/plots/plot_cspectrogram.hpp"
 
 int main() {
     size_t SPS = 100;

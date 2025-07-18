@@ -40,6 +40,6 @@ target_include_directories(cler INTERFACE
 )
 
 add_subdirectory(logger)
-add_subdirectory(blocks)
+add_subdirectory(desktop_blocks)
 add_subdirectory(desktop_examples)
 add_subdirectory(performance)

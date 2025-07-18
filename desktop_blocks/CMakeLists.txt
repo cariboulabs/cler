@@ -22,8 +22,8 @@ FetchContent_Declare(
   GIT_TAG master
 )
 
-add_library(cler_blocks INTERFACE)
-add_library(cler::cler_blocks ALIAS cler_blocks)
+add_library(cler_desktop_blocks INTERFACE)
+add_library(cler::cler_desktop_blocks ALIAS cler_desktop_blocks)
 
 add_subdirectory(gui)
 add_subdirectory(ezgmsk_demod)
@@ -31,7 +31,7 @@ add_subdirectory(plots)
 add_subdirectory(udp)
 add_subdirectory(sources)
 
-target_link_libraries(cler_blocks INTERFACE 
+target_link_libraries(cler_desktop_blocks INTERFACE 
   cler::blocks_gui
   cler::blocks_ezgmsk_demod
   cler::blocks_plots
@@ -39,6 +39,6 @@ target_link_libraries(cler_blocks INTERFACE
   cler::blocks_sources
 )
 
-target_include_directories(cler_blocks INTERFACE #so people call #include "blocks/..."
+target_include_directories(cler_desktop_blocks INTERFACE #so people call #include "blocks/..."
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
 )

@@ -1,10 +1,10 @@
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
-#include "blocks/sources/source_cw.hpp"
-#include "blocks/utils/throttle.hpp"
-#include "blocks/math/add.hpp"
-#include "blocks/plots/plot_timeseries.hpp"
-#include "blocks/gui/gui_manager.hpp"
+#include "desktop_blocks/sources/source_cw.hpp"
+#include "desktop_blocks/utils/throttle.hpp"
+#include "desktop_blocks/math/add.hpp"
+#include "desktop_blocks/plots/plot_timeseries.hpp"
+#include "desktop_blocks/gui/gui_manager.hpp"
 
 int main() {
     cler::GuiManager gui(800, 400, "Hello World Plot Example");

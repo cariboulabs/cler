@@ -1,8 +1,8 @@
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
-#include "blocks/udp/sink_udp.hpp"
-#include "blocks/udp/source_udp.hpp"
-#include "blocks/sinks/sink_null.hpp"
+#include "desktop_blocks/udp/sink_udp.hpp"
+#include "desktop_blocks/udp/source_udp.hpp"
+#include "desktop_blocks/sinks/sink_null.hpp"
 #include <queue>
 #include <iostream>
 #include <thread>

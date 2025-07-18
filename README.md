@@ -23,16 +23,13 @@ Embedded Linux aside, most embedded devices traditionally relied on dedicated ch
 
 **How does it compare to GNURadio or FutureSDR**? It’s not trying to — though it can be competitive in desktop environments. Cler isn’t a general-purpose SDR toolkit; it’s built from the ground up for embedded systems, where memory is limited, timing is critical, and you can’t rely on having an MMU. Instead of shared runtime schedulers or double-mapped buffers, Cler uses block-owned ring buffers and minimal coordination to keep things simple and deterministic. Yet it remains powerful enough for many SDR and control applications — just without the overhead.
 
-**How to use it?** For Desktop, just Include `include/cler.hpp` and you are good for the basics. Want to use already written blocks? Inlcude them from `blocks/*` and link against cler::cler_blocks </br>
-Alternatively, you can use CMAKE to link against `cler::cler` and/or `cler::cler_blocks` which already interface the required headers.
-
 Want to try out some examples on a Desktop?
 ```
 mkdir build
 cd build
 cmake ..
 make -j"$(nproc --ignore=1)"   # Use all cores-1
-cd examples
+cd desktop_examples
 ./hello_world #(or mass_spring_damper if you want to see somthing cool)
 ```
 
@@ -40,17 +37,17 @@ cd examples
 
 # Okay, but how does it write?
 
-Below is `examples/hello_world.cpp`
+Below is `desktop_examples/hello_world.cpp`
 
 ```
 int main() {
     cler::GuiManager gui(800, 400, "Hello World Plot Example");
 
     const size_t SPS = 1000;
-    SourceCWBlock<float> source1("CWSource", 1.0f, 1.0f, SPS);
+    SourceCWBlock<float> source1("CWSource", 1.0f, 1.0f, SPS); //amplitude, frequency
     SourceCWBlock<float> source2("CWSource2", 1.0f, 20.0f, SPS);
     ThrottleBlock<float> throttle("Throttle", SPS);
-    AddBlock<float> adder("Adder", 2);
+    AddBlock<float> adder("Adder", 2); // 2 inputs
 
     PlotTimeSeriesBlock plot(
         "Hello World Plot",
@@ -58,9 +55,9 @@ int main() {
         SPS,
         3.0f // duration in seconds
     );
-    plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f);
+    plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f); //x,y, width, height
 
-    cler::FlowGraph flowgraph(
+    auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source1, &adder.in[0]),
         cler::BlockRunner(&source2, &adder.in[1]),
         cler::BlockRunner(&adder, &throttle.in),
@@ -93,8 +90,8 @@ Cler supports two architectural styles:
     When the blocks are simple, the streamlined approach will be faster than the flowgraph becuase of the thread overhead. As a compromise, you can create `superblocks` which combine multiple small blocks.
     See `streamlined` and  `flowgraph` as examples for the two architectural styles, and `polyphase_channelizer` for a superblock implementation.
 
-* **Blocks**: </br>
-Blocks is a library of useful blocks for quick "plug and play". Its soft depedencies are `liquid`, `imdeargui`(with opengl,glfw).
+* **Desktop Blocks**: </br>
+`desktop_blocks` is a library of useful blocks for quick "plug and play". Its soft depedencies are `liquid`, `imdeargui`(with opengl,glfw).
 To include its headers and link against it, link against `cler::cler_blocks` with CMake.
 In Cler, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
 

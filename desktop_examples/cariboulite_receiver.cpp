@@ -1,8 +1,8 @@
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "cler_desktop_utils.hpp"
-#include "blocks/sources/source_cariboulite.hpp"
-#include "blocks/plots/plot_cspectrum.hpp"
+#include "desktop_blocks/sources/source_cariboulite.hpp"
+#include "desktop_blocks/plots/plot_cspectrum.hpp"
 #include "gui_manager.hpp"
 
 int main() {
