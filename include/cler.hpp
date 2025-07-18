@@ -162,11 +162,12 @@ namespace cler {
     template<typename... BlockRunners>
     class FlowGraph {
     public:
+        static constexpr std::size_t _N = sizeof...(BlockRunners);
         typedef void (*OnCrashCallback)(void* context);
 
         FlowGraph(BlockRunners... runners)
             : _runners(std::make_tuple(std::forward<BlockRunners>(std::move(runners))...)) {
-            _stats.resize(sizeof...(BlockRunners));
+            // std::array initialization handled by default constructor
         }
 
         ~FlowGraph() { stop(); }
@@ -293,17 +294,16 @@ namespace cler {
             return _config;
         }
 
-        const std::vector<BlockExecutionStats>& stats() const {
+        const std::array<BlockExecutionStats, _N>& stats() const {
             return _stats;
         }
 
     private:
-        static constexpr std::size_t _N = sizeof...(BlockRunners);
         std::tuple<BlockRunners...> _runners;
         std::array<std::thread, _N> _threads;
         std::atomic<bool> _stop_flag = false;
         FlowGraphConfig _config;
-        std::vector<BlockExecutionStats> _stats;
+        std::array<BlockExecutionStats, _N> _stats;
         OnCrashCallback _on_crash_cb = nullptr;
         void* _on_crash_context = nullptr;
     };

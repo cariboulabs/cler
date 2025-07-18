@@ -6,6 +6,7 @@
 #include "imgui.h"
 #include <vector>
 #include <mutex> 
+#include <vector>
 
 struct PlotCSpectrumBlock : public cler::BlockBase {
     const size_t BUFFER_SIZE_MULTIPLIER = 3;

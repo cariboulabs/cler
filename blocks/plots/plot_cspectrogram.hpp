@@ -6,6 +6,7 @@
 #include "implot.h"
 #include "spectral_windows.hpp"
 #include <mutex>
+#include <vector>
 
 struct PlotCSpectrogramBlock : public cler::BlockBase {
     const size_t BUFFER_SIZE_MULTIPLIER = 3;

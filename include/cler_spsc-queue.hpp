@@ -21,17 +21,36 @@
 #include <stdexcept>   // for std::logic_error
 #include <type_traits> // for std::is_default_constructible
 #include <utility>     // for forward
-#include <vector>      // for vector, allocator
+// vector header removed for embedded compatibility
 #include <cstring>    // for std::memcpy
 
 namespace dro {
 
 namespace details {
 
-#ifdef __cpp_lib_hardware_interference_size
-static constexpr std::size_t cacheLineSize =
-    std::hardware_destructive_interference_size;
+// Platform-aware cache line size detection
+#if defined(__cpp_lib_hardware_interference_size) && __cpp_lib_hardware_interference_size >= 201703L
+static constexpr std::size_t cacheLineSize = std::hardware_destructive_interference_size;
+#elif defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
+// Intel x86/x64: 64 bytes
+static constexpr std::size_t cacheLineSize = 64;
+#elif defined(__ARM_ARCH_7M__) || defined(__ARM_ARCH_6M__) || defined(__ARM_ARCH_7EM__)
+// ARM Cortex-M (STM32, TI Tiva): 32 bytes
+static constexpr std::size_t cacheLineSize = 32;
+#elif defined(__ARM_ARCH) && (__ARM_ARCH >= 8)
+// ARM Cortex-A (64-bit): 64 bytes
+static constexpr std::size_t cacheLineSize = 64;
+#elif defined(__ARM_ARCH) && (__ARM_ARCH == 7)
+// ARM Cortex-A (32-bit): typically 64 bytes
+static constexpr std::size_t cacheLineSize = 64;
+#elif defined(__aarch64__)
+// ARM64: 64 bytes
+static constexpr std::size_t cacheLineSize = 64;
+#elif defined(__arm__) || defined(_M_ARM)
+// Generic ARM: conservative 32 bytes
+static constexpr std::size_t cacheLineSize = 32;
 #else
+// Safe default for unknown platforms
 static constexpr std::size_t cacheLineSize = 64;
 #endif
 
@@ -62,7 +81,8 @@ template <typename T, typename Allocator = std::allocator<T>,
           typename = SPSC_Type<T>>
 struct HeapBuffer {
   const std::size_t capacity_;
-  std::vector<T, Allocator> buffer_;
+  T* buffer_;
+  [[no_unique_address]] Allocator allocator_;
 
   static constexpr std::size_t padding = ((cacheLineSize - 1) / sizeof(T)) + 1;
   static constexpr std::size_t MAX_SIZE_T =
@@ -71,7 +91,7 @@ struct HeapBuffer {
   explicit HeapBuffer(const std::size_t capacity,
                       const Allocator &allocator = Allocator())
       // +1 prevents live lock e.g. reader and writer share 1 slot for size 1
-      : capacity_(capacity + 1), buffer_(allocator) {
+      : capacity_(capacity + 1), allocator_(allocator) {
     if (capacity < 1) {
       throw std::logic_error("Capacity must be a positive number; Heap "
                              "allocations require capacity argument");
@@ -81,10 +101,31 @@ struct HeapBuffer {
       throw std::overflow_error(
           "Capacity with padding exceeds std::size_t. Reduce size of queue.");
     }
-    buffer_.resize(capacity_ + (2 * padding));
+    
+    const std::size_t total_size = capacity_ + (2 * padding);
+    buffer_ = std::allocator_traits<Allocator>::allocate(allocator_, total_size);
+    
+    // Initialize elements if T is not trivially constructible
+    if constexpr (!std::is_trivially_constructible_v<T>) {
+      for (std::size_t i = 0; i < total_size; ++i) {
+        std::allocator_traits<Allocator>::construct(allocator_, buffer_ + i);
+      }
+    }
   }
 
-  ~HeapBuffer() = default;
+  ~HeapBuffer() {
+    if (buffer_) {
+      const std::size_t total_size = capacity_ + (2 * padding);
+      // Destroy elements if T is not trivially destructible
+      if constexpr (!std::is_trivially_destructible_v<T>) {
+        for (std::size_t i = 0; i < total_size; ++i) {
+          std::allocator_traits<Allocator>::destroy(allocator_, buffer_ + i);
+        }
+      }
+      std::allocator_traits<Allocator>::deallocate(allocator_, buffer_, total_size);
+    }
+  }
+  
   // Non-Copyable and Non-Movable
   HeapBuffer(const HeapBuffer &lhs) = delete;
   HeapBuffer &operator=(const HeapBuffer &lhs) = delete;
