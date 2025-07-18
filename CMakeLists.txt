@@ -43,3 +43,5 @@ add_subdirectory(logger)
 add_subdirectory(desktop_blocks)
 add_subdirectory(desktop_examples)
 add_subdirectory(performance)
+
+add_subdirectory(embedded_examples)
