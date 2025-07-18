@@ -348,7 +348,6 @@ public:
     const auto padding  = writer_.paddingCache_;
     auto writeIndex     = writer_.writeIndex_.load(std::memory_order_relaxed);
 
-    const auto nextWriteIndex = (writeIndex + count) % capacity;
     auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
     writer_.readIndexCache_ = readIndexCache;
 
@@ -378,9 +377,6 @@ public:
     const auto capacity = base_type::capacity_;
     const auto padding  = writer_.paddingCache_;
     auto writeIndex     = writer_.writeIndex_.load(std::memory_order_relaxed);
-
-    // Calculate next write index no matter what
-    const auto nextWriteIndex = (writeIndex + count) % capacity;
 
     // If we're overwriting unread data, advance reader index
     auto readIndex = reader_.readIndex_.load(std::memory_order_acquire);

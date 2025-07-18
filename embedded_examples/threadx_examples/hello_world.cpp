@@ -141,6 +141,7 @@ private:
 
 // ThreadX application thread
 void hello_world_thread_entry(ULONG thread_input) {
+    (void)thread_input;  // Suppress unused parameter warning
     printf("CLER ThreadX Hello World Example\n");
     printf("Starting DSP flowgraph...\n");
 
@@ -164,6 +165,7 @@ void hello_world_thread_entry(ULONG thread_input) {
 
 // ThreadX application define
 void tx_application_define(void* first_unused_memory) {
+    (void)first_unused_memory;  // Suppress unused parameter warning
     static TX_THREAD hello_world_thread;
     static UCHAR hello_world_stack[2048];
     

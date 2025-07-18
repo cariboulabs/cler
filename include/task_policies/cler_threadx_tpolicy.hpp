@@ -69,9 +69,10 @@ struct ThreadXTaskPolicy : TaskPolicyBase<ThreadXTaskPolicy> {
         }
         
         // Create completion semaphore
+        static char sem_name[] = "ClerCompletionSem";
         UINT status = tx_semaphore_create(
             &wrapper.completion_sem,
-            "ClerCompletionSem",
+            sem_name,
             0  // Initial count
         );
         
@@ -91,9 +92,10 @@ struct ThreadXTaskPolicy : TaskPolicyBase<ThreadXTaskPolicy> {
         wrapper.task_data = task_data;
         
         // Create ThreadX thread
+        static char thread_name[] = "ClerThread";
         status = tx_thread_create(
             &wrapper.thread,                    // Thread control block
-            "ClerThread",                       // Thread name
+            thread_name,                        // Thread name
             thread_entry_point,                 // Thread entry function
             (ULONG)task_data,                  // Thread input
             wrapper.stack_memory,               // Stack start
