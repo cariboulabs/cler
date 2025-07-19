@@ -167,7 +167,7 @@ section li {
 
 .intro {
     font-size: 1.2rem;
-    color: #555;
+    color: var(--cler-black);
     margin-bottom: 1.5rem;
 }
 
@@ -179,7 +179,7 @@ section li {
 .problem {
     margin-bottom: 1.5rem;
     font-size: 1.1rem;
-    color: #555;
+    color: var(--cler-black);
 }
 
 .solution {
