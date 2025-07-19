@@ -10,7 +10,7 @@ find_package(Python3 COMPONENTS Interpreter)
 
 if(Python3_FOUND)
     # Set validator path
-    set(CLER_VALIDATOR "${CMAKE_SOURCE_DIR}/tools/cler-validate.py")
+    set(CLER_VALIDATOR "${CMAKE_SOURCE_DIR}/tools/linter/cler-validate.py")
     
     if(EXISTS ${CLER_VALIDATOR})
         # Create a custom target for validation

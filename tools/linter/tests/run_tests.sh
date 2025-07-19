@@ -8,9 +8,9 @@ echo "=================================="
 echo "Testing PASS cases:"
 echo "-------------------"
 
-for file in tools/test_validate/pass_*.cpp; do
+for file in tools/linter/tests/pass_*.cpp; do
     echo -n "Testing $(basename $file)... "
-    if python3 tools/cler-validate.py "$file" >/dev/null 2>&1; then
+    if python3 tools/linter/cler-validate.py "$file" >/dev/null 2>&1; then
         echo "✅ PASS"
     else
         echo "❌ FAIL (should have passed)"
@@ -23,9 +23,9 @@ echo
 echo "Testing FAIL cases:"
 echo "-------------------"
 
-for file in tools/test_validate/fail_*.cpp; do
+for file in tools/linter/tests/fail_*.cpp; do
     echo -n "Testing $(basename $file)... "
-    if python3 tools/cler-validate.py "$file" >/dev/null 2>&1; then
+    if python3 tools/linter/cler-validate.py "$file" >/dev/null 2>&1; then
         echo "❌ FAIL (should have failed)"
         exit 1
     else
@@ -38,7 +38,7 @@ echo
 echo "Testing desktop examples:"
 echo "-------------------------"
 
-if python3 tools/cler-validate.py desktop_examples/*.cpp >/dev/null 2>&1; then
+if python3 tools/linter/cler-validate.py desktop_examples/*.cpp >/dev/null 2>&1; then
     echo "✅ All desktop examples pass"
 else
     echo "❌ Some desktop examples failed"

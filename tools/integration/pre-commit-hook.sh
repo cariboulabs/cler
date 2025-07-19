@@ -15,11 +15,11 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Find the validator script
-VALIDATOR_PATH="tools/cler-validate.py"
+VALIDATOR_PATH="tools/linter/cler-validate.py"
 if [ ! -f "$VALIDATOR_PATH" ]; then
     # Try relative to git root
     GIT_ROOT=$(git rev-parse --show-toplevel)
-    VALIDATOR_PATH="$GIT_ROOT/tools/cler-validate.py"
+    VALIDATOR_PATH="$GIT_ROOT/tools/linter/cler-validate.py"
 fi
 
 if [ ! -f "$VALIDATOR_PATH" ]; then

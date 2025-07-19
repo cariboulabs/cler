@@ -6,7 +6,7 @@
 PYTHON ?= python3
 
 # Validator location
-CLER_VALIDATOR = tools/cler-validate.py
+CLER_VALIDATOR = tools/linter/cler-validate.py
 
 # Source directories
 SRC_DIRS = src desktop_examples examples
@@ -24,7 +24,7 @@ validate:
 .PHONY: validate-custom
 validate-custom:
 	@echo "Running Cler validation with custom rules..."
-	@$(PYTHON) $(CLER_VALIDATOR) --config tools/custom-rules.yaml $(CPP_FILES)
+	@$(PYTHON) $(CLER_VALIDATOR) --config tools/linter/custom-rules.yaml $(CPP_FILES)
 
 # Validation with JSON output (for CI/CD)
 .PHONY: validate-json

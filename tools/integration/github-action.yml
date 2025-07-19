@@ -7,16 +7,16 @@ on:
       - '**.cpp'
       - '**.hpp'
       - '**.h'
-      - 'tools/cler-validate.py'
-      - 'tools/rules.yaml'
+      - 'tools/linter/cler-validate.py'
+      - 'tools/linter/rules.yaml'
   pull_request:
     branches: [ main, develop ]
     paths:
       - '**.cpp'
       - '**.hpp'
       - '**.h'
-      - 'tools/cler-validate.py'
-      - 'tools/rules.yaml'
+      - 'tools/linter/cler-validate.py'
+      - 'tools/linter/rules.yaml'
 
 jobs:
   validate:
@@ -37,7 +37,7 @@ jobs:
     
     - name: Run Cler validation
       run: |
-        python tools/cler-validate.py \
+        python tools/linter/cler-validate.py \
           desktop_examples/*.cpp \
           examples/*.cpp \
           --json > validation-results.json
