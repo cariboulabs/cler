@@ -38,7 +38,8 @@
     <main class="learn-page">
         <div class="container">
             <div class="sidebar">
-                <nav class="learn-nav">
+                <button class="nav-toggle mobile-only" aria-label="Toggle navigation" aria-expanded="false" aria-controls="learnNav">☰</button>
+                <nav class="learn-nav" id="learnNav">
                     <h3>Contents</h3>
                     <ul>
                         <li><a href="#understanding">Understanding CLER</a></li>
@@ -93,7 +94,7 @@
     }
 };</code></pre>
                     </div>
-                    <p><strong>Design Rationale:</strong> Minimal virtual functions (only for interface), very little runtime type erasure, minimal hidden costs. What you write is mostly what gets compiled.</p>
+                    <p class="design-note"><strong>Design Rationale:</strong> Minimal virtual functions (only for interface), very little runtime type erasure, minimal hidden costs. What you write is mostly what gets compiled.</p>
 
                     <h3>Multiple Input/Output Blocks</h3>
                     <p>Blocks can have any number of inputs and outputs. Here's an adder that takes 2 inputs:</p>
@@ -120,7 +121,7 @@
     }
 };</code></pre>
                     </div>
-                    <p><strong>Key Design:</strong> Input channels are owned by the block, output channels are passed as parameters. This prevents one-to-many connection issues.</p>
+                    <p class="design-note"><strong>Key Design:</strong> Input channels are owned by the block, output channels are passed as parameters. This prevents one-to-many connection issues.</p>
 
                     <h3>Type-Agnostic Channels</h3>
                     <p>Channels work with any type — not just numbers:</p>
@@ -151,7 +152,7 @@ struct PacketProcessor : public cler::BlockBase {
     }
 };</code></pre>
                     </div>
-                    <p><strong>Flexibility:</strong> You're not limited to primitive types. Pass complex data structures, protocol packets, or custom objects between blocks.</p>
+                    <p class="key-point"><strong>Flexibility:</strong> You're not limited to primitive types. Pass complex data structures, protocol packets, or custom objects between blocks.</p>
                 </section>
 
                 <section id="execution-models">
@@ -180,7 +181,7 @@ auto flowgraph = cler::make_freertos_flowgraph(
 
 flowgraph.run();</code></pre>
                     </div>
-                    <p><strong>BlockRunner Syntax:</strong> First argument is the block, remaining arguments are its outputs (passed to procedure() as parameters). Same syntax works across all platforms.</p>
+                    <p class="design-note"><strong>BlockRunner Syntax:</strong> First argument is the block, remaining arguments are its outputs (passed to procedure() as parameters). Same syntax works across all platforms.</p>
 
                     <h3>Streamlined Mode</h3>
                     <p>You control the loop, manual scheduling (from streamlined.cpp):</p>
@@ -193,7 +194,7 @@ flowgraph.run();</code></pre>
     sink.procedure();
 }</code></pre>
                     </div>
-                    <p><strong>Use Cases:</strong> When blocks are simple, you avoid thread overhead. Perfect for embedded systems or when you need deterministic timing.</p>
+                    <p class="design-note"><strong>Use Cases:</strong> When blocks are simple, you avoid thread overhead. Perfect for embedded systems or when you need deterministic timing.</p>
                 </section>
 
                 <section id="control-system">
@@ -229,7 +230,7 @@ private:
     float _x = 0.0, _v = 0.0;  // Position and velocity state
 };</code></pre>
                     </div>
-                    <p><strong>Critical Detail:</strong> The plant block maintains internal state and connects to the controller in a feedback loop. The <code>force_in.push(0.0f)</code> is crucial — cyclic graphs need initial conditions or they'll deadlock on startup.</p>
+                    <p class="key-point"><strong>Critical Detail:</strong> The plant block maintains internal state and connects to the controller in a feedback loop. The <code>force_in.push(0.0f)</code> is crucial — cyclic graphs need initial conditions or they'll deadlock on startup.</p>
                     
                     <h3>Interactive PID Controller with Thread-Safe GUI</h3>
                     <div class="code-block">
@@ -272,7 +273,7 @@ private:
     float _error_prev = 0.0, _integral = 0.0;
 };</code></pre>
                     </div>
-                    <p><strong>Thread Safety:</strong> The GUI thread modifies PID parameters while the control loop runs at 100Hz. Atomic variables ensure thread-safe updates without locks, maintaining real-time performance. The controller remains responsive even while parameters change.</p>
+                    <p class="key-point"><strong>Thread Safety:</strong> The GUI thread modifies PID parameters while the control loop runs at 100Hz. Atomic variables ensure thread-safe updates without locks, maintaining real-time performance. The controller remains responsive even while parameters change.</p>
                     
                     <h3>The Cyclic Flowgraph</h3>
                     <div class="code-block">
@@ -285,7 +286,7 @@ private:
 );</code></pre>
                     </div>
                     <p><strong>BlockRunner Syntax:</strong> First argument is the block to run, remaining arguments are the outputs (channels passed to the block's procedure() method).</p>
-                    <p><strong>Feedback Loop:</strong> Notice how the data flows Controller → Plant → Fanout → back to Controller, creating a complete feedback loop. The initial force value in the plant prevents deadlock at startup.</p>
+                    <p class="design-note"><strong>Feedback Loop:</strong> Notice how the data flows Controller → Plant → Fanout → back to Controller, creating a complete feedback loop. The initial force value in the plant prevents deadlock at startup.</p>
                 </section>
 
                 <section id="performance-example">
@@ -313,7 +314,7 @@ struct GainBlock : public cler::BlockBase {
     }
 };</code></pre>
                     </div>
-                    <p><strong>The Problem:</strong> Each sample requires thread synchronization (pushing/popping from channels). The overhead of synchronization far exceeds the actual computation (one multiplication).</p>
+                    <p class="design-note"><strong>The Problem:</strong> Each sample requires thread synchronization (pushing/popping from channels). The overhead of synchronization far exceeds the actual computation (one multiplication).</p>
                     
                     <h3>Better Approaches</h3>
                     <p><strong>Option 1: Combine lightweight operations into heavier blocks</strong></p>
@@ -373,7 +374,7 @@ while (running) {
     }
 };</code></pre>
                     </div>
-                    <p><strong>Benefits:</strong> No dynamic allocation, better cache locality, deterministic memory usage — critical for real-time embedded systems.</p>
+                    <p class="key-point"><strong>Benefits:</strong> No dynamic allocation, better cache locality, deterministic memory usage — critical for real-time embedded systems.</p>
                 </section>
 
                 <section id="buffer-patterns">
@@ -442,7 +443,7 @@ struct BlockRunner {
         : block(blk), outputs(static_cast&lt;Channels*&gt;(outs)...) {}
 };</code></pre>
                     </div>
-                    <p><strong>Zero Overhead:</strong> Channel types are deduced at compile time. Minimal runtime type checking, very few virtual function calls, minimal dynamic allocations. The flowgraph code compiles close to what you'd write by hand — often with template optimizations.</p>
+                    <p class="key-point"><strong>Zero Overhead:</strong> Channel types are deduced at compile time. Minimal runtime type checking, very few virtual function calls, minimal dynamic allocations. The flowgraph code compiles close to what you'd write by hand — often with template optimizations.</p>
                     
                     <h3>AI-Friendly Core (~300 LOC)</h3>
                     <p>CLER's core is intentionally small and focused:</p>
@@ -500,6 +501,34 @@ struct BlockRunner {
                 if (targetElement) {
                     targetElement.scrollIntoView({ behavior: 'smooth' });
                 }
+            });
+        });
+
+        // Mobile navigation toggle
+        document.addEventListener('DOMContentLoaded', function() {
+            const toggleBtn = document.querySelector('.nav-toggle');
+            const sidebar = document.querySelector('.sidebar');
+            const learnNav = document.querySelector('.learn-nav');
+            
+            if (toggleBtn && sidebar && learnNav) {
+                toggleBtn.addEventListener('click', function() {
+                    const isOpen = learnNav.classList.toggle('open');
+                    sidebar.classList.toggle('open');
+                    toggleBtn.setAttribute('aria-expanded', isOpen);
+                });
+            }
+            
+            // Auto-close nav on link click (mobile only)
+            document.querySelectorAll('.learn-nav a').forEach(link => {
+                link.addEventListener('click', () => {
+                    if (window.innerWidth <= 768) {
+                        sidebar.classList.remove('open');
+                        learnNav.classList.remove('open');
+                        if (toggleBtn) {
+                            toggleBtn.setAttribute('aria-expanded', 'false');
+                        }
+                    }
+                });
             });
         });
     </script>

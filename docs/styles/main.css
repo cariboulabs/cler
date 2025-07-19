@@ -232,6 +232,35 @@ section li {
 }
 
 /* Learn page specific elements */
+.key-point {
+    margin: 1rem 0;
+    padding: 1rem 1.5rem;
+    background: linear-gradient(90deg, var(--cler-red) 3px, transparent 3px);
+    background-color: #fafafa;
+    border-radius: 0 var(--border-radius) var(--border-radius) 0;
+    font-size: 1rem;
+    line-height: 1.6;
+}
+
+.key-point strong {
+    color: var(--cler-red);
+    font-weight: 600;
+}
+
+.design-note {
+    margin: 1rem 0 1rem 2rem;
+    padding: 0.75rem 1rem;
+    background: #f8f9fa;
+    border-left: 3px solid var(--cler-red);
+    border-radius: 0 4px 4px 0;
+    font-size: 0.95rem;
+    color: #555;
+}
+
+.design-note strong {
+    color: var(--cler-black);
+}
+
 .principle-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -386,6 +415,38 @@ code {
     height: fit-content;
 }
 
+/* Mobile-only utility class */
+.mobile-only {
+    display: none;
+}
+
+/* Navigation toggle button */
+.nav-toggle {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: var(--cler-red);
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+}
+
+.nav-toggle:hover {
+    background-color: var(--cler-light-gray);
+}
+
+/* Smooth slide-in animation for navigation */
+.learn-nav {
+    max-height: 1000px;
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+}
+
+.sidebar {
+    transition: transform 0.3s ease;
+}
+
 .learn-nav h3 {
     margin-bottom: 1rem;
     color: var(--cler-red);
@@ -538,25 +599,39 @@ a:hover {
     }
     
     .learn-nav {
-        display: none;
+        max-height: 0;
+        opacity: 0;
     }
     
     .learn-nav.open {
+        max-height: 500px;
+        opacity: 1;
+    }
+    
+    /* Show mobile-only elements */
+    .mobile-only {
         display: block;
     }
     
-    /* Mobile navigation toggle for learn page */
-    .sidebar::before {
-        content: 'Contents ▼';
-        display: block;
-        cursor: pointer;
-        font-weight: bold;
-        color: var(--cler-red);
+    .nav-toggle {
         margin-bottom: 0.5rem;
     }
     
-    .sidebar.open::before {
-        content: 'Contents ▲';
+    /* Remove the old pseudo-element content */
+    .sidebar::before {
+        display: none;
+    }
+    
+    /* Adjust indented content for mobile */
+    .design-note {
+        margin: 1rem 0;
+        margin-left: 1rem;
+        padding: 0.75rem;
+    }
+    
+    .key-point {
+        margin: 1rem 0;
+        padding: 0.75rem 1rem;
     }
 }
 
