@@ -379,15 +379,20 @@ section li {
     background: var(--cler-red);
     color: white;
     border: none;
-    padding: 0.25rem 0.75rem;
-    border-radius: 4px;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
     cursor: pointer;
-    font-size: 0.8rem;
-    transition: background-color 0.2s ease;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    z-index: 10;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
 .copy-button:hover {
     background: #a02832;
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
 }
 
 /* Inline code */
