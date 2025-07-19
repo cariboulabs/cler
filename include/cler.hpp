@@ -5,7 +5,6 @@
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
 #include <complex> //again, a lot of cler blocks use complex numbers
-#include <string> //block names are self owning strings
 #include <chrono> // for timing measurements in FlowGraph
 #include <tuple> // for storing block runners
 
