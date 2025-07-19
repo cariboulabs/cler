@@ -1,0 +1,103 @@
+# Cler Validator Rules Configuration
+# 
+# This file defines validation patterns and rules for the Cler flowgraph validator.
+# You can customize these rules or create your own configuration file.
+
+# Regular expression patterns for extracting Cler constructs
+patterns:
+  # Matches block declarations - more flexible to catch PlotTimeSeriesBlock plot(...) patterns
+  block_declaration: '(\w+(?:Block)?)\s+(\w+)\s*\(["\']([^"\']+)["\']'
+  
+  # Matches BlockRunner declarations
+  block_runner: 'BlockRunner\s*\(\s*&(\w+)(?:\s*,\s*&([^)]+))?\)'
+  
+  # Matches flowgraph creation calls
+  flowgraph: 'make_\w+_flowgraph\s*\(([\s\S]*?)\)'
+  
+  # Matches channel access patterns like: block.in[0] or block.out
+  channel_access: '&(\w+)\.(in|out)(?:\[(\d+)\])?'
+  
+  # Detects streamlined mode (manual procedure calls)
+  streamlined_procedure: '(\w+)\.procedure\s*\('
+  
+  # Additional patterns for advanced validation
+  channel_declaration: 'Channel<([^>]+)>(?:<(\d+)>)?\s+(\w+)'
+  template_type: '<([^<>]+(?:<[^<>]+>)?)>'
+
+# Validation rules with severity levels
+rules:
+  missing_runner:
+    severity: error
+    description: "Block declared but no BlockRunner created"
+    
+  runner_not_in_flowgraph:
+    severity: error
+    description: "BlockRunner created but not added to flowgraph"
+    
+  invalid_connection:
+    severity: error
+    description: "Connection references non-existent block or channel"
+    
+  unconnected_input:
+    severity: warning
+    description: "Block input channel has no incoming connection"
+    
+  unused_output:
+    severity: warning
+    description: "Block output channel is not connected"
+    
+  duplicate_block_name:
+    severity: error
+    description: "Multiple blocks with the same variable name"
+    
+  unknown_block_in_runner:
+    severity: error
+    description: "BlockRunner references a block that doesn't exist"
+
+# Type checking rules (for future enhancement)
+type_rules:
+  # Define compatible type conversions
+  compatible_types:
+    - [float, float]
+    - [double, double]
+    - ['std::complex<float>', 'std::complex<float>']
+    - ['std::complex<double>', 'std::complex<double>']
+    # Add more as needed
+  
+  # Blocks that don't need input connections (sources)
+  source_blocks:
+    - SourceCWBlock
+    - SourceChirpBlock
+    - SourceFileBlock
+    - SourceUDPBlock
+    - SourceHackRFBlock
+    - SourceCaribouliteBlock
+  
+  # Blocks that don't need output connections (sinks)  
+  sink_blocks:
+    - SinkNullBlock
+    - SinkFileBlock
+    - SinkUDPBlock
+    - PlotTimeSeriesBlock
+    - PlotCSpectrumBlock
+    - PlotCSpectrogramBlock
+
+# Validation behavior configuration
+behavior:
+  # Skip validation for certain file patterns
+  skip_patterns:
+    - '*_test.cpp'
+    - '*_benchmark.cpp'
+    - 'test_*.cpp'
+  
+  # Maximum errors to report per file (0 = unlimited)
+  max_errors_per_file: 50
+  
+  # Stop validation after first error in file
+  fail_fast: false
+  
+  # Enable additional checks
+  extra_checks:
+    check_naming_convention: false
+    check_buffer_sizes: false
+    check_channel_types: false

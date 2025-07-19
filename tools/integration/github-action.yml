@@ -1,0 +1,110 @@
+name: Cler Flowgraph Validation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '**.cpp'
+      - '**.hpp'
+      - '**.h'
+      - 'tools/cler-validate.py'
+      - 'tools/rules.yaml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - '**.cpp'
+      - '**.hpp'
+      - '**.h'
+      - 'tools/cler-validate.py'
+      - 'tools/rules.yaml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.8'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyyaml
+    
+    - name: Run Cler validation
+      run: |
+        python tools/cler-validate.py \
+          desktop_examples/*.cpp \
+          examples/*.cpp \
+          --json > validation-results.json
+      continue-on-error: true
+    
+    - name: Upload validation results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: validation-results
+        path: validation-results.json
+    
+    - name: Comment PR with results
+      if: github.event_name == 'pull_request' && always()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const results = JSON.parse(fs.readFileSync('validation-results.json', 'utf8'));
+          
+          let comment = '## Cler Flowgraph Validation Results\n\n';
+          
+          if (results.length === 0) {
+            comment += '✅ **All validations passed!**\n';
+          } else {
+            const errors = results.filter(r => r.severity === 'error');
+            const warnings = results.filter(r => r.severity === 'warning');
+            
+            comment += `Found ${errors.length} error(s) and ${warnings.length} warning(s):\n\n`;
+            
+            // Group by file
+            const byFile = {};
+            results.forEach(r => {
+              if (!byFile[r.file]) byFile[r.file] = [];
+              byFile[r.file].push(r);
+            });
+            
+            for (const [file, issues] of Object.entries(byFile)) {
+              comment += `### \`${file}\`\n`;
+              issues.forEach(issue => {
+                const icon = issue.severity === 'error' ? '❌' : '⚠️';
+                comment += `- ${icon} Line ${issue.line}: ${issue.message}\n`;
+                if (issue.suggestion) {
+                  comment += `  - 💡 ${issue.suggestion}\n`;
+                }
+              });
+              comment += '\n';
+            }
+          }
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+    
+    - name: Check validation results
+      run: |
+        if [ -s validation-results.json ]; then
+          errors=$(python -c "import json; print(sum(1 for r in json.load(open('validation-results.json')) if r['severity'] == 'error'))")
+          if [ "$errors" -gt 0 ]; then
+            echo "❌ Validation failed with $errors error(s)"
+            exit 1
+          else
+            echo "✅ Validation passed with warnings only"
+          fi
+        else
+          echo "✅ All validations passed!"
+        fi
