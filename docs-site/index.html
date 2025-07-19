@@ -40,9 +40,30 @@
                 <h2>Why CLER?</h2>
                 <p class="problem">Embedded devices traditionally relied on dedicated chips for DSP — fusion, filtering, modulation. But with today's powerful SoCs and rise of agentic AI, it's often faster, cheaper, and more flexible to move DSP into software.</p>
                 
-                <p class="problem">Existing frameworks like GNU Radio use runtime polymorphism, void* buffers, and heavy machinery. This adds overhead, limits type safety, and complicates deployment on resource-constrained systems.</p>
-                
-                <p class="solution"><strong>CLER fills this gap.</strong> Using C++17 templates and compile-time safety, it achieves zero-cost abstraction with minimal runtime footprint — practical for everything from desktop SDR to bare-metal MCUs.</p>
+                <p class="problem">Existing frameworks like GNU Radio are battle-tested but require significant expertise and development time. Their runtime flexibility comes with overhead that makes embedded deployment challenging, and their large filesystem footprint doesn't fit today's AI context windows for modern development workflows.</p>
+
+                <p class="solution"><strong>CLER fills this gap.</strong> Using compile-time C++ templates, it minimizes overhead while keeping the runtime footprint tiny — practical for everything from desktop SDR to bare-metal MCUs. Its ~300 line core fits perfectly in AI context windows, enabling rapid development with modern tools.</p>
+            </div>
+        </section>
+
+        <section class="key-features">
+            <div class="container">
+                <h2>Key Design Principles</h2>
+                <div class="principle-grid">
+                    <div class="principle">
+                        <h4>📦 Simple and Lean</h4>
+                        <p>Blocks are just structs with a procedure() method. No complex inheritance hierarchy, minimal virtual functions.</p>
+                    </div>
+                    <div class="principle">
+                        <h4>🔗 Flexible</h4>
+                        <p>Generic over any type, safely. Supports multiple inputs/outputs and cyclic graphs for feedback systems.</p>
+                    </div>
+                    <div class="principle">
+                        <h4>🤖 AI-Friendly Core</h4>
+                        <p>~300 lines of core code fits perfectly in AI context windows, making it easy to get help with development.</p>
+                    </div>
+                    
+                </div>
             </div>
         </section>
 

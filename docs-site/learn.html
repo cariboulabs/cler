@@ -9,6 +9,12 @@
     <link rel="stylesheet" href="styles/main.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css">
+    <style>
+        /* Fix for scroll position when clicking navigation links */
+        section[id] {
+            scroll-margin-top: 80px; /* Adjust based on your nav height */
+        }
+    </style>
 </head>
 <body>
     <nav class="nav">
@@ -39,7 +45,7 @@
                         <li><a href="#core-concepts">Core Concepts</a></li>
                         <li><a href="#execution-models">Execution Models</a></li>
                         <li><a href="#control-system">Control System Example</a></li>
-                        <li><a href="#performance-example">Performance Example</a></li>
+                        <li><a href="#performance-example">Performance Considerations</a></li>
                         <li><a href="#buffer-patterns">Buffer Access Patterns</a></li>
                         <li><a href="#architecture">Architecture Deep Dive</a></li>
                     </ul>
@@ -52,25 +58,11 @@
 
                 <section id="understanding">
                     <h2>Understanding CLER</h2>
-                    <p><strong>Why show real examples?</strong> Learning DSP frameworks is best done by seeing working code in action. The examples below come directly from our desktop_examples directory — they're not toy code, but real applications demonstrating CLER's core capabilities.</p>
+                    <p><strong>Real Examples, Real Code</strong></p>
+                    <p>Learning DSP frameworks is best done by seeing working code in action. The examples below come directly from our desktop_examples directory — they're not toy code, but real applications demonstrating CLER's core capabilities.</p>
                     
-                    <p><strong>Platform Support:</strong> CLER supports both desktop and embedded platforms. Desktop examples use standard threads, while embedded frameworks include bare-metal, Zephyr, FreeRTOS, and ThreadX implementations.</p>
-                    
-                    <h3>Key Design Principles</h3>
-                    <div class="principle-grid">
-                        <div class="principle">
-                            <h4>📦 Blocks = Structs + Method</h4>
-                            <p>Define a struct inheriting from BlockBase, implement procedure(), done. Simple and lightweight.</p>
-                        </div>
-                        <div class="principle">
-                            <h4>🔗 Flexible</h4>
-                            <p>Channels work with any type (float, complex, packets), blocks aren't limited by number of inputs/outputs, and supports cyclic graphs for control systems and feedback loops.</p>
-                        </div>
-                        <div class="principle">
-                            <h4>🤖 AI-Friendly Core</h4>
-                            <p>~300 LOC core functionality — perfect context window for AI assistance.</p>
-                        </div>
-                    </div>
+                    <p><strong>Platform Support</strong></p>
+                    <p>CLER supports both desktop and embedded platforms. Desktop examples use standard threads, while embedded frameworks include bare-metal, Zephyr, FreeRTOS, and ThreadX implementations.</p>
                 </section>
 
                 <section id="core-concepts">
@@ -101,7 +93,7 @@
     }
 };</code></pre>
                     </div>
-                    <p><strong>Why this design?</strong> Minimal virtual functions (only for interface), very little runtime type erasure, minimal hidden costs. What you write is mostly what gets compiled.</p>
+                    <p><strong>Design Rationale:</strong> Minimal virtual functions (only for interface), very little runtime type erasure, minimal hidden costs. What you write is mostly what gets compiled.</p>
 
                     <h3>Multiple Input/Output Blocks</h3>
                     <p>Blocks can have any number of inputs and outputs. Here's an adder that takes 2 inputs:</p>
@@ -128,7 +120,7 @@
     }
 };</code></pre>
                     </div>
-                    <p><strong>Key insight:</strong> Input channels are owned by the block, output channels are passed as parameters. This prevents one-to-many connection issues.</p>
+                    <p><strong>Key Design:</strong> Input channels are owned by the block, output channels are passed as parameters. This prevents one-to-many connection issues.</p>
 
                     <h3>Type-Agnostic Channels</h3>
                     <p>Channels work with any type — not just numbers:</p>
@@ -159,14 +151,14 @@ struct PacketProcessor : public cler::BlockBase {
     }
 };</code></pre>
                     </div>
-                    <p><strong>Why this matters:</strong> You're not limited to primitive types. Pass complex data structures, protocol packets, or custom objects between blocks.</p>
+                    <p><strong>Flexibility:</strong> You're not limited to primitive types. Pass complex data structures, protocol packets, or custom objects between blocks.</p>
                 </section>
 
                 <section id="execution-models">
                     <h2>Two Execution Models</h2>
-                    <p><strong>Why two models?</strong> Different applications need different trade-offs. Flowgraph mode is convenient and handles threading for you. Streamlined mode gives you maximum control for embedded systems or when you need every microsecond.</p>
+                    <p>Different applications need different trade-offs. Flowgraph mode is convenient and handles threading for you. Streamlined mode gives you maximum control for embedded systems or when you need every microsecond.</p>
                     
-                    <h3>Flowgraph Mode:</h3>
+                    <h3>Flowgraph Mode</h3>
                     <p>Each block runs in its own thread, framework manages everything:</p>
                     <div class="code-block">
                         <button class="copy-button" onclick="copyCode(this)">Copy</button>
@@ -188,9 +180,9 @@ auto flowgraph = cler::make_freertos_flowgraph(
 
 flowgraph.run();</code></pre>
                     </div>
-                    <p><strong>BlockRunner syntax:</strong> First argument is the block, remaining arguments are its outputs (passed to procedure() as parameters). Same syntax works across all platforms.</p>
+                    <p><strong>BlockRunner Syntax:</strong> First argument is the block, remaining arguments are its outputs (passed to procedure() as parameters). Same syntax works across all platforms.</p>
 
-                    <h3>Streamlined Mode:</h3>
+                    <h3>Streamlined Mode</h3>
                     <p>You control the loop, manual scheduling (from streamlined.cpp):</p>
                     <div class="code-block">
                         <button class="copy-button" onclick="copyCode(this)">Copy</button>
@@ -201,13 +193,14 @@ flowgraph.run();</code></pre>
     sink.procedure();
 }</code></pre>
                     </div>
-                    <p><strong>When to choose streamlined?</strong> When blocks are simple, you avoid thread overhead. Perfect for embedded systems or when you need deterministic timing.</p>
+                    <p><strong>Use Cases:</strong> When blocks are simple, you avoid thread overhead. Perfect for embedded systems or when you need deterministic timing.</p>
                 </section>
 
                 <section id="control-system">
-                    <h2>Cyclic Graphs - Control System (mass_spring_damper.cpp)</h2>
-                    <p><strong>Why this example?</strong> This demonstrates CLER's support for cyclic graphs — the controller's output feeds the plant, and the plant's output feeds back to the controller, creating a closed feedback loop. This isn't just signal processing — it's a complete interactive simulation with real-time GUI controls.</p>
+                    <h2>Cyclic Graphs - Control System Example</h2>
+                    <p>This demonstrates CLER's support for cyclic graphs — the controller's output feeds the plant, and the plant's output feeds back to the controller, creating a closed feedback loop. This isn't just signal processing — it's a complete interactive simulation with real-time GUI controls.</p>
                     
+                    <h3>The Plant Block</h3>
                     <div class="code-block">
                         <button class="copy-button" onclick="copyCode(this)">Copy</button>
                         <pre><code class="language-cpp line-numbers">struct PlantBlock : public cler::BlockBase {
@@ -236,7 +229,7 @@ private:
     float _x = 0.0, _v = 0.0;  // Position and velocity state
 };</code></pre>
                     </div>
-                    <p><strong>Key insight:</strong> The plant block maintains internal state and connects to the controller in a feedback loop. The <code>force_in.push(0.0f)</code> is crucial — cyclic graphs need initial conditions or they'll deadlock on startup.</p>
+                    <p><strong>Critical Detail:</strong> The plant block maintains internal state and connects to the controller in a feedback loop. The <code>force_in.push(0.0f)</code> is crucial — cyclic graphs need initial conditions or they'll deadlock on startup.</p>
                     
                     <h3>Interactive PID Controller with Thread-Safe GUI</h3>
                     <div class="code-block">
@@ -279,9 +272,9 @@ private:
     float _error_prev = 0.0, _integral = 0.0;
 };</code></pre>
                     </div>
-                    <p><strong>Why atomic variables?</strong> The GUI thread modifies PID parameters while the control loop runs at 100Hz. Atomic variables ensure thread-safe updates without locks, maintaining real-time performance. The controller remains responsive even while parameters change.</p>
+                    <p><strong>Thread Safety:</strong> The GUI thread modifies PID parameters while the control loop runs at 100Hz. Atomic variables ensure thread-safe updates without locks, maintaining real-time performance. The controller remains responsive even while parameters change.</p>
                     
-                    <h4>The Cyclic Flowgraph</h4>
+                    <h3>The Cyclic Flowgraph</h3>
                     <div class="code-block">
                         <button class="copy-button" onclick="copyCode(this)">Copy</button>
                         <pre><code class="language-cpp line-numbers">auto flowgraph = cler::make_desktop_flowgraph(
@@ -291,72 +284,101 @@ private:
     cler::BlockRunner(&fanout, &plot.in[0], &controller.measured_position_in)  // Plant → Controller (feedback)
 );</code></pre>
                     </div>
-                    <p><strong>BlockRunner syntax:</strong> First argument is the block to run, remaining arguments are the outputs (channels passed to the block's procedure() method).</p>
-                    <p><strong>Cyclic magic:</strong> Notice how the data flows Controller → Plant → Fanout → back to Controller, creating a complete feedback loop. The initial force value in the plant prevents deadlock at startup.</p>
+                    <p><strong>BlockRunner Syntax:</strong> First argument is the block to run, remaining arguments are the outputs (channels passed to the block's procedure() method).</p>
+                    <p><strong>Feedback Loop:</strong> Notice how the data flows Controller → Plant → Fanout → back to Controller, creating a complete feedback loop. The initial force value in the plant prevents deadlock at startup.</p>
                 </section>
 
                 <section id="performance-example">
-                    <h2>High-Performance Processing (streamlined.cpp)</h2>
-                    <p><strong>Why show performance?</strong> CLER's zero-overhead design shines in high-throughput scenarios. This example processes millions of samples per second using different buffer strategies.</p>
+                    <h2>Performance Considerations</h2>
+                    <p>Choosing between flowgraph and streamlined modes depends on the computational weight of your blocks versus the overhead of orchestration.</p>
                     
-                    <h3>Batch Processing for Maximum Performance</h3>
+                    <h3>When Streamlined Mode Wins</h3>
+                    <p>If your blocks do minimal work per sample, the thread synchronization overhead in flowgraph mode can dominate. Consider this anti-pattern:</p>
                     <div class="code-block">
                         <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">struct SourceBlock : public cler::BlockBase {
-    float _ones[CHANNEL_SIZE];    // Pre-filled arrays
-    double _twos[CHANNEL_SIZE];
-    
-    SourceBlock(const char* name) : BlockBase(name) {
-        // Pre-fill arrays for maximum performance
-        for (size_t i = 0; i < CHANNEL_SIZE; ++i) {
-            _ones[i] = 1.0f;
-            _twos[i] = 2.0;
-        }
-    }
-    
-    cler::Result&lt;cler::Empty, cler::Error&gt; procedure(
-        cler::Channel&lt;float&gt;* out0,
-        cler::Channel&lt;double&gt;* out1) {
-        
-        // Batch write - orders of magnitude faster than individual pushes
-        out0->writeN(_ones, out0->space());
-        out1->writeN(_twos, out1->space());
-        return cler::Empty{};
-    }
-};</code></pre>
-                    </div>
-                    <p><strong>Performance insight:</strong> <code>writeN()</code> is vastly faster than individual <code>push()</code> calls. In this streamlined example, the system processes millions of samples per second with minimal CPU usage.</p>
-                    
-                    <h3>Stack vs Heap Channels</h3>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">struct GainBlock : public cler::BlockBase {
-    // Stack-allocated channel - no heap allocation!
-    cler::Channel&lt;float, CHANNEL_SIZE&gt; in;  
+                        <pre><code class="language-cpp line-numbers">// Anti-pattern: Simple gain block in flowgraph mode
+struct GainBlock : public cler::BlockBase {
     float gain;
     
-    GainBlock(const char* name, float gain_value) 
-        : BlockBase(name), gain(gain_value) {}
-    
     cler::Result&lt;cler::Empty, cler::Error&gt; procedure(
+        cler::ChannelBase&lt;float&gt;* in,
         cler::ChannelBase&lt;float&gt;* out) {
         
-        size_t transferable = std::min(in.size(), out->space());
-        for (size_t i = 0; i < transferable; ++i) {
-            float value;
-            in.pop(value);
+        // Just multiplying by a constant - very little work!
+        float value;
+        while (in->pop(value)) {
             out->push(value * gain);
         }
         return cler::Empty{};
     }
 };</code></pre>
                     </div>
-                    <p><strong>Why stack allocation?</strong> For embedded systems or performance-critical applications, stack-allocated channels eliminate heap overhead and improve cache locality.</p>
+                    <p><strong>The Problem:</strong> Each sample requires thread synchronization (pushing/popping from channels). The overhead of synchronization far exceeds the actual computation (one multiplication).</p>
+                    
+                    <h3>Better Approaches</h3>
+                    <p><strong>Option 1: Combine lightweight operations into heavier blocks</strong></p>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">// Better: Combine multiple operations
+struct ProcessingBlock : public cler::BlockBase {
+    float gain;
+    float offset;
+    
+    cler::Result&lt;cler::Empty, cler::Error&gt; procedure(
+        cler::ChannelBase&lt;float&gt;* in,
+        cler::ChannelBase&lt;float&gt;* out) {
+        
+        float buffer[256];
+        size_t count = in->readN(buffer, 256);
+        
+        // Process in batches - amortizes synchronization cost
+        for (size_t i = 0; i < count; ++i) {
+            buffer[i] = buffer[i] * gain + offset;
+            // Could add filtering, decimation, etc. here
+        }
+        
+        out->writeN(buffer, count);
+        return cler::Empty{};
+    }
+};</code></pre>
+                    </div>
+                    
+                    <p><strong>Option 2: Use streamlined mode for simple chains</strong></p>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">// Streamlined mode - no thread overhead
+while (running) {
+    source.procedure(&amp;channel1);
+    gain.procedure(&amp;channel1, &amp;channel2);
+    offset.procedure(&amp;channel2, &amp;channel3);
+    sink.procedure(&amp;channel3);
+}</code></pre>
+                    </div>
+                    
+                    <h3>Stack-Allocated Channels</h3>
+                    <p>For embedded systems or when you know the exact buffer size needed:</p>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">struct FilterBlock : public cler::BlockBase {
+    // Stack-allocated channel - no heap allocation!
+    cler::Channel&lt;float, 1024&gt; in;  // Template parameter sets size
+    
+    FilterBlock(const char* name) : BlockBase(name) {}
+    
+    cler::Result&lt;cler::Empty, cler::Error&gt; procedure(
+        cler::ChannelBase&lt;float&gt;* out) {
+        
+        // Process data...
+        return cler::Empty{};
+    }
+};</code></pre>
+                    </div>
+                    <p><strong>Benefits:</strong> No dynamic allocation, better cache locality, deterministic memory usage — critical for real-time embedded systems.</p>
                 </section>
 
                 <section id="buffer-patterns">
                     <h2>Three Buffer Access Patterns</h2>
-                    <p><strong>Why three patterns?</strong> Different algorithms need different memory access patterns. CLER supports them all efficiently, from simple single-sample processing to zero-copy bulk operations.</p>
+                    <p>Different algorithms need different memory access patterns. CLER supports them all efficiently, from simple single-sample processing to zero-copy bulk operations.</p>
                     
                     <div class="pattern-comparison">
                         <div class="pattern">
@@ -404,7 +426,7 @@ in->commit_read(processed_count);</code></pre>
 
                 <section id="architecture">
                     <h2>Architecture Deep Dive</h2>
-                    <p><strong>Why templates everywhere?</strong> CLER uses C++17 templates to eliminate all runtime overhead while maintaining type safety and flexibility.</p>
+                    <p>CLER uses C++17 templates to eliminate all runtime overhead while maintaining type safety and flexibility.</p>
                     
                     <h3>Compile-Time Magic</h3>
                     <div class="code-block">
@@ -420,7 +442,7 @@ struct BlockRunner {
         : block(blk), outputs(static_cast&lt;Channels*&gt;(outs)...) {}
 };</code></pre>
                     </div>
-                    <p><strong>The magic:</strong> Channel types are deduced at compile time. Minimal runtime type checking, very few virtual function calls, minimal dynamic allocations. The flowgraph code compiles close to what you'd write by hand — often with template optimizations.</p>
+                    <p><strong>Zero Overhead:</strong> Channel types are deduced at compile time. Minimal runtime type checking, very few virtual function calls, minimal dynamic allocations. The flowgraph code compiles close to what you'd write by hand — often with template optimizations.</p>
                     
                     <h3>AI-Friendly Core (~300 LOC)</h3>
                     <p>CLER's core is intentionally small and focused:</p>
@@ -441,7 +463,7 @@ struct BlockRunner {
                         <li><strong>Multiple access patterns:</strong> From simple push/pop to zero-copy peek/commit</li>
                     </ul>
                     
-                    <h3>Why This Architecture Matters</h3>
+                    <h3>Embedded-First Design</h3>
                     <p>CLER's design choices address real embedded constraints:</p>
                     <ul>
                         <li><strong>No MMU required:</strong> Unlike GNU Radio's double-mapped buffers</li>
