@@ -15,7 +15,9 @@ add_compile_options(-Wall -Wextra #mainly disable warnings for liquid. but need 
       -Wno-deprecated-declarations
       -Wno-sign-compare
       -Wno-implicit-fallthrough
+      -UNDEBUG
       )
+message(STATUS "Asserts are ENABLED even in Release builds")
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)

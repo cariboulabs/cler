@@ -42,6 +42,9 @@ cler::Result<cler::Empty, cler::Error> SourceUDPSocketBlock::procedure(cler::Cha
 
             switch (err) {
                 case EAGAIN:
+#if EAGAIN != EWOULDBLOCK
+                case EWOULDBLOCK:
+#endif
                 case EINTR:
                     // Harmless transient error: try again later
                     slice.release();

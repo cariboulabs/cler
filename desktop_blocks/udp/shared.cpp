@@ -34,7 +34,7 @@ cler::Result<BlobSlice, cler::Error> Slab::take_slot() {
 }
 
 void Slab::release_slot(size_t slot_idx) {
-    _free_slots.push(slot_idx);
+    assert(_free_slots.try_push(slot_idx));
 }
 
 GenericDatagramSocket::GenericDatagramSocket(SocketType type,
