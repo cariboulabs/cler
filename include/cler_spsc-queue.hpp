@@ -33,6 +33,8 @@ static constexpr std::size_t cacheLineSize = std::hardware_destructive_interfere
 #elif defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
 // Intel x86/x64: 64 bytes
 static constexpr std::size_t cacheLineSize = 64;
+#elif defined(__riscv) || defined(__riscv__)
+static constexpr std::size_t cacheLineSize = 64; //most are 64
 #elif defined(__ARM_ARCH_7M__) || defined(__ARM_ARCH_6M__) || defined(__ARM_ARCH_7EM__)
 // ARM Cortex-M (STM32, TI Tiva): 32 bytes
 static constexpr std::size_t cacheLineSize = 32;
