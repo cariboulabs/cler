@@ -1,5 +1,5 @@
 #include "cler.hpp"
-#include "task_policies/cler_desktop_tpolicy.hpp"
+#include "cler_desktop_utils.hpp"
 #include "desktop_blocks/sources/source_hackrf.hpp"
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
 #include "desktop_blocks/plots/plot_cspectrogram.hpp"

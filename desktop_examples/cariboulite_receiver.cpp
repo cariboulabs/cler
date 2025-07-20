@@ -1,18 +1,17 @@
 #include "cler.hpp"
-#include "task_policies/cler_desktop_tpolicy.hpp"
 #include "cler_desktop_utils.hpp"
 #include "desktop_blocks/sources/source_cariboulite.hpp"
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
 #include "gui_manager.hpp"
 
 int main() {
-    const size_t samp_rate = 4'000'000; // 4 MHz
-    const float freq_hz = 915e6; // 915 MHz
+    const size_t sps = 2'000'000;
+    const float freq_hz = 902e6;
 
     SourceCaribouliteBlock source_cariboulite(
         "SourceCaribouLite",
         CaribouLiteRadio::RadioType::S1G,
-        static_cast<float>(samp_rate),
+        static_cast<float>(sps),
         freq_hz,
         true
     );
@@ -20,7 +19,7 @@ int main() {
     PlotCSpectrumBlock plot(
         "Spectrum Plot",
         {"caribou_signal"},
-        samp_rate,
+        sps,
         256);
 
     auto flowgraph = cler::make_desktop_flowgraph(
