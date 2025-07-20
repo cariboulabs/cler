@@ -37,7 +37,6 @@ namespace cler {
         }
     }
 
-    // Virtual interface for type erasure (procedure signatures)
     template <typename T>
     struct ChannelBase {
         virtual ~ChannelBase() = default;
@@ -55,61 +54,8 @@ namespace cler {
         virtual void commit_read(size_t count) = 0;
     };
 
-    // CRTP base for high-performance direct channel operations
-    template<typename Derived, typename T>
-    struct ChannelCRTP {
-        // Direct calls - zero overhead via CRTP
-        size_t size() const { 
-            return static_cast<const Derived*>(this)->size_impl(); 
-        }
-        
-        size_t space() const { 
-            return static_cast<const Derived*>(this)->space_impl(); 
-        }
-        
-        void push(const T& v) { 
-            static_cast<Derived*>(this)->push_impl(v); 
-        }
-        
-        void pop(T& v) { 
-            static_cast<Derived*>(this)->pop_impl(v); 
-        }
-        
-        bool try_push(const T& v) { 
-            return static_cast<Derived*>(this)->try_push_impl(v); 
-        }
-        
-        bool try_pop(T& v) { 
-            return static_cast<Derived*>(this)->try_pop_impl(v); 
-        }
-        
-        size_t writeN(const T* data, size_t n) { 
-            return static_cast<Derived*>(this)->writeN_impl(data, n); 
-        }
-        
-        size_t readN(T* data, size_t n) { 
-            return static_cast<Derived*>(this)->readN_impl(data, n); 
-        }
-        
-        size_t peek_write(T*& ptr1, size_t& size1, T*& ptr2, size_t& size2) { 
-            return static_cast<Derived*>(this)->peek_write_impl(ptr1, size1, ptr2, size2); 
-        }
-        
-        void commit_write(size_t count) { 
-            static_cast<Derived*>(this)->commit_write_impl(count); 
-        }
-        
-        size_t peek_read(const T*& ptr1, size_t& size1, const T*& ptr2, size_t& size2) { 
-            return static_cast<Derived*>(this)->peek_read_impl(ptr1, size1, ptr2, size2); 
-        }
-        
-        void commit_read(size_t count) { 
-            static_cast<Derived*>(this)->commit_read_impl(count); 
-        }
-    };
-
     template <typename T, size_t N = 0>
-    struct Channel : public ChannelBase<T>, public ChannelCRTP<Channel<T, N>, T> {
+    struct Channel : public ChannelBase<T> {
         dro::SPSCQueue<T, N> _queue;
         Channel() = default;
 
@@ -118,41 +64,22 @@ namespace cler {
             if (size == 0) throw std::invalid_argument("Channel size must be greater than zero.");
         }
 
-        // Virtual interface implementation (for ChannelBase<T>)
-        size_t size() const override { return size_impl(); }
-        size_t space() const override { return space_impl(); }
-        void push(const T& v) override { push_impl(v); }
-        void pop(T& v) override { pop_impl(v); }
-        bool try_push(const T& v) override { return try_push_impl(v); }
-        bool try_pop(T& v) override { return try_pop_impl(v); }
-        size_t writeN(const T* data, size_t n) override { return writeN_impl(data, n); }
-        size_t readN(T* data, size_t n) override { return readN_impl(data, n); }
+        size_t size() const override { return _queue.size(); }
+        size_t space() const override { return _queue.space(); }
+        void push(const T& v) override { _queue.push(v); }
+        void pop(T& v) override { _queue.pop(v); }
+        bool try_push(const T& v) override { return _queue.try_push(v); }
+        bool try_pop(T& v) override { return _queue.try_pop(v); }
+        size_t writeN(const T* data, size_t n) override { return _queue.writeN(data, n); }
+        size_t readN(T* data, size_t n) override { return _queue.readN(data, n); }
         size_t peek_write(T*& ptr1, size_t& size1, T*& ptr2, size_t& size2) override {
-            return peek_write_impl(ptr1, size1, ptr2, size2);
-        }
-        void commit_write(size_t count) override { commit_write_impl(count); }
-        size_t peek_read(const T*& ptr1, size_t& size1, const T*& ptr2, size_t& size2) override {
-            return peek_read_impl(ptr1, size1, ptr2, size2);
-        }
-        void commit_read(size_t count) override { commit_read_impl(count); }
-
-        // Implementation methods (for CRTP)
-        size_t size_impl() const { return _queue.size(); }
-        size_t space_impl() const { return _queue.space(); }
-        void push_impl(const T& v) { _queue.push(v); }
-        void pop_impl(T& v) { _queue.pop(v); }
-        bool try_push_impl(const T& v) { return _queue.try_push(v); }
-        bool try_pop_impl(T& v) { return _queue.try_pop(v); }
-        size_t writeN_impl(const T* data, size_t n) { return _queue.writeN(data, n); }
-        size_t readN_impl(T* data, size_t n) { return _queue.readN(data, n); }
-        size_t peek_write_impl(T*& ptr1, size_t& size1, T*& ptr2, size_t& size2) {
             return _queue.peek_write(ptr1, size1, ptr2, size2);
         }
-        void commit_write_impl(size_t count) { _queue.commit_write(count); }
-        size_t peek_read_impl(const T*& ptr1, size_t& size1, const T*& ptr2, size_t& size2) {
+        void commit_write(size_t count) override { _queue.commit_write(count); }
+        size_t peek_read(const T*& ptr1, size_t& size1, const T*& ptr2, size_t& size2) override {
             return _queue.peek_read(ptr1, size1, ptr2, size2);
         }
-        void commit_read_impl(size_t count) { _queue.commit_read(count); }
+        void commit_read(size_t count) override { _queue.commit_read(count); }
     };
 
     struct BlockBase {
