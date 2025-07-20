@@ -11,9 +11,9 @@ template <typename T>
 struct MultiStageResamplerBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
-    MultiStageResamplerBlock(std::string name, const float ratio, const float attenuation,
+    MultiStageResamplerBlock(const char* name, const float ratio, const float attenuation,
         const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(std::move(name)), in(buffer_size), _ratio(ratio)
+        : cler::BlockBase(name), in(buffer_size), _ratio(ratio)
     {
         if constexpr (std::is_same_v<T, float>) {
             _msresamp_r = msresamp_rrrf_create(ratio, attenuation);
