@@ -31,4 +31,5 @@ if (HACKRF_FOUND)
     target_link_libraries(hackrf_receiver PRIVATE cler::cler_desktop_blocks)
 endif()
 
-
+add_executable(selectable_blocks selectable_blocks.cpp)
+target_link_libraries(selectable_blocks PRIVATE cler::cler_desktop_blocks)
