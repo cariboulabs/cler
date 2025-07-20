@@ -52,8 +52,15 @@ target_compile_options(cler INTERFACE
 )
 
 add_subdirectory(logger)
-add_subdirectory(desktop_blocks)
-add_subdirectory(desktop_examples)
-add_subdirectory(performance)
 
-add_subdirectory(embedded_examples)
+option(CLER_BUILD_BLOCKS "Build CLER blocks" ON)
+if (CLER_BUILD_BLOCKS)
+  add_subdirectory(desktop_blocks)
+endif()
+
+option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
+if(CLER_BUILD_EXAMPLES)
+  add_subdirectory(desktop_examples)
+  add_subdirectory(embedded_examples)
+  add_subdirectory(performance)
+endif()
