@@ -73,6 +73,9 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
 
         cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
             size_t transferable = out->space();
+            if (transferable == 0) {
+                return cler::Error::NotEnoughSpace;
+            }
             int ret = _radio->ReadSamples(_tmp, transferable);
             if (ret < 0) {
                 return cler::Error::ProcedureError; 
