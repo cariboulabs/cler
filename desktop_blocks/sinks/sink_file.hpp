@@ -25,14 +25,20 @@ struct SinkFileBlock : public cler::BlockBase {
         if (!_file.is_open()) {
             throw std::runtime_error("Failed to open file for writing: " + std::string(filename));
         }
-        _tmp = new T[cler::DEFAULT_BUFFER_SIZE];
+        _tmp = new T[buffer_size];
+        if (!_tmp) {
+            throw std::runtime_error("Failed to allocate memory for temporary buffer.");
+        }
     }
 
     ~SinkFileBlock() {
         if (_file.is_open()) {
             _file.close();
         }
-        delete[] _tmp;
+
+        if (_tmp) {
+            delete[] _tmp;
+        }
     }
 
     cler::Result<cler::Empty, cler::Error> procedure()
@@ -50,6 +56,7 @@ struct SinkFileBlock : public cler::BlockBase {
 
         in.readN(_tmp, to_write);
         _file.write(reinterpret_cast<char*>(_tmp), to_write * sizeof(T));
+        _file.flush();
 
         if (!_file) {
             return cler::Error::TERM_IOError;
@@ -61,6 +68,6 @@ struct SinkFileBlock : public cler::BlockBase {
 private:
     const char* _filename;
     std::ofstream _file;
-    T* _tmp;
-    size_t _buffer_size = cler::DEFAULT_BUFFER_SIZE;
+    T* _tmp = nullptr;
+    size_t _buffer_size;
 };

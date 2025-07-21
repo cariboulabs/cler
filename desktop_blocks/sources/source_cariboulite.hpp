@@ -27,7 +27,7 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
         bool agc,
         float rx_gain_db = 0.0f,
         size_t buffer_size = cler::DEFAULT_BUFFER_SIZE
-        ) : cler::BlockBase(name) {
+        ) : cler::BlockBase(name), _buffer_size(buffer_size) {
             if (!detect_cariboulite_board()) {
                 throw std::runtime_error("CaribouLite board not detected!");
             }
@@ -72,7 +72,7 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
         }
 
         cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
-            size_t transferable = out->space();
+            size_t transferable = std::min(out->space(), _buffer_size);
             if (transferable == 0) {
                 return cler::Error::NotEnoughSpace;
             }
@@ -84,8 +84,9 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             return cler::Empty{};
         }
 
-        private:
-        CaribouLiteRadio* _radio = nullptr;
-        std::complex<float>* _tmp = nullptr;
+        private:    
+            CaribouLiteRadio* _radio = nullptr;
+            std::complex<float>* _tmp = nullptr;
+            size_t _buffer_size;
 
 };
