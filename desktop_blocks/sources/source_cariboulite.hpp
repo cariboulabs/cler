@@ -54,7 +54,7 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             _radio->SetFrequency(freq_hz);
             _radio->SetRxSampleRate(samp_rate_hz);            
             _radio->SetAgc(agc);
-            if (agc) {_radio->SetRxGain(rx_gain_db);}
+            if (!agc) {_radio->SetRxGain(rx_gain_db);}
 
             _tmp = new std::complex<float>[buffer_size];
             
