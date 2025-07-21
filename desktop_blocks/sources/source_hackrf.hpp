@@ -10,8 +10,8 @@ struct SourceHackRFBlock : public cler::BlockBase {
                       int vga_gain_db = 16,  // 0-62 dB, multiple of 2
                       size_t buffer_size = 2 << 22)
         : cler::BlockBase(name),
-          _iq(buffer_size)
-          
+          _iq(buffer_size),
+          _buffer_size(buffer_size)
     {
         if (hackrf_open(&_dev) != HACKRF_SUCCESS) {
             throw std::runtime_error("Failed to open HackRF device.");
@@ -34,6 +34,9 @@ struct SourceHackRFBlock : public cler::BlockBase {
         }
 
         _tmp = new std::complex<float>[buffer_size];
+        if (!_tmp) {
+            throw std::runtime_error("Failed to allocate memory for temporary buffer.");
+        }
 
         if (hackrf_start_rx(_dev, rx_callback, this) != HACKRF_SUCCESS) {
             throw std::runtime_error("Failed to start RX streaming.");
@@ -59,7 +62,7 @@ struct SourceHackRFBlock : public cler::BlockBase {
         if (out_space == 0) {
             return cler::Error::NotEnoughSpace;
         }
-        size_t transferable = std::min(iq_size, out_space);
+        size_t transferable = std::min(iq_size, out_space, _buffer_size);
 
         size_t n = _iq.readN(_tmp, transferable);
         out->writeN(_tmp, n);
@@ -70,6 +73,7 @@ private:
     hackrf_device* _dev = nullptr;
     cler::Channel<std::complex<float>> _iq;
     std::complex<float>* _tmp = nullptr;
+    size_t _buffer_size;
 
     static int rx_callback(hackrf_transfer* transfer) {
         SourceHackRFBlock* self = static_cast<SourceHackRFBlock*>(transfer->rx_ctx);
