@@ -53,13 +53,15 @@ target_compile_options(cler INTERFACE
 
 add_subdirectory(logger)
 
+option(CLER_HEADLESS "Build CLER without gui" OFF)
+
 option(CLER_BUILD_BLOCKS "Build CLER blocks" ON)
 if (CLER_BUILD_BLOCKS)
   add_subdirectory(desktop_blocks)
 endif()
 
 option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
-if(CLER_BUILD_EXAMPLES)
+if(CLER_BUILD_EXAMPLES AND NOT CLER_HEADLESS)
   add_subdirectory(desktop_examples)
   add_subdirectory(embedded_examples)
   add_subdirectory(performance)
