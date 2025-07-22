@@ -46,4 +46,5 @@ add_custom_target(ezgmsk_copy_assets ALL
 # # Make your executable depend on this custom target
 add_dependencies(main ezgmsk_copy_assets)
 
-add_subdirectory(sandbox)
+#was for developing.. now it just slows compilation down
+# add_subdirectory(sandbox)

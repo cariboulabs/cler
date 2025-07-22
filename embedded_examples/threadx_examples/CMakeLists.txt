@@ -9,7 +9,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/mock_environment)
 add_executable(thx_hello_world
     thx_hello_world.cpp
 )
-target_link_libraries(thx_hello_world cler::cler)
+target_link_libraries(thx_hello_world cler::cler Threads::Threads)
 
 # Optional: Create a test target
 add_custom_target(thx_test_compilation 

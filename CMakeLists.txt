@@ -64,9 +64,9 @@ if (CLER_BUILD_BLOCKS)
   add_subdirectory(desktop_blocks)
 endif()
 
-if(CLER_BUILD_EXAMPLES)
+if(CLER_BUILD_EXAMPLES AND CLER_BUILD_BLOCKS)
   add_subdirectory(desktop_examples)
-  # add_subdirectory(embedded_examples)
+  add_subdirectory(embedded_examples)
 endif()
 
 if(CLER_BUILD_PERFORMANCE_TESTS)
