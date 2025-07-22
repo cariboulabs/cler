@@ -143,80 +143,76 @@ class ClerParser:
         
         return i - 1 if depth == 0 else -1
     
-    def _extract_blocks(self, content: str):
-        """Extract block instances from the code"""
-        # First find all block type definitions (structs inheriting from BlockBase)
-        block_types = set()
-        for match in re.finditer(PATTERNS['block_inheritance'], content):
-            block_types.add(match.group(1))
+    def _find_block_declaration(self, content: str, block_name: str) -> Optional[Block]:
+        """Find the declaration of a block by name"""
+        # Look for patterns like: SomeBlockType<...> block_name(...)
+        # First find the block name followed by parentheses, then work backwards
+        pattern = rf'\b{re.escape(block_name)}\s*\('
         
-        # Add common known block types
-        known_block_types = {
-            'SourceCWBlock', 'SourceFileBlock', 'SourceHackRFBlock', 'SourceCaribouliteBlock',
-            'SourceChirpBlock', 'SourceUDPSocketBlock',
-            'SinkFileBlock', 'SinkNullBlock', 'SinkUDPSocketBlock',
-            'AddBlock', 'GainBlock', 'ComplexToMagPhaseBlock',
-            'ThrottleBlock', 'FanoutBlock', 'ThroughputBlock',
-            'NoiseAWGNBlock', 'PolyphaseChannelizerBlock', 'MultistageResamplerBlock',
-            'PlotTimeSeriesBlock', 'PlotCSpectrumBlock', 'PlotCSpectrogramBlock',
-            'EZGmskDemodBlock'
-        }
-        block_types.update(known_block_types)
-        
-        # Now look for instances of any of these block types
-        for block_type in block_types:
-            # Find all occurrences of this block type
-            pattern = fr'\b({block_type})\s*'
+        for match in re.finditer(pattern, content):
+            # Work backwards to find the type and template parameters
+            start_pos = match.start()
             
-            for match in re.finditer(pattern, content):
-                start_pos = match.end()
+            # Find start of this line to get the full declaration
+            line_start = content.rfind('\n', 0, start_pos) + 1
+            line_content = content[line_start:match.end()]
+            
+            # Parse the line: TypeName<template> varname(
+            type_pattern = r'(\w+)\s*(?:<([^>]*(?:<[^>]*>[^>]*)*?)>)?\s+' + re.escape(block_name) + r'\s*\('
+            type_match = re.search(type_pattern, line_content)
+            
+            if type_match:
+                block_type = type_match.group(1)
+                template_params = type_match.group(2)
                 
-                # Try to parse template parameters
-                template_params = None
-                if start_pos < len(content) and content[start_pos] == '<':
-                    template_end = self._find_matching_bracket(content, start_pos, '<', '>')
-                    if template_end > start_pos:
-                        template_params = content[start_pos+1:template_end]
-                        start_pos = template_end + 1
-                
-                # Skip whitespace
-                while start_pos < len(content) and content[start_pos].isspace():
-                    start_pos += 1
-                
-                # Find variable name
-                var_match = re.match(r'(\w+)', content[start_pos:])
-                if not var_match:
-                    continue
-                
-                var_name = var_match.group(1)
-                var_end = start_pos + var_match.end()
-                
-                # Look for constructor parentheses
-                while var_end < len(content) and content[var_end].isspace():
-                    var_end += 1
-                
-                if var_end >= len(content) or content[var_end] != '(':
-                    continue
-                
-                # Parse constructor arguments
-                constructor_end = self._find_matching_bracket(content, var_end, '(', ')')
+                # Find constructor arguments
+                constructor_start = match.end() - 1
+                constructor_end = self._find_matching_bracket(content, constructor_start, '(', ')')
                 constructor_args = []
-                if constructor_end > var_end:
-                    args_str = content[var_end+1:constructor_end].strip()
+                if constructor_end > constructor_start:
+                    args_str = content[constructor_start+1:constructor_end].strip()
                     if args_str:
                         constructor_args = self._parse_constructor_args(args_str)
                 
-                # Create the block if not already exists
-                if var_name not in self.blocks:
-                    line, col = self._get_line_column(content, match.start())
-                    self.blocks[var_name] = Block(
-                        name=var_name,
-                        type=block_type,
-                        line=line,
-                        column=col,
-                        template_params=template_params.strip() if template_params else None,
-                        constructor_args=constructor_args
-                    )
+                line, col = self._get_line_column(content, line_start)
+                return Block(
+                    name=block_name,
+                    type=block_type,
+                    line=line,
+                    column=col,
+                    template_params=template_params.strip() if template_params else None,
+                    constructor_args=constructor_args
+                )
+        
+        return None
+    
+    def _extract_blocks(self, content: str):
+        """Extract block instances from declarations and BlockRunner usage"""
+        # First, find all block declarations using the general pattern
+        pattern = PATTERNS['block_instance_detailed']
+        
+        for match in re.finditer(pattern, content):
+            block_type = match.group(1)
+            template_params = match.group(2)
+            var_name = match.group(3)
+            constructor_args_str = match.group(4)
+            
+            # Parse constructor arguments
+            constructor_args = []
+            if constructor_args_str and constructor_args_str.strip():
+                constructor_args = self._parse_constructor_args(constructor_args_str)
+            
+            # Create the block if not already exists
+            if var_name not in self.blocks:
+                line, col = self._get_line_column(content, match.start())
+                self.blocks[var_name] = Block(
+                    name=var_name,
+                    type=block_type,
+                    line=line,
+                    column=col,
+                    template_params=template_params.strip() if template_params else None,
+                    constructor_args=constructor_args
+                )
     
     def _extract_flowgraph(self, content: str):
         """Extract flowgraph definition and connections"""
@@ -355,26 +351,17 @@ class ClerParser:
                         block.inputs.append(channel_name)
     
     def _infer_from_connections(self):
-        """Infer channel directions from BlockRunner connections"""
-        # For each connection, mark target as input, source as output
-        # Only if channels were found in struct definitions or if we found no struct
+        """Simply record what channels are used in connections"""
+        # Just add channels as they appear in connections
+        # Validation rules can determine if they're correct or not
         for conn in self.connections:
             source_block = self.blocks.get(conn.source_block)
             target_block = self.blocks.get(conn.target_block)
             
-            # Add outputs - for most blocks we won't find the struct definition,
-            # so we need to infer from usage. Sources typically output to 'out'
+            # Add output channels as used
             if source_block and conn.source_channel not in source_block.outputs:
                 source_block.outputs.append(conn.source_channel)
             
-            # Add inputs - but only if we found them in struct definition OR
-            # if we found no struct definition at all (external blocks)
+            # Add input channels as used  
             if target_block and conn.target_channel not in target_block.inputs:
-                # If we found channel definitions for this block, only add if channel exists
-                if target_block.channel_types:
-                    if conn.target_channel in target_block.channel_types:
-                        target_block.inputs.append(conn.target_channel)
-                    # Don't add if channel not found in struct - let validation catch it
-                else:
-                    # No struct found, assume it's an external block - add the channel
-                    target_block.inputs.append(conn.target_channel)
+                target_block.inputs.append(conn.target_channel)

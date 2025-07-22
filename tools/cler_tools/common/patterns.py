@@ -7,7 +7,7 @@ PATTERNS = {
     # Block detection patterns
     'block_inheritance': r'struct\s+(\w+)\s*:\s*public\s+cler::BlockBase',
     'block_instance': r'(\w+(?:Block|block))\s*(?:<.*?>)?\s+(\w+)\s*\(',
-    'block_instance_detailed': r'(\w+(?:Block|block))\s*(?:<([^>]+)>)?\s+(\w+)\s*\(([^)]*)\)',
+    'block_instance_detailed': r'(\w+(?:Block|block))\s*(?:<([^>]*(?:<[^>]*>[^>]*)*?)>)?\s+(\w+)\s*\(([^)]*)\)',
     'block_instance_any': r'(\w+)\s+(\w+)\s*\([^)]*\);\s*$',
     'channel_member': r'cler::Channel<([^>]*(?:<[^>]*>[^>]*)*)>\s+(\w+);',
     
