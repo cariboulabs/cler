@@ -38,9 +38,9 @@ struct SinkFileBlock : public cler::BlockBase {
             return cler::Error::TERM_IOError;
         }
 
-        T* ptr1, *ptr2;
+        const T* ptr1, *ptr2;
         size_t sz1, sz2;
-        size_t available_samples = in.peek_write(ptr1, sz1, ptr2, sz2);
+        size_t available_samples = in.peek_read(ptr1, sz1, ptr2, sz2);
 
         if (available_samples == 0) {
             _file.flush();
@@ -48,10 +48,10 @@ struct SinkFileBlock : public cler::BlockBase {
         }
 
         if (sz1 > 0 && ptr1) {
-            _file.write(reinterpret_cast<char*>(ptr1), sz1 * sizeof(T));
+            _file.write(reinterpret_cast<const char*>(ptr1), sz1 * sizeof(T));
         }
         if (sz2 > 0 && ptr2) {
-            _file.write(reinterpret_cast<char*>(ptr2), sz2 * sizeof(T));
+            _file.write(reinterpret_cast<const char*>(ptr2), sz2 * sizeof(T));
         }
 
         if (!_file) {
