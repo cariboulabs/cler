@@ -10,7 +10,6 @@ printf "  %-40s %-40s %s\n" "-DCMAKE_BUILD_TYPE=Debug|Release" "Build type confi
 echo ""
 
 echo "CLER Options:"
-printf "  %-40s %-40s %s\n" "-DCLER_HEADLESS=ON|OFF"               "Build without GUI or examples" "Default: OFF"
 printf "  %-40s %-40s %s\n" "-DCLER_BUILD_BLOCKS=ON|OFF"           "Enable DSP blocks" "Default: ON"
 printf "  %-40s %-40s %s\n" "-DCLER_BUILD_BLOCKS_GUI=ON|OFF"       "Include GUI-related blocks" "Default: ON"
 printf "  %-40s %-40s %s\n" "-DCLER_BUILD_BLOCKS_LIQUID=ON|OFF"    "Include Liquid-DSP blocks" "Default: ON"
