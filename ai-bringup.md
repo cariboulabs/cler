@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AI Bringup Guide for Cler DSP Framework
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This comprehensive guide provides context and guidance for AI assistants (Claude Code, GitHub Copilot, etc.) when working with the Cler DSP framework codebase.
 
 ## 1. Overview & Architecture
 
@@ -33,7 +33,6 @@ Cler is a C++17 template-based DSP flowgraph framework for SDRs and embedded sys
 **Header-only core framework** - link with `cler::cler`:
 
 - **`cler.hpp`** - Main framework header containing:
-  - `EmbeddableString<MaxLen>` - Fixed-size string for embedded use
   - `Error` enum and `Result<T, Error>` type for error handling
   - `ChannelBase<T>` interface and `Channel<T, N>` implementation (SPSC queues)
   - `BlockBase` - Base class for all processing blocks
@@ -50,6 +49,8 @@ Cler is a C++17 template-based DSP flowgraph framework for SDRs and embedded sys
 
 - **`cler_embedded_allocators.hpp`** - Memory allocators for embedded systems
 
+- **`cler_embeddable_string.hpp`** - Fixed-size string implementation (`EmbeddableString<MaxLen>`) for embedded use without std::string dependency
+
 ### Task Policies (`/include/task_policies/`)
 **Platform abstraction for threading**:
 
@@ -64,94 +65,26 @@ Cler is a C++17 template-based DSP flowgraph framework for SDRs and embedded sys
 
 **Note**: Block names and organization may evolve as development continues.
 
-- **`sources/`** - Signal generators and input blocks:
-  - `source_cw.hpp` - Continuous wave generator
-  - `source_chirp.hpp` - Chirp signal generator  
-  - `source_file.hpp` - File reader
-  - `source_udp.hpp` - UDP network receiver
-  - `source_hackrf.hpp` - HackRF SDR interface
-  - `source_cariboulite.hpp` - CaribouLite SDR interface
-
-- **`sinks/`** - Output and storage blocks:
-  - `sink_file.hpp` - File writer
-  - `sink_udp.hpp` - UDP network transmitter
-  - `sink_null.hpp` - Discard data (null sink)
-
-- **`math/`** - Mathematical operations:
-  - `add.hpp` - Multi-input adder block
-  - `gain.hpp` - Gain/scaling block
-  - `complex_demux.hpp` - Complex signal demultiplexer
-
-- **`plots/`** - Visualization blocks (ImGui-based):
-  - `plot_timeseries.hpp` - Time-domain plotting
-  - `plot_cspectrum.hpp` - Complex spectrum analyzer
-  - `plot_cspectrogram.hpp` - Spectrogram waterfall
-  - `spectral_windows.hpp` - Window functions for FFT
-
-- **`channelizers/`** - DSP processing:
-  - `polyphase_channelizer.hpp` - Multi-channel channelizer (liquid-dsp)
-
-- **`resamplers/`** - Sample rate conversion:
-  - `multistage_resampler.hpp` - Efficient resampling
-
-- **`noise/`** - Noise generation:
-  - `awgn.hpp` - Additive white Gaussian noise
-
-- **`utils/`** - Utility blocks:
-  - `throttle.hpp` - Rate limiting
-  - `fanout.hpp` - Split signal to multiple outputs
-  - `throughput.hpp` - Performance measurement
-
-- **`gui/`** - GUI management:
-  - `gui_manager.hpp` - ImGui window management
-
-- **`ezgmsk_demod/`** - Specialized demodulator:
-  - `ezgmsk_demod.hpp` - GMSK demodulation block
-
-- **`udp/`** - Network communication:
-  - `sink_udp.hpp`, `source_udp.hpp` - UDP blocks
-  - `shared.hpp` - Common UDP utilities
+- **`sources/`** - Signal generators: CW, chirp, file, UDP, HackRF, CaribouLite
+- **`sinks/`** - Output blocks: file, UDP, null
+- **`math/`** - Math operations: add, gain, complex_demux
+- **`plots/`** - ImGui visualizations: timeseries, spectrum, spectrogram
+- **`channelizers/`** - DSP: polyphase channelizer (liquid-dsp)
+- **`resamplers/`** - Sample rate conversion
+- **`noise/`** - AWGN generator
+- **`utils/`** - throttle, fanout, throughput measurement
+- **`gui/`** - ImGui window management
+- **`ezgmsk_demod/`** - GMSK demodulation
+- **`udp/`** - Network communication blocks
 
 ### Examples and Applications
 
-- **`/desktop_examples/`** - Complete applications demonstrating usage:
-  - `hello_world.cpp` - Basic flowgraph with GUI plot
-  - `flowgraph.cpp` - Multi-output threading example
-  - `streamlined.cpp` - Manual control loop example  
-  - `polyphase_channelizer.cpp` - Advanced DSP processing
-  - `mass_spring_damper.cpp` - Physics simulation
-  - `udp.cpp` - Network communication
-  - `cariboulite_receiver.cpp` - SDR receiver application
-  - `hackrf_receiver.cpp` - HackRF SDR application
-
-- **`/embedded_examples/`** - Embedded/RTOS examples:
-  - `baremetal_examples/` - No OS, direct hardware
-  - `freertos_examples/` - FreeRTOS integration
-  - `threadx_examples/` - ThreadX integration  
-  - `zephyr_examples/` - Zephyr RTOS integration
+- **`/desktop_examples/`** - Key examples: hello_world, flowgraph (variadic), streamlined, polyphase_channelizer, SDR apps (HackRF/CaribouLite), UDP networking, GUI plots
+- **`/embedded_examples/`** - Platform examples: baremetal, FreeRTOS, ThreadX, Zephyr
 
 ### Development Tools (`/tools/`)
-**Python-based development utilities**:
-
-- **`cler_tools/linter/`** - Flowgraph validation:
-  - `validate.py` - Main validation engine
-  - `rules.yaml` - Validation rules configuration
-  
-- **`cler_tools/viz/`** - Flowgraph visualization:
-  - `visualize.py` - SVG diagram generation
-  - `graph_builder.py` - Graph construction logic
-  - `svg_renderer.py` - SVG rendering engine
-  - `layout.py` - Layout algorithms
-
-- **`cler_tools/common/`** - Shared utilities:
-  - `cpp_parser.py` - C++ parsing logic
-  - `patterns.py` - Regex patterns for code analysis
-
-- **`integration/`** - Build system integrations:
-  - `pre-commit-hook.sh` - Git pre-commit validation
-  - `cmake-integration.cmake` - CMake integration
-  - `github-action.yml` - CI/CD workflow
-  - `Makefile.example` - Make integration
+- **`cler_tools/`** - Python tools: flowgraph validation (`cler-validate`) and visualization (`cler-viz`)
+- **`integration/`** - Build system hooks: pre-commit, CMake, GitHub Actions
 
 ### Performance and Utilities
 
@@ -161,6 +94,14 @@ Cler is a C++17 template-based DSP flowgraph framework for SDRs and embedded sys
 - **`/logger/`** - Logging utilities:
   - `logger.h/.c` - C logging interface
   - `zf_log/` - Zero-allocation logging library
+
+### Testing Infrastructure
+
+- **`/tests/`** - Unit and integration tests:
+  - `test_channel.cpp` - Channel implementation tests
+  - `test_result.cpp` - Result type tests
+  - `test_embeddable_string.cpp` - String implementation tests
+  - Test runner and CMake integration
 
 ### Documentation
 
@@ -413,6 +354,13 @@ size_t available = in.peek_read(ptr1, size1, ptr2, size2);
 // Process data...
 in.commit_read(processed_count);
 
+// For writing with peek_write (NOTE: variables passed by reference, not pointers)
+float* write_ptr1, *write_ptr2;
+size_t write_size1, write_size2;
+size_t writable = out->peek_write(write_ptr1, write_size1, write_ptr2, write_size2);
+// Write data...
+out->commit_write(written_count);
+
 // 3. Push/Pop (single values - AVOID in hot paths)
 float sample;
 in.pop(sample);
@@ -564,93 +512,57 @@ PlotCSpectrogramBlock spectrogram("Spectrogram", sample_rate, fft_size);
 ```
 
 ### Superblock Pattern (Composition)
-Desktop blocks often use composition to create complex functionality:
+Desktop blocks can compose other blocks internally - chain their `procedure()` calls to create complex functionality.
 
+## 9. Block Implementation Examples
+
+### Basic Block Pattern
 ```cpp
-struct CustomSourceBlock : public cler::BlockBase {
-    CustomSourceBlock(const char* name, float amplitude, float noise_stddev, 
-                     float frequency_hz, size_t sps)
-        : BlockBase(name),
-          cw_source_block("CWSource", amplitude, frequency_hz, sps),
-          noise_block("AWGN", noise_stddev / 100.0f),
-          fanout_block("Fanout", 2)
-    {}
-
-    cler::Result<cler::Empty, cler::Error> procedure(
-        cler::ChannelBase<std::complex<float>>* out1, 
-        cler::ChannelBase<std::complex<float>>* out2) {
-        
-        // Chain internal blocks
-        auto result = cw_source_block.procedure(&noise_block.in);
-        if (result.is_err()) return result.unwrap_err();
-        
-        result = noise_block.procedure(&fanout_block.in);
-        if (result.is_err()) return result.unwrap_err();
-        
-        return fanout_block.procedure(out1, out2);
-    }
+struct MyBlock : public cler::BlockBase {
+    cler::Channel<float> in;  // Input channels owned by block
     
-private:
-    SourceCWBlock<std::complex<float>> cw_source_block;
-    NoiseAWGNBlock<std::complex<float>> noise_block;  
-    FanoutBlock<std::complex<float>> fanout_block;
+    MyBlock(const char* name) : BlockBase(name), in(BUFFER_SIZE) {}
+    
+    // Output channels passed as variadic parameters
+    template<typename... OChannels>
+    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
+        // Check input/output availability
+        if (in.size() < required_samples) return cler::Error::NotEnoughSamples;
+        if (std::min({outs->space()...}) == 0) return cler::Error::NotEnoughSpace;
+        
+        // Process data efficiently
+        size_t transferable = std::min({in.size(), outs->space()...});
+        for (size_t i = 0; i < transferable; ++i) {
+            float sample;
+            in.pop(sample);
+            float processed = process(sample);
+            // Push to all outputs using fold expression
+            ((outs->push(processed)), ...);
+        }
+        
+        return cler::Empty{};
+    }
 };
 ```
 
-### GUI Integration
+### Multiple Output Example (Variadic)
 ```cpp
-#include "desktop_blocks/gui/gui_manager.hpp"
-
-int main() {
-    // Create GUI manager
-    cler::GuiManager gui(800, 600, "Application Title");
-    
-    // Create plot blocks  
-    PlotTimeSeriesBlock plot("Plot", {"Signal"}, sample_rate, 3.0f);
-    plot.set_initial_window(0.0f, 0.0f, 800.0f, 300.0f);
-    
-    // Run flowgraph...
-    
-    // GUI render loop
-    while (!gui.should_close()) {
-        gui.begin_frame();
-        plot.render();  // Plot blocks render themselves
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
-    }
-    
-    return 0;
-}
-```
-
-## 9. Advanced Examples & Patterns
-
-### Multiple Output Example (Polyphase Channelizer)
-```cpp
-struct PolyphaseChannelizerBlock : public cler::BlockBase {
+struct ChannelizerBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
     
     template <typename... OChannels>
     cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
         constexpr size_t num_outs = sizeof...(OChannels);
-        assert(num_outs == _num_channels);
         
-        // Process one frame at a time
-        if (in.size() < _num_channels) return cler::Error::NotEnoughSamples;
+        if (in.size() < num_outs) return cler::Error::NotEnoughSamples;
         
-        size_t n_frames_by_space = std::min({outs->space()...});
-        if (n_frames_by_space == 0) return cler::Error::NotEnoughSpace;
+        // Read frame, process, distribute to outputs
+        in.readN(_tmp_in, num_outs);
+        process_channels(_tmp_in, _tmp_out);
         
-        // Read input frame, process with liquid-dsp, distribute to outputs
-        in.readN(_tmp_in, _num_channels);
-        firpfbch_crcf_analyzer_execute(_pfch, _tmp_in, _tmp_out);
-        
-        // Push outputs using lambda with fold expression
+        // Push outputs using fold expression
         size_t idx = 0;
-        auto push_outputs = [&](auto*... chs) {
-            ((chs->push(_tmp_out[idx++])), ...);
-        };
-        push_outputs(outs...);
+        ((outs->push(_tmp_out[idx++])), ...);
         
         return cler::Empty{};
     }
@@ -666,123 +578,46 @@ int main() {
     // Create blocks
     SourceCWBlock<float> source("Source", 1.0f, 10.0f, 1000);
     AddBlock<float> adder("Adder", 2);
-    ThrottleBlock<float> throttle("Throttle", 1000);
     PlotTimeSeriesBlock plot("Plot", {"Signal"}, 1000, 3.0f);
     
-    // Create flowgraph with variadic outputs
+    // Create flowgraph with connections
     auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&source, &adder.in[0]),           // single output
-        cler::BlockRunner(&source2, &adder.in[1]),          
-        cler::BlockRunner(&adder, &throttle.in),            
-        cler::BlockRunner(&throttle, &plot.in[0]),
-        cler::BlockRunner(&channelizer,                     // multiple outputs
-            &plot1.in[0], &plot1.in[1], &plot1.in[2]),     // variadic parameters
-        cler::BlockRunner(&plot)                            // no outputs (sink)
+        cler::BlockRunner(&source, &adder.in[0]),     // single output
+        cler::BlockRunner(&channelizer,               // multiple outputs
+            &plot1.in[0], &plot2.in[0], &plot3.in[0]), // variadic params
+        cler::BlockRunner(&plot)                      // no outputs (sink)
     );
     
-    // Configure and run
-    cler::FlowGraphConfig config;
-    config.adaptive_sleep = true;
-    flowgraph.run(config);
-    
-    // GUI loop...
-    while (!gui.should_close()) {
-        gui.begin_frame();
-        plot.render();
-        gui.end_frame();
-    }
-    
-    flowgraph.stop();
-    return 0;
+    flowgraph.run();
+    // GUI loop, then flowgraph.stop();
 }
 ```
 
-### Streamlined Mode Example
+### Streamlined Mode (Manual Control)
 ```cpp
-#include "cler.hpp"
-// No task policy needed for streamlined mode
-
-int main() {
-    SourceBlock source("Source");
-    AdderBlock adder("Adder");
-    GainBlock gain("Gain", 2.0f);
-    SinkBlock sink("Sink");
-    
-    // Manual control loop
-    while (true) {
-        auto res1 = source.procedure(&adder.in0, &adder.in1);  // multiple outputs
-        auto res2 = adder.procedure(&gain.in);                 // single output
-        auto res3 = gain.procedure(&sink.in);
-        auto res4 = sink.procedure();                          // no outputs
-        
-        // Handle errors if needed...
-    }
+// Manual control without threading
+while (true) {
+    auto res1 = source.procedure(&adder.in0, &adder.in1);  // multiple outputs
+    auto res2 = adder.procedure(&gain.in);                 // single output
+    auto res3 = gain.procedure(&sink.in);
+    auto res4 = sink.procedure();                          // no outputs
 }
 ```
 
-### GUI Integration
-```cpp
-#include "desktop_blocks/gui/gui_manager.hpp"
+## 10. Development Tools
 
-int main() {
-    cler::GuiManager gui(800, 600, "Application Title");
-    
-    PlotTimeSeriesBlock plot("Plot", {"Signal"}, sample_rate, 3.0f);
-    plot.set_initial_window(0.0f, 0.0f, 800.0f, 300.0f);
-    
-    // Run flowgraph...
-    
-    // GUI render loop
-    while (!gui.should_close()) {
-        gui.begin_frame();
-        plot.render();  // Plot blocks render themselves
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
-    }
-    
-    return 0;
-}
-```
-
-## 10. Development Tools & Validation
-
-### Installation & Usage
 ```bash
-# Install Python tools (3.8+ required)
+# Install tools
 cd tools && uv pip install -e .
 
-# Validate flowgraph structure
+# Validate flowgraphs
 cler-validate desktop_examples/*.cpp
-cler-validate --json src/*.cpp
 
-# Generate flowgraph visualizations  
+# Generate visualizations  
 cler-viz file.cpp -o output.svg
-cler-viz *.cpp --output-dir ./diagrams/
-
-# Run test suites
-cd tools/cler_tools/linter/tests && ./run_tests.sh
-cd tools/cler_tools/viz/tests && ./run_tests.sh
 ```
 
-### Validation Rules
-The `cler-validate` tool checks for common flowgraph mistakes:
-- Missing BlockRunner for declared blocks
-- BlockRunner not added to flowgraph
-- Invalid channel connections
-- Unconnected inputs/outputs
-
-### Integration Examples
-```bash
-# Pre-commit hook
-tools/integration/pre-commit-hook.sh
-
-# GitHub Actions workflow  
-cp tools/integration/github-action.yml .github/workflows/
-
-# CMake integration
-include(tools/integration/cmake-integration.cmake)
-add_cler_validation(my_target)
-```
+Tools check for: missing BlockRunners, invalid connections, unconnected channels.
 
 ## 11. Performance & Debugging
 
@@ -808,18 +643,18 @@ cd build/performance && ./cler_throughput
 
 ### Common Performance Patterns
 ```cpp
-// Efficient bulk transfer
+// Efficient bulk transfer with correct peek_write usage
 size_t available = std::min({in.size(), out->space()});
-float* write_ptr;
-size_t write_size;
-out->peek_write(write_ptr, write_size, nullptr, nullptr);
-size_t to_process = std::min(available, write_size);
+float* write_ptr1, *write_ptr2;
+size_t write_size1, write_size2;
+size_t writable = out->peek_write(write_ptr1, write_size1, write_ptr2, write_size2);
+size_t to_process = std::min(available, write_size1);  // Use first segment
 
 // Process directly in output buffer
 for (size_t i = 0; i < to_process; ++i) {
     float sample;
     in.pop(sample);
-    write_ptr[i] = process(sample);
+    write_ptr1[i] = process(sample);
 }
 out->commit_write(to_process);
 ```
@@ -833,37 +668,49 @@ out->commit_write(to_process);
 - **No try/catch for flow control** - use `cler::Result` for recoverable errors
 - **Heavy implementations in `.cpp`** when dealing with single data types
 
-### Framework Internals (for tool developers)
-```cpp
-// EmbeddableString for names (avoids std::string dependency)
-cler::EmbeddableString<64> block_name = "MyBlock";
-cler::EmbeddableString<64> combined = block_name + "_Suffix";
+### Framework Internals
+- **EmbeddableString**: Fixed-size strings without std::string dependency
+- **Result<T,E>**: Error handling without exceptions
+- **Template-based connections**: Type-safe at compile time
 
-// Result type for error handling
-cler::Result<OutputType, cler::Error> result = operation();
-if (result.is_err()) {
-    cler::Error error = result.unwrap_err();
-    // Handle error...
-} else {
-    OutputType value = result.unwrap();
-    // Use value...
+### Additional Implementation Notes
+
+#### Channel Buffer Access (Corrected)
+The `peek_write()` and `peek_read()` methods use a two-segment circular buffer design. Both segments must be handled:
+
+```cpp
+// Correct peek_write usage - variables passed by reference
+T* ptr1, *ptr2;
+size_t size1, size2;
+size_t total = channel.peek_write(ptr1, size1, ptr2, size2);
+// total = size1 + size2 (total writable space)
+
+// Write to first segment
+for (size_t i = 0; i < size1; ++i) {
+    ptr1[i] = data[i];
 }
+
+// Write to second segment if needed
+for (size_t i = 0; i < size2; ++i) {
+    ptr2[i] = data[size1 + i];
+}
+
+channel.commit_write(size1 + size2);
 ```
 
-### Code Generation Patterns (for cler-flow and similar tools)
+#### Error Codes Reference
 ```cpp
-// Generate block declarations
-${BlockType}<${DataType}> ${instanceName}("${displayName}", ${parameters...});
-
-// Generate variadic connections  
-cler::BlockRunner(&${sourceBlock}, 
-    &${destBlock1}.in[${channel1}],
-    &${destBlock2}.in[${channel2}],
-    // ... more outputs
-),
-
-// Generate policy include based on target
-#include "task_policies/cler_${platform}_tpolicy.hpp"
+enum class Error : int {
+    Success = 0,
+    NotEnoughSamples = 1,
+    NotEnoughSpace = 2,
+    
+    // Terminal errors (negative values)
+    TERM_ChannelClosed = -1,
+    TERM_ChannelError = -2,
+    TERM_ProcedureError = -3,
+    TERM_Requested = -4
+};
 ```
 
 ### Common Template Errors & Solutions
@@ -872,4 +719,40 @@ cler::BlockRunner(&${sourceBlock},
 - **Missing policy**: Flowgraph mode requires task policy include
 - **Template explosion**: Use LLM assistance for complex template errors
 
-This comprehensive guide provides progressive depth from high-level architecture to implementation details, following the logical learning progression for working effectively with the Cler DSP framework.
+## 13. Quick Reference - Common Patterns
+
+### Block Creation Checklist
+1. Inherit from `cler::BlockBase`
+2. Declare input channels as member variables
+3. Initialize channels in constructor (with size)
+4. Implement `procedure()` with variadic output parameters
+5. Check input availability and output space
+6. Process data efficiently (bulk operations preferred)
+7. Return appropriate error codes
+
+### Flowgraph Creation Checklist
+1. Include `cler.hpp` and appropriate task policy
+2. Create all block instances
+3. Create `BlockRunner` for each block with connections
+4. Use `make_desktop_flowgraph()` or construct `FlowGraph`
+5. Configure and run flowgraph
+6. Handle GUI loop if using plots
+7. Stop flowgraph before cleanup
+
+### Performance Tips
+1. Use bulk read/write operations (`readN`/`writeN`)
+2. Prefer `peek_read`/`peek_write` for zero-copy processing
+3. Avoid single-sample `push`/`pop` in hot paths
+4. Process multiple samples per `procedure()` call
+5. Use compile-time channel sizes when possible
+6. Enable adaptive sleep for better CPU usage
+
+### Common Pitfalls
+1. Forgetting task policy include for flowgraph mode
+2. Incorrect `peek_write` usage (pass by reference, not pointer)
+3. Not checking channel space before writing
+4. Missing `BlockRunner` for a block
+5. Type mismatch between connected channels
+6. Not handling terminal errors appropriately
+
+This comprehensive guide provides accurate context for AI assistants working with the Cler DSP framework, with all corrections applied based on the actual codebase structure and API usage.
