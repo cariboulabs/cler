@@ -4,7 +4,7 @@ Layout algorithms for positioning graph nodes.
 
 from typing import Dict, List, Set
 import math
-from .graph_builder import Graph, Node
+from cler_tools.viz.graph_builder import Graph, Node
 
 
 class LayoutAlgorithm:

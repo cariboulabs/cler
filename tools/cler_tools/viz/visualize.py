@@ -14,8 +14,8 @@ import argparse
 from pathlib import Path
 
 from cler_tools.common import ClerParser
-from .svg_renderer import SVGRenderer
-from .graph_builder import GraphBuilder
+from cler_tools.viz.svg_renderer import SVGRenderer
+from cler_tools.viz.graph_builder import GraphBuilder
 
 
 def main():

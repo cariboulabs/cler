@@ -4,8 +4,8 @@ SVG renderer for flowgraph visualization.
 
 from typing import Dict, List, Tuple
 import math
-from .graph_builder import Graph, Node, Edge
-from .layout import HierarchicalLayout, CircularLayout
+from cler_tools.viz.graph_builder import Graph, Node, Edge
+from cler_tools.viz.layout import HierarchicalLayout, CircularLayout
 
 
 class SVGRenderer:
