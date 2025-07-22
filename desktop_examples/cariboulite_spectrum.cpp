@@ -8,7 +8,7 @@ int main() {
     const size_t sps = 2'000'000;
     const float freq_hz = 902e6;
 
-    SourceCaribouliteBlock source_cariboulite(
+    SourceCaribouliteBlock<std::complex<float>> source_cariboulite(
         "SourceCaribouLite",
         CaribouLiteRadio::RadioType::S1G,
         static_cast<float>(sps),
