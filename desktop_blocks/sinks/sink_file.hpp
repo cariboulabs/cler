@@ -49,10 +49,13 @@ struct SinkFileBlock : public cler::BlockBase {
 
         if (sz1 > 0 && ptr1) {
             _file.write(reinterpret_cast<const char*>(ptr1), sz1 * sizeof(T));
+            in.commit_read(sz1);
         }
         if (sz2 > 0 && ptr2) {
             _file.write(reinterpret_cast<const char*>(ptr2), sz2 * sizeof(T));
+            in.commit_read(sz2);
         }
+
 
         if (!_file) {
             return cler::Error::TERM_IOError;
