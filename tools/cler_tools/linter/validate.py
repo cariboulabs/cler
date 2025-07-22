@@ -16,23 +16,12 @@ import sys
 import json
 import argparse
 from pathlib import Path
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from typing import List, Dict, Set, Optional, Tuple
 import yaml
 
 from cler_tools.common import ClerParser, PATTERNS
-
-
-@dataclass
-class ValidationError:
-    """Represents a validation error or warning"""
-    type: str
-    message: str
-    file: str
-    line: int
-    column: int = 0
-    severity: str = 'error'
-    suggestion: Optional[str] = None
+from cler_tools.linter.validator import ValidationError, RuleEngine
 
 
 class ClerValidator:
@@ -40,19 +29,18 @@ class ClerValidator:
     
     def __init__(self, config_file: Optional[str] = None):
         self.parser = ClerParser()
-        self.errors: List[ValidationError] = []
+        self.rule_engine = RuleEngine()
         self.config = self._load_config(config_file)
+        self._configure_rules()
     
     def _load_config(self, config_file: Optional[str]) -> Dict:
         """Load validation rules from config file or use defaults"""
         default_config = {
             'rules': {
-                'missing_runner': {'severity': 'error'},
-                'runner_not_in_flowgraph': {'severity': 'error'},
-                'invalid_connection': {'severity': 'error'},
-                'unconnected_input': {'severity': 'warning'},
-                'unused_output': {'severity': 'warning'},
-                'duplicate_block_name': {'severity': 'error'}
+                'missing_runner': {'severity': 'error', 'enabled': True},
+                'invalid_connection': {'severity': 'error', 'enabled': True},
+                'channel_type_mismatch': {'severity': 'error', 'enabled': True},
+                'blockrunner_order': {'severity': 'error', 'enabled': True}
             }
         }
         
@@ -65,10 +53,12 @@ class ClerValidator:
         
         return default_config
     
+    def _configure_rules(self):
+        """Configure the rule engine with loaded configuration"""
+        self.rule_engine.configure_from_dict(self.config)
+    
     def validate_file(self, filepath: str) -> List[ValidationError]:
         """Validate a single C++ file"""
-        self.errors = []
-        
         try:
             with open(filepath, 'r') as f:
                 content = f.read()
@@ -76,66 +66,19 @@ class ClerValidator:
             # Parse the file
             flowgraph = self.parser.parse_file(content, filepath)
             
-            # Run validation checks
-            self._check_missing_runners(flowgraph, filepath)
-            self._check_invalid_connections(flowgraph, filepath)
-            self._check_unconnected_channels(flowgraph, filepath)
+            # Run all configured validation rules
+            errors = self.rule_engine.validate(flowgraph, filepath)
+            
+            return errors
             
         except Exception as e:
-            self.errors.append(ValidationError(
+            return [ValidationError(
                 type='parse_error',
                 message=f"Failed to parse file: {e}",
                 file=filepath,
                 line=0,
                 severity='error'
-            ))
-        
-        return self.errors
-    
-    def _check_missing_runners(self, flowgraph, filepath):
-        """Check for blocks without runners"""
-        for block_name, block in flowgraph.blocks.items():
-            if not block.in_flowgraph:
-                self.errors.append(ValidationError(
-                    type='missing_runner',
-                    message=f"Block '{block_name}' is not added to the flowgraph",
-                    file=filepath,
-                    line=block.line,
-                    column=block.column,
-                    severity=self.config['rules']['missing_runner']['severity'],
-                    suggestion=f"Add BlockRunner(&{block_name}) to the flowgraph"
-                ))
-    
-    def _check_invalid_connections(self, flowgraph, filepath):
-        """Check for invalid connections"""
-        for conn in flowgraph.connections:
-            if conn.target_block not in flowgraph.blocks:
-                self.errors.append(ValidationError(
-                    type='invalid_connection',
-                    message=f"Connection references unknown block '{conn.target_block}'",
-                    file=filepath,
-                    line=0,  # We'd need to track connection line numbers
-                    severity=self.config['rules']['invalid_connection']['severity']
-                ))
-    
-    def _check_unconnected_channels(self, flowgraph, filepath):
-        """Check for unconnected input channels"""
-        # Track which channels are connected
-        connected_inputs = set()
-        for conn in flowgraph.connections:
-            connected_inputs.add((conn.target_block, conn.target_channel))
-        
-        # Check each block's inputs
-        for block_name, block in flowgraph.blocks.items():
-            for input_channel in block.inputs:
-                if (block_name, input_channel) not in connected_inputs:
-                    self.errors.append(ValidationError(
-                        type='unconnected_input',
-                        message=f"Input channel '{input_channel}' of block '{block_name}' is not connected",
-                        file=filepath,
-                        line=block.line,
-                        severity=self.config['rules']['unconnected_input']['severity']
-                    ))
+            )]
 
 
 def main():

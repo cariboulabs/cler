@@ -10,7 +10,7 @@ echo "-------------------"
 
 for file in pass_*.cpp; do
     echo -n "Testing $(basename $file)... "
-    if python -m cler_tools.linter.validate "$file" >/dev/null 2>&1; then
+    if python3 -m cler_tools.linter.validate "$file" >/dev/null 2>&1; then
         echo "✅ PASS"
     else
         echo "❌ FAIL (should have passed)"
@@ -25,7 +25,7 @@ echo "-------------------"
 
 for file in fail_*.cpp; do
     echo -n "Testing $(basename $file)... "
-    if python -m cler_tools.linter.validate "$file" >/dev/null 2>&1; then
+    if python3 -m cler_tools.linter.validate "$file" >/dev/null 2>&1; then
         echo "❌ FAIL (should have failed)"
         exit 1
     else
