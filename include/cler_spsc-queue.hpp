@@ -416,9 +416,7 @@ std::size_t peek_write(T*& ptr1, std::size_t& size1, T*& ptr2, std::size_t& size
   const auto capacity = base_type::capacity_;
   const auto padding  = writer_.paddingCache_;
   const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
-
-  auto readIndexCache = writer_.readIndexCache_;
-  readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
+  auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
   writer_.readIndexCache_ = readIndexCache;
 
   std::size_t space;
@@ -469,8 +467,7 @@ std::size_t peek_read(const T*& ptr1, std::size_t& size1,  const T*& ptr2, std::
 
   const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
 
-  auto writeIndexCache = reader_.writeIndexCache_;
-  writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
+  auto writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
   reader_.writeIndexCache_ = writeIndexCache;
 
   std::size_t available;

@@ -49,6 +49,8 @@ struct SinkFileBlock : public cler::BlockBase {
 
         size_t available_samples = in.size();
         if (available_samples == 0) {
+            printf("flushed!\n");
+            _file.flush();
             return cler::Error::NotEnoughSamples;
         }
 
@@ -56,12 +58,9 @@ struct SinkFileBlock : public cler::BlockBase {
 
         in.readN(_tmp, to_write);
         _file.write(reinterpret_cast<char*>(_tmp), to_write * sizeof(T));
-        _file.flush();
-
         if (!_file) {
             return cler::Error::TERM_IOError;
         }
-
         return cler::Empty{};
     }
 
