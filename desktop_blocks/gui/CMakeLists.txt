@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.16)
-
 # === Dependencies (GLFW, OpenGL, ImGui, ImPlot) ===
 find_package(PkgConfig REQUIRED)
 pkg_search_module(GLFW REQUIRED glfw3)

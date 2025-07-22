@@ -2,7 +2,7 @@
 #include "cler_desktop_utils.hpp"
 #include "desktop_blocks/sources/source_cariboulite.hpp"
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
-#include "gui_manager.hpp"
+#include "desktop_blocks/gui/gui_manager.hpp"
 
 int main() {
     const size_t sps = 2'000'000;

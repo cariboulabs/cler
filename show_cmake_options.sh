@@ -1,0 +1,25 @@
+#!/bin/bash
+# Print all CLER CMake options and exit
+
+echo "==============================================="
+echo "         Available CLER CMake Options"
+echo "==============================================="
+echo ""
+echo "Build Type:"
+printf "  %-40s %-40s %s\n" "-DCMAKE_BUILD_TYPE=Debug|Release" "Build type configuration" "Default: Release"
+echo ""
+
+echo "CLER Options:"
+printf "  %-40s %-40s %s\n" "-DCLER_HEADLESS=ON|OFF"               "Build without GUI or examples" "Default: OFF"
+printf "  %-40s %-40s %s\n" "-DCLER_BUILD_BLOCKS=ON|OFF"           "Enable DSP blocks" "Default: ON"
+printf "  %-40s %-40s %s\n" "-DCLER_BUILD_BLOCKS_GUI=ON|OFF"       "Include GUI-related blocks" "Default: ON"
+printf "  %-40s %-40s %s\n" "-DCLER_BUILD_BLOCKS_LIQUID=ON|OFF"    "Include Liquid-DSP blocks" "Default: ON"
+printf "  %-40s %-40s %s\n" "-DCLER_BUILD_EXAMPLES=ON|OFF"         "Build example binaries" "Default: ON"
+printf "  %-40s %-40s %s\n" "-DCLER_BUILD_PERFORMANCE_TESTS=ON|OFF" "Build performance tests" "Default: OFF"
+echo ""
+echo "Note:"
+echo "  - CLER_BUILD_BLOCKS_GUI and CLER_BUILD_BLOCKS_LIQUID have no effect unless CLER_BUILD_BLOCKS is ON."
+echo ""
+echo "Usage:"
+echo "  cmake -D<OPTION>=<VALUE> .."
+echo ""
