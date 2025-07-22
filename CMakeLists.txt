@@ -24,6 +24,7 @@ option(CLER_BUILD_BLOCKS_GUI "Build CLER blocks with gui" ON)
 option(CLER_BUILD_BLOCKS_LIQUID "Build CLER blocks that use liquid-dsp" ON)
 option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
 option(CLER_BUILD_PERFORMANCE_TESTS "Build CLER performance tests" OFF)
+option(CLER_BUILD_TESTS "Build CLER unit tests" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
@@ -70,4 +71,8 @@ endif()
 
 if(CLER_BUILD_PERFORMANCE_TESTS)
   add_subdirectory(performance_tests)
+endif()
+
+if(CLER_BUILD_TESTS)
+  add_subdirectory(tests)
 endif()
