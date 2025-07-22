@@ -18,7 +18,11 @@ else()
     message(STATUS "Skipping plots example because CLER_BUILD_BLOCKS_GUI or CLER_BUILD_BLOCKS_LIQUID is OFF")
 endif()
 
-add_subdirectory(ezgmsk_demod)
+if (CLER_BUILD_BLOCKS_LIQUID)
+    add_subdirectory(ezgmsk_demod)
+else()
+    message(STATUS "Skipping ezgmsk_demod example because CLER_BUILD_BLOCKS_LIQUID is OFF")
+endif()
 
 if (CLER_BUILD_BLOCKS_GUI)
     add_executable(mass_spring_damper mass_spring_damper.cpp)

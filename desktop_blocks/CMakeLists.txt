@@ -29,7 +29,6 @@ else()
   message(STATUS "Skipping GUI blocks because CLER_BUILD_BLOCKS_GUI is OFF")
 endif()
 
-add_subdirectory(ezgmsk_demod)
 add_subdirectory(udp)
 add_subdirectory(sources)
 
@@ -39,6 +38,7 @@ target_link_libraries(cler_desktop_blocks INTERFACE
 )
 
 if (CLER_BUILD_BLOCKS_LIQUID)
+  add_subdirectory(ezgmsk_demod)
   target_link_libraries(cler_desktop_blocks INTERFACE 
     cler::blocks_ezgmsk_demod
     )
