@@ -26,8 +26,12 @@ class ClerParser:
         self.connections = []
         self.flowgraph_name = None
         
+        # Store content and byte content separately to handle encoding properly
+        self.content = content
+        self.content_bytes = content.encode('utf-8')
+        
         # Parse with tree-sitter
-        tree = self.parser.parse(bytes(content, 'utf8'))
+        tree = self.parser.parse(self.content_bytes)
         
         # Extract blocks and connections
         self._extract_blocks(tree.root_node, content)
@@ -101,10 +105,16 @@ class ClerParser:
         if identifier:
             var_name = self._get_node_text(identifier, content)
         
-        # Find constructor call
-        call_expr = self._find_child_by_type(declarator, 'call_expression')
-        if call_expr:
-            args = self._extract_call_arguments(call_expr, content)
+        # Find constructor arguments 
+        arg_list = self._find_child_by_type(declarator, 'argument_list')
+        if arg_list:
+            # Extract arguments directly from argument_list
+            args = []
+            for child in arg_list.children:
+                if child.type not in [',', '(', ')']:  # Skip separators and parentheses
+                    arg_text = self._get_node_text(child, content).strip()
+                    if arg_text:
+                        args.append(arg_text)
             constructor_args = args
         
         # Extract template parameters if present
@@ -244,7 +254,9 @@ class ClerParser:
     
     def _get_node_text(self, node: Node, content: str) -> str:
         """Get text content of a node"""
-        return content[node.start_byte:node.end_byte]
+        # Extract bytes and decode to handle UTF-8 properly
+        byte_content = self.content_bytes[node.start_byte:node.end_byte]
+        return byte_content.decode('utf-8')
     
     def _get_position(self, node: Node, content: str) -> Tuple[int, int]:
         """Get line and column position of node"""
