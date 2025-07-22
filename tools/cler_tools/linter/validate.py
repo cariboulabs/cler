@@ -20,7 +20,7 @@ from dataclasses import asdict
 from typing import List, Dict, Set, Optional, Tuple
 import yaml
 
-from cler_tools.common import ClerParser, PATTERNS
+from cler_tools.common import ClerParser
 from cler_tools.linter.validator import ValidationError, RuleEngine
 
 

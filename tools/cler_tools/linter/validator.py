@@ -138,8 +138,20 @@ class InvalidConnectionRule(ValidationRule):
                     f"Available outputs: {', '.join(source_block.outputs) or 'none'}"
                 ))
             
-            # Check if target has the input channel
-            if conn.target_channel not in target_block.inputs:
+            # Check if target has the input channel (handle array channels)
+            channel_found = conn.target_channel in target_block.inputs
+            
+            # If not found directly, check if it's an array channel access
+            if not channel_found and conn.channel_index is not None:
+                indexed_channel = f"{conn.target_channel}[{conn.channel_index}]"
+                channel_found = indexed_channel in target_block.inputs
+            
+            # Also check if the channel base exists (e.g., 'in' when we have 'in[0]', 'in[1]')
+            if not channel_found:
+                base_channels = [ch.split('[')[0] for ch in target_block.inputs if '[' in ch]
+                channel_found = conn.target_channel in base_channels
+            
+            if not channel_found:
                 errors.append(self.create_error(
                     f"Block '{conn.target_block}' does not have input channel '{conn.target_channel}'",
                     file_path,

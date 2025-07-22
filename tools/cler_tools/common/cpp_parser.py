@@ -1,79 +1,42 @@
 """
-Common C++ parsing functionality for Cler tools.
-Extracts blocks, connections, and flowgraph structure.
+AST-based C++ parser for Cler tools.
+Extracts blocks, connections, and flowgraph structure using tree-sitter.
 """
 
-import re
-from dataclasses import dataclass, field
-from typing import List, Dict, Set, Optional, Tuple
-from .patterns import PATTERNS, INPUT_OPERATIONS, OUTPUT_OPERATIONS
+import tree_sitter_cpp as tscpp
+from tree_sitter import Language, Parser, Node
+from typing import List, Dict, Optional, Tuple
+from .flowgraph import FlowGraph, Block, Connection
 
-
-@dataclass
-class Block:
-    """Represents a Cler block instance"""
-    name: str
-    type: str
-    line: int
-    column: int = 0
-    inputs: List[str] = field(default_factory=list)
-    outputs: List[str] = field(default_factory=list)
-    has_runner: bool = False
-    in_flowgraph: bool = False
-    template_params: Optional[str] = None
-    constructor_args: List[str] = field(default_factory=list)
-    channel_types: Dict[str, str] = field(default_factory=dict)
-    
-    def is_source(self) -> bool:
-        """Check if this block is a source (no input channels)"""
-        return len(self.inputs) == 0 and len(self.outputs) > 0
-    
-    def is_sink(self) -> bool:
-        """Check if this block is a sink (no output channels)"""
-        return len(self.inputs) > 0 and len(self.outputs) == 0
-    
-    def is_processing(self) -> bool:
-        """Check if this block is a processing block (has both inputs and outputs)"""
-        return len(self.inputs) > 0 and len(self.outputs) > 0
-
-
-@dataclass
-class Connection:
-    """Represents a connection between blocks"""
-    source_block: str
-    source_channel: str
-    target_block: str
-    target_channel: str
-    channel_index: Optional[int] = None
-
-
-@dataclass
-class FlowGraph:
-    """Represents a complete flowgraph structure"""
-    name: str
-    blocks: Dict[str, Block] = field(default_factory=dict)
-    connections: List[Connection] = field(default_factory=list)
-    
 
 class ClerParser:
-    """Parses Cler C++ code to extract flowgraph structure"""
+    """AST-based C++ parser for Cler flowgraph code using tree-sitter"""
     
     def __init__(self):
-        self.blocks: Dict[str, Block] = {}
-        self.connections: List[Connection] = []
-        self.flowgraph_name: Optional[str] = None
+        """Initialize AST-based parser"""
+        self.language = Language(tscpp.language())
+        self.parser = Parser(self.language)
+        self.blocks = {}
+        self.connections = []
+        self.flowgraph_name = None
     
     def parse_file(self, content: str, filename: str) -> FlowGraph:
-        """Parse a C++ file and return the flowgraph structure"""
-        self.blocks.clear()
-        self.connections.clear()
+        """Parse C++ file and extract flowgraph structure"""
+        self.blocks = {}
+        self.connections = []
+        self.flowgraph_name = None
         
-        # Extract components in order
-        self._extract_blocks(content)
-        self._extract_flowgraph(content)
-        self._infer_channel_directions(content)
+        # Parse with tree-sitter
+        tree = self.parser.parse(bytes(content, 'utf8'))
         
-        # Determine flowgraph name from function name or filename
+        # Extract blocks and connections
+        self._extract_blocks(tree.root_node, content)
+        self._extract_flowgraph(tree.root_node, content)
+        
+        # Infer channel directions from connections
+        self._infer_channel_directions()
+        
+        # Determine flowgraph name
         name = self.flowgraph_name or filename.split('/')[-1].replace('.cpp', '')
         
         return FlowGraph(
@@ -82,286 +45,244 @@ class ClerParser:
             connections=self.connections.copy()
         )
     
-    def _get_line_column(self, content: str, position: int) -> Tuple[int, int]:
-        """Convert string position to line and column number"""
-        lines = content[:position].split('\n')
-        line = len(lines)
-        column = len(lines[-1]) if lines else 0
-        return line, column
+    def _extract_blocks(self, node: Node, content: str):
+        """Extract block declarations from AST"""
+        for child in self._walk_ast(node):
+            if child.type == 'declaration':
+                self._process_declaration(child, content)
     
-    def _parse_constructor_args(self, args_str: str) -> List[str]:
-        """Parse constructor arguments, handling nested parentheses and brackets"""
-        if not args_str.strip():
-            return []
-        
-        args = []
-        current_arg = ""
-        depth = 0
-        in_quotes = False
-        quote_char = None
-        
-        for char in args_str:
-            if char in '"\'':
-                if not in_quotes:
-                    in_quotes = True
-                    quote_char = char
-                elif char == quote_char:
-                    in_quotes = False
-                    quote_char = None
-                current_arg += char
-            elif in_quotes:
-                current_arg += char
-            elif char in '({[':
-                depth += 1
-                current_arg += char
-            elif char in ')}]':
-                depth -= 1
-                current_arg += char
-            elif char == ',' and depth == 0:
-                args.append(current_arg.strip())
-                current_arg = ""
-            else:
-                current_arg += char
-        
-        # Add the last argument
-        if current_arg.strip():
-            args.append(current_arg.strip())
-        
-        return args
-    
-    def _find_matching_bracket(self, content: str, start: int, open_char: str, close_char: str) -> int:
-        """Find the matching closing bracket for an opening bracket"""
-        depth = 1
-        i = start + 1
-        
-        while i < len(content) and depth > 0:
-            if content[i] == open_char:
-                depth += 1
-            elif content[i] == close_char:
-                depth -= 1
-            i += 1
-        
-        return i - 1 if depth == 0 else -1
-    
-    def _find_block_declaration(self, content: str, block_name: str) -> Optional[Block]:
-        """Find the declaration of a block by name"""
-        # Look for patterns like: SomeBlockType<...> block_name(...)
-        # First find the block name followed by parentheses, then work backwards
-        pattern = rf'\b{re.escape(block_name)}\s*\('
-        
-        for match in re.finditer(pattern, content):
-            # Work backwards to find the type and template parameters
-            start_pos = match.start()
-            
-            # Find start of this line to get the full declaration
-            line_start = content.rfind('\n', 0, start_pos) + 1
-            line_content = content[line_start:match.end()]
-            
-            # Parse the line: TypeName<template> varname(
-            type_pattern = r'(\w+)\s*(?:<([^>]*(?:<[^>]*>[^>]*)*?)>)?\s+' + re.escape(block_name) + r'\s*\('
-            type_match = re.search(type_pattern, line_content)
-            
-            if type_match:
-                block_type = type_match.group(1)
-                template_params = type_match.group(2)
-                
-                # Find constructor arguments
-                constructor_start = match.end() - 1
-                constructor_end = self._find_matching_bracket(content, constructor_start, '(', ')')
-                constructor_args = []
-                if constructor_end > constructor_start:
-                    args_str = content[constructor_start+1:constructor_end].strip()
-                    if args_str:
-                        constructor_args = self._parse_constructor_args(args_str)
-                
-                line, col = self._get_line_column(content, line_start)
-                return Block(
-                    name=block_name,
-                    type=block_type,
-                    line=line,
-                    column=col,
-                    template_params=template_params.strip() if template_params else None,
-                    constructor_args=constructor_args
-                )
-        
-        return None
-    
-    def _extract_blocks(self, content: str):
-        """Extract block instances from declarations and BlockRunner usage"""
-        # First, find all block declarations using the general pattern
-        pattern = PATTERNS['block_instance_detailed']
-        
-        for match in re.finditer(pattern, content):
-            block_type = match.group(1)
-            template_params = match.group(2)
-            var_name = match.group(3)
-            constructor_args_str = match.group(4)
-            
-            # Parse constructor arguments
-            constructor_args = []
-            if constructor_args_str and constructor_args_str.strip():
-                constructor_args = self._parse_constructor_args(constructor_args_str)
-            
-            # Create the block if not already exists
-            if var_name not in self.blocks:
-                line, col = self._get_line_column(content, match.start())
-                self.blocks[var_name] = Block(
-                    name=var_name,
-                    type=block_type,
-                    line=line,
-                    column=col,
-                    template_params=template_params.strip() if template_params else None,
-                    constructor_args=constructor_args
-                )
-    
-    def _extract_flowgraph(self, content: str):
+    def _extract_flowgraph(self, node: Node, content: str):
         """Extract flowgraph definition and connections"""
-        # Find make_*_flowgraph function
-        pattern = PATTERNS['flowgraph_call']
-        match = re.search(pattern, content)
-        
-        if not match:
+        for child in self._walk_ast(node):
+            if child.type == 'call_expression':
+                self._process_call_expression(child, content)
+    
+    def _walk_ast(self, node: Node):
+        """Walk AST tree in depth-first order"""
+        yield node
+        for child in node.children:
+            yield from self._walk_ast(child)
+    
+    def _process_declaration(self, node: Node, content: str):
+        """Process variable declarations to find block instances"""
+        # Look for declarations like: BlockType<Template> varname(args);
+        declarator = self._find_child_by_type(node, 'init_declarator')
+        if not declarator:
             return
         
-        # Extract flowgraph name from function
-        func_match = re.search(r'make_(\w+)_flowgraph', content)
-        if func_match:
-            self.flowgraph_name = func_match.group(1)
+        # Get the type and variable name
+        type_node = self._find_child_by_type(node, 'type_identifier') or \
+                   self._find_child_by_type(node, 'template_type')
         
-        # Find the complete flowgraph call
-        start = match.end() - 1
-        flowgraph_content = self._extract_balanced_parens(content, start)
-        
-        if not flowgraph_content:
+        if not type_node:
             return
         
-        # Extract BlockRunner calls
-        self._extract_runners(flowgraph_content)
-    
-    def _extract_balanced_parens(self, content: str, start: int) -> str:
-        """Extract content within balanced parentheses"""
-        paren_count = 1
-        i = start + 1
+        # Extract type name
+        type_name = self._get_node_text(type_node, content)
         
-        while i < len(content) and paren_count > 0:
-            if content[i] == '(':
-                paren_count += 1
-            elif content[i] == ')':
-                paren_count -= 1
-            i += 1
+        # For template types, extract just the base type name
+        if type_node.type == 'template_type':
+            # Get the template name (first identifier)
+            template_name = self._find_child_by_type(type_node, 'type_identifier')
+            if template_name:
+                type_name = self._get_node_text(template_name, content)
         
-        return content[start:i] if paren_count == 0 else ""
-    
-    def _extract_runners(self, flowgraph_content: str):
-        """Extract BlockRunner declarations and their connections"""
-        runner_pattern = PATTERNS['blockrunner_call']
-        
-        for match in re.finditer(runner_pattern, flowgraph_content):
-            block_name = match.group(1)
-            connections_str = match.group(2)
-            
-            if block_name in self.blocks:
-                self.blocks[block_name].has_runner = True
-                self.blocks[block_name].in_flowgraph = True
-            
-            if connections_str:
-                self._parse_connections(connections_str, block_name)
-    
-    def _parse_connections(self, connections_str: str, source_block: str):
-        """Parse connection strings from BlockRunner"""
-        if not connections_str:
+        # Only process if it looks like a block type
+        if not (type_name.endswith('Block') or type_name.endswith('block')):
             return
+        
+        # Get variable name and constructor
+        var_name = None
+        constructor_args = []
+        template_params = None
+        
+        # Find identifier (variable name)
+        identifier = self._find_child_by_type(declarator, 'identifier')
+        if identifier:
+            var_name = self._get_node_text(identifier, content)
+        
+        # Find constructor call
+        call_expr = self._find_child_by_type(declarator, 'call_expression')
+        if call_expr:
+            args = self._extract_call_arguments(call_expr, content)
+            constructor_args = args
+        
+        # Extract template parameters if present
+        if type_node.type == 'template_type':
+            template_args = self._find_child_by_type(type_node, 'template_argument_list')
+            if template_args:
+                template_params = self._get_node_text(template_args, content)[1:-1]  # Remove < >
+        
+        # Create block
+        if var_name and var_name not in self.blocks:
+            line, col = self._get_position(declarator, content)
+            self.blocks[var_name] = Block(
+                name=var_name,
+                type=type_name,
+                line=line,
+                column=col,
+                template_params=template_params,
+                constructor_args=constructor_args
+            )
+    
+    def _process_call_expression(self, node: Node, content: str):
+        """Process function calls to find flowgraph and BlockRunner calls"""
+        # Get function name
+        func_name = self._get_function_name(node, content)
+        
+        if 'make_' in func_name and '_flowgraph' in func_name:
+            # Extract flowgraph name (handle namespaced calls like cler::make_desktop_flowgraph)
+            if '_flowgraph' in func_name:
+                # Remove namespace if present
+                clean_name = func_name.split('::')[-1] if '::' in func_name else func_name
+                self.flowgraph_name = clean_name.replace('make_', '').replace('_flowgraph', '')
             
-        channel_pattern = PATTERNS['channel_connection']
+            # Extract BlockRunner calls from arguments
+            self._extract_blockrunners(node, content)
         
-        # Split by commas but respect nested parentheses
-        parts = self._split_arguments(connections_str)
+        elif 'BlockRunner' in func_name:
+            # Direct BlockRunner call (handles both BlockRunner and cler::BlockRunner)
+            self._extract_single_blockrunner(node, content)
+    
+    def _extract_blockrunners(self, node: Node, content: str):
+        """Extract BlockRunner calls from flowgraph arguments"""
+        args_list = self._find_child_by_type(node, 'argument_list')
+        if not args_list:
+            return
         
-        for part in parts:
-            # Look for channel references like &block.channel
-            for match in re.finditer(channel_pattern, part):
-                target_block = match.group(1)
-                channel_name = match.group(2)
-                channel_index = int(match.group(3)) if match.group(3) else None
+        for arg in args_list.children:
+            if arg.type == 'call_expression':
+                func_name = self._get_function_name(arg, content)
+                if 'BlockRunner' in func_name:
+                    self._extract_single_blockrunner(arg, content)
+    
+    def _extract_single_blockrunner(self, node: Node, content: str):
+        """Extract connections from a single BlockRunner call"""
+        args_list = self._find_child_by_type(node, 'argument_list')
+        if not args_list:
+            return
+        
+        # Get all arguments
+        args = []
+        for child in args_list.children:
+            if child.type != ',':  # Skip comma separators
+                arg_text = self._get_node_text(child, content)
+                if arg_text.startswith('&'):
+                    args.append(arg_text[1:])  # Remove &
+        
+        if len(args) < 1:
+            return
+        
+        # First argument is source block
+        source_block = args[0]
+        
+        # Mark source block as in flowgraph
+        if source_block in self.blocks:
+            self.blocks[source_block].in_flowgraph = True
+        
+        # Remaining arguments are target channels
+        for target_arg in args[1:]:
+            if '.' in target_arg:
+                parts = target_arg.split('.')
+                target_block = parts[0]
+                target_channel = '.'.join(parts[1:])
                 
-                # In BlockRunner(&source, &target.channel), 
-                # source is the source block, target.channel is the destination
-                self.connections.append(Connection(
+                # Mark target block as in flowgraph
+                if target_block in self.blocks:
+                    self.blocks[target_block].in_flowgraph = True
+                
+                # Create connection
+                conn = Connection(
                     source_block=source_block,
-                    source_channel="out",  # Generic output name for source
+                    source_channel='out',  # Default output channel
                     target_block=target_block,
-                    target_channel=channel_name,
-                    channel_index=channel_index
-                ))
-    
-    def _split_arguments(self, args_str: str) -> List[str]:
-        """Split arguments respecting parentheses and brackets"""
-        parts = []
-        current = ""
-        depth = 0
-        
-        for char in args_str:
-            if char in '([':
-                depth += 1
-            elif char in ')]':
-                depth -= 1
-            elif char == ',' and depth == 0:
-                parts.append(current.strip())
-                current = ""
-                continue
-            current += char
-        
-        if current.strip():
-            parts.append(current.strip())
-        
-        return parts
-    
-    def _infer_channel_directions(self, content: str):
-        """Infer input/output channels from member declarations and connections"""
-        # Extract channel member declarations for each block
-        self._extract_channel_members(content)
-        # Infer directions from BlockRunner connections
-        self._infer_from_connections()
-    
-    def _extract_channel_members(self, content: str):
-        """Extract channel member variables from block definitions"""
-        # Find all channel member declarations
-        channel_pattern = PATTERNS['channel_member']
-        
-        # First, find block class definitions
-        for block_name, block in self.blocks.items():
-            # Look for the struct definition of this block type
-            struct_pattern = rf'struct\s+{re.escape(block.type)}.*?\{{([^}}]+)\}}'
-            
-            struct_match = re.search(struct_pattern, content, re.DOTALL)
-            if struct_match:
-                struct_body = struct_match.group(1)
+                    target_channel=target_channel
+                )
                 
-                # Find channel declarations in the struct
-                for channel_match in re.finditer(channel_pattern, struct_body):
-                    channel_type = channel_match.group(1)
-                    channel_name = channel_match.group(2)
-                    
-                    # Store the channel type for validation
-                    if channel_name not in block.channel_types:
-                        block.channel_types[channel_name] = channel_type.strip()
-                    
-                    # Channels declared as members are typically inputs
-                    if channel_name not in block.inputs:
-                        block.inputs.append(channel_name)
+                # Extract array index if present
+                if '[' in target_channel and ']' in target_channel:
+                    channel_base = target_channel.split('[')[0]
+                    index_str = target_channel.split('[')[1].split(']')[0]
+                    try:
+                        conn.channel_index = int(index_str)
+                        conn.target_channel = channel_base
+                    except ValueError:
+                        pass
+                
+                # Avoid duplicate connections
+                if not any(c.source_block == conn.source_block and 
+                          c.target_block == conn.target_block and 
+                          c.target_channel == conn.target_channel 
+                          for c in self.connections):
+                    self.connections.append(conn)
     
-    def _infer_from_connections(self):
-        """Simply record what channels are used in connections"""
-        # Just add channels as they appear in connections
-        # Validation rules can determine if they're correct or not
+    def _infer_channel_directions(self):
+        """Infer input/output channels from connections"""
         for conn in self.connections:
+            # Add output channels to source blocks
             source_block = self.blocks.get(conn.source_block)
-            target_block = self.blocks.get(conn.target_block)
-            
-            # Add output channels as used
             if source_block and conn.source_channel not in source_block.outputs:
                 source_block.outputs.append(conn.source_channel)
             
-            # Add input channels as used  
-            if target_block and conn.target_channel not in target_block.inputs:
-                target_block.inputs.append(conn.target_channel)
+            # Add input channels to target blocks
+            target_block = self.blocks.get(conn.target_block)
+            if target_block:
+                channel_name = conn.target_channel
+                if conn.channel_index is not None:
+                    channel_name = f"{conn.target_channel}[{conn.channel_index}]"
+                
+                if channel_name not in target_block.inputs:
+                    target_block.inputs.append(channel_name)
+    
+    def _find_child_by_type(self, node: Node, node_type: str) -> Optional[Node]:
+        """Find first child of given type"""
+        for child in node.children:
+            if child.type == node_type:
+                return child
+        return None
+    
+    def _get_node_text(self, node: Node, content: str) -> str:
+        """Get text content of a node"""
+        return content[node.start_byte:node.end_byte]
+    
+    def _get_position(self, node: Node, content: str) -> Tuple[int, int]:
+        """Get line and column position of node"""
+        return node.start_point[0] + 1, node.start_point[1]
+    
+    def _get_function_name(self, node: Node, content: str) -> str:
+        """Extract function name from call expression"""
+        # The function is the first child of call_expression
+        if node.children:
+            func_expr = node.children[0]
+            
+            # Handle different types of function expressions
+            if func_expr.type == 'identifier':
+                return self._get_node_text(func_expr, content)
+            elif func_expr.type == 'scoped_identifier':
+                # For cler::make_desktop_flowgraph, get the full name
+                return self._get_node_text(func_expr, content)
+            elif func_expr.type == 'field_expression':
+                # For object.method, get just the method name
+                field_id = self._find_child_by_type(func_expr, 'field_identifier')
+                if field_id:
+                    return self._get_node_text(field_id, content)
+            
+            # Fallback: get the text of the entire function expression
+            return self._get_node_text(func_expr, content)
+        
+        return ""
+    
+    def _extract_call_arguments(self, node: Node, content: str) -> List[str]:
+        """Extract arguments from function call"""
+        args_list = self._find_child_by_type(node, 'argument_list')
+        if not args_list:
+            return []
+        
+        args = []
+        for child in args_list.children:
+            if child.type != ',':  # Skip comma separators
+                arg_text = self._get_node_text(child, content).strip()
+                if arg_text:
+                    args.append(arg_text)
+        
+        return args
