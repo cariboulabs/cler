@@ -19,6 +19,12 @@ add_compile_options(-Wall -Wextra #mainly disable warnings for liquid. but need 
       )
 message(STATUS "Asserts are ENABLED even in Release builds")
 
+option(CLER_BUILD_BLOCKS "Build CLER blocks" ON)
+option(CLER_BUILD_BLOCKS_GUI "Build CLER blocks with gui" ON)
+option(CLER_BUILD_BLOCKS_LIQUID "Build CLER blocks that use liquid-dsp" ON)
+option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
+option(CLER_BUILD_PERFORMANCE_TESTS "Build CLER performance tests" OFF)
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
 endif()
@@ -53,20 +59,15 @@ target_compile_options(cler INTERFACE
 
 add_subdirectory(logger)
 
-option(CLER_BUILD_BLOCKS "Build CLER blocks" ON)
 if (CLER_BUILD_BLOCKS)
-  option(CLER_BUILD_BLOCKS_GUI "Build CLER blocks with gui" ON)
-  option(CLER_BUILD_BLOCKS_LIQUID "Build CLER blocks that use liquid-dsp" ON)
   add_subdirectory(desktop_blocks)
 endif()
 
-option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
 if(CLER_BUILD_EXAMPLES)
   add_subdirectory(desktop_examples)
-  add_subdirectory(embedded_examples)
+  # add_subdirectory(embedded_examples)
 endif()
 
-option(CLER_BUILD_PERFORMANCE_TESTS "Build CLER performance tests" OFF)
 if(CLER_BUILD_PERFORMANCE_TESTS)
   add_subdirectory(performance_tests)
 endif()
