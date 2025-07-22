@@ -1,3 +1,5 @@
+find_package(Threads REQUIRED)
+
 add_subdirectory(baremetal_examples)
 add_subdirectory(freertos_examples)
 add_subdirectory(threadx_examples)

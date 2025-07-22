@@ -19,6 +19,7 @@ printf "  %-40s %-40s %s\n" "-DCLER_BUILD_TESTS=ON|OFF"             "Build unit 
 echo ""
 echo "Note:"
 echo "  - CLER_BUILD_BLOCKS_GUI and CLER_BUILD_BLOCKS_LIQUID have no effect unless CLER_BUILD_BLOCKS is ON."
+echo "  - CLER_BUILD_EXAMPLES will build both desktop and embedded examples, but only if CLER_BUILD_BLOCKS is ON."
 echo ""
 echo "Usage:"
 echo "  cmake -D<OPTION>=<VALUE> .."
