@@ -13,7 +13,7 @@ void handle_sigint(int) {
 int main() {
     const size_t sps = 4'000'000;
     const float freq_hz = 903e6;
-    char recording_filename[] = "recorded_stream.bin";
+    char recording_filename[] = "recorded_stream.sc16";
 
     SourceCaribouliteBlock source_cariboulite(
         "SourceCaribouLite",
@@ -27,10 +27,10 @@ int main() {
     // AFTER the cbl source is created, so it doenst steal our handler
     std::signal(SIGINT, handle_sigint);
 
-    SinkFileBlock<std::complex<float>> sink_file(
+    SinkFileBlock<std::complex<short>> sink_file(
         "SinkFile",
         recording_filename,
-        32 * 1024
+        64 * 1024
     );
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source_cariboulite, &sink_file.in),
