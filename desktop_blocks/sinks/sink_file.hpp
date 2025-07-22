@@ -19,25 +19,16 @@ struct SinkFileBlock : public cler::BlockBase {
         }
 
         _filename = filename;
-        _buffer_size = buffer_size;
 
         _file.open(_filename, std::ios::binary | std::ios::out | std::ios::trunc);
         if (!_file.is_open()) {
             throw std::runtime_error("Failed to open file for writing: " + std::string(filename));
-        }
-        _tmp = new T[buffer_size];
-        if (!_tmp) {
-            throw std::runtime_error("Failed to allocate memory for temporary buffer.");
         }
     }
 
     ~SinkFileBlock() {
         if (_file.is_open()) {
             _file.close();
-        }
-
-        if (_tmp) {
-            delete[] _tmp;
         }
     }
 
@@ -47,17 +38,22 @@ struct SinkFileBlock : public cler::BlockBase {
             return cler::Error::TERM_IOError;
         }
 
-        size_t available_samples = in.size();
+        T* ptr1, *ptr2;
+        size_t sz1, sz2;
+        size_t available_samples = in.peek_write(ptr1, sz1, ptr2, sz2);
+
         if (available_samples == 0) {
-            printf("flushed!\n");
             _file.flush();
             return cler::Error::NotEnoughSamples;
         }
 
-        size_t to_write = std::min(available_samples, _buffer_size);
+        if (sz1 > 0 && ptr1) {
+            _file.write(reinterpret_cast<char*>(ptr1), sz1 * sizeof(T));
+        }
+        if (sz2 > 0 && ptr2) {
+            _file.write(reinterpret_cast<char*>(ptr2), sz2 * sizeof(T));
+        }
 
-        in.readN(_tmp, to_write);
-        _file.write(reinterpret_cast<char*>(_tmp), to_write * sizeof(T));
         if (!_file) {
             return cler::Error::TERM_IOError;
         }
@@ -67,6 +63,5 @@ struct SinkFileBlock : public cler::BlockBase {
 private:
     const char* _filename;
     std::ofstream _file;
-    T* _tmp = nullptr;
     size_t _buffer_size;
 };
