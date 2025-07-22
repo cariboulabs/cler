@@ -209,10 +209,11 @@ class ClerParser:
                     except ValueError:
                         pass
                 
-                # Avoid duplicate connections
+                # Avoid duplicate connections (include channel_index in comparison)
                 if not any(c.source_block == conn.source_block and 
                           c.target_block == conn.target_block and 
-                          c.target_channel == conn.target_channel 
+                          c.target_channel == conn.target_channel and
+                          c.channel_index == conn.channel_index
                           for c in self.connections):
                     self.connections.append(conn)
     

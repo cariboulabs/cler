@@ -2,7 +2,7 @@
 """
 Cler Flowgraph Visualizer
 
-Generates visual representations of Cler C++ flowgraphs as SVG images.
+Generates visual representations of Cler C++ flowgraphs using Graphviz.
 
 Usage:
     cler-viz file.cpp [-o output.svg]
@@ -14,8 +14,7 @@ import argparse
 from pathlib import Path
 
 from cler_tools.common import ClerParser
-from cler_tools.viz.svg_renderer import SVGRenderer
-from cler_tools.viz.graph_builder import GraphBuilder
+from cler_tools.viz.graphviz_renderer import GraphvizRenderer
 
 
 def main():
@@ -29,7 +28,7 @@ def main():
     )
     parser.add_argument(
         '-o', '--output',
-        help='Output SVG file (for single input file)'
+        help='Output file (for single input file, without extension)'
     )
     parser.add_argument(
         '--output-dir',
@@ -37,19 +36,15 @@ def main():
     )
     parser.add_argument(
         '--layout',
-        choices=['hierarchical', 'circular', 'force'],
-        default='hierarchical',
-        help='Layout algorithm to use'
+        choices=['dot', 'neato', 'fdp', 'circo', 'twopi'],
+        default='dot',
+        help='Graphviz layout algorithm (default: dot)'
     )
     parser.add_argument(
-        '--show-channels',
-        action='store_true',
-        help='Show channel names on connections'
-    )
-    parser.add_argument(
-        '--compact',
-        action='store_true',
-        help='Use compact layout with minimal spacing'
+        '--format',
+        choices=['svg', 'png', 'pdf', 'ps'],
+        default='svg',
+        help='Output format (default: svg)'
     )
     
     args = parser.parse_args()
@@ -66,6 +61,7 @@ def main():
     
     # Process each file
     cpp_parser = ClerParser()
+    renderer = GraphvizRenderer()
     
     for filepath in args.files:
         path = Path(filepath)
@@ -85,35 +81,26 @@ def main():
                 print(f"Warning: No blocks found in {filepath}", file=sys.stderr)
                 continue
             
-            # Build graph structure
-            graph_builder = GraphBuilder()
-            graph = graph_builder.build(flowgraph)
-            
-            # Render to SVG
-            renderer = SVGRenderer(
-                show_channels=args.show_channels,
-                compact=args.compact,
-                layout=args.layout
-            )
-            svg_content = renderer.render(graph)
-            
-            # Determine output path
+            # Determine output path (without extension)
             if args.output:
-                output_path = Path(args.output)
+                output_path = args.output
             elif args.output_dir:
-                output_path = output_dir / f"{path.stem}_flowgraph.svg"
+                output_path = str(output_dir / f"{path.stem}_flowgraph")
             else:
-                output_path = path.with_suffix('.svg')
+                output_path = str(path.with_suffix(''))
             
-            # Write SVG file
-            with open(output_path, 'w') as f:
-                f.write(svg_content)
+            # Render using Graphviz
+            generated_file = renderer.render(
+                flowgraph=flowgraph,
+                output_path=output_path,
+                layout=args.layout,
+                format=args.format
+            )
             
-            print(f"Generated: {output_path}")
+            print(f"Generated: {generated_file}")
             
         except Exception as e:
             print(f"Error processing {filepath}: {e}", file=sys.stderr)
-            import sys
             if sys.stdout.isatty():
                 import traceback
                 traceback.print_exc()
