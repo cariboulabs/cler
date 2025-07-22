@@ -49,9 +49,16 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
                 throw std::invalid_argument("Sample rate is out of range for the selected radio type.");
             }
 
-            if (samp_rate_hz > 4e6 || samp_rate_hz <= 0) {
-                throw std::invalid_argument("samp_rate_hz must be between 1 and 4 Mhz.");
+            if (samp_rate_hz > _radio->GetRxSampleRateMax() || samp_rate_hz < _radio->GetRxSampleRateMin()) {
+                throw std::invalid_argument(
+                    "samp_rate_hz must be between " +
+                    std::to_string(_radio->GetRxSampleRateMin()) + " and " +
+                    std::to_string(_radio->GetRxSampleRateMax()) + " Hz, but got " +
+                    std::to_string(samp_rate_hz)
+                    );
             }
+
+            _max_samples_to_read = _radio->GetNativeMtuSample();
 
             _radio->SetFrequency(freq_hz);
             _radio->SetRxSampleRate(samp_rate_hz);            
@@ -68,7 +75,7 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
         }
 
         cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
-            size_t transferable = out->space();
+            size_t transferable = std::min({out->space(), _max_samples_to_read});
             if (transferable == 0) {
                 return cler::Error::NotEnoughSpace;
             }
@@ -106,4 +113,5 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
 
         private:    
             CaribouLiteRadio* _radio = nullptr;
+            size_t _max_samples_to_read;
 };

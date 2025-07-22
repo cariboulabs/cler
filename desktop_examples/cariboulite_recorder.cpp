@@ -30,7 +30,7 @@ int main() {
     SinkFileBlock<std::complex<float>> sink_file(
         "SinkFile",
         recording_filename,
-        512  // 640 KB buffer
+        64 * 1024
     );
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source_cariboulite, &sink_file.in),
