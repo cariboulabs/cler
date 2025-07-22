@@ -25,19 +25,28 @@ FetchContent_Declare(
 add_library(cler_desktop_blocks INTERFACE)
 add_library(cler::cler_desktop_blocks ALIAS cler_desktop_blocks)
 
-add_subdirectory(gui)
+if (NOT CLER_HEADLESS)
+  add_subdirectory(gui)
+  add_subdirectory(plots)
+else()
+  message(STATUS "Skipping GUI blocks because CLER_HEADLESS is ON")
+endif()
+
 add_subdirectory(ezgmsk_demod)
-add_subdirectory(plots)
 add_subdirectory(udp)
 add_subdirectory(sources)
 
 target_link_libraries(cler_desktop_blocks INTERFACE 
-  cler::blocks_gui
   cler::blocks_ezgmsk_demod
-  cler::blocks_plots
   cler::blocks_udp
   cler::blocks_sources
 )
+
+if (NOT CLER_HEADLESS)
+  target_link_libraries(cler_desktop_blocks INTERFACE 
+    cler::blocks_gui
+    cler::blocks_plots)
+endif()
 
 target_include_directories(cler_desktop_blocks INTERFACE #so people call #include "blocks/..."
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
