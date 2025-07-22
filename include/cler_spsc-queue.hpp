@@ -346,6 +346,8 @@ public:
   }
 
   std::size_t writeN(const T* src, std::size_t count) noexcept(nothrow_v) {
+    static_assert(std::is_trivially_copyable_v<T>, 
+                  "writeN requires trivially copyable types");
     const auto capacity = base_type::capacity_;
     const auto padding  = writer_.paddingCache_;
     auto writeIndex     = writer_.writeIndex_.load(std::memory_order_relaxed);
@@ -375,47 +377,10 @@ public:
     return toWrite;
   }
 
-  std::size_t force_writeN(const T* src, std::size_t count) noexcept(nothrow_v) {
-    const auto capacity = base_type::capacity_;
-    const auto padding  = writer_.paddingCache_;
-    auto writeIndex     = writer_.writeIndex_.load(std::memory_order_relaxed);
-
-    // If we're overwriting unread data, advance reader index
-    auto readIndex = reader_.readIndex_.load(std::memory_order_acquire);
-
-    std::size_t used_space;
-    if (readIndex > writeIndex) {
-      used_space = writeIndex + (capacity - readIndex);
-    } else {
-      used_space = writeIndex - readIndex;
-    }
-
-    if (count > capacity - 1) {
-      // Defensive: never force write more than capacity-1
-      count = capacity - 1;
-    }
-
-    if (count > (capacity - 1 - used_space)) {
-      // Not enough space, so move reader forward to make room
-      std::size_t advance = count - (capacity - 1 - used_space);
-      auto newReadIndex = (readIndex + advance) % capacity;
-      reader_.readIndex_.store(newReadIndex, std::memory_order_release);
-    }
-
-    const std::size_t firstChunk = std::min(count, capacity - writeIndex);
-
-    std::memcpy(&base_type::buffer_[writeIndex + padding], src, firstChunk * sizeof(T));
-
-    if (firstChunk < count) {
-      std::memcpy(&base_type::buffer_[padding], src + firstChunk, (count - firstChunk) * sizeof(T));
-    }
-
-    writer_.writeIndex_.store((writeIndex + count) % capacity, std::memory_order_release);
-
-    return count;
-  }
 
   std::size_t readN(T* dst, std::size_t count) noexcept(nothrow_v) {
+    static_assert(std::is_trivially_copyable_v<T>, 
+                  "readN requires trivially copyable types");
     const auto capacity = base_type::capacity_;
     const auto padding  = base_type::padding;
 
@@ -474,15 +439,15 @@ std::size_t peek_write(T*& ptr1, std::size_t& size1, T*& ptr2, std::size_t& size
   // First chunk: contiguous to end
   std::size_t first_chunk = (readIndexCache > writeIndex)
       ? space  // contiguous, no wrap
-      : capacity - writeIndex;
+      : std::min(space, capacity - writeIndex);
 
   ptr1 = &base_type::buffer_[writeIndex + padding];
   size1 = first_chunk;
 
-  if (readIndexCache <= writeIndex) {
+  if (readIndexCache <= writeIndex && first_chunk < space) {
     // Wrapped: second chunk exists
     ptr2 = &base_type::buffer_[padding];
-    size2 = readIndexCache - 1;
+    size2 = space - first_chunk;
   } else {
     ptr2 = nullptr;
     size2 = 0;
@@ -526,7 +491,7 @@ std::size_t peek_read(const T*& ptr1, std::size_t& size1,  const T*& ptr2, std::
   // First chunk: contiguous
   std::size_t first_chunk = (writeIndexCache >= readIndex)
       ? available   // no wrap
-      : capacity - readIndex;
+      : std::min(available, capacity - readIndex);
 
   ptr1 = &base_type::buffer_[readIndex + padding];
   size1 = first_chunk;

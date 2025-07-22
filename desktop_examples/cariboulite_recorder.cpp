@@ -13,6 +13,7 @@ void handle_sigint(int) {
 int main() {
     const size_t sps = 4'000'000;
     const float freq_hz = 903e6;
+    char recording_filename[] = "recorded_stream.bin";
 
     SourceCaribouliteBlock source_cariboulite(
         "SourceCaribouLite",
@@ -20,8 +21,7 @@ int main() {
         freq_hz,
         static_cast<float>(sps),
         false,
-        40.0f,
-        512  // 640 KB buffer size
+        40.0f
     );
 
     // AFTER the cbl source is created, so it doenst steal our handler
@@ -29,7 +29,7 @@ int main() {
 
     SinkFileBlock<std::complex<float>> sink_file(
         "SinkFile",
-        "recorded_stream.bin",
+        recording_filename,
         512  // 640 KB buffer
     );
     auto flowgraph = cler::make_desktop_flowgraph(
@@ -42,10 +42,11 @@ int main() {
     });
 
 
+    printf("Press Ctrl+C to stop recording...\n");
     while (running) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
     flowgraph.stop();
-
+    printf("Samples saved to %s\n", recording_filename);
     return 0;
 }
