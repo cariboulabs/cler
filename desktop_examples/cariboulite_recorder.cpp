@@ -10,15 +10,7 @@ void handle_sigint(int) {
     running = false;
 }
 
-// Install signal handler at global scope to prevent libcariboulite from crashing ungracefully
-const auto _ = [] {
-    std::signal(SIGINT, handle_sigint);
-    return 0;
-}();
-
 int main() {
-    std::signal(SIGINT, handle_sigint);  // Install signal handler
-
     const size_t sps = 4'000'000;
     const float freq_hz = 903e6;
 
@@ -29,13 +21,16 @@ int main() {
         static_cast<float>(sps),
         false,
         40.0f,
-        640 * 1024  // 640 KB buffer size
+        512  // 640 KB buffer size
     );
+
+    // AFTER the cbl source is created, so it doenst steal our handler
+    std::signal(SIGINT, handle_sigint);
 
     SinkFileBlock<std::complex<float>> sink_file(
         "SinkFile",
         "recorded_stream.bin",
-        640 * 1024  // 640 KB buffer
+        512  // 640 KB buffer
     );
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source_cariboulite, &sink_file.in),
