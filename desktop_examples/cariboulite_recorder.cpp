@@ -15,7 +15,7 @@ int main() {
     const float freq_hz = 903e6;
     char recording_filename[] = "recorded_stream.sc16";
 
-    SourceCaribouliteBlock source_cariboulite(
+    SourceCaribouliteBlock<std::complex<short>> source_cariboulite(
         "SourceCaribouLite",
         CaribouLiteRadio::RadioType::S1G,
         freq_hz,

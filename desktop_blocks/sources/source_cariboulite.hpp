@@ -19,7 +19,11 @@ inline bool detect_cariboulite_board()
     return false;
 }
 
+template <typename T>
 struct SourceCaribouliteBlock : public cler::BlockBase {
+    static_assert(std::is_same_v<T, std::complex<short>> || std::is_same_v<T, std::complex<float>>,
+            "SourceCWBlock only supports std::complex<short> or std::complex<float>");
+
     SourceCaribouliteBlock(const char* name,
         CaribouLiteRadio::RadioType radio_type,
         float freq_hz,
@@ -74,14 +78,14 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             }            
         }
 
-        cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<short>>* out) {
+        cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
             size_t transferable = std::min({out->space(), _max_samples_to_read});
             if (transferable == 0) {
                 return cler::Error::NotEnoughSpace;
             }
 
             size_t sz1, sz2;
-            std::complex<short>* ptr1, *ptr2;
+            T* ptr1, *ptr2;
             out->peek_write(ptr1, sz1, ptr2, sz2);
 
             if (sz1 > transferable) {
