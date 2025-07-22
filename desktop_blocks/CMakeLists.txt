@@ -1,3 +1,12 @@
+add_library(cler_desktop_blocks INTERFACE)
+add_library(cler::cler_desktop_blocks ALIAS cler_desktop_blocks)
+
+target_link_libraries(cler_desktop_blocks INTERFACE cler::cler)
+
+target_include_directories(cler_desktop_blocks INTERFACE #so people call #include "blocks/..."
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
+)
+
 if (CLER_BUILD_BLOCKS_LIQUID)
   include(FetchContent)
   set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -14,9 +23,6 @@ if (CLER_BUILD_BLOCKS_LIQUID)
       SYSTEM ${liquid_SOURCE_DIR}/scripts #for config.h
   )
 endif()
-
-add_library(cler_desktop_blocks INTERFACE)
-add_library(cler::cler_desktop_blocks ALIAS cler_desktop_blocks)
 
 if (CLER_BUILD_BLOCKS_GUI)
   add_subdirectory(gui)
@@ -55,7 +61,3 @@ if (CLER_BUILD_BLOCKS_LIQUID AND CLER_BUILD_BLOCKS_GUI)
     cler::blocks_plots
   )
 endif()
-
-target_include_directories(cler_desktop_blocks INTERFACE #so people call #include "blocks/..."
-  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
-)
