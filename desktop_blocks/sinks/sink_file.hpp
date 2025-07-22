@@ -24,6 +24,8 @@ struct SinkFileBlock : public cler::BlockBase {
         if (!_file.is_open()) {
             throw std::runtime_error("Failed to open file for writing: " + std::string(filename));
         }
+
+        _buffer_size = buffer_size;
     }
 
     ~SinkFileBlock() {
@@ -46,7 +48,6 @@ struct SinkFileBlock : public cler::BlockBase {
             _file.flush();
             return cler::Error::NotEnoughSamples;
         }
-
         if (sz1 > 0 && ptr1) {
             _file.write(reinterpret_cast<const char*>(ptr1), sz1 * sizeof(T));
             in.commit_read(sz1);

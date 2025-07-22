@@ -64,7 +64,7 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             _radio->SetRxSampleRate(samp_rate_hz);            
             _radio->SetAgc(agc);
             if (!agc) {_radio->SetRxGain(rx_gain_db);}
-            
+                
             _radio->StartReceiving();
         }
 
@@ -74,15 +74,22 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             }            
         }
 
-        cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
+        cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<short>>* out) {
             size_t transferable = std::min({out->space(), _max_samples_to_read});
             if (transferable == 0) {
                 return cler::Error::NotEnoughSpace;
             }
 
             size_t sz1, sz2;
-            std::complex<float>* ptr1, *ptr2;
+            std::complex<short>* ptr1, *ptr2;
             out->peek_write(ptr1, sz1, ptr2, sz2);
+
+            if (sz1 > transferable) {
+                sz1 = transferable;
+            }
+            if (sz2 > transferable - sz1) {
+                sz2 = transferable - sz1;
+            }
 
             size_t total_written = 0;
             if (sz1 > 0 && ptr1) {
