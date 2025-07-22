@@ -62,7 +62,7 @@ struct SourceHackRFBlock : public cler::BlockBase {
         if (out_space == 0) {
             return cler::Error::NotEnoughSpace;
         }
-        size_t transferable = std::min(iq_size, out_space, _buffer_size);
+        size_t transferable = std::min({iq_size, out_space, _buffer_size});
 
         size_t n = _iq.readN(_tmp, transferable);
         out->writeN(_tmp, n);

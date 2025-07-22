@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.16)
 project(cler
         VERSION 0.1.0
         LANGUAGES CXX C
@@ -53,16 +53,20 @@ target_compile_options(cler INTERFACE
 
 add_subdirectory(logger)
 
-option(CLER_HEADLESS "Build CLER without gui" OFF)
-
 option(CLER_BUILD_BLOCKS "Build CLER blocks" ON)
 if (CLER_BUILD_BLOCKS)
+  option(CLER_BUILD_BLOCKS_GUI "Build CLER blocks with gui" ON)
+  option(CLER_BUILD_BLOCKS_LIQUID "Build CLER blocks that use liquid-dsp" ON)
   add_subdirectory(desktop_blocks)
 endif()
 
 option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
-if(CLER_BUILD_EXAMPLES AND NOT CLER_HEADLESS)
+if(CLER_BUILD_EXAMPLES)
   add_subdirectory(desktop_examples)
   add_subdirectory(embedded_examples)
-  add_subdirectory(performance)
+endif()
+
+option(CLER_BUILD_PERFORMANCE_TESTS "Build CLER performance tests" OFF)
+if(CLER_BUILD_PERFORMANCE_TESTS)
+  add_subdirectory(performance_tests)
 endif()
