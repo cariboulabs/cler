@@ -25,20 +25,22 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
         float freq_hz,
         float samp_rate_hz,
         bool agc,
-        float rx_gain_db = 0.0f,
-        size_t buffer_size = cler::DEFAULT_BUFFER_SIZE
-        ) : cler::BlockBase(name), _buffer_size(buffer_size) {
+        float rx_gain_db = 0.0f
+        ) : cler::BlockBase(name) {
             if (!detect_cariboulite_board()) {
                 throw std::runtime_error("CaribouLite board not detected!");
             }
             
             CaribouLite& cl = CaribouLite::GetInstance(false);
             _radio = cl.GetRadioChannel(radio_type);
+            if (!_radio) {
+                throw std::runtime_error("Failed to get radio channel for selected radio type");
+            }
 
             std::vector<CaribouLiteFreqRange> ranges = _radio->GetFrequencyRange();
             bool valid_freq = false;
             for (const auto& range : ranges) {
-                if (range.fmin() <= freq_hz && range.fmax() >= samp_rate_hz) {
+                if (range.fmin() <= freq_hz && range.fmax() >= freq_hz) {
                     valid_freq = true;
                     break;
                 }
@@ -55,8 +57,6 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             _radio->SetRxSampleRate(samp_rate_hz);            
             _radio->SetAgc(agc);
             if (!agc) {_radio->SetRxGain(rx_gain_db);}
-
-            _tmp = new std::complex<float>[buffer_size];
             
             _radio->StartReceiving();
         }
@@ -64,29 +64,46 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
         ~SourceCaribouliteBlock() {
             if (_radio) {
                 _radio->StopReceiving();
-            }
-            if (_tmp) {
-                delete[] _tmp;
-            }
-            
+            }            
         }
 
         cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
-            size_t transferable = std::min(out->space(), _buffer_size);
+            size_t transferable = out->space();
             if (transferable == 0) {
                 return cler::Error::NotEnoughSpace;
             }
-            int ret = _radio->ReadSamples(_tmp, transferable);
-            if (ret < 0) {
-                return cler::Error::ProcedureError; 
-            }
-            out->writeN(_tmp, ret);
+
+            size_t sz1, sz2;
+            std::complex<float>* ptr1, *ptr2;
+            out->peek_write(ptr1, sz1, ptr2, sz2);
+
+            size_t total_written = 0;
+            if (sz1 > 0 && ptr1) {
+                int ret = _radio->ReadSamples(ptr1, sz1);
+                if (ret < 0) {
+                    return cler::Error::ProcedureError; 
+                }    
+                 total_written += static_cast<size_t>(ret); 
+            };
+
+            //we have space, but cariboulabs doesnt have samples to give
+            if (static_cast<size_t>(total_written) < sz1) {
+                out->commit_write(total_written);
+                return cler::Empty{};
+            };
+
+            if (sz2 > 0 && ptr2) {
+                int ret = _radio->ReadSamples(ptr2, sz2);
+                if (ret < 0) {
+                    return cler::Error::ProcedureError; 
+                }    
+                 total_written += static_cast<size_t>(ret); 
+            };
+
+            out->commit_write(total_written);
             return cler::Empty{};
         }
 
         private:    
             CaribouLiteRadio* _radio = nullptr;
-            std::complex<float>* _tmp = nullptr;
-            size_t _buffer_size;
-
 };
