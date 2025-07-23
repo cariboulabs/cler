@@ -39,8 +39,10 @@ class ClerValidator:
             'rules': {
                 'missing_runner': {'severity': 'error', 'enabled': True},
                 'invalid_connection': {'severity': 'error', 'enabled': True},
-                'channel_type_mismatch': {'severity': 'error', 'enabled': True},
-                'blockrunner_order': {'severity': 'error', 'enabled': True}
+                'blockrunner_order': {'severity': 'error', 'enabled': True},
+                'multiple_connections': {'severity': 'error', 'enabled': True},
+                'unconnected_blocks': {'severity': 'error', 'enabled': True},
+                'duplicate_display_names': {'severity': 'warning', 'enabled': True}
             }
         }
         

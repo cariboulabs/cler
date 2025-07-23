@@ -15,11 +15,9 @@ class Block:
     column: int = 0  # Column position where block is declared
     inputs: List[str] = field(default_factory=list)  # Input channel names (e.g., ["in[0]", "in[1]"])
     outputs: List[str] = field(default_factory=list)  # Output channel names (e.g., ["out"])
-    has_runner: bool = False  # Legacy field, not used by AST parser
     in_flowgraph: bool = False  # True if block is referenced in flowgraph BlockRunner calls
     template_params: Optional[str] = None  # Template parameters (e.g., "float" from "Block<float>")
     constructor_args: List[str] = field(default_factory=list)  # Constructor arguments list
-    channel_types: Dict[str, str] = field(default_factory=dict)  # Channel name -> data type mapping
     
     def is_source(self) -> bool:
         """Check if this block is a source (no input channels)"""

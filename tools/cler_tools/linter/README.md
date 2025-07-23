@@ -8,7 +8,10 @@ The Cler linter analyzes C++ flowgraph code and validates:
 - Block declarations and BlockRunner usage
 - Channel connections between blocks
 - Missing blocks in flowgraph definitions
-- Channel type compatibility
+- BlockRunner argument order
+- Multiple connections to same input channel
+- Unconnected blocks (sources without outputs, sinks without inputs)
+- Duplicate display names (warnings)
 - Streamlined vs flowgraph mode detection
 
 ## Quick Start
@@ -97,16 +100,34 @@ cler::BlockRunner(&source, &undefined_block.in)  // ← Block doesn't exist
 cler::BlockRunner(&source, &sink.wrong_channel)  // ← Channel validation
 ```
 
-### ChannelTypeMismatchRule
-Checks type compatibility between connected channels:
+### BlockRunnerOrderRule
+Detects incorrect BlockRunner argument order:
 ```cpp
-SourceCWBlock<float> source(...);
-SinkFileBlock<std::complex<float>> sink(...);
-// ← float → complex<float> mismatch
+cler::BlockRunner(&sink.in, &adder)          // ← ERROR: channels before block
+// Should be:
+cler::BlockRunner(&adder, &sink.in)          // ← Block first, then channels
 ```
 
-### BlockRunnerOrderRule
-Validates BlockRunner construction patterns (extensible for future checks)
+### MultipleConnectionsRule
+Prevents multiple connections to same input channel:
+```cpp
+cler::BlockRunner(&source1, &sink.in),
+cler::BlockRunner(&source2, &sink.in),  // ← ERROR: sink.in already connected  
+```
+
+### UnconnectedBlocksRule
+Detects blocks added to flowgraph but not properly connected:
+```cpp
+cler::BlockRunner(&adder),        // ← ERROR: adder has no outputs connected
+cler::BlockRunner(&sink)          // ← ERROR: sink has no inputs connected
+```
+
+### DuplicateDisplayNamesRule
+Warns about blocks with duplicate display names:
+```cpp
+SourceCWBlock<float> source1("Source", ...);  
+SourceCWBlock<float> source2("Source", ...);  // ← WARNING: duplicate "Source"
+```
 
 ## Configuration
 
@@ -117,7 +138,16 @@ rules:
   missing_runner:
     severity: error
     enabled: true
-  channel_type_mismatch:
+  blockrunner_order:
+    severity: error
+    enabled: true
+  multiple_connections:
+    severity: error
+    enabled: true
+  unconnected_blocks:
+    severity: error
+    enabled: true
+  duplicate_display_names:
     severity: warning
     enabled: true
   invalid_connection:
@@ -141,7 +171,9 @@ bash cler_tools/linter/tests/run_tests.sh
 - Streamlined mode detection
 - Template type parsing
 - Variadic output handling
-- Error cases (missing runners, type mismatches)
+- Error cases (missing runners, invalid connections, wrong argument order)
+- Connection validation (multiple connections, unconnected blocks)
+- Warning cases (duplicate display names)
 
 ## Extending the Linter
 

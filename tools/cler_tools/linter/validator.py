@@ -163,65 +163,6 @@ class InvalidConnectionRule(ValidationRule):
         return errors
 
 
-class ChannelTypeMismatchRule(ValidationRule):
-    """Check for channel type mismatches between connected blocks"""
-    
-    def get_rule_name(self) -> str:
-        return "channel_type_mismatch"
-    
-    def validate(self, flowgraph: FlowGraph, file_path: str) -> List[ValidationError]:
-        errors = []
-        
-        for conn in flowgraph.connections:
-            # Skip if blocks don't exist (handled by other rules)
-            if (conn.source_block not in flowgraph.blocks or 
-                conn.target_block not in flowgraph.blocks):
-                continue
-            
-            source_block = flowgraph.blocks[conn.source_block]
-            target_block = flowgraph.blocks[conn.target_block]
-            
-            # Get channel types if available
-            source_type = source_block.channel_types.get(conn.source_channel)
-            target_type = target_block.channel_types.get(conn.target_channel)
-            
-            if source_type and target_type and source_type != target_type:
-                if not self._are_compatible_types(source_type, target_type):
-                    errors.append(self.create_error(
-                        f"Type mismatch: {conn.source_block}.{conn.source_channel} "
-                        f"({source_type}) → {conn.target_block}.{conn.target_channel} ({target_type})",
-                        file_path,
-                        target_block.line,
-                        target_block.column,
-                        f"Change channel types to match or add appropriate conversion"
-                    ))
-        
-        return errors
-    
-    def _are_compatible_types(self, source_type: str, target_type: str) -> bool:
-        """Check if two channel types are compatible"""
-        # Normalize type strings
-        source_normalized = source_type.strip().replace(' ', '')
-        target_normalized = target_type.strip().replace(' ', '')
-        
-        # Exact match
-        if source_normalized == target_normalized:
-            return True
-        
-        # Add more sophisticated type compatibility checking here
-        # For example: float and double might be compatible
-        compatible_pairs = [
-            ('float', 'double'),
-            ('double', 'float'),
-        ]
-        
-        for t1, t2 in compatible_pairs:
-            if ((source_normalized == t1 and target_normalized == t2) or
-                (source_normalized == t2 and target_normalized == t1)):
-                return True
-        
-        return False
-
 
 class BlockRunnerOrderRule(ValidationRule):
     """Check that BlockRunners are constructed with block first, then channels"""
@@ -232,9 +173,213 @@ class BlockRunnerOrderRule(ValidationRule):
     def validate(self, flowgraph: FlowGraph, file_path: str) -> List[ValidationError]:
         errors = []
         
-        # This rule would need to analyze the raw C++ text to check BlockRunner construction
-        # For now, we'll implement basic checks based on the parsed structure
-        # More sophisticated parsing could be added later
+        # Read the file content for text-based analysis
+        try:
+            with open(file_path, 'r') as f:
+                content = f.read()
+                lines = content.split('\n')
+        except Exception:
+            return errors
+        
+        # Pattern to match BlockRunner calls
+        import re
+        # Match BlockRunner or cler::BlockRunner with arguments
+        blockrunner_pattern = re.compile(
+            r'(?:cler::)?BlockRunner\s*\(\s*([^)]+)\s*\)',
+            re.MULTILINE | re.DOTALL
+        )
+        
+        for match in blockrunner_pattern.finditer(content):
+            args_str = match.group(1)
+            # Find line number
+            line_num = content[:match.start()].count('\n') + 1
+            
+            # Parse arguments (handle multi-line)
+            args = []
+            current_arg = ''
+            paren_depth = 0
+            bracket_depth = 0
+            
+            for char in args_str:
+                if char == '(' and not (paren_depth == 0 and bracket_depth == 0):
+                    paren_depth += 1
+                elif char == ')' and paren_depth > 0:
+                    paren_depth -= 1
+                elif char == '[':
+                    bracket_depth += 1
+                elif char == ']':
+                    bracket_depth -= 1
+                elif char == ',' and paren_depth == 0 and bracket_depth == 0:
+                    args.append(current_arg.strip())
+                    current_arg = ''
+                    continue
+                
+                current_arg += char
+            
+            # Don't forget the last argument
+            if current_arg.strip():
+                args.append(current_arg.strip())
+            
+            # Check if first argument looks like a channel (contains '.')
+            if args and len(args) > 0:
+                first_arg = args[0].strip()
+                # Remove leading & if present
+                if first_arg.startswith('&'):
+                    first_arg = first_arg[1:]
+                
+                # Check if it looks like a channel access (contains '.')
+                if '.' in first_arg and not first_arg.endswith(')'):
+                    # This looks like a channel as first argument, which is wrong
+                    errors.append(self.create_error(
+                        f"BlockRunner arguments in wrong order: channel '{first_arg}' appears before block pointer",
+                        file_path,
+                        line_num,
+                        0,
+                        "BlockRunner expects block pointer first, then channels: BlockRunner(&block, &other_block.channel)"
+                    ))
+        
+        return errors
+
+
+class MultipleConnectionsRule(ValidationRule):
+    """Check for multiple connections to the same input channel"""
+    
+    def get_rule_name(self) -> str:
+        return "multiple_connections"
+    
+    def validate(self, flowgraph: FlowGraph, file_path: str) -> List[ValidationError]:
+        errors = []
+        
+        # Track which input channels have been connected
+        connected_inputs = set()
+        
+        for conn in flowgraph.connections:
+            # Create a unique key for the input channel
+            input_key = f"{conn.target_block}.{conn.target_channel}"
+            if conn.channel_index is not None:
+                input_key += f"[{conn.channel_index}]"
+            
+            if input_key in connected_inputs:
+                errors.append(self.create_error(
+                    f"Multiple connections to input channel '{input_key}'",
+                    file_path,
+                    0,  # We don't have line info for connections
+                    0,
+                    "Each input channel can only have one connection"
+                ))
+            else:
+                connected_inputs.add(input_key)
+        
+        return errors
+
+
+class DuplicateDisplayNamesRule(ValidationRule):
+    """Warn about blocks with duplicate display names (constructor argument)"""
+    
+    def get_rule_name(self) -> str:
+        return "duplicate_display_names"
+    
+    def validate(self, flowgraph: FlowGraph, file_path: str) -> List[ValidationError]:
+        errors = []
+        
+        # Track display names from constructor args
+        display_names = {}
+        
+        for block_name, block in flowgraph.blocks.items():
+            # The first constructor argument is typically the display name
+            if block.constructor_args and len(block.constructor_args) > 0:
+                display_name = block.constructor_args[0].strip('"\'')
+                
+                if display_name in display_names:
+                    # This is a warning, not an error
+                    errors.append(ValidationError(
+                        type=self.get_rule_name(),
+                        message=f"Duplicate display name '{display_name}' used by blocks '{display_names[display_name]}' and '{block_name}'",
+                        file=file_path,
+                        line=block.line,
+                        column=block.column,
+                        severity='warning',
+                        suggestion="Consider using unique display names for easier debugging"
+                    ))
+                else:
+                    display_names[display_name] = block_name
+        
+        return errors
+
+
+class UnconnectedBlocksRule(ValidationRule):
+    """Check for blocks that are in flowgraph but not properly connected"""
+    
+    def get_rule_name(self) -> str:
+        return "unconnected_blocks"
+    
+    def validate(self, flowgraph: FlowGraph, file_path: str) -> List[ValidationError]:
+        errors = []
+        
+        # Only check blocks that are in the flowgraph
+        for block_name, block in flowgraph.blocks.items():
+            if not block.in_flowgraph:
+                continue
+            
+            # Check if block has any connections
+            has_input_connection = any(
+                conn.target_block == block_name 
+                for conn in flowgraph.connections
+            )
+            has_output_connection = any(
+                conn.source_block == block_name 
+                for conn in flowgraph.connections
+            )
+            
+            # Use naming conventions to determine block type
+            block_type_lower = block.type.lower()
+            
+            # Sources typically have "source" in their name
+            if 'source' in block_type_lower and not has_output_connection:
+                errors.append(self.create_error(
+                    f"Source block '{block_name}' has no output connections",
+                    file_path,
+                    block.line,
+                    block.column,
+                    "Connect the source output to another block"
+                ))
+            
+            # Sinks typically have "sink" in their name
+            elif 'sink' in block_type_lower and not has_input_connection:
+                errors.append(self.create_error(
+                    f"Sink block '{block_name}' has no input connections",
+                    file_path,
+                    block.line,
+                    block.column,
+                    "Connect an output to this sink's input"
+                ))
+            
+            # For other blocks, if they have both input and output channels referenced
+            # in connections elsewhere, but this instance is not connected
+            elif not ('source' in block_type_lower or 'sink' in block_type_lower):
+                # Check if this type of block typically has inputs/outputs based on other instances
+                other_blocks_of_type = [b for n, b in flowgraph.blocks.items() 
+                                       if b.type == block.type and n != block_name]
+                
+                typically_has_inputs = any(b.inputs for b in other_blocks_of_type)
+                typically_has_outputs = any(b.outputs for b in other_blocks_of_type)
+                
+                if typically_has_inputs and not has_input_connection:
+                    errors.append(self.create_error(
+                        f"Block '{block_name}' has no input connections",
+                        file_path,
+                        block.line,
+                        block.column,
+                        "Connect outputs from other blocks to this block's inputs"
+                    ))
+                if typically_has_outputs and not has_output_connection:
+                    errors.append(self.create_error(
+                        f"Block '{block_name}' has no output connections",
+                        file_path,
+                        block.line,
+                        block.column,
+                        "Connect this block's outputs to other blocks"
+                    ))
         
         return errors
 
@@ -247,8 +392,10 @@ class RuleEngine:
         self.rule_registry: Dict[str, Type[ValidationRule]] = {
             'missing_runner': MissingRunnerRule,
             'invalid_connection': InvalidConnectionRule,
-            'channel_type_mismatch': ChannelTypeMismatchRule,
             'blockrunner_order': BlockRunnerOrderRule,
+            'multiple_connections': MultipleConnectionsRule,
+            'unconnected_blocks': UnconnectedBlocksRule,
+            'duplicate_display_names': DuplicateDisplayNamesRule,
         }
     
     def add_rule(self, rule: ValidationRule):

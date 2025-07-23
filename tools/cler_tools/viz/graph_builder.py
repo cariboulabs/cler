@@ -53,9 +53,21 @@ class GraphBuilder:
         
         # Create nodes from blocks
         for block_name, block in flowgraph.blocks.items():
+            # Create label with template parameters if available
+            label_parts = [block_name]
+            
+            # Extract base type name (remove "Block" suffix if present)
+            base_type = block.type
+            if base_type.endswith('Block'):
+                base_type = base_type[:-5]
+            
+            # Add template parameters if available
+            if block.template_params:
+                label_parts.append(f"<{block.template_params}>")
+            
             node = Node(
                 id=block_name,
-                label=f"{block_name}\\n({block.type})",
+                label="\\n".join(label_parts),
                 type=block.type,
                 inputs=block.inputs.copy(),
                 outputs=block.outputs.copy()

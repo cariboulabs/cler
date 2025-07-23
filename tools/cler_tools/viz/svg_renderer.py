@@ -23,7 +23,7 @@ class SVGRenderer:
         
         # Color scheme
         self.colors = {
-            'node_fill': '#f0f4f8',
+            'node_fill': 'none',  # No fill for blocks
             'node_stroke': '#2d3748',
             'edge_stroke': '#4a5568',
             'text': '#1a202c',

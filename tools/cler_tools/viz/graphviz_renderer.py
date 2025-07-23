@@ -12,31 +12,7 @@ class GraphvizRenderer:
     """Renders flowgraphs using Graphviz"""
     
     def __init__(self):
-        # Color scheme by data type
-        self.datatype_colors = {
-            'float': 'lightblue',
-            'double': 'lightgreen',  
-            'int': 'lightyellow',
-            'complex<float>': 'lavender',
-            'complex<double>': 'lightpink',
-            'std::complex<float>': 'lavender',
-            'std::complex<double>': 'lightpink',
-            'uint8_t': 'wheat',
-            'uint16_t': 'wheat',
-            'uint32_t': 'wheat',
-            'int8_t': 'mistyrose',
-            'int16_t': 'mistyrose',
-            'int32_t': 'mistyrose',
-            'unknown': 'lightgray'
-        }
-        
-        # Colors for custom/unknown types
-        self.custom_colors = [
-            'lightsalmon', 'lightsteelblue', 'lightseagreen', 'lightcoral',
-            'lightskyblue', 'lightgoldenrod', 'lightcyan', 'lightpink',
-            'lightblue', 'lightgreen', 'lightyellow', 'lavenderblush'
-        ]
-        self.custom_type_assignments = {}  # Track custom type colors
+        pass  # No color configuration needed since we're not using fills
         
     def render(self, flowgraph: FlowGraph, output_path: str, 
                layout: str = 'dot', format: str = 'svg') -> str:
@@ -76,7 +52,7 @@ class GraphvizRenderer:
         
         # Set graph attributes
         dot.attr(rankdir='LR')  # Left to right layout
-        dot.attr('node', shape='box', style='rounded,filled', fontname='Arial')
+        dot.attr('node', shape='box', style='rounded', fontname='Arial')  # Remove 'filled' from default
         dot.attr('edge', fontname='Arial', fontsize='10')
         dot.attr(layout=layout)
         
@@ -91,36 +67,27 @@ class GraphvizRenderer:
         for conn in flowgraph.connections:
             self._add_connection_edge(dot, conn)
         
-        # Add legend for data types
-        self._add_legend(dot, flowgraph)
+        # Legend removed as per user request
         
         return dot
     
     def _add_block_node(self, dot: graphviz.Digraph, block: Block):
         """Add a block as a node to the DOT graph"""
-        # Extract data type from template parameters
-        data_type = self._extract_data_type(block)
-        
-        # Create node label with type and data type
+        # Create node label with name and template parameters
         label_parts = [f"<B>{block.name}</B>"]
-        label_parts.append(f"<FONT POINT-SIZE='10'>{block.type}</FONT>")
         
-        # Add data type if available
-        if data_type and data_type != 'unknown':
-            escaped_type = data_type.replace('<', '&lt;').replace('>', '&gt;')
+        # Add template parameters if available
+        if block.template_params:
+            escaped_type = block.template_params.replace('<', '&lt;').replace('>', '&gt;')
             label_parts.append(f"<FONT POINT-SIZE='9' COLOR='gray30'>&lt;{escaped_type}&gt;</FONT>")
         
         label = '<' + '<BR/>'.join(label_parts) + '>'
         
-        # Get color based on data type
-        color = self._get_color_for_type(data_type)
-        
-        # Add node to graph
+        # Add node to graph with no fill
         dot.node(
             block.name,
             label=label,
-            fillcolor=color,
-            tooltip=f"{block.type}<{data_type}> at line {block.line}"
+            tooltip=f"{block.type} at line {block.line}"
         )
     
     def _add_connection_edge(self, dot: graphviz.Digraph, conn: Connection):
@@ -146,69 +113,4 @@ class GraphvizRenderer:
         # Add edge to graph
         dot.edge(conn.source_block, conn.target_block, **edge_attrs)
     
-    def _extract_data_type(self, block: Block) -> str:
-        """Extract the primary data type from block template parameters"""
-        if not block.template_params:
-            return 'unknown'
-        
-        # Clean up the template parameter string
-        template_str = block.template_params.strip()
-        
-        # Handle common cases
-        if template_str in self.datatype_colors:
-            return template_str
-        
-        # Handle complex template parameters like "std::complex<float>"
-        # Take the first/main template parameter
-        if ',' in template_str:
-            template_str = template_str.split(',')[0].strip()
-        
-        return template_str if template_str else 'unknown'
     
-    def _get_color_for_type(self, data_type: str) -> str:
-        """Get color for data type, assigning new colors for custom types"""
-        # Check if it's a known type
-        if data_type in self.datatype_colors:
-            return self.datatype_colors[data_type]
-        
-        # Check if we've already assigned a color to this custom type
-        if data_type in self.custom_type_assignments:
-            return self.custom_type_assignments[data_type]
-        
-        # Assign a new color for this custom type
-        if len(self.custom_type_assignments) < len(self.custom_colors):
-            color = self.custom_colors[len(self.custom_type_assignments)]
-            self.custom_type_assignments[data_type] = color
-            return color
-        
-        # Fallback to unknown color if we run out of custom colors
-        return self.datatype_colors['unknown']
-    
-    def _add_legend(self, dot: graphviz.Digraph, flowgraph: FlowGraph):
-        """Add a legend showing data type colors"""
-        # Collect all data types used in this flowgraph
-        used_types = set()
-        for block in flowgraph.blocks.values():
-            if block.in_flowgraph:
-                data_type = self._extract_data_type(block)
-                if data_type != 'unknown':
-                    used_types.add(data_type)
-        
-        if not used_types:
-            return  # No legend needed if no types detected
-        
-        # Create legend as a subgraph
-        with dot.subgraph(name='cluster_legend') as legend:
-            legend.attr(label='Data Types', style='rounded', color='gray')
-            legend.attr('node', shape='box', style='filled', fontsize='10')
-            
-            # Add legend entries for used types only
-            for i, dtype in enumerate(sorted(used_types)):
-                color = self._get_color_for_type(dtype)
-                escaped_type = dtype.replace('<', '&lt;').replace('>', '&gt;')
-                legend.node(
-                    f'legend_{i}',
-                    label=f'&lt;{escaped_type}&gt;',
-                    fillcolor=color,
-                    fontname='monospace'
-                )

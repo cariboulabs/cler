@@ -87,7 +87,8 @@ def main():
             elif args.output_dir:
                 output_path = str(output_dir / f"{path.stem}_flowgraph")
             else:
-                output_path = str(path.with_suffix(''))
+                # Default to current directory with filename
+                output_path = f"{path.stem}_flowgraph"
             
             # Render using Graphviz
             generated_file = renderer.render(
