@@ -112,8 +112,8 @@ struct TestResult {
     }
 };
 
-TestResult run_legacy_test(size_t samples) {
-    std::cout << "Running LEGACY test..." << std::flush;
+TestResult run_baseline_test(size_t samples) {
+    std::cout << "Running BASELINE test..." << std::flush;
     
     SourceBlock source("Source");
     CopyBlock stage0("Stage0");
@@ -146,7 +146,7 @@ TestResult run_legacy_test(size_t samples) {
     std::cout << " DONE" << std::endl;
     
     return {
-        "Legacy (ThreadPerBlock)",
+        "Baseline (ThreadPerBlock)",
         sink.get_throughput(),
         duration,
         samples
@@ -199,15 +199,15 @@ int main() {
     constexpr size_t SAMPLES = 256'000'000;
     
     std::cout << "========================================" << std::endl;
-    std::cout << "Enhanced vs Legacy Performance Test" << std::endl;
+    std::cout << "Cler Performance Features Test" << std::endl;
     std::cout << "Pipeline: Source -> 4x Copy -> Sink" << std::endl;
     std::cout << "Samples: " << SAMPLES << std::endl;
     std::cout << "========================================" << std::endl;
     
     std::vector<TestResult> results;
     
-    // Test 1: Legacy ThreadPerBlock
-    results.push_back(run_legacy_test(SAMPLES));
+    // Test 1: Baseline ThreadPerBlock
+    results.push_back(run_baseline_test(SAMPLES));
     
     // Test 2: Enhanced FixedThreadPool (conservative)  
     auto conservative_config = cler::flowgraph_config::embedded_optimized();
@@ -247,7 +247,7 @@ int main() {
     // Calculate improvements vs baseline
     if (results.size() >= 2) {
         double baseline = results[0].throughput;
-        std::cout << "Performance Improvements vs Legacy:" << std::endl;
+        std::cout << "Performance Improvements vs Baseline:" << std::endl;
         for (size_t i = 1; i < results.size(); ++i) {
             double improvement = ((results[i].throughput - baseline) / baseline) * 100.0;
             std::cout << "  " << results[i].name << ": " 

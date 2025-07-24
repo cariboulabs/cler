@@ -174,7 +174,7 @@ namespace cler {
     class FlowGraph {
     public:
         static constexpr std::size_t _N = sizeof...(BlockRunners);
-        typedef void (*OnCrashCallback)(void* context);
+        typedef void (*OnErrTerminateCallback)(void* context);
 
         FlowGraph(BlockRunners... runners)
             : _runners(std::make_tuple(std::forward<BlockRunners>(std::move(runners))...)) {}
@@ -186,13 +186,13 @@ namespace cler {
         FlowGraph& operator=(const FlowGraph&) = delete;
         FlowGraph& operator=(FlowGraph&&) = delete;
 
-        void set_on_crash_cb(OnCrashCallback cb, void* context) {
-            _on_crash_cb = cb;
-            _on_crash_context = context;
+        void set_on_err_terminate_cb(OnErrTerminateCallback cb, void* context) {
+            _on_err_terminate_cb = cb;
+            _on_err_terminate_context = context;
         }
 
-        OnCrashCallback on_crash_cb() const { return _on_crash_cb; }
-        void* on_crash_context() const { return _on_crash_context; }
+        OnErrTerminateCallback on_err_terminate_cb() const { return _on_err_terminate_cb; }
+        void* on_err_terminate_context() const { return _on_err_terminate_context; }
 
         void run(const FlowGraphConfig& config = FlowGraphConfig{}) {
             _config = config;
@@ -200,7 +200,7 @@ namespace cler {
             
             switch (config.scheduler) {
                 case SchedulerType::ThreadPerBlock:
-                    run_thread_per_block();
+                    run_thread_per_block(config);
                     break;
                     
                 case SchedulerType::FixedThreadPool:
@@ -228,12 +228,9 @@ namespace cler {
         const std::array<BlockExecutionStats, _N>& stats() const { return _stats; }
 
     private:
-        void run_thread_per_block() {
-            launch_thread_per_block_helper(std::make_index_sequence<_N>{});
-        }
-        
-        template<std::size_t... Is>
-        void launch_thread_per_block_helper(std::index_sequence<Is...>) {
+        void run_thread_per_block(const FlowGraphConfig& config) {
+            // Launch one thread per block (original behavior)
+            auto launch_helper = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
             ((_tasks[Is] = TaskPolicy::create_task([this]() {
                 auto& runner = std::get<Is>(_runners);
                 auto& stats  = _stats[Is];
@@ -265,8 +262,8 @@ namespace cler {
 
                         if (err > Error::TERMINATE_FLOWGRAPH) {
                             _stop_flag = true;
-                            if (_on_crash_cb) {
-                                _on_crash_cb(_on_crash_context);
+                            if (_on_err_terminate_cb) {
+                                _on_err_terminate_cb(_on_err_terminate_context);
                             }
                             return;
                         }
@@ -314,6 +311,8 @@ namespace cler {
                 stats.final_adaptive_sleep_us = _config.adaptive_sleep ? adaptive_sleep_us : 0.0;
                 stats.total_runtime_s = total_runtime_s.count();
             })), ...);
+            };
+            launch_helper(std::make_index_sequence<_N>{});
         }
 
         std::tuple<BlockRunners...> _runners;
@@ -321,8 +320,8 @@ namespace cler {
         std::atomic<bool> _stop_flag = false;
         FlowGraphConfig _config;
         std::array<BlockExecutionStats, _N> _stats;
-        OnCrashCallback _on_crash_cb = nullptr;
-        void* _on_crash_context = nullptr;
+        OnErrTerminateCallback _on_err_terminate_cb = nullptr;
+        void* _on_err_terminate_context = nullptr;
         
         // Adaptive Load Balancer
         template<size_t MaxBlocks = 32, size_t MaxWorkers = 8>
@@ -479,6 +478,9 @@ namespace cler {
             size_t num_workers = config.num_workers;
             assert(num_workers >= 2 && "AdaptiveLoadBalancing requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
             
+            // Adaptive sleep is not compatible with load balancing (different sleep patterns)
+            assert(!config.adaptive_sleep && "AdaptiveLoadBalancing does not support adaptive_sleep. Use ThreadPerBlock scheduler for adaptive sleep.");
+            
             // Initialize load balancer
             load_balancer.initialize(_N, num_workers);
             
@@ -524,12 +526,8 @@ namespace cler {
                 }
                 
                 if (!did_work) {
-                    // No work available, yield or sleep
-                    if (_config.adaptive_sleep) {
-                        TaskPolicy::sleep_us(100);  // Brief sleep
-                    } else {
-                        TaskPolicy::yield();
-                    }
+                    // No work available, yield to other workers
+                    TaskPolicy::yield();
                 }
                 
                 iteration_count++;
@@ -552,11 +550,14 @@ namespace cler {
             size_t num_workers = config.num_workers;
             assert(num_workers >= 2 && "FixedThreadPool requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
             
+            // Adaptive sleep is not compatible with thread pooling (different sleep patterns)
+            assert(!config.adaptive_sleep && "FixedThreadPool does not support adaptive_sleep. Use ThreadPerBlock scheduler for adaptive sleep.");
+            
             // For fixed thread pool: distribute blocks round-robin across workers
             // This is a simplified implementation - real thread pool would be more sophisticated
             if (num_workers >= _N) {
                 // More workers than blocks - use thread-per-block (current behavior)
-                run_thread_per_block();
+                run_thread_per_block(config);
             } else {
                 // Fewer workers than blocks - use shared worker implementation
                 launch_shared_workers(num_workers, config);
@@ -590,12 +591,8 @@ namespace cler {
                 }
                 
                 if (!did_work) {
-                    // No work available, yield or sleep
-                    if (_config.adaptive_sleep) {
-                        TaskPolicy::sleep_us(100);  // Brief sleep
-                    } else {
-                        TaskPolicy::yield();
-                    }
+                    // No work available, yield to other workers
+                    TaskPolicy::yield();
                 }
             }
         }
@@ -625,8 +622,8 @@ namespace cler {
                     auto err = result.unwrap_err();
                     if (err > Error::TERMINATE_FLOWGRAPH) {
                         _stop_flag = true;
-                        if (_on_crash_cb) {
-                            _on_crash_cb(_on_crash_context);
+                        if (_on_err_terminate_cb) {
+                            _on_err_terminate_cb(_on_err_terminate_context);
                         }
                     }
                     return false;
@@ -642,8 +639,8 @@ namespace cler {
                     auto err = result.unwrap_err();
                     if (err > Error::TERMINATE_FLOWGRAPH) {
                         _stop_flag = true;
-                        if (_on_crash_cb) {
-                            _on_crash_cb(_on_crash_context);
+                        if (_on_err_terminate_cb) {
+                            _on_err_terminate_cb(_on_err_terminate_context);
                         }
                     }
                     return false;
