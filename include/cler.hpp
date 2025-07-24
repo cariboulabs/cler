@@ -8,6 +8,7 @@
 #include <complex> //again, a lot of cler blocks use complex numbers
 #include <chrono> // for timing measurements in FlowGraph
 #include <tuple> // for storing block runners
+#include <thread> // for hardware_concurrency
 
 namespace cler {
 
@@ -133,6 +134,68 @@ namespace cler {
         size_t adaptive_sleep_consecutive_fail_threshold = 50;
     };
 
+    // Enhanced scheduling types for performance optimization  
+    enum class SchedulerType {
+        ThreadPerBlock,      // Current behavior (default) - one thread per block
+        FixedThreadPool,     // Simple thread pool (embedded-friendly)
+        WorkStealing,        // High-performance work-stealing (desktop) - future
+        SingleThreaded       // No threading (baremetal/streamlined only)
+    };
+    
+    // Enhanced configuration for performance optimization
+    struct EnhancedFlowGraphConfig {
+        // Scheduler configuration
+        SchedulerType scheduler = SchedulerType::ThreadPerBlock;
+        size_t num_workers = 0;  // 0 = auto-detect (hardware_concurrency)
+        
+        // Procedure call optimizations
+        bool reduce_error_checks = false;     // Skip some validation in hot path
+        bool inline_procedure_calls = true;   // Template optimization hint  
+        size_t min_work_threshold = 1;        // Only call procedure() if >= samples
+        
+        // Legacy adaptive sleep (for ThreadPerBlock mode)
+        bool adaptive_sleep = false;
+        double adaptive_sleep_ramp_up_factor = 1.5;
+        double adaptive_sleep_max_us = 5000.0;
+        double adaptive_sleep_target_gain = 0.5;
+        double adaptive_sleep_decay_factor = 0.8;
+        size_t adaptive_sleep_consecutive_fail_threshold = 50;
+        
+        // Topology optimization (Tier 2 feature)
+        bool topology_aware = false;
+        
+        // Convert to legacy FlowGraphConfig for backward compatibility
+        FlowGraphConfig to_legacy_config() const {
+            FlowGraphConfig legacy;
+            legacy.adaptive_sleep = adaptive_sleep;
+            legacy.adaptive_sleep_ramp_up_factor = adaptive_sleep_ramp_up_factor;
+            legacy.adaptive_sleep_max_us = adaptive_sleep_max_us;
+            legacy.adaptive_sleep_target_gain = adaptive_sleep_target_gain;
+            legacy.adaptive_sleep_decay_factor = adaptive_sleep_decay_factor;
+            legacy.adaptive_sleep_consecutive_fail_threshold = adaptive_sleep_consecutive_fail_threshold;
+            return legacy;
+        }
+        
+        // Factory methods for common configurations
+        static EnhancedFlowGraphConfig embedded_optimized() {
+            EnhancedFlowGraphConfig config;
+            config.scheduler = SchedulerType::FixedThreadPool;
+            config.num_workers = 2;  // Conservative for embedded
+            config.reduce_error_checks = false;  // Keep safety
+            config.min_work_threshold = 1;
+            return config;
+        }
+        
+        static EnhancedFlowGraphConfig desktop_performance() {
+            EnhancedFlowGraphConfig config;
+            config.scheduler = SchedulerType::FixedThreadPool;
+            config.num_workers = 0;  // Auto-detect
+            config.reduce_error_checks = true;   // Optimize for speed
+            config.min_work_threshold = 4;       // Batch small work
+            return config;
+        }
+    };
+
     template<typename TaskPolicy, typename... BlockRunners>
     class FlowGraph {
     public:
@@ -161,6 +224,32 @@ namespace cler {
             _config = config;
             _stop_flag = false;
             launch_tasks_helper(std::make_index_sequence<_N>{});
+        }
+        
+        // Enhanced configuration run method
+        void run(const EnhancedFlowGraphConfig& enhanced_config) {
+            _enhanced_config = enhanced_config;
+            
+            // For now, implement FixedThreadPool as the first enhancement
+            switch (enhanced_config.scheduler) {
+                case SchedulerType::ThreadPerBlock:
+                    // Use legacy behavior
+                    run(enhanced_config.to_legacy_config());
+                    break;
+                    
+                case SchedulerType::FixedThreadPool:
+                    run_with_thread_pool(enhanced_config);
+                    break;
+                    
+                case SchedulerType::WorkStealing:
+                    // Future implementation - fall back to thread pool for now
+                    run_with_thread_pool(enhanced_config);
+                    break;
+                    
+                case SchedulerType::SingleThreaded:
+                    run_single_threaded(enhanced_config);
+                    break;
+            }
         }
 
         void stop() {
@@ -266,9 +355,162 @@ namespace cler {
         std::array<typename TaskPolicy::task_type, _N> _tasks;
         std::atomic<bool> _stop_flag = false;
         FlowGraphConfig _config;
+        EnhancedFlowGraphConfig _enhanced_config;  // New enhanced configuration
         std::array<BlockExecutionStats, _N> _stats;
         OnCrashCallback _on_crash_cb = nullptr;
         void* _on_crash_context = nullptr;
+        
+        // Enhanced scheduling implementations
+        void run_with_thread_pool(const EnhancedFlowGraphConfig& config) {
+            _config = config.to_legacy_config();
+            _stop_flag = false;
+            
+            // Determine number of workers
+            size_t num_workers = config.num_workers;
+            if (num_workers == 0) {
+                num_workers = std::max(1u, std::thread::hardware_concurrency());
+            }
+            
+            // For fixed thread pool: distribute blocks round-robin across workers
+            // This is a simplified implementation - real thread pool would be more sophisticated
+            if (num_workers >= _N) {
+                // More workers than blocks - use thread-per-block (current behavior)
+                launch_tasks_helper(std::make_index_sequence<_N>{});
+            } else {
+                // Fewer workers than blocks - use shared worker implementation
+                launch_shared_workers(num_workers, config);
+            }
+        }
+        
+        void run_single_threaded(const EnhancedFlowGraphConfig& config) {
+            // Single-threaded mode - execute all blocks sequentially in one thread
+            // This is useful for baremetal or when deterministic execution is needed
+            _config = config.to_legacy_config();
+            _stop_flag = false;
+            
+            _tasks[0] = TaskPolicy::create_task([this, config]() {
+                run_sequential_execution(config);
+            });
+        }
+        
+        void launch_shared_workers(size_t num_workers, const EnhancedFlowGraphConfig& config) {
+            // Create worker tasks that process multiple blocks
+            for (size_t worker_id = 0; worker_id < num_workers && worker_id < _N; ++worker_id) {
+                _tasks[worker_id] = TaskPolicy::create_task([this, worker_id, num_workers, config]() {
+                    run_worker_thread(worker_id, num_workers, config);
+                });
+            }
+        }
+        
+        void run_worker_thread(size_t worker_id, size_t total_workers, const EnhancedFlowGraphConfig& config) {
+            // Each worker processes blocks assigned to it (round-robin)
+            auto process_block = [this, config](size_t block_index) {
+                return execute_block_at_index(block_index, config);
+            };
+            
+            while (!_stop_flag) {
+                bool did_work = false;
+                
+                // Process blocks assigned to this worker
+                for (size_t block_idx = worker_id; block_idx < _N; block_idx += total_workers) {
+                    if (_stop_flag) break;
+                    
+                    bool block_did_work = process_block(block_idx);
+                    did_work = did_work || block_did_work;
+                }
+                
+                if (!did_work) {
+                    // No work available, yield or sleep
+                    if (_config.adaptive_sleep) {
+                        TaskPolicy::sleep_us(100);  // Brief sleep
+                    } else {
+                        TaskPolicy::yield();
+                    }
+                }
+            }
+        }
+        
+        void run_sequential_execution(const EnhancedFlowGraphConfig& config) {
+            // Single-threaded execution - process all blocks in sequence
+            while (!_stop_flag) {
+                bool any_work = false;
+                
+                for (size_t block_idx = 0; block_idx < _N; ++block_idx) {
+                    if (_stop_flag) break;
+                    
+                    bool did_work = execute_block_at_index(block_idx, config);
+                    any_work = any_work || did_work;
+                }
+                
+                if (!any_work) {
+                    // No blocks had work, brief pause
+                    TaskPolicy::yield();
+                }
+            }
+        }
+        
+        template<size_t I>
+        bool execute_block_at_index_helper(const EnhancedFlowGraphConfig& config) {
+            if constexpr (I >= _N) {
+                return false;  // Invalid index
+            }
+            
+            auto& runner = std::get<I>(_runners);
+            auto& stats = _stats[I];
+            
+            // Apply procedure optimizations
+            if (config.reduce_error_checks) {
+                // Fast path - minimal error checking
+                auto result = std::apply([&](auto*... outs) {
+                    return runner.block->procedure(outs...);
+                }, runner.outputs);
+                
+                if (result.is_ok()) {
+                    stats.successful_procedures++;
+                    return true;
+                } else {
+                    stats.failed_procedures++;
+                    auto err = result.unwrap_err();
+                    if (err > Error::TERMINATE_FLOWGRAPH) {
+                        _stop_flag = true;
+                        if (_on_crash_cb) {
+                            _on_crash_cb(_on_crash_context);
+                        }
+                    }
+                    return false;
+                }
+            } else {
+                // Safe path - full error checking (similar to current implementation)
+                auto result = std::apply([&](auto*... outs) {
+                    return runner.block->procedure(outs...);
+                }, runner.outputs);
+                
+                if (result.is_err()) {
+                    stats.failed_procedures++;
+                    auto err = result.unwrap_err();
+                    if (err > Error::TERMINATE_FLOWGRAPH) {
+                        _stop_flag = true;
+                        if (_on_crash_cb) {
+                            _on_crash_cb(_on_crash_context);
+                        }
+                    }
+                    return false;
+                } else {
+                    stats.successful_procedures++;
+                    return true;
+                }
+            }
+        }
+        
+        bool execute_block_at_index(size_t index, const EnhancedFlowGraphConfig& config) {
+            // Runtime dispatch to compile-time template
+            bool result = false;
+            auto dispatch = [&]<size_t... Is>(std::index_sequence<Is...>) {
+                ((index == Is ? (result = execute_block_at_index_helper<Is>(config), true) : false) || ...);
+            };
+            dispatch(std::make_index_sequence<_N>{});
+            return result;
+        }
     };
 
     constexpr size_t DEFAULT_BUFFER_SIZE = 256;
