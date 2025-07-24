@@ -51,18 +51,21 @@
                 <h2>Key Design Principles</h2>
                 <div class="principle-grid">
                     <div class="principle">
-                        <h4>📦 Simple and Lean</h4>
-                        <p>Blocks are just structs with a procedure() method.</p>
+                        <h4>📦 Template-Based Zero-Cost</h4>
+                        <p>Compile-time type safety and optimization. Templates compile away to almost nothing.</p>
                     </div>
                     <div class="principle">
-                        <h4>🔗 Flexible yet Safe</h4>
-                        <p>Flexible by design. Type-safe generics with no constraints over number of inputs or outputs. Also supports cyclical graphs.</p>
+                        <h4>🔗 Variadic Outputs</h4>
+                        <p>Blocks can have multiple output channels via template parameters. Supports cyclic graphs for control systems.</p>
+                    </div>
+                    <div class="principle">
+                        <h4>🎯 Two Execution Modes</h4>
+                        <p>Flowgraph (threaded) for convenience or Streamlined (manual) for maximum control and performance.</p>
                     </div>
                     <div class="principle">
                         <h4>🤖 AI-Friendly Core</h4>
                         <p>~300 lines of core code fits perfectly in AI context windows, making it easy to get help with development.</p>
                     </div>
-                    
                 </div>
             </div>
         </section>
@@ -97,26 +100,31 @@ int main() {
         3.0f // duration in seconds
     );
 
+    // Create flowgraph with variadic outputs
     auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&amp;source1, &amp;adder.in[0]),
+        cler::BlockRunner(&amp;source1, &amp;adder.in[0]),     // single output
         cler::BlockRunner(&amp;source2, &amp;adder.in[1]),
         cler::BlockRunner(&amp;adder, &amp;throttle.in),
         cler::BlockRunner(&amp;throttle, &amp;plot.in[0]),
-        cler::BlockRunner(&amp;plot)
+        cler::BlockRunner(&amp;plot)                        // no outputs (sink)
     );
 
-    flowgraph.run();
+    cler::FlowGraphConfig config;
+    config.adaptive_sleep = true;
+    flowgraph.run(config);
 
-    while (gui.should_close() == false) {
+    while (!gui.should_close()) {
         gui.begin_frame();
         plot.render();
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+    
+    flowgraph.stop();
     return 0;
 }</code></pre>
                 </div>
-                <p class="explanation">This creates a flowgraph with signal sources → math → throttle → visualization. Each block runs in its own thread with lock-free channels between them. No complex XML configuration, just intuitive C++ code.</p>
+                <p class="explanation">This creates a flowgraph where each block runs in its own thread with lock-free channels. The BlockRunner syntax connects blocks: first argument is the block, remaining arguments are its outputs (passed as parameters to the block's procedure() method). Framework manages threading and adaptive sleep for efficient CPU usage.</p>
             </div>
         </section>
 
