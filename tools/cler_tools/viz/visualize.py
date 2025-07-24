@@ -2,10 +2,11 @@
 """
 Cler Flowgraph Visualizer
 
-Generates visual representations of Cler C++ flowgraphs using Graphviz.
+Generates Mermaid flowchart visualizations of Cler C++ flowgraphs.
 
 Usage:
-    cler-viz file.cpp [-o output.svg]
+    cler-viz file.cpp [-o output.mmd]
+    cler-viz file.cpp --format html [-o output.html]
     cler-viz *.cpp --output-dir ./diagrams/
 """
 
@@ -14,7 +15,7 @@ import argparse
 from pathlib import Path
 
 from cler_tools.common import ClerParser
-from cler_tools.viz.graphviz_renderer import GraphvizRenderer
+from cler_tools.viz.mermaid_renderer import MermaidRenderer
 
 
 def main():
@@ -35,16 +36,10 @@ def main():
         help='Output directory for multiple files'
     )
     parser.add_argument(
-        '--layout',
-        choices=['dot', 'neato', 'fdp', 'circo', 'twopi'],
-        default='dot',
-        help='Graphviz layout algorithm (default: dot)'
-    )
-    parser.add_argument(
         '--format',
-        choices=['svg', 'png', 'pdf', 'ps'],
-        default='svg',
-        help='Output format (default: svg)'
+        choices=['mmd', 'html'],
+        default='mmd',
+        help='Output format (default: mmd)'
     )
     
     args = parser.parse_args()
@@ -61,7 +56,7 @@ def main():
     
     # Process each file
     cpp_parser = ClerParser()
-    renderer = GraphvizRenderer()
+    renderer = MermaidRenderer()
     
     for filepath in args.files:
         path = Path(filepath)
@@ -90,11 +85,10 @@ def main():
                 # Default to current directory with filename
                 output_path = f"{path.stem}_flowgraph"
             
-            # Render using Graphviz
+            # Render using Mermaid
             generated_file = renderer.render(
                 flowgraph=flowgraph,
                 output_path=output_path,
-                layout=args.layout,
                 format=args.format
             )
             

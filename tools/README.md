@@ -44,24 +44,30 @@ See [`cler_tools/linter/README.md`](cler_tools/linter/README.md) for complete do
 
 ### 📊 cler-viz
 
-Generates visual representations of Cler flowgraphs as SVG images.
+Generates Mermaid flowchart visualizations of Cler flowgraphs for web-native rendering.
 
 **Key Features:**
 - Automatic flowgraph extraction from C++ code
-- Multiple layout algorithms (hierarchical, circular, force-directed)
-- Customizable styling and channel labels
+- Clean Mermaid flowchart syntax output
+- Smart node shapes: sources (stadium), sinks (trapezoid), processing (rectangle)
+- Color-coded block types for visual clarity
 - Batch processing for multiple files
+- GitHub/web documentation ready output
+- Standalone HTML generation with embedded Mermaid viewer
 
 **Quick Usage:**
 ```bash
-# Generate SVG for a single file
-cler-viz file.cpp -o output.svg
+# Generate Mermaid flowchart (default)
+cler-viz file.cpp -o output.mmd
+
+# Generate standalone HTML with embedded viewer
+cler-viz file.cpp --format html -o output.html
 
 # Process multiple files
-cler-viz *.cpp --output-dir ./diagrams/
+cler-viz *.cpp --output-dir ./docs/diagrams/
 
-# Use circular layout with channel labels
-cler-viz main.cpp --layout circular --show-channels
+# Batch generate HTML documentation
+cler-viz *.cpp --format html --output-dir ./docs/
 ```
 
 See [`cler_tools/viz/README.md`](cler_tools/viz/README.md) for complete documentation.
@@ -98,9 +104,7 @@ tools/
 │   │   └── tests/         # Test suite
 │   └── viz/               # Visualization tool
 │       ├── visualize.py   # Main script
-│       ├── graph_builder.py
-│       ├── svg_renderer.py
-│       ├── layout.py      # Layout algorithms
+│       ├── mermaid_renderer.py  # Mermaid renderer
 │       └── tests/         # Test suite
 └── integration/           # Build system integrations
     ├── pre-commit-hook.sh
@@ -113,6 +117,7 @@ tools/
 
 - **Python 3.8+**
 - **PyYAML** (for configuration files)
+- **tree-sitter** and **tree-sitter-cpp** (for C++ parsing)
 
 ## Contributing
 
