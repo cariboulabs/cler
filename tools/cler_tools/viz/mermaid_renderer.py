@@ -3,55 +3,56 @@ Mermaid-based renderer for Cler flowgraph visualization.
 Generates Mermaid flowchart syntax for web-native rendering.
 """
 
-from typing import Dict, Optional
-from ..common.flowgraph import FlowGraph, Block, Connection
+from ..common.flowgraph import FlowGraph, Block
 
 
 class MermaidRenderer:
     """Renders flowgraphs as Mermaid flowchart syntax"""
     
-    def __init__(self, direction: str = 'LR'):
+    def __init__(self, direction: str = 'LR', fence_style: str = 'backticks'):
         """
         Initialize Mermaid renderer.
         
         Args:
             direction: Graph direction ('LR', 'TD', 'BT', 'RL')
+            fence_style: Fencing style ('backticks', 'colons', 'none')
         """
         self.direction = direction
+        self.fence_style = fence_style
         self.node_counter = 0
         self.node_map = {}  # Map block names to Mermaid node IDs
         
-    def render(self, flowgraph: FlowGraph, output_path: str, 
-               format: str = 'mmd') -> str:
+    def render(self, flowgraph: FlowGraph, output_path: str) -> str:
         """
         Render flowgraph to Mermaid format.
         
         Args:
             flowgraph: The flowgraph to render
             output_path: Output file path (without extension)
-            format: Output format ('mmd' for Mermaid, 'html' for embedded HTML)
             
         Returns:
             Path to generated file
         """
         mermaid_code = self._generate_mermaid(flowgraph)
         
-        if format == 'html':
-            content = self._wrap_html(mermaid_code, flowgraph.name)
-            file_ext = 'html'
-        else:
-            content = mermaid_code
-            file_ext = 'mmd'
-            
-        output_file = f"{output_path}.{file_ext}"
+        output_file = f"{output_path}.md"
         with open(output_file, 'w') as f:
-            f.write(content)
+            f.write(mermaid_code)
             
         return output_file
     
     def _generate_mermaid(self, flowgraph: FlowGraph) -> str:
         """Generate Mermaid flowchart syntax"""
-        lines = [f"flowchart {self.direction}"]
+        lines = []
+        
+        # Add opening fence based on style
+        if self.fence_style == 'backticks':
+            lines.append("```mermaid")
+        elif self.fence_style == 'colons':
+            lines.append("::: mermaid")
+        # 'none' adds no fencing
+        
+        lines.append(f"flowchart {self.direction}")
         
         # Add nodes
         for block_name, block in flowgraph.blocks.items():
@@ -69,17 +70,18 @@ class MermaidRenderer:
             source_id = self._get_node_id(conn.source_block)
             target_id = self._get_node_id(conn.target_block)
             
-            # Add connection with optional label
-            if conn.target_channel and conn.channel_index is not None:
-                label = f"{conn.target_channel}[{conn.channel_index}]"
-                lines.append(f"    {source_id} -->|\"{label}\"| {target_id}")
-            elif conn.target_channel:
-                lines.append(f"    {source_id} -->|\"{conn.target_channel}\"| {target_id}")
-            else:
-                lines.append(f"    {source_id} --> {target_id}")
+            # Simple connections without channel labels
+            lines.append(f"    {source_id} --> {target_id}")
         
         # Add styling
         lines.extend(self._generate_styling(flowgraph))
+        
+        # Add closing fence based on style
+        if self.fence_style == 'backticks':
+            lines.append("```")
+        elif self.fence_style == 'colons':
+            lines.append(":::")
+        # 'none' adds no closing fence
         
         return '\n'.join(lines)
     
@@ -93,19 +95,20 @@ class MermaidRenderer:
     
     def _create_node_label(self, block: Block) -> str:
         """Create display label for block"""
+        # Start with block name
         label = block.name
         
-        # Add type information if different from name
-        if not block.name.lower().startswith(block.type.lower().replace('block', '')):
-            # Remove 'Block' suffix from type for cleaner display
-            clean_type = block.type.replace('Block', '')
-            label += f"\\n({clean_type})"
-            
-        # Add template parameters (escape angle brackets)
+        # Always add type information 
+        # Remove 'Block' suffix from type for cleaner display
+        clean_type = block.type.replace('Block', '')
+        label += f"\n({clean_type})"
+        
+        # Show template parameters after block type if they exist
         if block.template_params:
+            # Use HTML-escaped angle brackets for Mermaid compatibility
             escaped_params = block.template_params.replace('<', '&lt;').replace('>', '&gt;')
-            label += f"\\n&lt;{escaped_params}&gt;"
-            
+            label += f"\n&lt;{escaped_params}&gt;"
+        
         return label
     
     def _get_node_shape(self, block: Block) -> tuple:
@@ -137,26 +140,3 @@ class MermaidRenderer:
         
         return styles
     
-    def _wrap_html(self, mermaid_code: str, title: str) -> str:
-        """Wrap Mermaid code in HTML for standalone rendering"""
-        return f"""<!DOCTYPE html>
-<html>
-<head>
-    <title>{title} - Cler Flowgraph</title>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; }}
-        .mermaid {{ text-align: center; }}
-        h1 {{ color: #333; }}
-    </style>
-</head>
-<body>
-    <h1>{title}</h1>
-    <div class="mermaid">
-{mermaid_code}
-    </div>
-    <script>
-        mermaid.initialize({{ startOnLoad: true, theme: 'default' }});
-    </script>
-</body>
-</html>"""

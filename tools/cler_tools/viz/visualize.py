@@ -5,8 +5,7 @@ Cler Flowgraph Visualizer
 Generates Mermaid flowchart visualizations of Cler C++ flowgraphs.
 
 Usage:
-    cler-viz file.cpp [-o output.mmd]
-    cler-viz file.cpp --format html [-o output.html]
+    cler-viz file.cpp [-o output.md]
     cler-viz *.cpp --output-dir ./diagrams/
 """
 
@@ -36,10 +35,10 @@ def main():
         help='Output directory for multiple files'
     )
     parser.add_argument(
-        '--format',
-        choices=['mmd', 'html'],
-        default='mmd',
-        help='Output format (default: mmd)'
+        '--fence',
+        choices=['backticks', 'colons', 'none'],
+        default='backticks',
+        help='Mermaid fencing style (default: backticks)'
     )
     
     args = parser.parse_args()
@@ -56,7 +55,7 @@ def main():
     
     # Process each file
     cpp_parser = ClerParser()
-    renderer = MermaidRenderer()
+    renderer = MermaidRenderer(fence_style=args.fence)
     
     for filepath in args.files:
         path = Path(filepath)
@@ -88,8 +87,7 @@ def main():
             # Render using Mermaid
             generated_file = renderer.render(
                 flowgraph=flowgraph,
-                output_path=output_path,
-                format=args.format
+                output_path=output_path
             )
             
             print(f"Generated: {generated_file}")
