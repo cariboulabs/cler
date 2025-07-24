@@ -8,7 +8,6 @@
 #include <complex> //again, a lot of cler blocks use complex numbers
 #include <chrono> // for timing measurements in FlowGraph
 #include <tuple> // for storing block runners
-#include <thread> // for hardware_concurrency
 
 namespace cler {
 
@@ -143,10 +142,11 @@ namespace cler {
     };
     
     // Enhanced configuration for performance optimization
+    // EMBEDDED-COMPATIBLE: Uses task policy abstraction, no direct std::thread dependency
     struct EnhancedFlowGraphConfig {
         // Scheduler configuration
         SchedulerType scheduler = SchedulerType::ThreadPerBlock;
-        size_t num_workers = 0;  // 0 = auto-detect (hardware_concurrency)
+        size_t num_workers = 0;  // 0 = auto-detect (embedded-safe: max 4 workers)
         
         // Procedure call optimizations
         bool reduce_error_checks = false;     // Skip some validation in hot path
@@ -189,7 +189,7 @@ namespace cler {
         static EnhancedFlowGraphConfig desktop_performance() {
             EnhancedFlowGraphConfig config;
             config.scheduler = SchedulerType::FixedThreadPool;
-            config.num_workers = 0;  // Auto-detect
+            config.num_workers = 0;  // Auto-detect (embedded-safe: max 4 workers)
             config.reduce_error_checks = true;   // Optimize for speed
             config.min_work_threshold = 4;       // Batch small work
             return config;
@@ -365,10 +365,11 @@ namespace cler {
             _config = config.to_legacy_config();
             _stop_flag = false;
             
-            // Determine number of workers
+            // Determine number of workers - embedded-safe approach
             size_t num_workers = config.num_workers;
             if (num_workers == 0) {
-                num_workers = std::max(1u, std::thread::hardware_concurrency());
+                // Default to reasonable embedded values, task policy can override
+                num_workers = (_N <= 4) ? _N : 4;  // Conservative default for embedded
             }
             
             // For fixed thread pool: distribute blocks round-robin across workers
