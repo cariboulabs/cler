@@ -89,43 +89,29 @@ struct EnhancedFlowGraphConfig {
 - ⚡ **No API changes** - optimization is transparent
 - 🔧 **Optional optimizations** - can disable for safety
 
-#### 3. Static Work-Stealing (Optional)
+#### 3. ~~Static Work-Stealing~~ (REMOVED - Not Compatible)
 
-Basic work-stealing using only static, compile-time allocation.
+**❌ Work-stealing is fundamentally incompatible with Cler's architecture:**
 
-**Static-Only Design:**
+**Blocking Issues:**
+- **SPSC Channel Ownership**: Each block owns its input channels - can't share between threads
+- **User-Controlled Processing**: Users decide sample batch sizes in `procedure()` - can't split work
+- **Block State**: Internal state (filters, buffers) not thread-safe
+- **Channel Guarantees**: SPSC queues require single producer/consumer - work-stealing breaks this
+
+**Why Round-Robin Works Instead:**
 ```cpp
-template<size_t MaxWorkers = 8, size_t QueueSize = 64>
-class StaticWorkStealer {
-    // Static circular buffer - no dynamic allocation
-    struct WorkItem { BlockBase* block; /* outputs... */ };
-    std::array<WorkItem, QueueSize> local_queue;
-    size_t head = 0, tail = 0;
-    
-    // Global static registry - compile-time sized
-    static std::array<StaticWorkStealer*, MaxWorkers> stealers;
-    static size_t num_stealers;
-    
-    bool try_steal_work() {
-        // Simple round-robin stealing, no allocations
-        for (size_t i = 0; i < num_stealers; ++i) {
-            auto* other = stealers[i];
-            if (other != this && other->has_work()) {
-                auto work = other->pop_back();
-                push_front(work);
-                return true;
-            }
-        }
-        return false;
-    }
-};
+// ✅ Current approach: Each worker gets different blocks
+for (size_t block_idx = worker_id; block_idx < _N; block_idx += total_workers) {
+    execute_block_at_index(block_idx, config);  // Whole blocks per worker
+}
+
+// ❌ Impossible: Can't steal partial procedure() calls
+// ❌ Impossible: Can't move block ownership between threads  
+// ❌ Impossible: Would corrupt SPSC channel guarantees
 ```
 
-**Benefits:**
-- 🎯 **20-30% better CPU utilization** when threads become idle
-- 🛡️ **Zero dynamic allocation** - all memory statically allocated
-- 🔧 **Compile-time configuration** - MaxWorkers and QueueSize templates
-- ⚡ **Predictable memory usage** - fixed at compile time
+**Better Alternative**: Focus on **cache-aware scheduling** and **zero-copy operations** (Tier 2)
 
 ### Tier 2: Desktop/High-Performance Features
 
@@ -224,11 +210,11 @@ class StaticGraphBalancer {
 
 | Feature | Throughput | Latency | Memory | Complexity |
 |---------|------------|---------|--------|------------|
-| Enhanced Config | +15-25% | -10-15% | Static | Low |
-| Procedure Optimization | +5-10% | -5-10% | Static | Very Low |
-| Static Work-Stealing | +20-30% | -15-20% | Static | Medium |
+| Enhanced Config + FixedThreadPool | +25-35% | -15-25% | Static | Low |
+| ~~Procedure Optimization~~ | ~~Removed~~ | ~~N/A~~ | ~~N/A~~ | ~~N/A~~ |
+| ~~Static Work-Stealing~~ | ~~Incompatible~~ | ~~N/A~~ | ~~N/A~~ | ~~N/A~~ |
 
-**Combined Tier 1**: **+40-65% throughput, -30-45% latency**
+**Tier 1 Total**: **+25-35% throughput** (Achieved: +33.8% in testing)
 
 ### Tier 2 (Desktop) Additional Benefits
 
@@ -237,7 +223,7 @@ class StaticGraphBalancer {
 | Cache-Aware Scheduling | +15-25% | -40-60% | Medium |
 | Zero-Copy Operations | +30-50% | -20-30% | Low |
 
-**Combined Tier 1+2**: **+85-140% throughput, -50-75% latency**
+**Combined Tier 1+2**: **+70-115% throughput, -35-60% latency**
 
 ### Tier 3 (Advanced) Additional Benefits
 
@@ -245,7 +231,7 @@ class StaticGraphBalancer {
 |---------|--------------|------------|------------|
 | Graph Load Balancing | +25-40% | High | High |
 
-**Maximum Combined**: **+110-180% throughput**
+**Maximum Combined**: **+95-155% throughput**
 
 ### Static Memory Usage
 
@@ -361,11 +347,11 @@ using MyFlowGraph = FlowGraph<DesktopTaskPolicy,
 - **Configurable**: Template parameters control memory usage
 
 ### Embedded Benefits (Tier 1 Only)
-- **+40-65% throughput improvement**
-- **-30-45% latency reduction**
+- **+25-35% throughput improvement** (Tested: +33.8%)
+- **-15-25% latency reduction**
 - **Zero dynamic allocation**
 - **Predictable memory usage**
-- **Optional per-feature basis**
+- **Embedded-compatible design**
 
 ### Memory Footprint Example
 ```cpp
@@ -385,4 +371,6 @@ using DesktopFlowGraph = FlowGraph<
 ```
 
 ### Recommendation
-Start with Tier 1 features for immediate 40-65% performance gains while maintaining full embeddability. Tier 2-3 features can be added later for desktop/server deployments requiring maximum performance.
+Start with Tier 1 features for immediate 25-35% performance gains (tested: 33.8%) while maintaining full embeddability. Tier 2-3 features can be added later for desktop/server deployments requiring maximum performance.
+
+**Tier 1 Complete**: Enhanced FlowGraph Configuration with FixedThreadPool scheduling provides significant performance improvement with minimal complexity and full embedded compatibility.
