@@ -224,7 +224,7 @@ ssize_t GenericDatagramSocket::send(const uint8_t* data, size_t len) const {
         return sendto(_sockfd, data, len, 0,
                         reinterpret_cast<const struct sockaddr*>(&_dest_un), sizeof(_dest_un));
     }
-    return -1;
+    throw std::runtime_error("GenericDatagramSocket: send called on invalid socket type");
 }
 
 ssize_t GenericDatagramSocket::recv(uint8_t* buffer, size_t max_len, int flags) const {
