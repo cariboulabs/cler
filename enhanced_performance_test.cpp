@@ -231,6 +231,18 @@ int main() {
     auto_config.min_work_threshold = 4;
     results.push_back(run_enhanced_test("Enhanced (auto workers, optimized)", auto_config, SAMPLES));
     
+    // Test 5: Adaptive Load Balancing (default settings)
+    cler::EnhancedFlowGraphConfig loadbalance_config = cler::EnhancedFlowGraphConfig::adaptive_load_balancing();
+    loadbalance_config.num_workers = 4;
+    results.push_back(run_enhanced_test("Adaptive Load Balancing (4 workers)", loadbalance_config, SAMPLES));
+    
+    // Test 6: Adaptive Load Balancing (aggressive settings)
+    cler::EnhancedFlowGraphConfig aggressive_config = cler::EnhancedFlowGraphConfig::adaptive_load_balancing();
+    aggressive_config.num_workers = 4;
+    aggressive_config.rebalance_interval = 200;   // More frequent rebalancing
+    aggressive_config.load_balance_threshold = 0.1; // Lower threshold for rebalancing
+    results.push_back(run_enhanced_test("Adaptive Load Balancing (aggressive)", aggressive_config, SAMPLES));
+    
     // Print results
     std::cout << "========================================" << std::endl;
     std::cout << "Performance Test Results" << std::endl;
