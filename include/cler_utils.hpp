@@ -57,4 +57,55 @@ inline const char* error_to_cstring(Error error) {
     return to_str(error);
 }
 
+// Factory methods for FlowGraphConfig 
+// Common configurations for typical use cases
+namespace flowgraph_config {
+
+    // Conservative embedded configuration
+    inline FlowGraphConfig embedded_optimized() {
+        FlowGraphConfig config;
+        config.scheduler = SchedulerType::FixedThreadPool;
+        config.num_workers = 2;  // Conservative for embedded
+        config.reduce_error_checks = false;  // Keep safety
+        config.min_work_threshold = 1;
+        return config;
+    }
+    
+    // Desktop performance configuration
+    inline FlowGraphConfig desktop_performance() {
+        FlowGraphConfig config;
+        config.scheduler = SchedulerType::FixedThreadPool;
+        config.num_workers = 4;  // Good default for most desktop systems
+        config.reduce_error_checks = true;   // Optimize for speed
+        config.min_work_threshold = 4;       // Batch small work
+        return config;
+    }
+    
+    // Adaptive load balancing configuration
+    inline FlowGraphConfig adaptive_load_balancing() {
+        FlowGraphConfig config;
+        config.scheduler = SchedulerType::AdaptiveLoadBalancing;
+        config.num_workers = 4;  // Good default for load balancing
+        config.reduce_error_checks = true;
+        config.enable_load_balancing = true;
+        config.rebalance_interval = 1000;
+        config.load_balance_threshold = 0.2;
+        return config;
+    }
+    
+    // Thread-per-block with adaptive sleep (single-threaded blocks)
+    inline FlowGraphConfig thread_per_block_adaptive() {
+        FlowGraphConfig config;
+        config.scheduler = SchedulerType::ThreadPerBlock;
+        config.adaptive_sleep = true;
+        config.adaptive_sleep_ramp_up_factor = 1.5;
+        config.adaptive_sleep_max_us = 5000.0;
+        config.adaptive_sleep_target_gain = 0.5;
+        config.adaptive_sleep_decay_factor = 0.8;
+        config.adaptive_sleep_consecutive_fail_threshold = 50;
+        return config;
+    }
+
+} // namespace flowgraph_config
+
 } // namespace cler

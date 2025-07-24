@@ -4,7 +4,10 @@ include_directories(
 )
 
 add_executable(cler_throughput cler_throughput.cpp)
-target_link_libraries(cler_throughput)
+target_link_libraries(cler_throughput cler::cler)
+
+add_executable(performance_features performance_features.cpp)
+target_link_libraries(performance_features cler::cler)
 
 if(UNIX)
   set(CHMOD_COMMAND chmod +x ${CMAKE_CURRENT_BINARY_DIR}/futuresdr_throughput.sh)

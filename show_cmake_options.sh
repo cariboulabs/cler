@@ -14,7 +14,7 @@ printf "  %-40s %-40s %s\n" "-DCLER_BUILD_BLOCKS=ON|OFF"            "Enable DSP 
 printf "  %-40s %-40s %s\n" "-DCLER_BUILD_BLOCKS_GUI=ON|OFF"        "Include GUI-related blocks" "Default: ON"
 printf "  %-40s %-40s %s\n" "-DCLER_BUILD_BLOCKS_LIQUID=ON|OFF"     "Include Liquid-DSP blocks" "Default: ON"
 printf "  %-40s %-40s %s\n" "-DCLER_BUILD_EXAMPLES=ON|OFF"          "Build example binaries" "Default: ON"
-printf "  %-40s %-40s %s\n" "-DCLER_BUILD_PERFORMANCE_TESTS=ON|OFF" "Build performance tests" "Default: OFF"
+printf "  %-40s %-40s %s\n" "-DCLER_BUILD_PERFORMANCE=ON|OFF" "Build performance tests" "Default: OFF"
 printf "  %-40s %-40s %s\n" "-DCLER_BUILD_TESTS=ON|OFF"             "Build unit tests" "Default: OFF"
 echo ""
 echo "Note:"

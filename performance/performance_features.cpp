@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "cler_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include <iostream>
 #include <chrono>
@@ -152,7 +153,7 @@ TestResult run_legacy_test(size_t samples) {
     };
 }
 
-TestResult run_enhanced_test(const std::string& name, cler::EnhancedFlowGraphConfig config, size_t samples) {
+TestResult run_enhanced_test(const std::string& name, cler::FlowGraphConfig config, size_t samples) {
     std::cout << "Running " << name << " test..." << std::flush;
     
     SourceBlock source("Source");
@@ -208,36 +209,27 @@ int main() {
     // Test 1: Legacy ThreadPerBlock
     results.push_back(run_legacy_test(SAMPLES));
     
-    // Test 2: Enhanced FixedThreadPool (conservative)
-    cler::EnhancedFlowGraphConfig conservative_config;
-    conservative_config.scheduler = cler::SchedulerType::FixedThreadPool;
-    conservative_config.num_workers = 2;
-    conservative_config.reduce_error_checks = false;  // Keep safe
+    // Test 2: Enhanced FixedThreadPool (conservative)  
+    auto conservative_config = cler::flowgraph_config::embedded_optimized();
     results.push_back(run_enhanced_test("Enhanced (2 workers, safe)", conservative_config, SAMPLES));
     
     // Test 3: Enhanced FixedThreadPool (optimized)
-    cler::EnhancedFlowGraphConfig optimized_config;
-    optimized_config.scheduler = cler::SchedulerType::FixedThreadPool;
-    optimized_config.num_workers = 4;
-    optimized_config.reduce_error_checks = true;   // Enable optimizations
-    optimized_config.min_work_threshold = 8;       // Batch small work
+    auto optimized_config = cler::flowgraph_config::desktop_performance();
+    optimized_config.num_workers = 4;  // Override auto-detect
+    optimized_config.min_work_threshold = 8;  // Batch small work
     results.push_back(run_enhanced_test("Enhanced (4 workers, optimized)", optimized_config, SAMPLES));
     
     // Test 4: Enhanced FixedThreadPool (auto workers)
-    cler::EnhancedFlowGraphConfig auto_config;
-    auto_config.scheduler = cler::SchedulerType::FixedThreadPool;
-    auto_config.num_workers = 0;  // Auto-detect
-    auto_config.reduce_error_checks = true;
-    auto_config.min_work_threshold = 4;
+    auto auto_config = cler::flowgraph_config::desktop_performance();
     results.push_back(run_enhanced_test("Enhanced (auto workers, optimized)", auto_config, SAMPLES));
     
     // Test 5: Adaptive Load Balancing (default settings)
-    cler::EnhancedFlowGraphConfig loadbalance_config = cler::EnhancedFlowGraphConfig::adaptive_load_balancing();
+    auto loadbalance_config = cler::flowgraph_config::adaptive_load_balancing();
     loadbalance_config.num_workers = 4;
     results.push_back(run_enhanced_test("Adaptive Load Balancing (4 workers)", loadbalance_config, SAMPLES));
     
     // Test 6: Adaptive Load Balancing (aggressive settings)
-    cler::EnhancedFlowGraphConfig aggressive_config = cler::EnhancedFlowGraphConfig::adaptive_load_balancing();
+    auto aggressive_config = cler::flowgraph_config::adaptive_load_balancing();
     aggressive_config.num_workers = 4;
     aggressive_config.rebalance_interval = 200;   // More frequent rebalancing
     aggressive_config.load_balance_threshold = 0.1; // Lower threshold for rebalancing
