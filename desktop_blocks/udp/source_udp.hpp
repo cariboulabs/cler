@@ -9,7 +9,6 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
     SourceUDPSocketBlock(const char* name,
                             UDPBlock::SocketType type,
                             const std::string& bind_addr_or_path,
-                            uint16_t port,
                             size_t max_blob_size,
                             size_t num_slab_slots = 100,
                             OnReceiveCallback callback = nullptr,

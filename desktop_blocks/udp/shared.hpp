@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <assert.h>
 #include <memory>
+#include <string>
 
 namespace UDPBlock {
 
@@ -18,6 +19,14 @@ enum class SocketType {
     INET6_UDP,    // IPv6 UDP
     UNIX_DGRAM    // UNIX datagram
 };
+
+// Helper function to parse address string based on socket type
+struct ParsedAddress {
+    std::string address;
+    uint16_t port;
+};
+
+ParsedAddress parse_address_string(SocketType type, const std::string& addr_str);
 
 struct Slab;
 
@@ -53,12 +62,10 @@ private:
 
 struct GenericDatagramSocket {
     static GenericDatagramSocket make_receiver(SocketType type,
-                                           const std::string& bind_addr,
-                                           uint16_t port);
+                                           const std::string& bind_addr_str);
 
     static GenericDatagramSocket make_sender(SocketType type,
-                                            const std::string& dest_addr,
-                                            uint16_t port);
+                                            const std::string& dest_addr_str);
 
     ~GenericDatagramSocket();
     void bind(const std::string& bind_addr_or_path, uint16_t port = 0);

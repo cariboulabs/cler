@@ -82,8 +82,8 @@ size_t on_sink_null_recv(cler::Channel<UDPBlock::BlobSlice>* channel, [[maybe_un
 
 int main() {
     SourceDatagramBlock source_datagram("SourceDatagram");
-    SinkUDPSocketBlock sink_udp("SinkUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001, on_sink_udp_send);
-    SourceUDPSocketBlock source_udp("SourceUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1", 9001,
+    SinkUDPSocketBlock sink_udp("SinkUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1:9001", on_sink_udp_send);
+    SourceUDPSocketBlock source_udp("SourceUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1:9001",
                       MAX_UDP_BLOB_SIZE, SLAB_SLOTS, on_source_udp_recv, nullptr);
     SinkNullBlock<UDPBlock::BlobSlice> sink_null("SinkNull", on_sink_null_recv, nullptr, 20);
 

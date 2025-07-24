@@ -1,6 +1,41 @@
 #include "shared.hpp"
+#include <sstream>
 
 namespace UDPBlock {
+
+ParsedAddress parse_address_string(SocketType type, const std::string& addr_str) {
+    ParsedAddress result;
+    
+    if (type == SocketType::UNIX_DGRAM) {
+        // For UNIX sockets, the entire string is the path
+        result.address = addr_str;
+        result.port = 0;
+        return result;
+    }
+    
+    // For IP sockets (IPv4/IPv6), parse IP:port format
+    size_t colon_pos = addr_str.find_last_of(':');
+    if (colon_pos == std::string::npos) {
+        throw std::runtime_error("Invalid address format for IP socket. Expected 'IP:port'");
+    }
+    
+    result.address = addr_str.substr(0, colon_pos);
+    std::string port_str = addr_str.substr(colon_pos + 1);
+    
+    try {
+        int port_int = std::stoi(port_str);
+        if (port_int < 0 || port_int > 65535) {
+            throw std::runtime_error("Port number out of range (0-65535)");
+        }
+        result.port = static_cast<uint16_t>(port_int);
+    } catch (const std::invalid_argument&) {
+        throw std::runtime_error("Invalid port number: " + port_str);
+    } catch (const std::out_of_range&) {
+        throw std::runtime_error("Port number out of range: " + port_str);
+    }
+    
+    return result;
+}
 
 
 void BlobSlice::release() {
@@ -98,19 +133,19 @@ GenericDatagramSocket::GenericDatagramSocket(SocketType type,
 }
 
 GenericDatagramSocket GenericDatagramSocket::make_receiver(SocketType type,
-                                        const std::string& bind_addr,
-                                        uint16_t port)
+                                        const std::string& bind_addr_str)
 {
-    GenericDatagramSocket sock(type, "", 0); //place holders
-    sock.bind(bind_addr, port);
+    ParsedAddress parsed = parse_address_string(type, bind_addr_str);
+    GenericDatagramSocket sock(type, "", 0); // placeholders
+    sock.bind(parsed.address, parsed.port);
     return sock;
 }
 
 GenericDatagramSocket GenericDatagramSocket::make_sender(SocketType type,
-                                        const std::string& dest_addr,
-                                        uint16_t port)
+                                        const std::string& dest_addr_str)
 {
-    return GenericDatagramSocket(type, dest_addr, port);
+    ParsedAddress parsed = parse_address_string(type, dest_addr_str);
+    return GenericDatagramSocket(type, parsed.address, parsed.port);
 }
 
 GenericDatagramSocket::~GenericDatagramSocket() {

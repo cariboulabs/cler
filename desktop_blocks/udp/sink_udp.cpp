@@ -3,13 +3,12 @@
 SinkUDPSocketBlock::SinkUDPSocketBlock(const char* name,
                     const UDPBlock::SocketType type,
                     const std::string& dest_host_or_path,
-                    const uint16_t port,
                     OnSendCallback callback,
                     void* callback_context,
                     const size_t buffer_size)
     : cler::BlockBase(name),
     in(buffer_size),
-    _socket(UDPBlock::GenericDatagramSocket::make_sender(type, dest_host_or_path, port)),
+    _socket(UDPBlock::GenericDatagramSocket::make_sender(type, dest_host_or_path)),
     _callback(callback),
     _callback_context(callback_context)
 {

@@ -3,13 +3,12 @@
 SourceUDPSocketBlock::SourceUDPSocketBlock(const char* name,
                         UDPBlock::SocketType type,
                         const std::string& bind_addr_or_path,
-                        uint16_t port,
                         size_t max_blob_size,
                         size_t num_slab_slots,
                         OnReceiveCallback callback,
                         [[maybe_unused]] void* callback_context)
     : cler::BlockBase(name),
-    _socket(UDPBlock::GenericDatagramSocket::make_receiver(type, bind_addr_or_path, port)),
+    _socket(UDPBlock::GenericDatagramSocket::make_receiver(type, bind_addr_or_path)),
     _slab(UDPBlock::Slab(num_slab_slots, max_blob_size)),
     _callback(callback)    
 {}
