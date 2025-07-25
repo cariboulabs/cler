@@ -219,9 +219,11 @@ int main() {
     
     // Test 6: ThreadPerBlock with conservative adaptive sleep (rarely sleeps)
     auto conservative_sleep_config = cler::flowgraph_config::thread_per_block_adaptive_sleep();
-    conservative_sleep_config.adaptive_sleep_multiplier = 1.0; // Minimal growth
-    results.push_back(run_enhanced_test("ThreadPerBlock (conservative adapive sleep)", conservative_sleep_config, test_duration));
-    
+    conservative_sleep_config.adaptive_sleep_max_us = 1000.0; // Lower max sleep time
+    conservative_sleep_config.adaptive_sleep_multiplier = 2.0; // High growth
+    conservative_sleep_config.adaptive_sleep_fail_threshold = 20; // More fails before sleeping
+    results.push_back(run_enhanced_test("ThreadPerBlock (conservative adaptive sleep)", conservative_sleep_config, test_duration));
+
     // Test 7: ThreadPerBlock with adaptive sleep (for sparse data)
     auto adaptive_sleep_config = cler::flowgraph_config::thread_per_block_adaptive_sleep();
     results.push_back(run_enhanced_test("ThreadPerBlock (default adaptive sleep)", adaptive_sleep_config, test_duration));
@@ -229,7 +231,8 @@ int main() {
     // Test 8: ThreadPerBlock with aggressive adaptive sleep (for very sparse data)
     auto aggressive_sleep_config = cler::flowgraph_config::thread_per_block_adaptive_sleep();
     aggressive_sleep_config.adaptive_sleep_multiplier = 2.0; // Aggressive growth
-    aggressive_sleep_config.adaptive_sleep_fail_threshold = 5;
+    aggressive_sleep_config.adaptive_sleep_fail_threshold = 5; // Fewer fails before sleeping
+    aggressive_sleep_config.adaptive_sleep_max_us = 10000.0; // Higher max
     results.push_back(run_enhanced_test("ThreadPerBlock (aggressive adaptive sleep)", aggressive_sleep_config, test_duration));
 
     // Print results
