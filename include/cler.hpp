@@ -137,24 +137,19 @@ namespace cler {
 
     // Enhanced scheduling types for performance optimization  
     enum class SchedulerType {
-        ThreadPerBlock,        // Current behavior (default) - one thread per block
-        FixedThreadPool,       // Simple thread pool (embedded-friendly)
-        AdaptiveLoadBalancing  // Load balancing based on block performance metrics
+        ThreadPerBlock,        // Works with adaptive_sleep; best for small flowgraphs or debugging
+        FixedThreadPool,       // Simple thread pool; best for uniform workloads  
+        AdaptiveLoadBalancing  // Works with load balancing options; best for imbalanced workloads
     };
     
     // Configuration for performance optimization
     // EMBEDDED-COMPATIBLE: Uses task policy abstraction, no direct std::thread dependency
     struct FlowGraphConfig {
-        // Scheduler configuration
+        // Scheduler selection: determines threading model and compatible optimizations
         SchedulerType scheduler = SchedulerType::ThreadPerBlock;
         size_t num_workers = 4;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
         
-        // Procedure call optimizations
-        bool reduce_error_checks = false;     // Skip some validation in hot path
-        bool inline_procedure_calls = true;   // Template optimization hint  
-        size_t min_work_threshold = 1;        // Only call procedure() if >= samples
-        
-        // Adaptive sleep (for ThreadPerBlock mode)
+        // CPU efficiency for ThreadPerBlock: adaptively sleeps when blocks starve for data
         bool adaptive_sleep = false;
         double adaptive_sleep_ramp_up_factor = 1.5;
         double adaptive_sleep_max_us = 5000.0;
@@ -162,7 +157,7 @@ namespace cler {
         double adaptive_sleep_decay_factor = 0.8;
         size_t adaptive_sleep_consecutive_fail_threshold = 50;
         
-        // Load balancing configuration
+        // Dynamic work redistribution: monitors block execution time and reassigns heavy blocks to less loaded workers
         bool enable_load_balancing = false;
         size_t rebalance_interval = 1000;  // Rebalance every N procedure calls
         double load_balance_threshold = 0.2;  // 20% imbalance triggers rebalancing
@@ -211,6 +206,28 @@ namespace cler {
                     run_with_load_balancing(config);
                     break;
             }
+        }
+        
+        template<typename Rep, typename Period>
+        void run_for(const std::chrono::duration<Rep, Period>& duration, const FlowGraphConfig& config = FlowGraphConfig{}) {
+            // Start the flowgraph
+            auto start_time = std::chrono::steady_clock::now();
+            run(config);
+            
+            // For longer durations, use sleep_us to avoid busy waiting
+            auto total_us = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+            if (total_us > 100000) { // More than 100ms
+                // Sleep for most of the duration, leaving 50ms for precise timing
+                TaskPolicy::sleep_us(total_us - 50000);
+            }
+            
+            // Use yield for the remaining time for precise timing
+            while (std::chrono::steady_clock::now() - start_time < duration) {
+                TaskPolicy::yield();
+            }
+            
+            // Stop the flowgraph
+            stop();
         }
 
         void stop() {
@@ -607,47 +624,24 @@ namespace cler {
             auto& runner = std::get<I>(_runners);
             auto& stats = _stats[I];
             
-            // Apply procedure optimizations
-            if (config.reduce_error_checks) {
-                // Fast path - minimal error checking
-                auto result = std::apply([&](auto*... outs) {
-                    return runner.block->procedure(outs...);
-                }, runner.outputs);
-                
-                if (result.is_ok()) {
-                    stats.successful_procedures++;
-                    return true;
-                } else {
-                    stats.failed_procedures++;
-                    auto err = result.unwrap_err();
-                    if (err > Error::TERMINATE_FLOWGRAPH) {
-                        _stop_flag = true;
-                        if (_on_err_terminate_cb) {
-                            _on_err_terminate_cb(_on_err_terminate_context);
-                        }
+            // Execute procedure and handle errors
+            auto result = std::apply([&](auto*... outs) {
+                return runner.block->procedure(outs...);
+            }, runner.outputs);
+            
+            if (result.is_err()) {
+                stats.failed_procedures++;
+                auto err = result.unwrap_err();
+                if (err > Error::TERMINATE_FLOWGRAPH) {
+                    _stop_flag = true;
+                    if (_on_err_terminate_cb) {
+                        _on_err_terminate_cb(_on_err_terminate_context);
                     }
-                    return false;
                 }
+                return false;
             } else {
-                // Safe path - full error checking (similar to current implementation)
-                auto result = std::apply([&](auto*... outs) {
-                    return runner.block->procedure(outs...);
-                }, runner.outputs);
-                
-                if (result.is_err()) {
-                    stats.failed_procedures++;
-                    auto err = result.unwrap_err();
-                    if (err > Error::TERMINATE_FLOWGRAPH) {
-                        _stop_flag = true;
-                        if (_on_err_terminate_cb) {
-                            _on_err_terminate_cb(_on_err_terminate_context);
-                        }
-                    }
-                    return false;
-                } else {
-                    stats.successful_procedures++;
-                    return true;
-                }
+                stats.successful_procedures++;
+                return true;
             }
         }
         

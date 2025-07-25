@@ -66,8 +66,6 @@ namespace flowgraph_config {
         FlowGraphConfig config;
         config.scheduler = SchedulerType::FixedThreadPool;
         config.num_workers = 2;  // Conservative for embedded
-        config.reduce_error_checks = false;  // Keep safety
-        config.min_work_threshold = 1;
         return config;
     }
     
@@ -76,8 +74,6 @@ namespace flowgraph_config {
         FlowGraphConfig config;
         config.scheduler = SchedulerType::FixedThreadPool;
         config.num_workers = 4;  // Good default for most desktop systems
-        config.reduce_error_checks = true;   // Optimize for speed
-        config.min_work_threshold = 4;       // Batch small work
         return config;
     }
     
@@ -86,7 +82,6 @@ namespace flowgraph_config {
         FlowGraphConfig config;
         config.scheduler = SchedulerType::AdaptiveLoadBalancing;
         config.num_workers = 4;  // Good default for load balancing
-        config.reduce_error_checks = true;
         config.enable_load_balancing = true;
         config.rebalance_interval = 1000;
         config.load_balance_threshold = 0.2;

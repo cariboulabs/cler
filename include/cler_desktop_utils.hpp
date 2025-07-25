@@ -39,8 +39,6 @@ void print_flowgraph_execution_report(const DesktopFlowGraph<BlockRunners...>& f
     
     if (fg.config().scheduler != SchedulerType::ThreadPerBlock) {
         printf("  - Workers: %zu\n", fg.config().num_workers);
-        printf("  - Error Check Reduction: %s\n", fg.config().reduce_error_checks ? "ENABLED" : "DISABLED");
-        printf("  - Min Work Threshold: %zu samples\n", fg.config().min_work_threshold);
         
         if (fg.config().scheduler == SchedulerType::AdaptiveLoadBalancing) {
             printf("  - Load Balancing: %s\n", fg.config().enable_load_balancing ? "ENABLED" : "DISABLED");

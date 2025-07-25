@@ -89,6 +89,10 @@ struct SinkBlock : public cler::BlockBase {
         auto elapsed = std::chrono::duration<double>(now - _start_time).count();
         return _received / elapsed;
     }
+    
+    size_t get_samples_processed() const {
+        return _received;
+    }
 
 private:
     size_t _received = 0;
@@ -112,7 +116,7 @@ struct TestResult {
     }
 };
 
-TestResult run_baseline_test(size_t samples) {
+TestResult run_baseline_test(std::chrono::seconds test_duration) {
     std::cout << "Running BASELINE test..." << std::flush;
     
     SourceBlock source("Source");
@@ -120,7 +124,7 @@ TestResult run_baseline_test(size_t samples) {
     CopyBlock stage1("Stage1");
     CopyBlock stage2("Stage2");
     CopyBlock stage3("Stage3");
-    SinkBlock sink("Sink", samples);
+    SinkBlock sink("Sink", SIZE_MAX);  // No sample limit
 
     auto fg = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source, &stage0.in),
@@ -131,17 +135,10 @@ TestResult run_baseline_test(size_t samples) {
         cler::BlockRunner(&sink)
     );
 
-    auto start = std::chrono::steady_clock::now();
-    fg.run();  // Default legacy configuration
-
-    while (!sink.is_done()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    fg.stop();
-    auto end = std::chrono::steady_clock::now();
+    // Run for specified duration
+    fg.run_for(test_duration);
     
-    double duration = std::chrono::duration<double>(end - start).count();
+    double duration = test_duration.count();
     
     std::cout << " DONE" << std::endl;
     
@@ -149,11 +146,11 @@ TestResult run_baseline_test(size_t samples) {
         "Baseline (ThreadPerBlock)",
         sink.get_throughput(),
         duration,
-        samples
+        sink.get_samples_processed()  // Access the actual samples processed
     };
 }
 
-TestResult run_enhanced_test(const std::string& name, cler::FlowGraphConfig config, size_t samples) {
+TestResult run_enhanced_test(const std::string& name, cler::FlowGraphConfig config, std::chrono::seconds test_duration) {
     std::cout << "Running " << name << " test..." << std::flush;
     
     SourceBlock source("Source");
@@ -161,7 +158,7 @@ TestResult run_enhanced_test(const std::string& name, cler::FlowGraphConfig conf
     CopyBlock stage1("Stage1");
     CopyBlock stage2("Stage2");
     CopyBlock stage3("Stage3");
-    SinkBlock sink("Sink", samples);
+    SinkBlock sink("Sink", SIZE_MAX);  // No sample limit
 
     auto fg = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source, &stage0.in),
@@ -172,17 +169,10 @@ TestResult run_enhanced_test(const std::string& name, cler::FlowGraphConfig conf
         cler::BlockRunner(&sink)
     );
 
-    auto start = std::chrono::steady_clock::now();
-    fg.run(config);  // Enhanced configuration
-
-    while (!sink.is_done()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    fg.stop();
-    auto end = std::chrono::steady_clock::now();
+    // Run for specified duration
+    fg.run_for(test_duration, config);
     
-    double duration = std::chrono::duration<double>(end - start).count();
+    double duration = test_duration.count();
     
     std::cout << " DONE" << std::endl;
     
@@ -190,50 +180,42 @@ TestResult run_enhanced_test(const std::string& name, cler::FlowGraphConfig conf
         name,
         sink.get_throughput(),
         duration,
-        samples
+        sink.get_samples_processed()
     };
 }
 
 int main() {
-    // Same test parameters as original
-    constexpr size_t SAMPLES = 256'000'000;
+    // Test duration: 5 seconds for each test for more robust results
+    const auto test_duration = std::chrono::seconds(5);
     
     std::cout << "========================================" << std::endl;
     std::cout << "Cler Performance Features Test" << std::endl;
     std::cout << "Pipeline: Source -> 4x Copy -> Sink" << std::endl;
-    std::cout << "Samples: " << SAMPLES << std::endl;
+    std::cout << "Test Duration: " << test_duration.count() << " seconds per test" << std::endl;
     std::cout << "========================================" << std::endl;
     
     std::vector<TestResult> results;
     
     // Test 1: Baseline ThreadPerBlock
-    results.push_back(run_baseline_test(SAMPLES));
+    results.push_back(run_baseline_test(test_duration));
     
-    // Test 2: Enhanced FixedThreadPool (conservative)  
+    // Test 2: FixedThreadPool with 2 workers (embedded-style)
     auto conservative_config = cler::flowgraph_config::embedded_optimized();
-    results.push_back(run_enhanced_test("Enhanced (2 workers, safe)", conservative_config, SAMPLES));
+    results.push_back(run_enhanced_test("FixedThreadPool (2 workers)", conservative_config, test_duration));
     
-    // Test 3: Enhanced FixedThreadPool (optimized)
-    auto optimized_config = cler::flowgraph_config::desktop_performance();
-    optimized_config.num_workers = 4;  // Override auto-detect
-    optimized_config.min_work_threshold = 8;  // Batch small work
-    results.push_back(run_enhanced_test("Enhanced (4 workers, optimized)", optimized_config, SAMPLES));
+    // Test 3: FixedThreadPool with 4 workers (desktop-style)
+    auto default_config = cler::flowgraph_config::desktop_performance();
+    results.push_back(run_enhanced_test("FixedThreadPool (4 workers)", default_config, test_duration));
     
-    // Test 4: Enhanced FixedThreadPool (auto workers)
-    auto auto_config = cler::flowgraph_config::desktop_performance();
-    results.push_back(run_enhanced_test("Enhanced (auto workers, optimized)", auto_config, SAMPLES));
-    
-    // Test 5: Adaptive Load Balancing (default settings)
+    // Test 4: AdaptiveLoadBalancing with default rebalancing
     auto loadbalance_config = cler::flowgraph_config::adaptive_load_balancing();
-    loadbalance_config.num_workers = 4;
-    results.push_back(run_enhanced_test("Adaptive Load Balancing (4 workers)", loadbalance_config, SAMPLES));
+    results.push_back(run_enhanced_test("AdaptiveLoadBalancing (default)", loadbalance_config, test_duration));
     
-    // Test 6: Adaptive Load Balancing (aggressive settings)
+    // Test 5: AdaptiveLoadBalancing with aggressive rebalancing
     auto aggressive_config = cler::flowgraph_config::adaptive_load_balancing();
-    aggressive_config.num_workers = 4;
     aggressive_config.rebalance_interval = 200;   // More frequent rebalancing
     aggressive_config.load_balance_threshold = 0.1; // Lower threshold for rebalancing
-    results.push_back(run_enhanced_test("Adaptive Load Balancing (aggressive)", aggressive_config, SAMPLES));
+    results.push_back(run_enhanced_test("AdaptiveLoadBalancing (aggressive)", aggressive_config, test_duration));
     
     // Print results
     std::cout << "========================================" << std::endl;

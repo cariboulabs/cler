@@ -30,7 +30,6 @@ flowgraph.run();  // Uses ThreadPerBlock by default
 cler::EnhancedFlowGraphConfig config;
 config.scheduler = cler::SchedulerType::FixedThreadPool;
 config.num_workers = 4;
-config.reduce_error_checks = true;
 flowgraph.run(config);
 ```
 
@@ -67,32 +66,21 @@ cler::EnhancedFlowGraphConfig embedded_config = cler::EnhancedFlowGraphConfig::e
 // Results in:
 // - scheduler = FixedThreadPool
 // - num_workers = 2 (conservative for embedded)
-// - reduce_error_checks = false (keep safety)
-// - min_work_threshold = 1
 flowgraph.run(embedded_config);
 
 // Desktop performance configuration  
 cler::EnhancedFlowGraphConfig desktop_config = cler::EnhancedFlowGraphConfig::desktop_performance();
 // Results in:
 // - scheduler = FixedThreadPool  
-// - num_workers = 0 (auto-detect, max 4 for embedded compatibility)
-// - reduce_error_checks = true (optimize for speed)
-// - min_work_threshold = 4 (batch small work)
+// - num_workers = 4 (good default for desktop systems)
 flowgraph.run(desktop_config);
 
 // Manual configuration
-cler::EnhancedFlowGraphConfig manual_config;
+cler::FlowGraphConfig manual_config;
 manual_config.scheduler = cler::SchedulerType::FixedThreadPool;
 manual_config.num_workers = 4;                    // Explicit worker count
-manual_config.reduce_error_checks = true;        // Skip some validation for speed
-manual_config.min_work_threshold = 8;            // Only call procedure() if >= 8 samples
 flowgraph.run(manual_config);
 ```
-
-**Performance Options:**
-- `num_workers = 0`: Auto-detect workers (embedded-safe: max 4)
-- `reduce_error_checks = true`: Skip some validation in hot path (+5-10% speed)
-- `min_work_threshold = N`: Only call procedure() if >= N samples available
 
 **Characteristics:**
 - Fixed number of worker threads
@@ -199,7 +187,6 @@ Aggressive LoadBalancing:        49.0 MSamples/sec (+177%) 🏆
 cler::EnhancedFlowGraphConfig config;
 config.scheduler = cler::SchedulerType::FixedThreadPool;
 config.num_workers = 4;
-config.reduce_error_checks = true;  // DSP usually has predictable data
 ```
 
 ### Example 2: Mixed Processing Pipeline
@@ -304,12 +291,10 @@ config.load_balance_threshold = 0.4; // Less sensitive (40% imbalance)
 cler::EnhancedFlowGraphConfig config;
 config.scheduler = cler::SchedulerType::AdaptiveLoadBalancing;
 config.num_workers = 6;
-config.reduce_error_checks = true;        // Skip validation for speed
-config.min_work_threshold = 16;           // Batch work efficiently
 config.enable_load_balancing = true;
 config.rebalance_interval = 300;
 config.load_balance_threshold = 0.15;
-// This combines thread pooling + load balancing + procedure optimizations
+// This combines thread pooling + load balancing
 ```
 
 ## Running the Performance Test
