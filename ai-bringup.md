@@ -260,7 +260,7 @@ int main() {
     
     // Configure and run
     cler::FlowGraphConfig config;
-    config.adaptive_sleep = true;
+    // config.adaptive_sleep = true;  // Optional: for sparse/intermittent data only
     flowgraph.run(config);
     
     // GUI loop...
@@ -327,7 +327,8 @@ config.scheduler = cler::SchedulerType::ThreadPerBlock;        // Default: one t
 config.num_workers = 4;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
 
 // Adaptive sleep configuration (works with all scheduler types)
-config.adaptive_sleep = true;
+// WARNING: Can significantly reduce throughput - only use for sparse/intermittent data
+config.adaptive_sleep = true;  // CAUTION: reduces CPU usage but may impact throughput
 config.adaptive_sleep_multiplier = 1.5;       // How aggressively to increase sleep time
 config.adaptive_sleep_max_us = 5000.0;        // Maximum sleep time in microseconds
 config.adaptive_sleep_fail_threshold = 10;    // Start sleeping after N consecutive fails
@@ -674,7 +675,7 @@ cler::FlowGraphConfig config;
 // Example 1: Uniform workload (e.g., simple signal processing chain)
 config.scheduler = cler::SchedulerType::FixedThreadPool;
 config.num_workers = 4;
-config.adaptive_sleep = true;  // Reduce CPU usage when data is sparse
+// config.adaptive_sleep = true;  // Optional: only if data is sparse
 
 // Example 2: Imbalanced workload (e.g., fanout with different processing paths)
 config.scheduler = cler::SchedulerType::AdaptiveLoadBalancing;
@@ -685,7 +686,7 @@ config.load_balancing_threshold = 0.15; // Rebalance at 15% imbalance
 
 // Example 3: Sparse data (e.g., intermittent sensor readings)
 config.scheduler = cler::SchedulerType::ThreadPerBlock;
-config.adaptive_sleep = true;
+config.adaptive_sleep = true;  // Appropriate for sparse data
 config.adaptive_sleep_multiplier = 2.0;    // Aggressive backoff
 config.adaptive_sleep_max_us = 10000.0;    // Up to 10ms sleep
 config.adaptive_sleep_fail_threshold = 5;  // Sleep after 5 failures

@@ -179,7 +179,7 @@ auto flowgraph = cler::make_desktop_flowgraph(
 // Configure scheduler and performance options
 cler::FlowGraphConfig config;
 config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Or FixedThreadPool/AdaptiveLoadBalancing
-config.adaptive_sleep = true;
+// config.adaptive_sleep = true;  // Optional: for sparse/intermittent data only
 flowgraph.run(config);
 
 // Embedded version (FreeRTOS example)
@@ -239,7 +239,7 @@ int main() {
     // Configure scheduler for optimal performance
     cler::FlowGraphConfig config;
     config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Good default
-    config.adaptive_sleep = true;  // Reduce CPU when idle
+    // config.adaptive_sleep = true;  // Optional: reduce CPU when idle
     flowgraph.run(config);
     return 0;
 }</code></pre>
@@ -510,7 +510,7 @@ while (running) {
                         <button class="copy-button" onclick="copyCode(this)">Copy</button>
                         <pre><code class="language-cpp line-numbers">cler::FlowGraphConfig config;
 config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Default
-config.adaptive_sleep = true;  // Reduce CPU when data is sparse
+// config.adaptive_sleep = true;  // Only for sparse/intermittent data
 flowgraph.run(config);</code></pre>
                     </div>
                     <p><strong>Best for:</strong> Small flowgraphs, debugging, uniform workloads</p>
@@ -523,7 +523,7 @@ flowgraph.run(config);</code></pre>
                         <pre><code class="language-cpp line-numbers">cler::FlowGraphConfig config;
 config.scheduler = cler::SchedulerType::FixedThreadPool;
 config.num_workers = 4;  // Number of worker threads (minimum 2)
-config.adaptive_sleep = true;
+// config.adaptive_sleep = true;  // Optional: only for sparse data
 flowgraph.run(config);</code></pre>
                     </div>
                     <p><strong>Best for:</strong> Uniform workloads with balanced processing across blocks</p>
@@ -542,7 +542,7 @@ config.load_balancing = true;
 config.load_balancing_interval = 500;   // Check balance every 500 calls
 config.load_balancing_threshold = 0.15; // Rebalance at 15% imbalance
 
-config.adaptive_sleep = true;
+// config.adaptive_sleep = true;  // Optional: for sparse data only
 flowgraph.run(config);</code></pre>
                     </div>
                     <p><strong>Best for:</strong> Imbalanced workloads, dynamic data rates, varying block complexity</p>
@@ -550,16 +550,17 @@ flowgraph.run(config);</code></pre>
                     <p class="key-point"><strong>Benefits:</strong> Automatically balances work across threads, handles heterogeneous blocks. Essential for fanout scenarios with different processing complexity per path.</p>
                     
                     <h3>Adaptive Sleep Configuration</h3>
-                    <p>All scheduler types support adaptive sleep to reduce CPU usage when data is sparse:</p>
+                    <p><strong>⚠️ Warning:</strong> Adaptive sleep reduces CPU usage but can significantly impact throughput. Only use for sparse/intermittent data sources like sensors or network packets with gaps.</p>
                     <div class="code-block">
                         <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// Adaptive sleep works with all scheduler types
-config.adaptive_sleep = true;
+                        <pre><code class="language-cpp line-numbers">// Adaptive sleep works with all scheduler types - USE CAREFULLY
+// Can significantly reduce throughput, only use for sparse/intermittent data
+config.adaptive_sleep = true;  // CAUTION: reduces CPU usage but may impact throughput
 config.adaptive_sleep_multiplier = 1.5;       // How aggressively to increase sleep
 config.adaptive_sleep_max_us = 5000.0;        // Maximum sleep time (microseconds)
 config.adaptive_sleep_fail_threshold = 10;    // Start sleeping after N failures
 
-// For sparse/intermittent data (sensors, network packets)
+// For very sparse data (sensors, network packets)
 config.adaptive_sleep_multiplier = 2.0;       // Aggressive backoff
 config.adaptive_sleep_max_us = 10000.0;       // Up to 10ms sleep
 config.adaptive_sleep_fail_threshold = 5;     // Sleep after 5 failures</code></pre>

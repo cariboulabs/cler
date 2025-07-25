@@ -112,7 +112,7 @@ int main() {
     // Configure scheduler for optimal performance
     cler::FlowGraphConfig config;
     config.scheduler = cler::SchedulerType::ThreadPerBlock;  // One thread per block (default)
-    config.adaptive_sleep = true;  // Reduce CPU usage when data is sparse
+    // config.adaptive_sleep = true;  // Optional: for sparse/intermittent data only
     flowgraph.run(config);
 
     while (!gui.should_close()) {
