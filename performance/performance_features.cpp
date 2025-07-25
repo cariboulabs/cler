@@ -217,6 +217,14 @@ int main() {
     aggressive_config.load_balance_threshold = 0.1; // Lower threshold for rebalancing
     results.push_back(run_enhanced_test("AdaptiveLoadBalancing (aggressive)", aggressive_config, test_duration));
     
+    // Test 6: ThreadPerBlock with adaptive sleep (default)
+    auto adaptive_sleep_config = cler::flowgraph_config::thread_per_block_adaptive();
+    results.push_back(run_enhanced_test("ThreadPerBlock (adaptive sleep)", adaptive_sleep_config, test_duration));
+    
+    // Test 7: ThreadPerBlock with aggressive adaptive sleep
+    auto aggressive_sleep_config = cler::flowgraph_config::thread_per_block_aggressive_sleep();
+    results.push_back(run_enhanced_test("ThreadPerBlock (aggressive sleep)", aggressive_sleep_config, test_duration));
+    
     // Print results
     std::cout << "========================================" << std::endl;
     std::cout << "Performance Test Results" << std::endl;

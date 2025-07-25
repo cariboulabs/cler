@@ -51,11 +51,9 @@ void print_flowgraph_execution_report(const DesktopFlowGraph<BlockRunners...>& f
     
     printf("  - Adaptive Sleep: %s\n", fg.config().adaptive_sleep ? "ENABLED" : "DISABLED");
     if (fg.config().adaptive_sleep) {
-        printf("      * Sleep Factor : %.2f\n", fg.config().adaptive_sleep_ramp_up_factor);
-        printf("      * Max Sleep (us): %.2f\n", fg.config().adaptive_sleep_max_us);
-        printf("      * Gain : %.2f\n", fg.config().adaptive_sleep_target_gain);
-        printf("      * Decay Factor : %.2f\n", fg.config().adaptive_sleep_decay_factor);
-        printf("      * Consecutive Fail Threshold: %zu\n", fg.config().adaptive_sleep_consecutive_fail_threshold);
+        printf("      * Multiplier: %.2f\n", fg.config().adaptive_sleep_multiplier);
+        printf("      * Max Sleep (us): %.1f\n", fg.config().adaptive_sleep_max_us);
+        printf("      * Fail Threshold: %zu\n", fg.config().adaptive_sleep_fail_threshold);
     }
     printf("\n");
 

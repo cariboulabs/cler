@@ -121,7 +121,6 @@ namespace cler {
         EmbeddableString<64> name;
         size_t successful_procedures = 0;
         size_t failed_procedures = 0;
-        double avg_dead_time_us = 0.0;
         double total_dead_time_s = 0.0;
         double final_adaptive_sleep_us = 0.0;
         double total_runtime_s = 0.0;
@@ -149,13 +148,11 @@ namespace cler {
         SchedulerType scheduler = SchedulerType::ThreadPerBlock;
         size_t num_workers = 4;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
         
-        // CPU efficiency for ThreadPerBlock: adaptively sleeps when blocks starve for data
+        // CPU efficiency for ThreadPerBlock: simple exponential backoff when blocks starve for data
         bool adaptive_sleep = false;
-        double adaptive_sleep_ramp_up_factor = 1.5;
-        double adaptive_sleep_max_us = 5000.0;
-        double adaptive_sleep_target_gain = 0.5;
-        double adaptive_sleep_decay_factor = 0.8;
-        size_t adaptive_sleep_consecutive_fail_threshold = 50;
+        double adaptive_sleep_multiplier = 1.5;       // How aggressively to increase sleep time
+        double adaptive_sleep_max_us = 5000.0;        // Maximum sleep time in microseconds
+        size_t adaptive_sleep_fail_threshold = 10;    // Start sleeping after N consecutive fails
         
         // Dynamic work redistribution: monitors block execution time and reassigns heavy blocks to less loaded workers
         bool enable_load_balancing = false;
@@ -259,7 +256,6 @@ namespace cler {
 
                 size_t successful = 0;
                 size_t failed = 0;
-                double avg_dead_time_s = 0.0;
                 double total_dead_time_s = 0.0;
                 double adaptive_sleep_us = 0.0;
                 size_t consecutive_fails = 0;
@@ -287,19 +283,18 @@ namespace cler {
 
                         if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
                             total_dead_time_s += dt.count();
-                            avg_dead_time_s += (dt.count() - avg_dead_time_s) / failed;
                             consecutive_fails++;
 
-                            if (_config.adaptive_sleep) {
-                                if (consecutive_fails > _config.adaptive_sleep_consecutive_fail_threshold) {
+                            if (_config.adaptive_sleep && consecutive_fails > _config.adaptive_sleep_fail_threshold) {
+                                // Simple exponential backoff
+                                if (adaptive_sleep_us == 0.0) {
+                                    adaptive_sleep_us = 1.0;  // Start with 1 microsecond
+                                } else {
                                     adaptive_sleep_us = std::min(
-                                        adaptive_sleep_us * _config.adaptive_sleep_ramp_up_factor + 1.0,
+                                        adaptive_sleep_us * _config.adaptive_sleep_multiplier,
                                         _config.adaptive_sleep_max_us
                                     );
                                 }
-
-                                double desired_us = avg_dead_time_s * 1e6 * _config.adaptive_sleep_target_gain;
-                                adaptive_sleep_us = std::max(adaptive_sleep_us, desired_us);
                                 TaskPolicy::sleep_us(static_cast<size_t>(adaptive_sleep_us));
                             } else {
                                 TaskPolicy::yield();
@@ -312,9 +307,7 @@ namespace cler {
                     } else {
                         successful++;
                         consecutive_fails = 0;
-                        if (_config.adaptive_sleep) {
-                            adaptive_sleep_us *= _config.adaptive_sleep_decay_factor;
-                        }
+                        adaptive_sleep_us = 0.0;  // Reset sleep time on success
                     }
                 }
 
@@ -323,7 +316,6 @@ namespace cler {
 
                 stats.successful_procedures = successful;
                 stats.failed_procedures = failed;
-                stats.avg_dead_time_us = avg_dead_time_s * 1e6;
                 stats.total_dead_time_s = total_dead_time_s;
                 stats.final_adaptive_sleep_us = _config.adaptive_sleep ? adaptive_sleep_us : 0.0;
                 stats.total_runtime_s = total_runtime_s.count();
