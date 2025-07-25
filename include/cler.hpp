@@ -120,20 +120,24 @@ namespace cler {
         EmbeddableString<64> name;
         size_t successful_procedures = 0;
         size_t failed_procedures = 0;
+        size_t samples_processed = 0;
         double total_dead_time_s = 0.0;
-        double final_adaptive_sleep_us = 0.0;
         double total_runtime_s = 0.0;
-        size_t samples_processed = 0;              // Total samples processed by this block
-        double avg_execution_time_us = 0.0;        // Average time per successful procedure call
-        double cpu_utilization_percent = 0.0;     // Percentage of time spent in procedure vs waiting
-        size_t worker_reassignments = 0;           // Number of times block was reassigned (load balancing)
-        double throughput_samples_per_sec = 0.0;  // Calculated throughput
-        
-        // Block-centric adaptive sleep state (thread-safe for all schedulers)
+        double final_adaptive_sleep_us = 0.0;
         std::atomic<double> current_adaptive_sleep_us{0.0};
         std::atomic<size_t> consecutive_fails{0};
+        double get_avg_execution_time_us() const {
+            return successful_procedures > 0 ? (total_runtime_s * 1e6) / successful_procedures : 0.0;
+        }
+        
+        double get_cpu_utilization_percent() const {
+            return total_runtime_s > 0 ? ((total_runtime_s - total_dead_time_s) / total_runtime_s) * 100.0 : 0.0;
+        }
+        
+        double get_throughput_samples_per_sec() const {
+            return total_runtime_s > 0 ? samples_processed / total_runtime_s : 0.0;
+        }
     };
-
 
     // Enhanced scheduling types for performance optimization  
     enum class SchedulerType {

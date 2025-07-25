@@ -463,97 +463,195 @@ int main() {
         double baseline_throughput = baseline_result.throughput;
         double baseline_efficiency = baseline_result.cpu_efficiency;
         
-        std::cout << "🔄 UNIFORM FANOUT Analysis:" << std::endl;
-        std::cout << "  BASELINE (ThreadPerBlock): " << (baseline_throughput/1e6) << " MSamples/sec, " 
-                  << (baseline_efficiency*100) << "% CPU efficiency" << std::endl;
+        std::cout << "\n🔄 UNIFORM FANOUT Analysis:" << std::endl;
+        printf("%-45s | %12s | %10s | %12s | %13s\n",
+            "Configuration", "Throughput", "CPU Eff", "vs Baseline", "vs No Sleep");
+        printf("%s\n", std::string(105, '-').c_str());
+        
+        printf("%-45s | %10.1f MS | %8.1f%% | %11s | %12s\n",
+            "BASELINE (ThreadPerBlock)",
+            baseline_throughput/1e6, baseline_efficiency*100, "---", "---");
         
         // FixedThreadPool comparison
         if (results.size() >= 3) {
-            std::cout << "  FixedThreadPool: " << (results[1].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[1].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
-            std::cout << (results[1].cpu_efficiency*100) << "% CPU efficiency" << std::endl;
+            printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %12s\n",
+                "FixedThreadPool (4 workers)",
+                results[1].throughput/1e6, results[1].cpu_efficiency*100,
+                ((results[1].throughput - baseline_throughput) / baseline_throughput) * 100.0, "---");
             
-            std::cout << "  FixedThreadPool + adaptive sleep: " << (results[2].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[2].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
-            std::cout << (results[2].cpu_efficiency*100) << "% CPU efficiency ";
-            std::cout << "[" << std::showpos << ((results[2].throughput - results[1].throughput) / results[1].throughput) * 100.0 << "% vs without sleep]" << std::endl;
+            printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %+10.1f%%\n",
+                "FixedThreadPool + adaptive sleep",
+                results[2].throughput/1e6, results[2].cpu_efficiency*100,
+                ((results[2].throughput - baseline_throughput) / baseline_throughput) * 100.0,
+                ((results[2].throughput - results[1].throughput) / results[1].throughput) * 100.0);
         }
         
         // AdaptiveLoadBalancing comparison
         if (results.size() >= 5) {
-            std::cout << "  AdaptiveLoadBalancing: " << (results[3].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[3].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
-            std::cout << (results[3].cpu_efficiency*100) << "% CPU efficiency" << std::endl;
+            printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %12s\n",
+                "AdaptiveLoadBalancing",
+                results[3].throughput/1e6, results[3].cpu_efficiency*100,
+                ((results[3].throughput - baseline_throughput) / baseline_throughput) * 100.0, "---");
             
-            std::cout << "  AdaptiveLoadBalancing + adaptive sleep: " << (results[4].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[4].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
-            std::cout << (results[4].cpu_efficiency*100) << "% CPU efficiency ";
-            std::cout << "[" << std::showpos << ((results[4].throughput - results[3].throughput) / results[3].throughput) * 100.0 << "% vs without sleep]" << std::endl;
+            printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %+10.1f%%\n",
+                "AdaptiveLoadBalancing + adaptive sleep",
+                results[4].throughput/1e6, results[4].cpu_efficiency*100,
+                ((results[4].throughput - baseline_throughput) / baseline_throughput) * 100.0,
+                ((results[4].throughput - results[3].throughput) / results[3].throughput) * 100.0);
         }
         
         if (results.size() >= 11) {
-            std::cout << "\n⚖️ IMBALANCED FANOUT Analysis:" << std::endl;
+            std::cout << "\n\n⚖️ IMBALANCED FANOUT Analysis:" << std::endl;
+            printf("%-45s | %12s | %10s | %12s | %13s\n",
+                "Configuration", "Throughput", "CPU Eff", "vs Baseline", "vs No Sleep");
+            printf("%s\n", std::string(105, '-').c_str());
             
             // FixedThreadPool imbalanced comparison (indices 5,6)
-            std::cout << "  FixedThreadPool (imbalanced): " << (results[5].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[5].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
-            std::cout << (results[5].cpu_efficiency*100) << "% CPU efficiency" << std::endl;
+            printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %12s\n",
+                "FixedThreadPool (4 workers)",
+                results[5].throughput/1e6, results[5].cpu_efficiency*100,
+                ((results[5].throughput - baseline_throughput) / baseline_throughput) * 100.0, "---");
             
-            std::cout << "  FixedThreadPool + adaptive sleep (imbalanced): " << (results[6].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[6].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
-            std::cout << (results[6].cpu_efficiency*100) << "% CPU efficiency ";
-            std::cout << "[" << std::showpos << ((results[6].throughput - results[5].throughput) / results[5].throughput) * 100.0 << "% vs without sleep]" << std::endl;
+            printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %+10.1f%%\n",
+                "FixedThreadPool + adaptive sleep",
+                results[6].throughput/1e6, results[6].cpu_efficiency*100,
+                ((results[6].throughput - baseline_throughput) / baseline_throughput) * 100.0,
+                ((results[6].throughput - results[5].throughput) / results[5].throughput) * 100.0);
             
             // AdaptiveLoadBalancing imbalanced comparison (indices 7,8)
-            std::cout << "  AdaptiveLoadBalancing (imbalanced): " << (results[7].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[7].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
-            std::cout << (results[7].cpu_efficiency*100) << "% CPU efficiency" << std::endl;
+            printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %12s\n",
+                "AdaptiveLoadBalancing",
+                results[7].throughput/1e6, results[7].cpu_efficiency*100,
+                ((results[7].throughput - baseline_throughput) / baseline_throughput) * 100.0, "---");
             
-            std::cout << "  AdaptiveLoadBalancing + adaptive sleep (imbalanced): " << (results[8].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[8].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
-            std::cout << (results[8].cpu_efficiency*100) << "% CPU efficiency ";
-            std::cout << "[" << std::showpos << ((results[8].throughput - results[7].throughput) / results[7].throughput) * 100.0 << "% vs without sleep]" << std::endl;
+            printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %+10.1f%%\n",
+                "AdaptiveLoadBalancing + adaptive sleep",
+                results[8].throughput/1e6, results[8].cpu_efficiency*100,
+                ((results[8].throughput - baseline_throughput) / baseline_throughput) * 100.0,
+                ((results[8].throughput - results[7].throughput) / results[7].throughput) * 100.0);
         }
         
         if (results.size() >= 15) {
-            std::cout << "\n🚀 HEAVY FANOUT Analysis:" << std::endl;
+            std::cout << "\n\n🚀 HEAVY FANOUT Analysis:" << std::endl;
+            printf("%-45s | %12s | %10s | %12s | %13s\n",
+                "Configuration", "Throughput", "CPU Eff", "vs Baseline", "vs No Sleep");
+            printf("%s\n", std::string(105, '-').c_str());
             
             // Find the heavy fanout test indices (should start around index 11)
             size_t heavy_start = 11;  // Adjust based on actual test structure
             if (results.size() >= heavy_start + 4) {
                 // FixedThreadPool heavy comparison
-                std::cout << "  FixedThreadPool (heavy): " << (results[heavy_start].throughput/1e6) << " MSamples/sec ";
-                std::cout << "(" << std::showpos << ((results[heavy_start].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
-                std::cout << (results[heavy_start].cpu_efficiency*100) << "% CPU efficiency" << std::endl;
+                printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %12s\n",
+                    "FixedThreadPool (4 workers)",
+                    results[heavy_start].throughput/1e6, results[heavy_start].cpu_efficiency*100,
+                    ((results[heavy_start].throughput - baseline_throughput) / baseline_throughput) * 100.0, "---");
                 
-                std::cout << "  FixedThreadPool + adaptive sleep (heavy): " << (results[heavy_start+1].throughput/1e6) << " MSamples/sec ";
-                std::cout << "(" << std::showpos << ((results[heavy_start+1].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
-                std::cout << (results[heavy_start+1].cpu_efficiency*100) << "% CPU efficiency ";
-                std::cout << "[" << std::showpos << ((results[heavy_start+1].throughput - results[heavy_start].throughput) / results[heavy_start].throughput) * 100.0 << "% vs without sleep]" << std::endl;
+                printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %+10.1f%%\n",
+                    "FixedThreadPool + adaptive sleep",
+                    results[heavy_start+1].throughput/1e6, results[heavy_start+1].cpu_efficiency*100,
+                    ((results[heavy_start+1].throughput - baseline_throughput) / baseline_throughput) * 100.0,
+                    ((results[heavy_start+1].throughput - results[heavy_start].throughput) / results[heavy_start].throughput) * 100.0);
                 
                 // AdaptiveLoadBalancing heavy comparison
-                std::cout << "  AdaptiveLoadBalancing (heavy): " << (results[heavy_start+2].throughput/1e6) << " MSamples/sec ";
-                std::cout << "(" << std::showpos << ((results[heavy_start+2].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
-                std::cout << (results[heavy_start+2].cpu_efficiency*100) << "% CPU efficiency" << std::endl;
+                printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %12s\n",
+                    "AdaptiveLoadBalancing",
+                    results[heavy_start+2].throughput/1e6, results[heavy_start+2].cpu_efficiency*100,
+                    ((results[heavy_start+2].throughput - baseline_throughput) / baseline_throughput) * 100.0, "---");
                 
-                std::cout << "  AdaptiveLoadBalancing + adaptive sleep (heavy): " << (results[heavy_start+3].throughput/1e6) << " MSamples/sec ";
-                std::cout << "(" << std::showpos << ((results[heavy_start+3].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
-                std::cout << (results[heavy_start+3].cpu_efficiency*100) << "% CPU efficiency ";
-                std::cout << "[" << std::showpos << ((results[heavy_start+3].throughput - results[heavy_start+2].throughput) / results[heavy_start+2].throughput) * 100.0 << "% vs without sleep]" << std::endl;
+                printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %+10.1f%%\n",
+                    "AdaptiveLoadBalancing + adaptive sleep",
+                    results[heavy_start+3].throughput/1e6, results[heavy_start+3].cpu_efficiency*100,
+                    ((results[heavy_start+3].throughput - baseline_throughput) / baseline_throughput) * 100.0,
+                    ((results[heavy_start+3].throughput - results[heavy_start+2].throughput) / results[heavy_start+2].throughput) * 100.0);
             }
         }
         
-        // Find overall best configurations
-        auto overall_best = std::max_element(results.begin(), results.end(), 
-            [](const TestResult& a, const TestResult& b) { return a.throughput < b.throughput; });
-        std::cout << "\n🏆 OVERALL BEST PERFORMANCE: " << overall_best->name;
-        std::cout << " (" << std::showpos << ((overall_best->throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)" << std::endl;
+        // Find best per category
+        std::cout << "\n🏆 WINNERS BY CATEGORY:" << std::endl;
+        printf("%-20s | %-20s | %-45s | %12s | %10s\n",
+            "Category", "Metric", "Configuration", "Throughput", "CPU Eff");
+        printf("%s\n", std::string(115, '-').c_str());
         
-        // Best CPU efficiency
-        auto efficiency_best = std::max_element(results.begin(), results.end(), 
-            [](const TestResult& a, const TestResult& b) { return a.cpu_efficiency < b.cpu_efficiency; });
-        std::cout << "🏆 BEST CPU EFFICIENCY: " << efficiency_best->name;
-        std::cout << " (" << (efficiency_best->cpu_efficiency*100) << "% CPU efficiency)" << std::endl;
+        // UNIFORM fanout winners (indices 0-4, including baseline)
+        if (results.size() >= 5) {
+            auto uniform_throughput_best = std::max_element(results.begin(), results.begin() + 5,
+                [](const TestResult& a, const TestResult& b) { return a.throughput < b.throughput; });
+            auto uniform_efficiency_best = std::max_element(results.begin(), results.begin() + 5,
+                [](const TestResult& a, const TestResult& b) { return a.cpu_efficiency < b.cpu_efficiency; });
+            
+            // Clean configuration names (remove category-specific suffixes)
+            std::string uniform_throughput_name = uniform_throughput_best->name;
+            std::string uniform_efficiency_name = uniform_efficiency_best->name;
+            
+            printf("%-20s | %-20s | %-45s | %10.1f MS | %8.1f%%\n",
+                "Uniform", "Throughput", uniform_throughput_name.c_str(), 
+                uniform_throughput_best->throughput/1e6, uniform_throughput_best->cpu_efficiency*100);
+            printf("%-20s | %-20s | %-45s | %10.1f MS | %8.1f%%\n",
+                "Uniform", "CPU Efficiency", uniform_efficiency_name.c_str(), 
+                uniform_efficiency_best->throughput/1e6, uniform_efficiency_best->cpu_efficiency*100);
+        }
+        
+        // IMBALANCED fanout winners (includes baseline at index 0, imbalanced at indices 5-10)
+        if (results.size() >= 11) {
+            std::cout << std::endl;  // Add spacing between categories
+            // Compare baseline (index 0) with imbalanced results (indices 5-10)
+            auto imbalanced_candidates_throughput = std::max_element(results.begin() + 5, results.begin() + 11,
+                [](const TestResult& a, const TestResult& b) { return a.throughput < b.throughput; });
+            auto imbalanced_throughput_best = (baseline_result.throughput > imbalanced_candidates_throughput->throughput) 
+                ? &baseline_result : &(*imbalanced_candidates_throughput);
+            
+            auto imbalanced_candidates_efficiency = std::max_element(results.begin() + 5, results.begin() + 11,
+                [](const TestResult& a, const TestResult& b) { return a.cpu_efficiency < b.cpu_efficiency; });
+            auto imbalanced_efficiency_best = (baseline_result.cpu_efficiency > imbalanced_candidates_efficiency->cpu_efficiency)
+                ? &baseline_result : &(*imbalanced_candidates_efficiency);
+            
+            // Clean configuration names (remove [IMBALANCED] suffix)
+            std::string imbalanced_throughput_name = imbalanced_throughput_best->name;
+            std::string imbalanced_efficiency_name = imbalanced_efficiency_best->name;
+            size_t pos = imbalanced_throughput_name.find(" [IMBALANCED]");
+            if (pos != std::string::npos) imbalanced_throughput_name.erase(pos);
+            pos = imbalanced_efficiency_name.find(" [IMBALANCED]");
+            if (pos != std::string::npos) imbalanced_efficiency_name.erase(pos);
+            
+            printf("%-20s | %-20s | %-45s | %10.1f MS | %8.1f%%\n",
+                "Imbalanced", "Throughput", imbalanced_throughput_name.c_str(), 
+                imbalanced_throughput_best->throughput/1e6, imbalanced_throughput_best->cpu_efficiency*100);
+            printf("%-20s | %-20s | %-45s | %10.1f MS | %8.1f%%\n",
+                "Imbalanced", "CPU Efficiency", imbalanced_efficiency_name.c_str(), 
+                imbalanced_efficiency_best->throughput/1e6, imbalanced_efficiency_best->cpu_efficiency*100);
+        }
+        
+        // HEAVY fanout winners (includes baseline at index 0, heavy at indices 11+)
+        if (results.size() >= 17) {
+            std::cout << std::endl;  // Add spacing between categories
+            // Compare baseline (index 0) with heavy results (indices 11+)
+            auto heavy_candidates_throughput = std::max_element(results.begin() + 11, results.end(),
+                [](const TestResult& a, const TestResult& b) { return a.throughput < b.throughput; });
+            auto heavy_throughput_best = (baseline_result.throughput > heavy_candidates_throughput->throughput)
+                ? &baseline_result : &(*heavy_candidates_throughput);
+            
+            auto heavy_candidates_efficiency = std::max_element(results.begin() + 11, results.end(),
+                [](const TestResult& a, const TestResult& b) { return a.cpu_efficiency < b.cpu_efficiency; });
+            auto heavy_efficiency_best = (baseline_result.cpu_efficiency > heavy_candidates_efficiency->cpu_efficiency)
+                ? &baseline_result : &(*heavy_candidates_efficiency);
+            
+            // Clean configuration names (remove [HEAVY FANOUT] suffix)
+            std::string heavy_throughput_name = heavy_throughput_best->name;
+            std::string heavy_efficiency_name = heavy_efficiency_best->name;
+            size_t pos = heavy_throughput_name.find(" [HEAVY FANOUT]");
+            if (pos != std::string::npos) heavy_throughput_name.erase(pos);
+            pos = heavy_efficiency_name.find(" [HEAVY FANOUT]");
+            if (pos != std::string::npos) heavy_efficiency_name.erase(pos);
+            
+            printf("%-20s | %-20s | %-45s | %10.1f MS | %8.1f%%\n",
+                "Heavy", "Throughput", heavy_throughput_name.c_str(), 
+                heavy_throughput_best->throughput/1e6, heavy_throughput_best->cpu_efficiency*100);
+            printf("%-20s | %-20s | %-45s | %10.1f MS | %8.1f%%\n",
+                "Heavy", "CPU Efficiency", heavy_efficiency_name.c_str(), 
+                heavy_efficiency_best->throughput/1e6, heavy_efficiency_best->cpu_efficiency*100);
+        }
+        
+        std::cout << "\nNOTE: CPU Efficiency = successful_procedures / (successful_procedures + failed_procedures)" << std::endl;
     }
     
     std::cout << "========================================" << std::endl;

@@ -283,27 +283,58 @@ int main() {
         result.print();
     }
     
-    // Calculate improvements vs baseline
+    // Performance Analysis vs ThreadPerBlock baseline
     if (results.size() >= 2) {
-        double baseline = results[0].throughput;
-        std::cout << "Performance Improvements vs Baseline (thread per block):" << std::endl;
-        for (size_t i = 1; i < results.size(); ++i) {
-            double improvement = ((results[i].throughput - baseline) / baseline) * 100.0;
-            std::cout << "  " << results[i].name << ": " 
-                      << std::showpos << improvement << "%" << std::endl;
-        }
-        std::cout << std::endl;
+        double baseline_throughput = results[0].throughput;
+        double baseline_efficiency = results[0].cpu_efficiency;
         
-        // Find best result
-        auto best = std::max_element(results.begin() + 1, results.end(), 
+        std::cout << "========================================" << std::endl;
+        std::cout << "Performance Analysis vs BASELINE (ThreadPerBlock)" << std::endl;
+        std::cout << "========================================" << std::endl;
+        
+        printf("%-45s | %12s | %10s | %12s\n",
+            "Configuration", "Throughput", "CPU Eff", "vs Baseline");
+        printf("%s\n", std::string(85, '-').c_str());
+        
+        printf("%-45s | %10.1f MS | %8.1f%% | %11s\n",
+            "BASELINE (ThreadPerBlock)",
+            baseline_throughput/1e6, baseline_efficiency*100, "---");
+        
+        for (size_t i = 1; i < results.size(); ++i) {
+            double improvement = ((results[i].throughput - baseline_throughput) / baseline_throughput) * 100.0;
+            printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%%\n",
+                results[i].name.c_str(),
+                results[i].throughput/1e6, 
+                results[i].cpu_efficiency*100,
+                improvement);
+        }
+        
+        // Find best result (including baseline at index 0)
+        auto best = std::max_element(results.begin(), results.end(), 
             [](const TestResult& a, const TestResult& b) {
                 return a.throughput < b.throughput;
             });
         
-        std::cout << "🏆 Best Enhancement: " << best->name << std::endl;
-        std::cout << "🚀 Speed Improvement: " 
-                  << std::showpos << ((best->throughput - baseline) / baseline) * 100.0 
-                  << "% (" << (best->throughput / baseline) << "x faster)" << std::endl;
+        std::cout << "\n🏆 BEST PERFORMANCE:" << std::endl;
+        printf("%-25s | %-45s | %12s | %10s\n",
+            "Metric", "Configuration", "Throughput", "CPU Eff");
+        printf("%s\n", std::string(95, '-').c_str());
+        
+        printf("%-25s | %-45s | %10.1f MS | %8.1f%%\n",
+            "Best Throughput",
+            best->name.c_str(),
+            best->throughput/1e6,
+            best->cpu_efficiency*100);
+        
+        // Find best CPU efficiency
+        auto efficiency_best = std::max_element(results.begin(), results.end(),
+            [](const TestResult& a, const TestResult& b) { return a.cpu_efficiency < b.cpu_efficiency; });
+        
+        printf("%-25s | %-45s | %10.1f MS | %8.1f%%\n",
+            "Best CPU Efficiency",
+            efficiency_best->name.c_str(),
+            efficiency_best->throughput/1e6,
+            efficiency_best->cpu_efficiency*100);
     }
     
     std::cout << "========================================" << std::endl;
