@@ -1,33 +1,8 @@
-include_directories(
-  ${PROJECT_SOURCE_DIR}
-  ${PROJECT_SOURCE_DIR}/include
-)
+add_executable(perf_simple_linear_flow perf_simple_linear_flow.cpp)
+target_link_libraries(perf_simple_linear_flow cler::cler_desktop_blocks)
 
-add_executable(cler_throughput cler_throughput.cpp)
-target_link_libraries(cler_throughput cler::cler)
-
-add_executable(performance_features performance_features.cpp)
-target_link_libraries(performance_features cler::cler)
-
-if(UNIX)
-  set(CHMOD_COMMAND chmod +x ${CMAKE_CURRENT_BINARY_DIR}/futuresdr_throughput.sh)
-else()
-  set(CHMOD_COMMAND ${CMAKE_COMMAND} -E true)  # always safe fallback
-endif()
-
-add_custom_command(
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/futuresdr_throughput.sh
-  COMMAND ${CMAKE_COMMAND} -E copy
-          ${CMAKE_CURRENT_SOURCE_DIR}/futuresdr_throughput.sh
-          ${CMAKE_CURRENT_BINARY_DIR}/futuresdr_throughput.sh
-  COMMAND ${CHMOD_COMMAND}
-  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/futuresdr_throughput.sh
-  COMMENT "Copying and conditionally chmod +x futuresdr_throughput.sh"
-)
-
-add_custom_target(copy_futuresdr ALL
-  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/futuresdr_throughput.sh
-)
+add_executable(perf_fanout_workloads perf_fanout_workloads.cpp)
+target_link_libraries(perf_fanout_workloads cler::cler_desktop_blocks)
 
 if(UNIX)
   add_custom_command(
@@ -42,3 +17,5 @@ if(UNIX)
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/cpugov.sh
   )
 endif()
+
+add_subdirectory(compare_futuresdr)

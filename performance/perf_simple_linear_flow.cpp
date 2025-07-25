@@ -2,9 +2,6 @@
 #include "cler_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include <iostream>
-#include <chrono>
-#include <thread>
-#include <algorithm>
 #include <random>
 
 // Same blocks as original performance test for fair comparison
@@ -105,6 +102,7 @@ struct TestResult {
     double throughput;
     double duration;
     size_t samples;
+    double cpu_efficiency;  // successful procedures / total procedures
     
     void print() const {
         std::cout << "=== " << name << " ===" << std::endl;
@@ -112,6 +110,7 @@ struct TestResult {
         std::cout << "  Duration: " << duration << " seconds" << std::endl;
         std::cout << "  Throughput: " << throughput << " samples/sec" << std::endl;
         std::cout << "  Performance: " << (throughput / 1e6) << " MSamples/sec" << std::endl;
+        std::cout << "  CPU Efficiency: " << (cpu_efficiency * 100.0) << "%" << std::endl;
         std::cout << std::endl;
     }
 };
@@ -140,13 +139,24 @@ TestResult run_baseline_test(std::chrono::seconds test_duration) {
     
     double duration = test_duration.count();
     
+    // Calculate CPU efficiency from stats
+    const auto& stats = fg.stats();
+    size_t total_successful = 0;
+    size_t total_procedures = 0;
+    for (const auto& stat : stats) {
+        total_successful += stat.successful_procedures;
+        total_procedures += stat.successful_procedures + stat.failed_procedures;
+    }
+    double cpu_efficiency = total_procedures > 0 ? double(total_successful) / total_procedures : 0.0;
+    
     std::cout << " DONE" << std::endl;
     
     return {
-        "Baseline (ThreadPerBlock)",
+        "BASELINE: ThreadPerBlock (no features)",
         sink.get_throughput(),
         duration,
-        sink.get_samples_processed()  // Access the actual samples processed
+        sink.get_samples_processed(),
+        cpu_efficiency
     };
 }
 
@@ -174,24 +184,37 @@ TestResult run_enhanced_test(const std::string& name, cler::FlowGraphConfig conf
     
     double duration = test_duration.count();
     
+    // Calculate CPU efficiency from stats
+    const auto& stats = fg.stats();
+    size_t total_successful = 0;
+    size_t total_procedures = 0;
+    for (const auto& stat : stats) {
+        total_successful += stat.successful_procedures;
+        total_procedures += stat.successful_procedures + stat.failed_procedures;
+    }
+    double cpu_efficiency = total_procedures > 0 ? double(total_successful) / total_procedures : 0.0;
+    
     std::cout << " DONE" << std::endl;
     
     return {
         name,
         sink.get_throughput(),
         duration,
-        sink.get_samples_processed()
+        sink.get_samples_processed(),
+        cpu_efficiency
     };
 }
 
 int main() {
     // Test duration: 5 seconds for each test for more robust results
-    const auto test_duration = std::chrono::seconds(5);
+    const auto test_duration = std::chrono::seconds(3);
     
     std::cout << "========================================" << std::endl;
-    std::cout << "Cler Performance Features Test" << std::endl;
-    std::cout << "Pipeline: Source -> 4x Copy -> Sink" << std::endl;
+    std::cout << "Cler Simple Linear Flow Performance Test" << std::endl;
+    std::cout << "Pipeline: Source -> 4x Copy -> Sink (6 blocks)" << std::endl;
+    std::cout << "BASELINE: ThreadPerBlock scheduler with no feature extensions" << std::endl;
     std::cout << "Test Duration: " << test_duration.count() << " seconds per test" << std::endl;
+    std::cout << "Metrics: Throughput + CPU Efficiency (successful/total procedures)" << std::endl;
     std::cout << "========================================" << std::endl;
     
     std::vector<TestResult> results;

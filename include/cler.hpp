@@ -4,12 +4,10 @@
 #include "cler_result.hpp"
 #include "cler_embeddable_string.hpp"
 #include <array>
-#include <vector> // for load balancer assignments
 #include <algorithm> // for std::min, which a-lot of cler blocks use
 #include <complex> //again, a lot of cler blocks use complex numbers
 #include <chrono> // for timing measurements in FlowGraph
 #include <tuple> // for storing block runners
-#include <numeric> // for std::iota
 #include <cassert> // for assertions
 #include <atomic> // for atomic adaptive sleep state
 
@@ -400,6 +398,12 @@ namespace cler {
             void initialize(size_t blocks, size_t workers) {
                 num_blocks = std::min(blocks, MaxBlocks);
                 num_workers = std::min(workers, MaxWorkers);
+                
+                // Initialize assignment counts to zero
+                for (size_t w = 0; w < num_workers; ++w) {
+                    assignment_counts[w].store(0);
+                    worker_iteration_count[w].store(0);
+                }
                 
                 // Initial round-robin assignment
                 for (size_t i = 0; i < num_blocks; ++i) {
