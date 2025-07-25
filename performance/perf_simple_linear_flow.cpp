@@ -2,9 +2,6 @@
 #include "cler_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include <iostream>
-#include <chrono>
-#include <thread>
-#include <algorithm>
 #include <random>
 
 // Same blocks as original performance test for fair comparison
@@ -105,6 +102,7 @@ struct TestResult {
     double throughput;
     double duration;
     size_t samples;
+    double cpu_efficiency;  // successful procedures / total procedures
     
     void print() const {
         std::cout << "=== " << name << " ===" << std::endl;
@@ -112,6 +110,7 @@ struct TestResult {
         std::cout << "  Duration: " << duration << " seconds" << std::endl;
         std::cout << "  Throughput: " << throughput << " samples/sec" << std::endl;
         std::cout << "  Performance: " << (throughput / 1e6) << " MSamples/sec" << std::endl;
+        std::cout << "  CPU Efficiency: " << (cpu_efficiency * 100.0) << "%" << std::endl;
         std::cout << std::endl;
     }
 };
@@ -140,13 +139,24 @@ TestResult run_baseline_test(std::chrono::seconds test_duration) {
     
     double duration = test_duration.count();
     
+    // Calculate CPU efficiency from stats
+    const auto& stats = fg.stats();
+    size_t total_successful = 0;
+    size_t total_procedures = 0;
+    for (const auto& stat : stats) {
+        total_successful += stat.successful_procedures;
+        total_procedures += stat.successful_procedures + stat.failed_procedures;
+    }
+    double cpu_efficiency = total_procedures > 0 ? double(total_successful) / total_procedures : 0.0;
+    
     std::cout << " DONE" << std::endl;
     
     return {
-        "Baseline (ThreadPerBlock)",
+        "BASELINE: ThreadPerBlock (no features)",
         sink.get_throughput(),
         duration,
-        sink.get_samples_processed()  // Access the actual samples processed
+        sink.get_samples_processed(),
+        cpu_efficiency
     };
 }
 
@@ -174,24 +184,37 @@ TestResult run_enhanced_test(const std::string& name, cler::FlowGraphConfig conf
     
     double duration = test_duration.count();
     
+    // Calculate CPU efficiency from stats
+    const auto& stats = fg.stats();
+    size_t total_successful = 0;
+    size_t total_procedures = 0;
+    for (const auto& stat : stats) {
+        total_successful += stat.successful_procedures;
+        total_procedures += stat.successful_procedures + stat.failed_procedures;
+    }
+    double cpu_efficiency = total_procedures > 0 ? double(total_successful) / total_procedures : 0.0;
+    
     std::cout << " DONE" << std::endl;
     
     return {
         name,
         sink.get_throughput(),
         duration,
-        sink.get_samples_processed()
+        sink.get_samples_processed(),
+        cpu_efficiency
     };
 }
 
 int main() {
     // Test duration: 5 seconds for each test for more robust results
-    const auto test_duration = std::chrono::seconds(5);
+    const auto test_duration = std::chrono::seconds(3);
     
     std::cout << "========================================" << std::endl;
-    std::cout << "Cler Performance Features Test" << std::endl;
-    std::cout << "Pipeline: Source -> 4x Copy -> Sink" << std::endl;
+    std::cout << "Cler Simple Linear Flow Performance Test" << std::endl;
+    std::cout << "Pipeline: Source -> 4x Copy -> Sink (6 blocks)" << std::endl;
+    std::cout << "BASELINE: ThreadPerBlock scheduler with no feature extensions" << std::endl;
     std::cout << "Test Duration: " << test_duration.count() << " seconds per test" << std::endl;
+    std::cout << "Metrics: Throughput + CPU Efficiency (successful/total procedures)" << std::endl;
     std::cout << "========================================" << std::endl;
     
     std::vector<TestResult> results;
@@ -213,8 +236,8 @@ int main() {
     
     // Test 5: AdaptiveLoadBalancing with aggressive rebalancing
     auto aggressive_config = cler::flowgraph_config::adaptive_load_balancing();
-    aggressive_config.rebalance_interval = 200;   // More frequent rebalancing
-    aggressive_config.load_balance_threshold = 0.1; // Lower threshold for rebalancing
+    aggressive_config.load_balancing_interval = 200;   // More frequent rebalancing
+    aggressive_config.load_balancing_threshold = 0.1; // Lower threshold for rebalancing
     results.push_back(run_enhanced_test("AdaptiveLoadBalancing (aggressive)", aggressive_config, test_duration));
     
     // Test 6: ThreadPerBlock with conservative adaptive sleep (rarely sleeps)
@@ -234,6 +257,22 @@ int main() {
     aggressive_sleep_config.adaptive_sleep_fail_threshold = 5; // Fewer fails before sleeping
     aggressive_sleep_config.adaptive_sleep_max_us = 10000.0; // Higher max
     results.push_back(run_enhanced_test("ThreadPerBlock (aggressive adaptive sleep)", aggressive_sleep_config, test_duration));
+    
+    // Test 9: FixedThreadPool with adaptive sleep (NEW - now possible!)
+    auto fixed_pool_sleep_config = cler::flowgraph_config::desktop_performance();
+    fixed_pool_sleep_config.adaptive_sleep = true;
+    fixed_pool_sleep_config.adaptive_sleep_multiplier = 1.5;
+    fixed_pool_sleep_config.adaptive_sleep_max_us = 5000.0;
+    fixed_pool_sleep_config.adaptive_sleep_fail_threshold = 10;
+    results.push_back(run_enhanced_test("FixedThreadPool (with adaptive sleep)", fixed_pool_sleep_config, test_duration));
+    
+    // Test 10: AdaptiveLoadBalancing with adaptive sleep (NEW - best of both worlds!)
+    auto loadbalance_sleep_config = cler::flowgraph_config::adaptive_load_balancing();
+    loadbalance_sleep_config.adaptive_sleep = true;
+    loadbalance_sleep_config.adaptive_sleep_multiplier = 1.5;
+    loadbalance_sleep_config.adaptive_sleep_max_us = 5000.0;
+    loadbalance_sleep_config.adaptive_sleep_fail_threshold = 10;
+    results.push_back(run_enhanced_test("AdaptiveLoadBalancing (with adaptive sleep)", loadbalance_sleep_config, test_duration));
 
     // Print results
     std::cout << "========================================" << std::endl;
@@ -244,27 +283,58 @@ int main() {
         result.print();
     }
     
-    // Calculate improvements vs baseline
+    // Performance Analysis vs ThreadPerBlock baseline
     if (results.size() >= 2) {
-        double baseline = results[0].throughput;
-        std::cout << "Performance Improvements vs Baseline (thread per block):" << std::endl;
-        for (size_t i = 1; i < results.size(); ++i) {
-            double improvement = ((results[i].throughput - baseline) / baseline) * 100.0;
-            std::cout << "  " << results[i].name << ": " 
-                      << std::showpos << improvement << "%" << std::endl;
-        }
-        std::cout << std::endl;
+        double baseline_throughput = results[0].throughput;
+        double baseline_efficiency = results[0].cpu_efficiency;
         
-        // Find best result
-        auto best = std::max_element(results.begin() + 1, results.end(), 
+        std::cout << "========================================" << std::endl;
+        std::cout << "Performance Analysis vs BASELINE (ThreadPerBlock)" << std::endl;
+        std::cout << "========================================" << std::endl;
+        
+        printf("%-45s | %12s | %10s | %12s\n",
+            "Configuration", "Throughput", "CPU Eff", "vs Baseline");
+        printf("%s\n", std::string(85, '-').c_str());
+        
+        printf("%-45s | %10.1f MS | %8.1f%% | %11s\n",
+            "BASELINE (ThreadPerBlock)",
+            baseline_throughput/1e6, baseline_efficiency*100, "---");
+        
+        for (size_t i = 1; i < results.size(); ++i) {
+            double improvement = ((results[i].throughput - baseline_throughput) / baseline_throughput) * 100.0;
+            printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%%\n",
+                results[i].name.c_str(),
+                results[i].throughput/1e6, 
+                results[i].cpu_efficiency*100,
+                improvement);
+        }
+        
+        // Find best result (including baseline at index 0)
+        auto best = std::max_element(results.begin(), results.end(), 
             [](const TestResult& a, const TestResult& b) {
                 return a.throughput < b.throughput;
             });
         
-        std::cout << "🏆 Best Enhancement: " << best->name << std::endl;
-        std::cout << "🚀 Speed Improvement: " 
-                  << std::showpos << ((best->throughput - baseline) / baseline) * 100.0 
-                  << "% (" << (best->throughput / baseline) << "x faster)" << std::endl;
+        std::cout << "\n🏆 BEST PERFORMANCE:" << std::endl;
+        printf("%-25s | %-45s | %12s | %10s\n",
+            "Metric", "Configuration", "Throughput", "CPU Eff");
+        printf("%s\n", std::string(95, '-').c_str());
+        
+        printf("%-25s | %-45s | %10.1f MS | %8.1f%%\n",
+            "Best Throughput",
+            best->name.c_str(),
+            best->throughput/1e6,
+            best->cpu_efficiency*100);
+        
+        // Find best CPU efficiency
+        auto efficiency_best = std::max_element(results.begin(), results.end(),
+            [](const TestResult& a, const TestResult& b) { return a.cpu_efficiency < b.cpu_efficiency; });
+        
+        printf("%-25s | %-45s | %10.1f MS | %8.1f%%\n",
+            "Best CPU Efficiency",
+            efficiency_best->name.c_str(),
+            efficiency_best->throughput/1e6,
+            efficiency_best->cpu_efficiency*100);
     }
     
     std::cout << "========================================" << std::endl;
