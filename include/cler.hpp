@@ -8,7 +8,6 @@
 #include <complex> //again, a lot of cler blocks use complex numbers
 #include <chrono> // for timing measurements in FlowGraph
 #include <tuple> // for storing block runners
-#include <vector> // for adaptive load balancer
 #include <numeric> // for std::iota
 #include <cassert> // for assertions
 
@@ -142,24 +141,24 @@ namespace cler {
     };
     
     // Configuration for performance optimization
-    // EMBEDDED-COMPATIBLE: Uses task policy abstraction, no direct std::thread dependency
     struct FlowGraphConfig {
-        // Scheduler selection: determines threading model and compatible optimizations
         SchedulerType scheduler = SchedulerType::ThreadPerBlock;
         size_t num_workers = 4;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
-        
-        // CPU efficiency for ThreadPerBlock: simple exponential backoff when blocks starve for data
+
+        // Meant to optimize for starved blocks. Works well when we have
+        // - Intermittent sensor data
+        // - Network packet processing with gaps
+        // - File processing with I/O delays
         bool adaptive_sleep = false;
         double adaptive_sleep_multiplier = 1.5;       // How aggressively to increase sleep time
         double adaptive_sleep_max_us = 5000.0;        // Maximum sleep time in microseconds
         size_t adaptive_sleep_fail_threshold = 10;    // Start sleeping after N consecutive fails
         
-        // Dynamic work redistribution: monitors block execution time and reassigns heavy blocks to less loaded workers
+        // Dynamic work redistribution: 
+        // monitors block execution time and reassigns heavy blocks to less loaded workers
         bool enable_load_balancing = false;
         size_t rebalance_interval = 1000;  // Rebalance every N procedure calls
         double load_balance_threshold = 0.2;  // 20% imbalance triggers rebalancing
-        
-        
     };
 
     template<typename TaskPolicy, typename... BlockRunners>
@@ -384,18 +383,17 @@ namespace cler {
                 block_metrics[block_idx].samples_processed += samples;
             }
             
-            std::vector<size_t> get_worker_assignments(size_t worker_id) {
-                if (worker_id >= num_workers) return {};
+            size_t get_worker_assignments(size_t worker_id, size_t* assignments_out, size_t max_assignments) {
+                if (worker_id >= num_workers) return 0;
                 
-                std::vector<size_t> assignments;
                 size_t count = assignment_counts[worker_id].load();
-                assignments.reserve(count);
+                size_t copy_count = std::min(count, max_assignments);
                 
-                for (size_t i = 0; i < count; ++i) {
-                    assignments.push_back(worker_assignments[worker_id][i]);
+                for (size_t i = 0; i < copy_count; ++i) {
+                    assignments_out[i] = worker_assignments[worker_id][i];
                 }
                 
-                return assignments;
+                return copy_count;
             }
             
             bool should_rebalance(size_t worker_id, size_t interval) {
@@ -453,16 +451,19 @@ namespace cler {
                 }
                 
                 // Create sorted block list (heaviest first)
-                std::vector<size_t> sorted_blocks(num_blocks);
-                std::iota(sorted_blocks.begin(), sorted_blocks.end(), 0);
-                std::sort(sorted_blocks.begin(), sorted_blocks.end(),
+                std::array<size_t, MaxBlocks> sorted_blocks;
+                for (size_t i = 0; i < num_blocks; ++i) {
+                    sorted_blocks[i] = i;
+                }
+                std::sort(sorted_blocks.begin(), sorted_blocks.begin() + num_blocks,
                     [&](size_t a, size_t b) { return block_weights[a] > block_weights[b]; });
                 
                 // Greedy assignment: always assign to least loaded worker
                 std::array<double, MaxWorkers> worker_loads;
                 worker_loads.fill(0.0);
                 
-                for (size_t block_idx : sorted_blocks) {
+                for (size_t i = 0; i < num_blocks; ++i) {
+                    size_t block_idx = sorted_blocks[i];
                     // Find least loaded worker
                     auto min_it = std::min_element(worker_loads.begin(), 
                                                  worker_loads.begin() + num_workers);
@@ -508,10 +509,12 @@ namespace cler {
                 bool did_work = false;
                 
                 // Get current block assignments for this worker
-                auto assignments = load_balancer.get_worker_assignments(worker_id);
+                std::array<size_t, 32> assignments;  // Max 32 blocks per worker
+                size_t assignment_count = load_balancer.get_worker_assignments(worker_id, assignments.data(), 32);
                 
                 // Process assigned blocks
-                for (size_t block_idx : assignments) {
+                for (size_t i = 0; i < assignment_count; ++i) {
+                    size_t block_idx = assignments[i];
                     if (_stop_flag) break;
                     
                     // Time the execution for load balancing metrics

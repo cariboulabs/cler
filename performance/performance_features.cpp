@@ -217,14 +217,21 @@ int main() {
     aggressive_config.load_balance_threshold = 0.1; // Lower threshold for rebalancing
     results.push_back(run_enhanced_test("AdaptiveLoadBalancing (aggressive)", aggressive_config, test_duration));
     
-    // Test 6: ThreadPerBlock with adaptive sleep (default)
-    auto adaptive_sleep_config = cler::flowgraph_config::thread_per_block_adaptive();
-    results.push_back(run_enhanced_test("ThreadPerBlock (adaptive sleep)", adaptive_sleep_config, test_duration));
+    // Test 6: ThreadPerBlock with conservative adaptive sleep (rarely sleeps)
+    auto conservative_sleep_config = cler::flowgraph_config::thread_per_block_adaptive_sleep();
+    conservative_sleep_config.adaptive_sleep_multiplier = 1.0; // Minimal growth
+    results.push_back(run_enhanced_test("ThreadPerBlock (conservative adapive sleep)", conservative_sleep_config, test_duration));
     
-    // Test 7: ThreadPerBlock with aggressive adaptive sleep
-    auto aggressive_sleep_config = cler::flowgraph_config::thread_per_block_aggressive_sleep();
-    results.push_back(run_enhanced_test("ThreadPerBlock (aggressive sleep)", aggressive_sleep_config, test_duration));
+    // Test 7: ThreadPerBlock with adaptive sleep (for sparse data)
+    auto adaptive_sleep_config = cler::flowgraph_config::thread_per_block_adaptive_sleep();
+    results.push_back(run_enhanced_test("ThreadPerBlock (default adaptive sleep)", adaptive_sleep_config, test_duration));
     
+    // Test 8: ThreadPerBlock with aggressive adaptive sleep (for very sparse data)
+    auto aggressive_sleep_config = cler::flowgraph_config::thread_per_block_adaptive_sleep();
+    aggressive_sleep_config.adaptive_sleep_multiplier = 2.0; // Aggressive growth
+    aggressive_sleep_config.adaptive_sleep_fail_threshold = 5;
+    results.push_back(run_enhanced_test("ThreadPerBlock (aggressive adaptive sleep)", aggressive_sleep_config, test_duration));
+
     // Print results
     std::cout << "========================================" << std::endl;
     std::cout << "Performance Test Results" << std::endl;
@@ -237,7 +244,7 @@ int main() {
     // Calculate improvements vs baseline
     if (results.size() >= 2) {
         double baseline = results[0].throughput;
-        std::cout << "Performance Improvements vs Baseline:" << std::endl;
+        std::cout << "Performance Improvements vs Baseline (thread per block):" << std::endl;
         for (size_t i = 1; i < results.size(); ++i) {
             double improvement = ((results[i].throughput - baseline) / baseline) * 100.0;
             std::cout << "  " << results[i].name << ": " 

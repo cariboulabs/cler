@@ -88,25 +88,14 @@ namespace flowgraph_config {
         return config;
     }
     
-    // Thread-per-block with adaptive sleep (single-threaded blocks)
-    inline FlowGraphConfig thread_per_block_adaptive() {
+    // Thread-per-block with adaptive sleep (for low-rate data scenarios)
+    inline FlowGraphConfig thread_per_block_adaptive_sleep() {
         FlowGraphConfig config;
         config.scheduler = SchedulerType::ThreadPerBlock;
         config.adaptive_sleep = true;
         config.adaptive_sleep_multiplier = 1.5;     // Default: moderate growth
         config.adaptive_sleep_max_us = 5000.0;      // Default: 5ms max sleep
         config.adaptive_sleep_fail_threshold = 10;  // Default: start sleeping after 10 fails
-        return config;
-    }
-
-    // Thread-per-block with aggressive adaptive sleep  
-    inline FlowGraphConfig thread_per_block_aggressive_sleep() {
-        FlowGraphConfig config;
-        config.scheduler = SchedulerType::ThreadPerBlock;
-        config.adaptive_sleep = true;
-        config.adaptive_sleep_multiplier = 2.0;     // Aggressive: faster growth
-        config.adaptive_sleep_max_us = 10000.0;     // Aggressive: 10ms max sleep
-        config.adaptive_sleep_fail_threshold = 5;   // Aggressive: start sleeping after 5 fails
         return config;
     }
 
