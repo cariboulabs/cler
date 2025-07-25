@@ -41,10 +41,10 @@ void print_flowgraph_execution_report(const DesktopFlowGraph<BlockRunners...>& f
         printf("  - Workers: %zu\n", fg.config().num_workers);
         
         if (fg.config().scheduler == SchedulerType::AdaptiveLoadBalancing) {
-            printf("  - Load Balancing: %s\n", fg.config().enable_load_balancing ? "ENABLED" : "DISABLED");
-            if (fg.config().enable_load_balancing) {
-                printf("      * Rebalance Interval: %zu procedure calls\n", fg.config().rebalance_interval);
-                printf("      * Imbalance Threshold: %.1f%%\n", fg.config().load_balance_threshold * 100.0);
+            printf("  - Load Balancing: %s\n", fg.config().load_balancing ? "ENABLED" : "DISABLED");
+            if (fg.config().load_balancing) {
+                printf("      * Interval: %zu procedure calls\n", fg.config().load_balancing_interval);
+                printf("      * Threshold: %.1f%%\n", fg.config().load_balancing_threshold * 100.0);
             }
         }
     }

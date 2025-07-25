@@ -10,6 +10,7 @@
 #include <tuple> // for storing block runners
 #include <numeric> // for std::iota
 #include <cassert> // for assertions
+#include <atomic> // for atomic adaptive sleep state
 
 namespace cler {
 
@@ -130,14 +131,18 @@ namespace cler {
         double cpu_utilization_percent = 0.0;     // Percentage of time spent in procedure vs waiting
         size_t worker_reassignments = 0;           // Number of times block was reassigned (load balancing)
         double throughput_samples_per_sec = 0.0;  // Calculated throughput
+        
+        // Block-centric adaptive sleep state (thread-safe for all schedulers)
+        // std::atomic<double> current_adaptive_sleep_us{0.0};  // COMMENTED OUT FOR PERFORMANCE TEST
+        // std::atomic<size_t> consecutive_fails{0};            // COMMENTED OUT FOR PERFORMANCE TEST
     };
 
 
     // Enhanced scheduling types for performance optimization  
     enum class SchedulerType {
-        ThreadPerBlock,        // Works with adaptive_sleep; best for small flowgraphs
-        FixedThreadPool,       // Simple thread pool; best for uniform block workloads  
-        AdaptiveLoadBalancing  // Works with load balancing options; best for imbalanced workloads
+        ThreadPerBlock,        // Works with adaptive_sleep; best for small flowgraphs or debugging
+        FixedThreadPool,       // Works with adaptive_sleep; best for uniform workloads  
+        AdaptiveLoadBalancing  // Works with adaptive_sleep and load balancing; best for imbalanced workloads
     };
     
     // Configuration for performance optimization
@@ -145,8 +150,8 @@ namespace cler {
         SchedulerType scheduler = SchedulerType::ThreadPerBlock;
         size_t num_workers = 4;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
 
-        // Meant to optimize for starved blocks. Works well when we have
-        // - Intermittent sensor data
+        // Optimizes CPU usage for starved blocks (sparse data scenarios):
+        // - Intermittent sensor data  
         // - Network packet processing with gaps
         // - File processing with I/O delays
         bool adaptive_sleep = false;
@@ -154,11 +159,10 @@ namespace cler {
         double adaptive_sleep_max_us = 5000.0;        // Maximum sleep time in microseconds
         size_t adaptive_sleep_fail_threshold = 10;    // Start sleeping after N consecutive fails
         
-        // Dynamic work redistribution: 
-        // monitors block execution time and reassigns heavy blocks to less loaded workers
-        bool enable_load_balancing = false;
-        size_t rebalance_interval = 1000;  // Rebalance every N procedure calls
-        double load_balance_threshold = 0.2;  // 20% imbalance triggers rebalancing
+        // Dynamic work redistribution: monitors block execution time and reassigns heavy blocks to less loaded workers
+        bool load_balancing = false;
+        size_t load_balancing_interval = 1000;     // Rebalance every N procedure calls
+        double load_balancing_threshold = 0.2;     // 20% imbalance triggers rebalancing
     };
 
     template<typename TaskPolicy, typename... BlockRunners>
@@ -241,6 +245,46 @@ namespace cler {
         const std::array<BlockExecutionStats, _N>& stats() const { return _stats; }
 
     private:
+        // Block-centric adaptive sleep logic (works with all schedulers)
+        // COMMENTED OUT FOR PERFORMANCE TEST - ATOMIC FIELDS REMOVED
+        /*
+        void handle_adaptive_sleep(size_t block_idx, bool procedure_succeeded) {
+            if (!_config.adaptive_sleep) return;
+            
+            auto& stats = _stats[block_idx];
+            
+            if (procedure_succeeded) {
+                // Reset sleep state on success
+                stats.consecutive_fails.store(0);
+                stats.current_adaptive_sleep_us.store(0.0);
+            } else {
+                // Increment failure count
+                size_t fails = stats.consecutive_fails.fetch_add(1) + 1;
+                
+                // Check if we should sleep
+                if (fails > _config.adaptive_sleep_fail_threshold) {
+                    double current_sleep = stats.current_adaptive_sleep_us.load();
+                    
+                    if (current_sleep == 0.0) {
+                        // Start sleeping with 1 microsecond
+                        stats.current_adaptive_sleep_us.store(1.0);
+                        TaskPolicy::sleep_us(1);
+                    } else {
+                        // Exponential backoff
+                        double new_sleep = std::min(
+                            current_sleep * _config.adaptive_sleep_multiplier,
+                            _config.adaptive_sleep_max_us
+                        );
+                        stats.current_adaptive_sleep_us.store(new_sleep);
+                        TaskPolicy::sleep_us(static_cast<size_t>(new_sleep));
+                    }
+                } else {
+                    // Not enough failures yet, just yield
+                    TaskPolicy::yield();
+                }
+            }
+        }
+        */
         void run_thread_per_block(const FlowGraphConfig& config) {
             // Launch one thread per block (original behavior)
             auto launch_helper = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
@@ -256,8 +300,6 @@ namespace cler {
                 size_t successful = 0;
                 size_t failed = 0;
                 double total_dead_time_s = 0.0;
-                double adaptive_sleep_us = 0.0;
-                size_t consecutive_fails = 0;
 
                 while (!_stop_flag) {
                     auto t_now = std::chrono::steady_clock::now();
@@ -282,31 +324,17 @@ namespace cler {
 
                         if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
                             total_dead_time_s += dt.count();
-                            consecutive_fails++;
-
-                            if (_config.adaptive_sleep && consecutive_fails > _config.adaptive_sleep_fail_threshold) {
-                                // Simple exponential backoff
-                                if (adaptive_sleep_us == 0.0) {
-                                    adaptive_sleep_us = 1.0;  // Start with 1 microsecond
-                                } else {
-                                    adaptive_sleep_us = std::min(
-                                        adaptive_sleep_us * _config.adaptive_sleep_multiplier,
-                                        _config.adaptive_sleep_max_us
-                                    );
-                                }
-                                TaskPolicy::sleep_us(static_cast<size_t>(adaptive_sleep_us));
-                            } else {
-                                TaskPolicy::yield();
-                            }
-
+                            // Use block-centric adaptive sleep
+                            // handle_adaptive_sleep(Is, false);  // COMMENTED OUT FOR PERFORMANCE TEST
+                            TaskPolicy::yield();
                         } else {
                             TaskPolicy::yield();
                         }
 
                     } else {
                         successful++;
-                        consecutive_fails = 0;
-                        adaptive_sleep_us = 0.0;  // Reset sleep time on success
+                        // Use block-centric adaptive sleep  
+                        // handle_adaptive_sleep(Is, true);  // COMMENTED OUT FOR PERFORMANCE TEST
                     }
                 }
 
@@ -316,7 +344,7 @@ namespace cler {
                 stats.successful_procedures = successful;
                 stats.failed_procedures = failed;
                 stats.total_dead_time_s = total_dead_time_s;
-                stats.final_adaptive_sleep_us = _config.adaptive_sleep ? adaptive_sleep_us : 0.0;
+                stats.final_adaptive_sleep_us = 0.0;  // _config.adaptive_sleep ? stats.current_adaptive_sleep_us.load() : 0.0;  // COMMENTED OUT FOR PERFORMANCE TEST
                 stats.total_runtime_s = total_runtime_s.count();
             })), ...);
             };
@@ -488,9 +516,6 @@ namespace cler {
             size_t num_workers = config.num_workers;
             assert(num_workers >= 2 && "AdaptiveLoadBalancing requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
             
-            // Adaptive sleep is not compatible with load balancing (different sleep patterns)
-            assert(!config.adaptive_sleep && "AdaptiveLoadBalancing does not support adaptive_sleep. Use ThreadPerBlock scheduler for adaptive sleep.");
-            
             // Initialize load balancer
             load_balancer.initialize(_N, num_workers);
             
@@ -532,9 +557,9 @@ namespace cler {
                 }
                 
                 // Check if rebalancing is needed
-                if (config.enable_load_balancing && 
-                    load_balancer.should_rebalance(worker_id, config.rebalance_interval)) {
-                    load_balancer.rebalance_workers(config.load_balance_threshold);
+                if (config.load_balancing && 
+                    load_balancer.should_rebalance(worker_id, config.load_balancing_interval)) {
+                    load_balancer.rebalance_workers(config.load_balancing_threshold);
                 }
                 
                 if (!did_work) {
@@ -561,9 +586,6 @@ namespace cler {
             // Validate worker count - must be at least 2 for thread pooling
             size_t num_workers = config.num_workers;
             assert(num_workers >= 2 && "FixedThreadPool requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
-            
-            // Adaptive sleep is not compatible with thread pooling (different sleep patterns)
-            assert(!config.adaptive_sleep && "FixedThreadPool does not support adaptive_sleep. Use ThreadPerBlock scheduler for adaptive sleep.");
             
             // For fixed thread pool: distribute blocks round-robin across workers
             // This is a simplified implementation - real thread pool would be more sophisticated
@@ -633,9 +655,20 @@ namespace cler {
                         _on_err_terminate_cb(_on_err_terminate_context);
                     }
                 }
+                
+                // Handle adaptive sleep for failed procedure
+                if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
+                    // handle_adaptive_sleep(I, false);  // COMMENTED OUT FOR PERFORMANCE TEST
+                    TaskPolicy::yield();
+                }
+                
                 return false;
             } else {
                 stats.successful_procedures++;
+                
+                // Handle adaptive sleep for successful procedure
+                // handle_adaptive_sleep(I, true);  // COMMENTED OUT FOR PERFORMANCE TEST
+                
                 return true;
             }
         }
