@@ -135,8 +135,8 @@ namespace cler {
 
     // Enhanced scheduling types for performance optimization  
     enum class SchedulerType {
-        ThreadPerBlock,        // Works with adaptive_sleep; best for small flowgraphs or debugging
-        FixedThreadPool,       // Simple thread pool; best for uniform workloads  
+        ThreadPerBlock,        // Works with adaptive_sleep; best for small flowgraphs
+        FixedThreadPool,       // Simple thread pool; best for uniform block workloads  
         AdaptiveLoadBalancing  // Works with load balancing options; best for imbalanced workloads
     };
     
