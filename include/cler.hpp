@@ -370,7 +370,7 @@ namespace cler {
         }
         
         // Adaptive Load Balancer
-        template<size_t MaxBlocks = 32, size_t MaxWorkers = 8>
+        template<size_t MaxBlocks = _N, size_t MaxWorkers = 8>
         class AdaptiveLoadBalancer {
         public:
             struct BlockMetrics {
