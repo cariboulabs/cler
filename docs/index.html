@@ -42,7 +42,7 @@
                 
                 <p class="problem">Existing frameworks like GNU Radio are battle-tested but require significant expertise and development time. Their runtime flexibility comes with overhead that makes embedded deployment challenging, and their large filesystem footprint doesn't fit today's AI context windows for modern development workflows.</p>
 
-                <p class="solution"><strong>CLER fills this gap.</strong> Using compile-time C++ templates, it minimizes overhead while keeping the runtime footprint tiny — practical for everything from desktop SDR to bare-metal MCUs. Its ~300 line core fits perfectly in AI context windows, enabling rapid development with modern tools.</p>
+                <p class="solution"><strong>CLER fills this gap.</strong> Using compile-time C++ templates, it minimizes overhead while keeping the runtime footprint tiny — practical for everything from desktop SDR to bare-metal MCUs. Its &lt;1000 line core fits perfectly in AI context windows, enabling rapid development with modern tools.</p>
             </div>
         </section>
 
@@ -64,7 +64,7 @@
                     </div>
                     <div class="principle">
                         <h4>🤖 AI-Friendly Core</h4>
-                        <p>~300 lines of core code fits perfectly in AI context windows, making it easy to get help with development.</p>
+                        <p>&lt;1000 lines of core code fits perfectly in AI context windows, making it easy to get help with development.</p>
                     </div>
                 </div>
             </div>
@@ -109,8 +109,10 @@ int main() {
         cler::BlockRunner(&amp;plot)                        // no outputs (sink)
     );
 
+    // Configure scheduler for optimal performance
     cler::FlowGraphConfig config;
-    config.adaptive_sleep = true;
+    config.scheduler = cler::SchedulerType::ThreadPerBlock;  // One thread per block (default)
+    config.adaptive_sleep = true;  // Reduce CPU usage when data is sparse
     flowgraph.run(config);
 
     while (!gui.should_close()) {

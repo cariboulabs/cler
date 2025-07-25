@@ -48,6 +48,7 @@
                         <li><a href="#platform-support">Platform Support</a></li>
                         <li><a href="#control-system">Control System Example</a></li>
                         <li><a href="#performance-example">Performance Considerations</a></li>
+                        <li><a href="#scheduler-types">Scheduler Types & Optimization</a></li>
                         <li><a href="#buffer-patterns">Buffer Access Patterns</a></li>
                         <li><a href="#architecture">Architecture Deep Dive</a></li>
                     </ul>
@@ -175,6 +176,12 @@ auto flowgraph = cler::make_desktop_flowgraph(
     cler::BlockRunner(&amp;sink)                                  // no outputs (sink)
 );
 
+// Configure scheduler and performance options
+cler::FlowGraphConfig config;
+config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Or FixedThreadPool/AdaptiveLoadBalancing
+config.adaptive_sleep = true;
+flowgraph.run(config);
+
 // Embedded version (FreeRTOS example)
 #include "task_policies/cler_freertos_tpolicy.hpp"
 auto flowgraph = cler::FlowGraph&lt;cler::FreeRTOSTaskPolicy,
@@ -189,7 +196,7 @@ auto flowgraph = cler::FlowGraph&lt;cler::FreeRTOSTaskPolicy,
     cler::BlockRunner(&amp;sink)
 );
 
-flowgraph.run();</code></pre>
+flowgraph.run(config);  // Same config works on all platforms</code></pre>
                     </div>
                     <p class="key-point"><strong>BlockRunner Syntax:</strong> First argument is the block, remaining arguments are its outputs (passed to procedure() as parameters). Same syntax works across all platforms.</p>
 
@@ -229,7 +236,11 @@ int main() {
         cler::BlockRunner(&amp;sink)
     );
     
-    flowgraph.run();
+    // Configure scheduler for optimal performance
+    cler::FlowGraphConfig config;
+    config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Good default
+    config.adaptive_sleep = true;  // Reduce CPU when idle
+    flowgraph.run(config);
     return 0;
 }</code></pre>
                     </div>
@@ -490,6 +501,72 @@ while (running) {
                     <p class="key-point"><strong>Benefits:</strong> No dynamic allocation, better cache locality, deterministic memory usage — critical for real-time embedded systems.</p>
                 </section>
 
+                <section id="scheduler-types">
+                    <h2>Scheduler Types & Performance Optimization</h2>
+                    <p>CLER provides three scheduler types to optimize performance for different workload characteristics. Choosing the right scheduler can dramatically improve throughput and reduce CPU usage.</p>
+                    
+                    <h3>ThreadPerBlock (Default)</h3>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">cler::FlowGraphConfig config;
+config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Default
+config.adaptive_sleep = true;  // Reduce CPU when data is sparse
+flowgraph.run(config);</code></pre>
+                    </div>
+                    <p><strong>Best for:</strong> Small flowgraphs, debugging, uniform workloads</p>
+                    <p><strong>Characteristics:</strong> One dedicated thread per block</p>
+                    <p class="design-note"><strong>Trade-offs:</strong> Simple and predictable, but thread overhead grows with block count. Good starting point for most applications.</p>
+                    
+                    <h3>FixedThreadPool</h3>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">cler::FlowGraphConfig config;
+config.scheduler = cler::SchedulerType::FixedThreadPool;
+config.num_workers = 4;  // Number of worker threads (minimum 2)
+config.adaptive_sleep = true;
+flowgraph.run(config);</code></pre>
+                    </div>
+                    <p><strong>Best for:</strong> Uniform workloads with balanced processing across blocks</p>
+                    <p><strong>Characteristics:</strong> Fixed number of worker threads process blocks round-robin</p>
+                    <p class="key-point"><strong>Benefits:</strong> Lower thread overhead, better CPU cache utilization. Works well when all blocks have similar computational requirements.</p>
+                    
+                    <h3>AdaptiveLoadBalancing</h3>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">cler::FlowGraphConfig config;
+config.scheduler = cler::SchedulerType::AdaptiveLoadBalancing;
+config.num_workers = 4;  // Number of worker threads (minimum 2)
+
+// Load balancing configuration
+config.load_balancing = true;
+config.load_balancing_interval = 500;   // Check balance every 500 calls
+config.load_balancing_threshold = 0.15; // Rebalance at 15% imbalance
+
+config.adaptive_sleep = true;
+flowgraph.run(config);</code></pre>
+                    </div>
+                    <p><strong>Best for:</strong> Imbalanced workloads, dynamic data rates, varying block complexity</p>
+                    <p><strong>Characteristics:</strong> Dynamic work distribution based on block performance metrics</p>
+                    <p class="key-point"><strong>Benefits:</strong> Automatically balances work across threads, handles heterogeneous blocks. Essential for fanout scenarios with different processing complexity per path.</p>
+                    
+                    <h3>Adaptive Sleep Configuration</h3>
+                    <p>All scheduler types support adaptive sleep to reduce CPU usage when data is sparse:</p>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">// Adaptive sleep works with all scheduler types
+config.adaptive_sleep = true;
+config.adaptive_sleep_multiplier = 1.5;       // How aggressively to increase sleep
+config.adaptive_sleep_max_us = 5000.0;        // Maximum sleep time (microseconds)
+config.adaptive_sleep_fail_threshold = 10;    // Start sleeping after N failures
+
+// For sparse/intermittent data (sensors, network packets)
+config.adaptive_sleep_multiplier = 2.0;       // Aggressive backoff
+config.adaptive_sleep_max_us = 10000.0;       // Up to 10ms sleep
+config.adaptive_sleep_fail_threshold = 5;     // Sleep after 5 failures</code></pre>
+                    </div>
+                    <p class="design-note"><strong>Use Cases:</strong> Sensor data, network packets, user input processing. Can achieve >90% CPU reduction during idle periods while maintaining low latency when data arrives.</p>
+                </section>
+
                 <section id="buffer-patterns">
                     <h2>Three Buffer Access Patterns</h2>
                     <p>Different algorithms need different memory access patterns. CLER supports them all efficiently, from simple single-sample processing to zero-copy bulk operations.</p>
@@ -571,10 +648,10 @@ struct BlockRunner {
                     </div>
                     <p class="key-point"><strong>Zero Overhead:</strong> Channel types are deduced at compile time. Minimal runtime type checking, very few virtual function calls, minimal dynamic allocations. The flowgraph code compiles close to what you'd write by hand — often with template optimizations.</p>
                     
-                    <h3>AI-Friendly Core (~300 LOC)</h3>
+                    <h3>AI-Friendly Core (&lt;1000 LOC)</h3>
                     <p>CLER's core is intentionally small and focused:</p>
                     <ul>
-                        <li><strong>~300 lines:</strong> Perfect context window for AI assistance</li>
+                        <li><strong>&lt;1000 lines:</strong> Perfect context window for AI assistance</li>
                         <li><strong>Clear abstractions:</strong> BlockBase, Channel, FlowGraph, Result types</li>
                         <li><strong>Minimal dependencies:</strong> Only standard library, easy to understand</li>
                         <li><strong>Template-heavy:</strong> AI tools excel at understanding and extending template code</li>
