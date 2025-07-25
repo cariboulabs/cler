@@ -304,7 +304,7 @@ int main() {
 #include "task_policies/cler_desktop_tpolicy.hpp"  // Platform-specific policy
 ```
 
-### Flowgraph Construction
+### Flowgraph Construction and Scheduler Configuration
 ```cpp
 auto flowgraph = cler::make_desktop_flowgraph(
     cler::BlockRunner(&source, &adder.in[0]),           // single output
@@ -315,8 +315,28 @@ auto flowgraph = cler::make_desktop_flowgraph(
     cler::BlockRunner(&plot)                            // no outputs (sink)
 );
 
+// Configure scheduler and performance options
 cler::FlowGraphConfig config;
+
+// Choose scheduler type (new in recent versions)
+config.scheduler = cler::SchedulerType::ThreadPerBlock;        // Default: one thread per block
+// config.scheduler = cler::SchedulerType::FixedThreadPool;    // Fixed worker pool (num_workers required)
+// config.scheduler = cler::SchedulerType::AdaptiveLoadBalancing; // Dynamic work distribution
+
+// Worker configuration (for FixedThreadPool and AdaptiveLoadBalancing)
+config.num_workers = 4;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
+
+// Adaptive sleep configuration (works with all scheduler types)
 config.adaptive_sleep = true;
+config.adaptive_sleep_multiplier = 1.5;       // How aggressively to increase sleep time
+config.adaptive_sleep_max_us = 5000.0;        // Maximum sleep time in microseconds
+config.adaptive_sleep_fail_threshold = 10;    // Start sleeping after N consecutive fails
+
+// Load balancing (only for AdaptiveLoadBalancing scheduler)
+config.load_balancing = true;                 // Enable dynamic rebalancing
+config.load_balancing_interval = 1000;        // Rebalance every N procedure calls
+config.load_balancing_threshold = 0.2;        // 20% imbalance triggers rebalancing
+
 flowgraph.run(config);
 ```
 
@@ -621,19 +641,67 @@ Tools check for: missing BlockRunners, invalid connections, unconnected channels
 
 ## 11. Performance & Debugging
 
-### Execution Statistics
+### Scheduler Types and Performance Optimization
+
+Cler provides three scheduler types to optimize for different workload characteristics:
+
+#### ThreadPerBlock (Default)
+- **Best for**: Small flowgraphs, debugging, uniform workloads
+- **Characteristics**: One dedicated thread per block
+- **Pros**: Simple, predictable, no thread contention
+- **Cons**: Thread overhead, poor scalability with many blocks
+
+#### FixedThreadPool
+- **Best for**: Uniform workloads with balanced processing
+- **Characteristics**: Fixed number of worker threads processing blocks round-robin
+- **Pros**: Lower thread overhead, better CPU cache utilization
+- **Cons**: Can suffer from work imbalance
+- **Requires**: `config.num_workers` (minimum 2)
+
+#### AdaptiveLoadBalancing
+- **Best for**: Imbalanced workloads, dynamic data rates, varying block complexity
+- **Characteristics**: Dynamic work distribution based on block performance metrics
+- **Pros**: Automatically balances work across threads, handles heterogeneous blocks
+- **Cons**: Slight overhead from load tracking and rebalancing
+- **Requires**: `config.num_workers` (minimum 2)
+- **Options**: `load_balancing_interval`, `load_balancing_threshold`
+
+### Execution Statistics and Block Performance
 ```cpp
-// Enable adaptive sleep for better CPU usage
+// Configure for optimal performance based on workload
 cler::FlowGraphConfig config;
+
+// Example 1: Uniform workload (e.g., simple signal processing chain)
+config.scheduler = cler::SchedulerType::FixedThreadPool;
+config.num_workers = 4;
+config.adaptive_sleep = true;  // Reduce CPU usage when data is sparse
+
+// Example 2: Imbalanced workload (e.g., fanout with different processing paths)
+config.scheduler = cler::SchedulerType::AdaptiveLoadBalancing;
+config.num_workers = 4;
+config.load_balancing = true;
+config.load_balancing_interval = 500;   // Check balance every 500 calls
+config.load_balancing_threshold = 0.15; // Rebalance at 15% imbalance
+
+// Example 3: Sparse data (e.g., intermittent sensor readings)
+config.scheduler = cler::SchedulerType::ThreadPerBlock;
 config.adaptive_sleep = true;
-config.adaptive_sleep_ramp_up_factor = 1.5;
-config.adaptive_sleep_max_us = 5000.0;
+config.adaptive_sleep_multiplier = 2.0;    // Aggressive backoff
+config.adaptive_sleep_max_us = 10000.0;    // Up to 10ms sleep
+config.adaptive_sleep_fail_threshold = 5;  // Sleep after 5 failures
+
 flowgraph.run(config);
 
-// After stopping, get detailed report
+// After stopping, get detailed report with performance metrics
 flowgraph.stop();
 cler::print_flowgraph_execution_report(flowgraph);
-throughput_block.report();
+
+// BlockExecutionStats now includes (calculated post-execution):
+// - Successful/failed procedure counts
+// - CPU utilization percentage
+// - Average execution time per procedure
+// - Throughput in samples/second
+// - Adaptive sleep final value (if enabled)
 ```
 
 ### Benchmarking
@@ -659,6 +727,35 @@ for (size_t i = 0; i < to_process; ++i) {
 out->commit_write(to_process);
 ```
 
+### Performance Recommendations by Use Case
+
+#### Simple Linear Chain (Source → A → B → C → Sink)
+- **Scheduler**: ThreadPerBlock (simple, predictable)
+- **Adaptive Sleep**: Yes for sparse data, No for continuous streams
+- **Expected**: Good performance, easy debugging
+
+#### Fanout with Uniform Processing (Source → Fanout → [N similar paths] → Sinks)
+- **Scheduler**: FixedThreadPool with workers = min(N/2, CPU cores)
+- **Adaptive Sleep**: Optional based on data rate
+- **Expected**: Better than ThreadPerBlock due to reduced thread overhead
+
+#### Fanout with Imbalanced Processing (different complexity per path)
+- **Scheduler**: AdaptiveLoadBalancing with load_balancing enabled
+- **Workers**: Start with CPU cores - 1
+- **Load Balancing**: interval=500-1000, threshold=0.1-0.2
+- **Expected**: Significantly better than FixedThreadPool for imbalanced loads
+
+#### Many Blocks (>20 blocks in flowgraph)
+- **Scheduler**: AdaptiveLoadBalancing or FixedThreadPool
+- **Workers**: 4-8 depending on CPU
+- **Rationale**: ThreadPerBlock creates too many threads
+
+#### Sparse/Intermittent Data (sensors, network packets)
+- **Scheduler**: Any (ThreadPerBlock is fine for simplicity)
+- **Adaptive Sleep**: REQUIRED - aggressive settings
+- **Settings**: multiplier=2.0, max_us=10000, fail_threshold=5
+- **Expected**: >90% reduction in CPU usage during idle
+
 ## 12. Development Guidelines & Code Style
 
 ### Core Principles
@@ -672,6 +769,10 @@ out->commit_write(to_process);
 - **EmbeddableString**: Fixed-size strings without std::string dependency
 - **Result<T,E>**: Error handling without exceptions
 - **Template-based connections**: Type-safe at compile time
+- **BlockExecutionStats**: Optimized structure storing only runtime data
+  - Runtime fields: successful/failed procedures, samples processed, dead time, runtime
+  - Post-processing calculations: avg execution time, CPU utilization %, throughput
+  - Memory optimized: ~32 bytes smaller per block vs calculating at runtime
 
 ### Additional Implementation Notes
 
