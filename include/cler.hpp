@@ -123,8 +123,6 @@ namespace cler {
         double total_dead_time_s = 0.0;
         double final_adaptive_sleep_us = 0.0;
         double total_runtime_s = 0.0;
-        
-        // Enhanced statistics for new schedulers
         size_t samples_processed = 0;              // Total samples processed by this block
         double avg_execution_time_us = 0.0;        // Average time per successful procedure call
         double cpu_utilization_percent = 0.0;     // Percentage of time spent in procedure vs waiting
@@ -139,9 +137,9 @@ namespace cler {
 
     // Enhanced scheduling types for performance optimization  
     enum class SchedulerType {
-        ThreadPerBlock,        // Works with adaptive_sleep; best for small flowgraphs or debugging
-        FixedThreadPool,       // Works with adaptive_sleep; best for uniform workloads  
-        AdaptiveLoadBalancing  // Works with adaptive_sleep and load balancing; best for imbalanced workloads
+        ThreadPerBlock,        //Best for small flowgraphs or debugging
+        FixedThreadPool,       //Best for uniform workloads
+        AdaptiveLoadBalancing  //Best for imbalanced workloads
     };
     
     // Configuration for performance optimization
@@ -149,7 +147,8 @@ namespace cler {
         SchedulerType scheduler = SchedulerType::ThreadPerBlock;
         size_t num_workers = 4;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
 
-        // Optimizes CPU usage for starved blocks (sparse data scenarios):
+        // Optimizes CPU usage, usually at the cost of reducing throughput
+        // Most useful for:
         // - Intermittent sensor data  
         // - Network packet processing with gaps
         // - File processing with I/O delays
@@ -158,7 +157,10 @@ namespace cler {
         double adaptive_sleep_max_us = 5000.0;        // Maximum sleep time in microseconds
         size_t adaptive_sleep_fail_threshold = 10;    // Start sleeping after N consecutive fails
         
-        // Dynamic work redistribution: monitors block execution time and reassigns heavy blocks to less loaded workers
+        // Dynamic work redistribution
+        //especially useful for:
+        // - Imbalanced workloads (where some paths or blocks are much slower)
+        // - Dynamic data rates (where some blocks receive more data than others)
         bool load_balancing = false;
         size_t load_balancing_interval = 1000;     // Rebalance every N procedure calls
         double load_balancing_threshold = 0.2;     // 20% imbalance triggers rebalancing

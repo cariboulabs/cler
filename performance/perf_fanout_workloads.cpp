@@ -356,6 +356,7 @@ int main() {
     std::cout << "2. IMBALANCED fanout (different path complexity) -> AdaptiveLoadBalancing should excel" << std::endl;
     std::cout << "3. HEAVY fanout (many parallel paths) -> Load balancing should excel" << std::endl;
     std::cout << "BASELINE: ThreadPerBlock scheduler with no feature extensions" << std::endl;
+    std::cout << "ADAPTIVE SLEEP: Tests both with/without adaptive sleep for CPU efficiency" << std::endl;
     std::cout << "Test Duration: " << test_duration.count() << " seconds per test" << std::endl;
     std::cout << "Metrics: Throughput + CPU Efficiency (successful/total procedures)" << std::endl;
     std::cout << "========================================" << std::endl;
@@ -375,19 +376,36 @@ int main() {
     auto fixed_config = cler::flowgraph_config::desktop_performance();
     results.push_back(run_enhanced_test("FixedThreadPool (4 workers)", fixed_config, test_duration));
     
+    // Test 2b: FixedThreadPool + Adaptive Sleep
+    auto fixed_config_sleep = cler::flowgraph_config::desktop_performance();
+    fixed_config_sleep.adaptive_sleep = true;
+    results.push_back(run_enhanced_test("FixedThreadPool + adaptive sleep", fixed_config_sleep, test_duration));
+    
     // Test 3: AdaptiveLoadBalancing (should be decent but not optimal for uniform)
     auto loadbalance_config = cler::flowgraph_config::adaptive_load_balancing();
     results.push_back(run_enhanced_test("AdaptiveLoadBalancing", loadbalance_config, test_duration));
     
+    // Test 3b: AdaptiveLoadBalancing + Adaptive Sleep
+    auto loadbalance_config_sleep = cler::flowgraph_config::adaptive_load_balancing();
+    loadbalance_config_sleep.adaptive_sleep = true;
+    results.push_back(run_enhanced_test("AdaptiveLoadBalancing + adaptive sleep", loadbalance_config_sleep, test_duration));
+    
     std::cout << "\n⚖️ IMBALANCED FANOUT TESTS (light/heavy/very-light paths):" << std::endl;
     std::cout << "Pipeline: Source -> Fanout -> [Gain->Sink, Noise+Gain->Sink, DirectSink] (8 blocks)" << std::endl;
     std::cout << "Expected: AdaptiveLoadBalancing should perform best due to imbalanced load" << std::endl;
+    std::cout << "Adaptive sleep should help most here due to starved light paths" << std::endl;
     
     // Test 4: FixedThreadPool (should struggle with imbalanced load)
     results.push_back(run_imbalanced_test("FixedThreadPool (4 workers)", fixed_config, test_duration));
     
+    // Test 4b: FixedThreadPool + Adaptive Sleep (should improve CPU efficiency)
+    results.push_back(run_imbalanced_test("FixedThreadPool + adaptive sleep", fixed_config_sleep, test_duration));
+    
     // Test 5: AdaptiveLoadBalancing (should excel at imbalanced)
     results.push_back(run_imbalanced_test("AdaptiveLoadBalancing", loadbalance_config, test_duration));
+    
+    // Test 5b: AdaptiveLoadBalancing + Adaptive Sleep
+    results.push_back(run_imbalanced_test("AdaptiveLoadBalancing + adaptive sleep", loadbalance_config_sleep, test_duration));
     
     // Test 6: Aggressive AdaptiveLoadBalancing (should be even better)
     auto aggressive_config = cler::flowgraph_config::adaptive_load_balancing();
@@ -395,18 +413,35 @@ int main() {
     aggressive_config.load_balancing_threshold = 0.05; // Very sensitive (5% imbalance)
     results.push_back(run_imbalanced_test("AdaptiveLoadBalancing (aggressive)", aggressive_config, test_duration));
     
+    // Test 6b: Aggressive AdaptiveLoadBalancing + Adaptive Sleep
+    auto aggressive_config_sleep = cler::flowgraph_config::adaptive_load_balancing();
+    aggressive_config_sleep.load_balancing_interval = 100;
+    aggressive_config_sleep.load_balancing_threshold = 0.05;
+    aggressive_config_sleep.adaptive_sleep = true;
+    results.push_back(run_imbalanced_test("AdaptiveLoadBalancing (aggressive) + adaptive sleep", aggressive_config_sleep, test_duration));
+    
     std::cout << "\n🚀 HEAVY FANOUT TESTS (8 parallel paths):" << std::endl;
     std::cout << "Pipeline: Source -> Fanout -> [8x Gain->Sink paths] (18 blocks total)" << std::endl;
     std::cout << "Expected: Load balancing should excel with many blocks to distribute" << std::endl;
+    std::cout << "Adaptive sleep may help with thread contention and back-pressure" << std::endl;
     
     // Test 7: FixedThreadPool (should handle many blocks reasonably)
     results.push_back(run_heavy_fanout_test("FixedThreadPool (4 workers)", fixed_config, test_duration));
     
+    // Test 7b: FixedThreadPool + Adaptive Sleep
+    results.push_back(run_heavy_fanout_test("FixedThreadPool + adaptive sleep", fixed_config_sleep, test_duration));
+    
     // Test 8: AdaptiveLoadBalancing (should excel with many blocks to balance)
     results.push_back(run_heavy_fanout_test("AdaptiveLoadBalancing", loadbalance_config, test_duration));
     
+    // Test 8b: AdaptiveLoadBalancing + Adaptive Sleep
+    results.push_back(run_heavy_fanout_test("AdaptiveLoadBalancing + adaptive sleep", loadbalance_config_sleep, test_duration));
+    
     // Test 9: Aggressive AdaptiveLoadBalancing (should be excellent)
     results.push_back(run_heavy_fanout_test("AdaptiveLoadBalancing (aggressive)", aggressive_config, test_duration));
+    
+    // Test 9b: Aggressive AdaptiveLoadBalancing + Adaptive Sleep (ultimate config)
+    results.push_back(run_heavy_fanout_test("AdaptiveLoadBalancing (aggressive) + adaptive sleep", aggressive_config_sleep, test_duration));
 
     // Print results
     std::cout << "========================================" << std::endl;
@@ -417,64 +452,108 @@ int main() {
         result.print();
     }
     
-    // Analysis - All comparisons vs ThreadPerBlock baseline
+    // Analysis - All comparisons vs ThreadPerBlock baseline + with/without adaptive sleep
     std::cout << "========================================" << std::endl;
     std::cout << "Performance Analysis vs BASELINE (ThreadPerBlock)" << std::endl;
+    std::cout << "With/Without Adaptive Sleep Comparisons" << std::endl;
     std::cout << "========================================" << std::endl;
     
-    if (results.size() >= 3) {
+    if (results.size() >= 5) {
         // Use baseline for all comparisons
         double baseline_throughput = baseline_result.throughput;
+        double baseline_efficiency = baseline_result.cpu_efficiency;
         
         std::cout << "🔄 UNIFORM FANOUT Analysis:" << std::endl;
-        std::cout << "  BASELINE (ThreadPerBlock): " << (baseline_throughput/1e6) << " MSamples/sec" << std::endl;
-        std::cout << "  FixedThreadPool: " << (results[1].throughput/1e6) << " MSamples/sec ";
-        std::cout << "(" << std::showpos << ((results[1].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)" << std::endl;
-        std::cout << "  AdaptiveLoadBalancing: " << (results[2].throughput/1e6) << " MSamples/sec ";
-        std::cout << "(" << std::showpos << ((results[2].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)" << std::endl;
+        std::cout << "  BASELINE (ThreadPerBlock): " << (baseline_throughput/1e6) << " MSamples/sec, " 
+                  << (baseline_efficiency*100) << "% CPU efficiency" << std::endl;
         
-        if (results.size() >= 6) {
+        // FixedThreadPool comparison
+        if (results.size() >= 3) {
+            std::cout << "  FixedThreadPool: " << (results[1].throughput/1e6) << " MSamples/sec ";
+            std::cout << "(" << std::showpos << ((results[1].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
+            std::cout << (results[1].cpu_efficiency*100) << "% CPU efficiency" << std::endl;
+            
+            std::cout << "  FixedThreadPool + adaptive sleep: " << (results[2].throughput/1e6) << " MSamples/sec ";
+            std::cout << "(" << std::showpos << ((results[2].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
+            std::cout << (results[2].cpu_efficiency*100) << "% CPU efficiency ";
+            std::cout << "[" << std::showpos << ((results[2].throughput - results[1].throughput) / results[1].throughput) * 100.0 << "% vs without sleep]" << std::endl;
+        }
+        
+        // AdaptiveLoadBalancing comparison
+        if (results.size() >= 5) {
+            std::cout << "  AdaptiveLoadBalancing: " << (results[3].throughput/1e6) << " MSamples/sec ";
+            std::cout << "(" << std::showpos << ((results[3].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
+            std::cout << (results[3].cpu_efficiency*100) << "% CPU efficiency" << std::endl;
+            
+            std::cout << "  AdaptiveLoadBalancing + adaptive sleep: " << (results[4].throughput/1e6) << " MSamples/sec ";
+            std::cout << "(" << std::showpos << ((results[4].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
+            std::cout << (results[4].cpu_efficiency*100) << "% CPU efficiency ";
+            std::cout << "[" << std::showpos << ((results[4].throughput - results[3].throughput) / results[3].throughput) * 100.0 << "% vs without sleep]" << std::endl;
+        }
+        
+        if (results.size() >= 11) {
             std::cout << "\n⚖️ IMBALANCED FANOUT Analysis:" << std::endl;
-            std::cout << "  FixedThreadPool (imbalanced): " << (results[3].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[3].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)" << std::endl;
-            std::cout << "  AdaptiveLoadBalancing (imbalanced): " << (results[4].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[4].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)" << std::endl;
-            std::cout << "  AdaptiveLoadBalancing (aggressive): " << (results[5].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[5].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)" << std::endl;
+            
+            // FixedThreadPool imbalanced comparison (indices 5,6)
+            std::cout << "  FixedThreadPool (imbalanced): " << (results[5].throughput/1e6) << " MSamples/sec ";
+            std::cout << "(" << std::showpos << ((results[5].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
+            std::cout << (results[5].cpu_efficiency*100) << "% CPU efficiency" << std::endl;
+            
+            std::cout << "  FixedThreadPool + adaptive sleep (imbalanced): " << (results[6].throughput/1e6) << " MSamples/sec ";
+            std::cout << "(" << std::showpos << ((results[6].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
+            std::cout << (results[6].cpu_efficiency*100) << "% CPU efficiency ";
+            std::cout << "[" << std::showpos << ((results[6].throughput - results[5].throughput) / results[5].throughput) * 100.0 << "% vs without sleep]" << std::endl;
+            
+            // AdaptiveLoadBalancing imbalanced comparison (indices 7,8)
+            std::cout << "  AdaptiveLoadBalancing (imbalanced): " << (results[7].throughput/1e6) << " MSamples/sec ";
+            std::cout << "(" << std::showpos << ((results[7].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
+            std::cout << (results[7].cpu_efficiency*100) << "% CPU efficiency" << std::endl;
+            
+            std::cout << "  AdaptiveLoadBalancing + adaptive sleep (imbalanced): " << (results[8].throughput/1e6) << " MSamples/sec ";
+            std::cout << "(" << std::showpos << ((results[8].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
+            std::cout << (results[8].cpu_efficiency*100) << "% CPU efficiency ";
+            std::cout << "[" << std::showpos << ((results[8].throughput - results[7].throughput) / results[7].throughput) * 100.0 << "% vs without sleep]" << std::endl;
         }
         
-        if (results.size() >= 9) {
+        if (results.size() >= 15) {
             std::cout << "\n🚀 HEAVY FANOUT Analysis:" << std::endl;
-            std::cout << "  FixedThreadPool (heavy): " << (results[6].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[6].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)" << std::endl;
-            std::cout << "  AdaptiveLoadBalancing (heavy): " << (results[7].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[7].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)" << std::endl;
-            std::cout << "  AdaptiveLoadBalancing (aggressive heavy): " << (results[8].throughput/1e6) << " MSamples/sec ";
-            std::cout << "(" << std::showpos << ((results[8].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)" << std::endl;
+            
+            // Find the heavy fanout test indices (should start around index 11)
+            size_t heavy_start = 11;  // Adjust based on actual test structure
+            if (results.size() >= heavy_start + 4) {
+                // FixedThreadPool heavy comparison
+                std::cout << "  FixedThreadPool (heavy): " << (results[heavy_start].throughput/1e6) << " MSamples/sec ";
+                std::cout << "(" << std::showpos << ((results[heavy_start].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
+                std::cout << (results[heavy_start].cpu_efficiency*100) << "% CPU efficiency" << std::endl;
+                
+                std::cout << "  FixedThreadPool + adaptive sleep (heavy): " << (results[heavy_start+1].throughput/1e6) << " MSamples/sec ";
+                std::cout << "(" << std::showpos << ((results[heavy_start+1].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
+                std::cout << (results[heavy_start+1].cpu_efficiency*100) << "% CPU efficiency ";
+                std::cout << "[" << std::showpos << ((results[heavy_start+1].throughput - results[heavy_start].throughput) / results[heavy_start].throughput) * 100.0 << "% vs without sleep]" << std::endl;
+                
+                // AdaptiveLoadBalancing heavy comparison
+                std::cout << "  AdaptiveLoadBalancing (heavy): " << (results[heavy_start+2].throughput/1e6) << " MSamples/sec ";
+                std::cout << "(" << std::showpos << ((results[heavy_start+2].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
+                std::cout << (results[heavy_start+2].cpu_efficiency*100) << "% CPU efficiency" << std::endl;
+                
+                std::cout << "  AdaptiveLoadBalancing + adaptive sleep (heavy): " << (results[heavy_start+3].throughput/1e6) << " MSamples/sec ";
+                std::cout << "(" << std::showpos << ((results[heavy_start+3].throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline), ";
+                std::cout << (results[heavy_start+3].cpu_efficiency*100) << "% CPU efficiency ";
+                std::cout << "[" << std::showpos << ((results[heavy_start+3].throughput - results[heavy_start+2].throughput) / results[heavy_start+2].throughput) * 100.0 << "% vs without sleep]" << std::endl;
+            }
         }
         
-        // Find best for each scenario
-        auto uniform_best = std::max_element(results.begin(), results.begin() + 3, 
+        // Find overall best configurations
+        auto overall_best = std::max_element(results.begin(), results.end(), 
             [](const TestResult& a, const TestResult& b) { return a.throughput < b.throughput; });
-        std::cout << "\n🏆 Best for UNIFORM fanout: " << uniform_best->name;
-        if (uniform_best->throughput != baseline_throughput) {
-            std::cout << " (" << std::showpos << ((uniform_best->throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)";
-        }
-        std::cout << std::endl;
+        std::cout << "\n🏆 OVERALL BEST PERFORMANCE: " << overall_best->name;
+        std::cout << " (" << std::showpos << ((overall_best->throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)" << std::endl;
         
-        if (results.size() >= 6) {
-            auto imbalanced_best = std::max_element(results.begin() + 3, results.begin() + 6, 
-                [](const TestResult& a, const TestResult& b) { return a.throughput < b.throughput; });
-            std::cout << "🏆 Best for IMBALANCED fanout: " << imbalanced_best->name;
-            std::cout << " (" << std::showpos << ((imbalanced_best->throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)" << std::endl;
-        }
-        
-        if (results.size() >= 9) {
-            auto heavy_best = std::max_element(results.begin() + 6, results.end(), 
-                [](const TestResult& a, const TestResult& b) { return a.throughput < b.throughput; });
-            std::cout << "🏆 Best for HEAVY fanout: " << heavy_best->name;
-            std::cout << " (" << std::showpos << ((heavy_best->throughput - baseline_throughput) / baseline_throughput) * 100.0 << "% vs baseline)" << std::endl;
-        }
+        // Best CPU efficiency
+        auto efficiency_best = std::max_element(results.begin(), results.end(), 
+            [](const TestResult& a, const TestResult& b) { return a.cpu_efficiency < b.cpu_efficiency; });
+        std::cout << "🏆 BEST CPU EFFICIENCY: " << efficiency_best->name;
+        std::cout << " (" << (efficiency_best->cpu_efficiency*100) << "% CPU efficiency)" << std::endl;
     }
     
     std::cout << "========================================" << std::endl;
