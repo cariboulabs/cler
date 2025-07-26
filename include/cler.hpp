@@ -174,6 +174,7 @@ namespace cler {
     class FlowGraph {
     public:
         static constexpr std::size_t _N = sizeof...(BlockRunners);
+        static constexpr std::size_t MaxBlocks = sizeof...(BlockRunners);  // Clean compile-time constant
         typedef void (*OnErrTerminateCallback)(void* context);
 
         FlowGraph(BlockRunners... runners)
@@ -370,7 +371,7 @@ namespace cler {
         }
         
         // Adaptive Load Balancer
-        template<size_t MaxBlocks = _N, size_t MaxWorkers = 8>
+        template<size_t MaxBlocksParam, size_t MaxWorkers = 8>
         class AdaptiveLoadBalancer {
         public:
             struct BlockMetrics {
@@ -390,11 +391,11 @@ namespace cler {
             
             
         private:
-            std::array<BlockMetrics, MaxBlocks> block_metrics;
+            std::array<BlockMetrics, MaxBlocksParam> block_metrics;
             std::array<std::atomic<size_t>, MaxWorkers> worker_iteration_count;
             
             // Static assignment arrays - embedded-safe
-            std::array<std::array<size_t, MaxBlocks>, MaxWorkers> worker_assignments;
+            std::array<std::array<size_t, MaxBlocksParam>, MaxWorkers> worker_assignments;
             std::array<std::atomic<size_t>, MaxWorkers> assignment_counts;
             
             size_t num_blocks = 0;
@@ -402,8 +403,14 @@ namespace cler {
             
         public:
             void initialize(size_t blocks, size_t workers) {
-                num_blocks = std::min(blocks, MaxBlocks);
+                num_blocks = std::min(blocks, MaxBlocksParam);
                 num_workers = std::min(workers, MaxWorkers);
+                
+                // Runtime validation for embedded safety
+                assert(num_workers > 0 && "Must have at least one worker");
+                assert(num_blocks > 0 && "Must have at least one block");
+                assert(num_workers <= MaxWorkers && "Worker count exceeds template parameter");
+                assert(num_blocks <= MaxBlocksParam && "Block count exceeds template parameter");
                 
                 // Initialize assignment counts to zero
                 for (size_t w = 0; w < num_workers; ++w) {
@@ -429,6 +436,12 @@ namespace cler {
             }
             
             size_t get_worker_assignments(size_t worker_id, size_t* assignments_out, size_t max_assignments) {
+                // Compile-time safeguards for embedded systems
+                static_assert(MaxBlocksParam <= MaxWorkers * MaxBlocksParam, 
+                             "MaxBlocks must be reasonable for worker capacity");
+                static_assert(MaxWorkers >= 1, "Must have at least one worker");
+                static_assert(MaxBlocksParam >= 1, "Must have at least one block");
+                
                 if (worker_id >= num_workers) return 0;
                 
                 size_t count = assignment_counts[worker_id].load();
@@ -453,7 +466,7 @@ namespace cler {
             
             void rebalance_workers(double threshold) {
                 // Calculate load weights for each block
-                std::array<double, MaxBlocks> block_weights;
+                std::array<double, MaxBlocksParam> block_weights;
                 double total_weight = 0.0;
                 
                 for (size_t i = 0; i < num_blocks; ++i) {
@@ -489,20 +502,20 @@ namespace cler {
             }
             
         private:
-            void rebalance_greedy(const std::array<double, MaxBlocks>& block_weights) {
+            void rebalance_greedy(const std::array<double, MaxBlocksParam>& block_weights) {
                 // Clear current assignments
                 for (size_t w = 0; w < num_workers; ++w) {
                     assignment_counts[w] = 0;
                 }
                 
                 // Create sorted block list (heaviest first) using bounds-safe approach
-                std::array<size_t, MaxBlocks> sorted_blocks;
+                std::array<size_t, MaxBlocksParam> sorted_blocks;
                 for (size_t i = 0; i < num_blocks; ++i) {
                     sorted_blocks[i] = i;
                 }
                 
                 // Use simple insertion sort for small arrays to avoid std::sort bounds issues
-                // This is more efficient for small MaxBlocks anyway (typical embedded use)
+                // This is more efficient for small MaxBlocksParam anyway (typical embedded use)
                 for (size_t i = 1; i < num_blocks; ++i) {
                     size_t key = sorted_blocks[i];
                     double key_weight = block_weights[key];
@@ -534,7 +547,7 @@ namespace cler {
             }
         };
         
-        AdaptiveLoadBalancer<_N, 8> load_balancer;  // Template parameterized for better efficacy
+        AdaptiveLoadBalancer<MaxBlocks, 8> load_balancer;  // Clean template parameterization
         
         // Enhanced scheduling implementations
         void run_with_load_balancing(const FlowGraphConfig& config) {
@@ -571,8 +584,8 @@ namespace cler {
                 bool did_work = false;
                 
                 // Get current block assignments for this worker
-                std::array<size_t, _N> assignments;  // Max _N blocks per worker
-                size_t assignment_count = load_balancer.get_worker_assignments(worker_id, assignments.data(), _N);
+                std::array<size_t, MaxBlocks> assignments;  // Max MaxBlocks blocks per worker
+                size_t assignment_count = load_balancer.get_worker_assignments(worker_id, assignments.data(), MaxBlocks);
                 
                 // Process assigned blocks
                 for (size_t i = 0; i < assignment_count; ++i) {
@@ -616,8 +629,8 @@ namespace cler {
             auto end_time = std::chrono::steady_clock::now();
             
             // Update stats for all blocks this worker processed
-            std::array<size_t, _N> final_assignments;
-            size_t final_count = load_balancer.get_worker_assignments(worker_id, final_assignments.data(), _N);
+            std::array<size_t, MaxBlocks> final_assignments;
+            size_t final_count = load_balancer.get_worker_assignments(worker_id, final_assignments.data(), MaxBlocks);
             for (size_t i = 0; i < final_count; ++i) {
                 size_t block_idx = final_assignments[i];
                 std::chrono::duration<double> total_runtime = end_time - _block_start_times[block_idx];
