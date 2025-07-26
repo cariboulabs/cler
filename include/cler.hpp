@@ -250,6 +250,86 @@ namespace cler {
         const std::array<BlockExecutionStats, _N>& stats() const { return _stats; }
 
     private:
+        // C++17 compatible static helper functions to replace C++20 templated lambdas
+        template<typename TaskPolicyT, typename FlowGraphT, std::size_t... Is>
+        static void launch_tasks(FlowGraphT* self, std::index_sequence<Is...>) {
+            ((self->_tasks[Is] = TaskPolicyT::create_task([self]() {
+                auto& runner = std::get<Is>(self->_runners);
+                auto& stats  = self->_stats[Is];
+
+                stats.name = runner.block->name();
+
+                auto t_start = std::chrono::steady_clock::now();
+                auto t_last  = t_start;
+
+                size_t successful = 0;
+                size_t failed = 0;
+                double total_dead_time_s = 0.0;
+
+                while (!self->_stop_flag) {
+                    auto t_now = std::chrono::steady_clock::now();
+                    std::chrono::duration<double> dt = t_now - t_last;
+                    t_last = t_now;
+
+                    Result<Empty, Error> result = std::apply([&](auto*... outs) {
+                        return runner.block->procedure(outs...);
+                    }, runner.outputs);
+
+                    if (result.is_err()) {
+                        failed++;
+                        auto err = result.unwrap_err();
+
+                        if (err > Error::TERMINATE_FLOWGRAPH) {
+                            self->_stop_flag = true;
+                            if (self->_on_err_terminate_cb) {
+                                self->_on_err_terminate_cb(self->_on_err_terminate_context);
+                            }
+                            return;
+                        }
+
+                        if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
+                            total_dead_time_s += dt.count();
+                            self->handle_adaptive_sleep(Is, false);
+                        } else {
+                            TaskPolicyT::yield();
+                        }
+
+                    } else {
+                        successful++;
+                        self->handle_adaptive_sleep(Is, true);
+                    }
+                }
+
+                auto t_end = std::chrono::steady_clock::now();
+                std::chrono::duration<double> total_runtime_s = t_end - t_start;
+
+                stats.successful_procedures = successful;
+                stats.failed_procedures = failed;
+                stats.total_dead_time_s = total_dead_time_s;
+                stats.final_adaptive_sleep_us = self->_config.adaptive_sleep ? stats.current_adaptive_sleep_us.load() : 0.0;
+                stats.total_runtime_s = total_runtime_s.count();
+            })), ...);
+        }
+
+        template<typename FlowGraphT, std::size_t... Is>
+        static void initialize_block_stats_impl(FlowGraphT* self, std::index_sequence<Is...>) {
+            ((self->_stats[Is].name = std::get<Is>(self->_runners).block->name()), ...);
+        }
+
+        template<typename FlowGraphT, std::size_t... Is>
+        static bool execute_block_at_index_impl(FlowGraphT* self, size_t index, const FlowGraphConfig& config, std::index_sequence<Is...>) {
+            bool result = false;
+            ((index == Is ? (result = self->template execute_block_at_index_helper<Is>(config), true) : false) || ...);
+            return result;
+        }
+
+        template<typename FlowGraphT, std::size_t... Is>
+        static bool execute_block_at_index_with_metrics_impl(FlowGraphT* self, size_t index, const FlowGraphConfig& config, std::index_sequence<Is...>) {
+            bool result = false;
+            ((index == Is ? (result = self->template execute_block_at_index_helper<Is>(config), true) : false) || ...);
+            return result;
+        }
+
         // Block-centric adaptive sleep logic (works with all schedulers)
         void handle_adaptive_sleep(size_t block_idx, bool procedure_succeeded) {
             if (!_config.adaptive_sleep) return;
@@ -289,67 +369,7 @@ namespace cler {
         }
         void run_thread_per_block(const FlowGraphConfig& config) {
             // Launch one thread per block (original behavior)
-            auto launch_helper = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            ((_tasks[Is] = TaskPolicy::create_task([this]() {
-                auto& runner = std::get<Is>(_runners);
-                auto& stats  = _stats[Is];
-
-                stats.name = runner.block->name();
-
-                auto t_start = std::chrono::steady_clock::now();
-                auto t_last  = t_start;
-
-                size_t successful = 0;
-                size_t failed = 0;
-                double total_dead_time_s = 0.0;
-
-                while (!_stop_flag) {
-                    auto t_now = std::chrono::steady_clock::now();
-                    std::chrono::duration<double> dt = t_now - t_last;
-                    t_last = t_now;
-
-                    Result<Empty, Error> result = std::apply([&](auto*... outs) {
-                        return runner.block->procedure(outs...);
-                    }, runner.outputs);
-
-                    if (result.is_err()) {
-                        failed++;
-                        auto err = result.unwrap_err();
-
-                        if (err > Error::TERMINATE_FLOWGRAPH) {
-                            _stop_flag = true;
-                            if (_on_err_terminate_cb) {
-                                _on_err_terminate_cb(_on_err_terminate_context);
-                            }
-                            return;
-                        }
-
-                        if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
-                            total_dead_time_s += dt.count();
-                            // Use block-centric adaptive sleep
-                            handle_adaptive_sleep(Is, false);
-                        } else {
-                            TaskPolicy::yield();
-                        }
-
-                    } else {
-                        successful++;
-                        // Use block-centric adaptive sleep  
-                        handle_adaptive_sleep(Is, true);
-                    }
-                }
-
-                auto t_end = std::chrono::steady_clock::now();
-                std::chrono::duration<double> total_runtime_s = t_end - t_start;
-
-                stats.successful_procedures = successful;
-                stats.failed_procedures = failed;
-                stats.total_dead_time_s = total_dead_time_s;
-                stats.final_adaptive_sleep_us = _config.adaptive_sleep ? stats.current_adaptive_sleep_us.load() : 0.0;
-                stats.total_runtime_s = total_runtime_s.count();
-            })), ...);
-            };
-            launch_helper(std::make_index_sequence<_N>{});
+            launch_tasks<TaskPolicy, FlowGraph<TaskPolicy, BlockRunners...>>(this, std::make_index_sequence<_N>{});
         }
 
         std::tuple<BlockRunners...> _runners;
@@ -363,10 +383,7 @@ namespace cler {
         
         // Initialize block stats with names
         void initialize_block_stats() {
-            auto init_helper = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-                ((_stats[Is].name = std::get<Is>(_runners).block->name()), ...);
-            };
-            init_helper(std::make_index_sequence<_N>{});
+            initialize_block_stats_impl<FlowGraph<TaskPolicy, BlockRunners...>>(this, std::make_index_sequence<_N>{});
         }
         
         // Adaptive Load Balancer
@@ -617,12 +634,7 @@ namespace cler {
         
         bool execute_block_at_index_with_metrics(size_t index, const FlowGraphConfig& config) {
             // Similar to execute_block_at_index but with metrics tracking
-            bool result = false;
-            auto dispatch = [&]<size_t... Is>(std::index_sequence<Is...>) {
-                ((index == Is ? (result = execute_block_at_index_helper<Is>(config), true) : false) || ...);
-            };
-            dispatch(std::make_index_sequence<_N>{});
-            return result;
+            return execute_block_at_index_with_metrics_impl<FlowGraph<TaskPolicy, BlockRunners...>>(this, index, config, std::make_index_sequence<_N>{});
         }
         void run_with_thread_pool(const FlowGraphConfig& config) {
             _stop_flag = false;
@@ -745,12 +757,7 @@ namespace cler {
         
         bool execute_block_at_index(size_t index, const FlowGraphConfig& config) {
             // Runtime dispatch to compile-time template
-            bool result = false;
-            auto dispatch = [&]<size_t... Is>(std::index_sequence<Is...>) {
-                ((index == Is ? (result = execute_block_at_index_helper<Is>(config), true) : false) || ...);
-            };
-            dispatch(std::make_index_sequence<_N>{});
-            return result;
+            return execute_block_at_index_impl<FlowGraph<TaskPolicy, BlockRunners...>>(this, index, config, std::make_index_sequence<_N>{});
         }
     };
 
