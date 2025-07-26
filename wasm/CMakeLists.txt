@@ -87,7 +87,7 @@ function(add_wasm_demo NAME SOURCE_FILE)
     
     # Generate HTML from template
     configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/html/demo_template.html
+        ${CMAKE_CURRENT_SOURCE_DIR}/html/demo_template_improved.html
         ${CMAKE_SOURCE_DIR}/docs/demos/${NAME}/index.html
         @ONLY
     )
@@ -97,7 +97,7 @@ function(add_wasm_demo NAME SOURCE_FILE)
         COMMAND ${CMAKE_COMMAND} -E make_directory 
             ${CMAKE_SOURCE_DIR}/docs/demos/${NAME}
         COMMAND ${CMAKE_COMMAND} -E copy 
-            $<TARGET_FILE:wasm_${NAME}>
+            $<TARGET_FILE_DIR:wasm_${NAME}>/wasm_${NAME}.wasm
             ${CMAKE_SOURCE_DIR}/docs/demos/${NAME}/demo.wasm
         COMMAND ${CMAKE_COMMAND} -E copy 
             $<TARGET_FILE_DIR:wasm_${NAME}>/wasm_${NAME}.js

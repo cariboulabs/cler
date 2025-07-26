@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WASM Test</title>
+</head>
+<body>
+    <h1>WASM Loading Test</h1>
+    <div id="status">Checking...</div>
+    <pre id="log"></pre>
+    
+    <script>
+        const log = (msg) => {
+            console.log(msg);
+            document.getElementById('log').innerHTML += msg + '\n';
+        };
+        
+        // Check SharedArrayBuffer
+        log('SharedArrayBuffer available: ' + (typeof SharedArrayBuffer !== 'undefined'));
+        log('crossOriginIsolated: ' + crossOriginIsolated);
+        
+        // Try to load the WASM file directly
+        log('\nTrying to fetch demo.wasm...');
+        fetch('mass_spring_damper/demo.wasm')
+            .then(response => {
+                log('WASM fetch status: ' + response.status);
+                log('WASM content-type: ' + response.headers.get('content-type'));
+                return response.arrayBuffer();
+            })
+            .then(bytes => {
+                log('WASM size: ' + bytes.byteLength + ' bytes');
+                log('\nTrying to compile WASM...');
+                return WebAssembly.compile(bytes);
+            })
+            .then(module => {
+                log('✅ WASM compiled successfully!');
+                log('Exports: ' + WebAssembly.Module.exports(module).map(e => e.name).join(', ').substring(0, 100) + '...');
+            })
+            .catch(error => {
+                log('❌ Error: ' + error.message);
+            });
+        
+        // Check if ClerDemo is available
+        setTimeout(() => {
+            log('\nChecking for ClerDemo...');
+            log('typeof ClerDemo: ' + typeof ClerDemo);
+        }, 2000);
+    </script>
+</body>
+</html>

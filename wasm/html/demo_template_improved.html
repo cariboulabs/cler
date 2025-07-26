@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cler Demo - mass_spring_damper</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: #fff;
+        }
+        #canvas {
+            display: block;
+            margin: 0 auto;
+        }
+        #status {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 14px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .error {
+            color: #ff4444;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            width: 400px;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+        }
+        .control-btn {
+            background: rgba(102, 126, 234, 0.8);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 0 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        .control-btn:hover {
+            background: rgba(102, 126, 234, 1);
+            transform: translateY(-1px);
+        }
+        .control-btn:disabled {
+            background: rgba(128, 128, 128, 0.5);
+            cursor: not-allowed;
+            transform: none;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #progressContainer {
+            margin-top: 20px;
+        }
+        #progressBarBg {
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+            overflow: hidden;
+            height: 20px;
+        }
+        #progressBar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s;
+        }
+        #progressText {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #ccc;
+        }
+        #errorDisplay {
+            background: #ff4444;
+            color: white;
+            padding: 20px;
+            margin: 20px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 14px;
+            text-align: left;
+        }
+        #loadingDetails {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #888;
+            max-height: 200px;
+            overflow-y: auto;
+            text-align: left;
+            padding: 10px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="restartBtn" class="control-btn" onclick="restartDemo()" disabled>
+            🔄 Restart Demo
+        </button>
+        <button id="fullscreenBtn" class="control-btn" onclick="toggleFullscreen()">
+            ⛶ Fullscreen
+        </button>
+    </div>
+    
+    <div id="loading">
+        <div class="spinner"></div>
+        <div id="loadingText">Loading Cler Demo...</div>
+        <div id="progressContainer">
+            <div id="progressBarBg">
+                <div id="progressBar"></div>
+            </div>
+            <div id="progressText">Initializing...</div>
+        </div>
+        <div id="loadingDetails"></div>
+    </div>
+    <div id="status" style="display: none;">Status: Initializing...</div>
+    <div id="errorDisplay" style="display: none;"></div>
+    <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+    
+    <script>
+        // Global variables for demo control
+        let Module = null;
+        let isRunning = false;
+        let loadStartTime = Date.now();
+        let lastProgressUpdate = Date.now();
+        
+        // Progress tracking
+        function updateProgress(percent, message) {
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('progressText').textContent = message;
+            
+            // Add to loading details
+            const details = document.getElementById('loadingDetails');
+            const timestamp = ((Date.now() - loadStartTime) / 1000).toFixed(1);
+            details.innerHTML += `[${timestamp}s] ${message}<br>`;
+            details.scrollTop = details.scrollHeight;
+            
+            console.log(`[Progress ${percent}%] ${message}`);
+        }
+        
+        // Error display
+        function showError(error) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('errorDisplay').style.display = 'block';
+            document.getElementById('errorDisplay').innerHTML = `
+                <h3>Failed to Load Demo</h3>
+                <p>${error}</p>
+                <p>Check the browser console (F12) for more details.</p>
+                <button class="control-btn" onclick="window.location.reload()">Reload Page</button>
+            `;
+            console.error('Demo loading error:', error);
+        }
+        
+        // Demo control functions
+        function restartDemo() {
+            const restartBtn = document.getElementById('restartBtn');
+            restartBtn.disabled = true;
+            restartBtn.textContent = '🔄 Restarting...';
+            window.location.reload();
+        }
+        
+        function toggleFullscreen() {
+            const canvas = document.getElementById('canvas');
+            
+            if (!document.fullscreenElement) {
+                canvas.requestFullscreen().then(() => {
+                    document.getElementById('fullscreenBtn').textContent = '🗗 Exit Fullscreen';
+                }).catch(err => {
+                    console.log('Error entering fullscreen:', err);
+                });
+            } else {
+                document.exitFullscreen().then(() => {
+                    document.getElementById('fullscreenBtn').textContent = '⛶ Fullscreen';
+                }).catch(err => {
+                    console.log('Error exiting fullscreen:', err);
+                });
+            }
+        }
+        
+        // Handle fullscreen changes
+        document.addEventListener('fullscreenchange', () => {
+            const btn = document.getElementById('fullscreenBtn');
+            if (document.fullscreenElement) {
+                btn.textContent = '🗗 Exit Fullscreen';
+            } else {
+                btn.textContent = '⛶ Fullscreen';
+            }
+        });
+        
+        // Check browser compatibility
+        updateProgress(5, 'Checking browser compatibility...');
+        
+        // Enable SharedArrayBuffer support (required for pthread)
+        if (!crossOriginIsolated) {
+            showError('SharedArrayBuffer support required!<br>' +
+                'Please serve with appropriate CORS headers:<br>' +
+                'Cross-Origin-Embedder-Policy: require-corp<br>' +
+                'Cross-Origin-Opener-Policy: same-origin');
+            throw new Error('SharedArrayBuffer not available');
+        }
+        
+        updateProgress(10, 'Browser compatibility OK');
+        
+        // Timeout detection
+        const loadTimeout = setTimeout(() => {
+            showError('Loading timeout - the demo is taking too long to load.');
+        }, 30000); // 30 second timeout
+        
+        Module = {
+            preRun: [],
+            postRun: [function() {
+                clearTimeout(loadTimeout);
+                updateProgress(100, 'Demo started!');
+                document.getElementById('restartBtn').disabled = false;
+                isRunning = true;
+                
+                // Hide loading after a short delay
+                setTimeout(() => {
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('status').style.display = 'block';
+                    setTimeout(() => {
+                        document.getElementById('status').style.display = 'none';
+                    }, 3000);
+                }, 1000);
+            }],
+            print: (function() {
+                return function(text) {
+                    console.log(text);
+                    document.getElementById('status').textContent = 'Status: ' + text;
+                };
+            })(),
+            printErr: function(text) {
+                console.error(text);
+                document.getElementById('status').innerHTML = '<span class="error">Error: ' + text + '</span>';
+            },
+            canvas: (function() {
+                var canvas = document.getElementById('canvas');
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                window.addEventListener('resize', function() {
+                    canvas.width = window.innerWidth;
+                    canvas.height = window.innerHeight;
+                });
+                return canvas;
+            })(),
+            setStatus: function(text) {
+                if (!Module.setStatus.last) Module.setStatus.last = { time: Date.now(), text: '' };
+                if (text === Module.setStatus.last.text) return;
+                
+                // Parse status messages for progress
+                const m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
+                if (m) {
+                    const current = parseInt(m[2]);
+                    const total = parseInt(m[4]);
+                    const percent = 10 + (current / total) * 80; // 10-90% range
+                    updateProgress(percent, m[1].trim());
+                } else {
+                    // Generic status update
+                    if (text.includes('Downloading')) {
+                        updateProgress(20, 'Downloading WebAssembly module...');
+                    } else if (text.includes('Loading')) {
+                        updateProgress(40, 'Loading WebAssembly module...');
+                    } else if (text.includes('Running')) {
+                        updateProgress(95, 'Starting demo...');
+                    }
+                }
+                
+                document.getElementById('status').textContent = 'Status: ' + text;
+                Module.setStatus.last.text = text;
+            },
+            totalDependencies: 0,
+            monitorRunDependencies: function(left) {
+                this.totalDependencies = Math.max(this.totalDependencies, left);
+                const percent = 30 + ((this.totalDependencies - left) / this.totalDependencies) * 40; // 30-70% range
+                updateProgress(percent, left ? `Loading dependencies... (${this.totalDependencies-left}/${this.totalDependencies})` : 'All dependencies loaded');
+            },
+            instantiateWasm: function(imports, successCallback) {
+                updateProgress(25, 'Fetching WebAssembly module...');
+                const wasmUrl = 'demo.wasm';
+                
+                // Modern instantiateStreaming approach
+                if (WebAssembly.instantiateStreaming) {
+                    WebAssembly.instantiateStreaming(fetch(wasmUrl), imports)
+                        .then(function(output) {
+                            updateProgress(50, 'WebAssembly module loaded');
+                            successCallback(output.instance);
+                        })
+                        .catch(function(error) {
+                            showError('Failed to load WebAssembly module: ' + error.message);
+                        });
+                } else {
+                    // Fallback for older browsers
+                    fetch(wasmUrl)
+                        .then(response => response.arrayBuffer())
+                        .then(bytes => {
+                            updateProgress(40, 'Compiling WebAssembly module...');
+                            return WebAssembly.instantiate(bytes, imports);
+                        })
+                        .then(output => {
+                            updateProgress(50, 'WebAssembly module loaded');
+                            successCallback(output.instance);
+                        })
+                        .catch(error => {
+                            showError('Failed to load WebAssembly module: ' + error.message);
+                        });
+                }
+                return {}; // Placeholder, we'll call successCallback later
+            }
+        };
+        
+        updateProgress(15, 'Loading demo script...');
+        
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            clearTimeout(loadTimeout);
+            showError('JavaScript error: ' + msg + ' at line ' + lineNo);
+            return true;
+        };
+        
+        // Detect if script fails to load
+        window.addEventListener('error', function(e) {
+            if (e.target.tagName === 'SCRIPT') {
+                clearTimeout(loadTimeout);
+                showError('Failed to load demo.js - make sure the file exists and the server is running.');
+            }
+        }, true);
+    </script>
+    <script async type="text/javascript" src="demo.js" 
+            onload="updateProgress(20, 'Demo script loaded')"
+            onerror="showError('Failed to load demo.js')"></script>
+</body>
+</html>
