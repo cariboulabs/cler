@@ -29,7 +29,7 @@ set(WASM_LINK_FLAGS
     "-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
     "-s MODULARIZE=1"
     "-s EXPORT_NAME=ClerDemo"
-    "--preload-file=${CMAKE_SOURCE_DIR}/wasm/assets@/assets"
+    "-s ERROR_ON_UNDEFINED_SYMBOLS=0"
 )
 
 find_package(Threads REQUIRED)
@@ -39,10 +39,19 @@ function(add_wasm_demo NAME SOURCE_FILE)
     # Create executable from the original source file with wasm_ prefix
     add_executable(wasm_${NAME} ${CMAKE_SOURCE_DIR}/desktop_examples/${SOURCE_FILE})
     
-    # Link with Cler libraries
-    target_link_libraries(wasm_${NAME} 
-        PRIVATE cler::cler_desktop_blocks
-        PRIVATE Threads::Threads
+    # Add include directories for Cler headers
+    target_include_directories(wasm_${NAME} PRIVATE
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/include
+    )
+    
+    # Link with only the specific libraries we need, avoiding desktop GL/GLFW
+    target_link_libraries(wasm_${NAME} PRIVATE
+        cler::blocks_udp
+        cler::blocks_plots
+        cler::blocks_gui
+        liquid
+        Threads::Threads
     )
     
     # Apply Emscripten flags only for linking

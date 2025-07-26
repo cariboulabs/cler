@@ -155,6 +155,12 @@ emmake make
 **Problem**: CMake needs Emscripten toolchain file
 **Solution**: emcmake automatically sets correct toolchain after emsdk activation
 
+#### GLFW/OpenGL Linking Issues (Current)
+**Problem**: `wasm-ld: error: undefined symbol: glfwWindowHint` and OpenGL symbols
+**Cause**: Desktop GUI libraries linking to system GLFW/OpenGL instead of Emscripten's implementation
+**Status**: 🔧 **IN PROGRESS** - GUI CMakeLists.txt updated, added ERROR_ON_UNDEFINED_SYMBOLS=0
+**Next**: Verify GLFW/OpenGL symbols are properly provided by Emscripten USE_GLFW=3 flag
+
 ## 🔍 Debugging
 
 ### Build Issues
