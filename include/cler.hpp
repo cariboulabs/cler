@@ -14,16 +14,24 @@
 namespace cler {
 
     enum class Error {
+        // Non-fatal errors (< TERMINATE_FLOWGRAPH)
         NotEnoughSamples,
         NotEnoughSpace,
         ProcedureError,
         BadData,
+        
+        // Fatal errors (>= TERMINATE_FLOWGRAPH)
         TERMINATE_FLOWGRAPH,
         TERM_InvalidChannelIndex,
         TERM_ProcedureError,
         TERM_IOError,
         TERM_EOFReached,
     };
+    
+    // Helper function for error classification
+    constexpr bool is_fatal(Error error) {
+        return error >= Error::TERMINATE_FLOWGRAPH;
+    }
 
     inline const char* to_str(Error error) {
         switch (error) {
@@ -113,6 +121,8 @@ namespace cler {
             : block(blk), outputs(static_cast<Channels*>(outs)...) {}
     };
 
+    // C++17 deduction guide: automatically deduces channel base types from concrete channel types
+    // This allows: BlockRunner(&block, &channel) instead of BlockRunner<Block, ChannelBase<T>>(&block, &channel)
     template<typename Block, typename... Channels>
     BlockRunner(Block*, Channels*...) -> BlockRunner<Block, channel_to_base_t<Channels>...>;
 
@@ -120,7 +130,6 @@ namespace cler {
         EmbeddableString<64> name;
         size_t successful_procedures = 0;
         size_t failed_procedures = 0;
-        size_t samples_processed = 0;
         double total_dead_time_s = 0.0;
         double total_runtime_s = 0.0;
         double final_adaptive_sleep_us = 0.0;
@@ -134,8 +143,8 @@ namespace cler {
             return total_runtime_s > 0 ? ((total_runtime_s - total_dead_time_s) / total_runtime_s) * 100.0 : 0.0;
         }
         
-        double get_throughput_samples_per_sec() const {
-            return total_runtime_s > 0 ? samples_processed / total_runtime_s : 0.0;
+        double get_avg_dead_time_per_fail() const {
+            return failed_procedures > 0 ? total_dead_time_s / failed_procedures : 0.0;
         }
     };
 
@@ -149,7 +158,7 @@ namespace cler {
     // Configuration for performance optimization
     struct FlowGraphConfig {
         SchedulerType scheduler = SchedulerType::ThreadPerBlock;
-        size_t num_workers = 4;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
+        size_t num_workers = 4;  // Number of worker threads (used by FixedThreadPool and AdaptiveLoadBalancing, ignored for ThreadPerBlock)
 
         // Optimizes CPU usage, usually at the cost of reducing throughput
         // Most useful for:
@@ -157,24 +166,22 @@ namespace cler {
         // - Network packet processing with gaps
         // - File processing with I/O delays
         bool adaptive_sleep = false;
-        double adaptive_sleep_multiplier = 1.5;       // How aggressively to increase sleep time
-        double adaptive_sleep_max_us = 5000.0;        // Maximum sleep time in microseconds
-        size_t adaptive_sleep_fail_threshold = 10;    // Start sleeping after N consecutive fails
-        
-        // Dynamic work redistribution
-        //especially useful for:
-        // - Imbalanced workloads (where some paths or blocks are much slower)
-        // - Dynamic data rates (where some blocks receive more data than others)
-        bool load_balancing = false;
-        size_t load_balancing_interval = 1000;     // Rebalance every N procedure calls
-        double load_balancing_threshold = 0.2;     // 20% imbalance triggers rebalancing
+        double adaptive_sleep_multiplier = 1.5;  // How aggressively to increase sleep time
+        double adaptive_sleep_max_us = 5000.0;          // Maximum sleep time in microseconds
+        size_t adaptive_sleep_fail_threshold = 10;  // Start sleeping after N consecutive fails
+
+        // Load balancing parameters (only used with AdaptiveLoadBalancing scheduler)
+        size_t load_balancing_interval = 1000;  // Rebalance every N procedure calls
+        double load_balancing_threshold = 0.2;  // 20% imbalance triggers rebalancing
     };
 
     template<typename TaskPolicy, typename... BlockRunners>
     class FlowGraph {
     public:
         static constexpr std::size_t _N = sizeof...(BlockRunners);
-        typedef void (*OnErrTerminateCallback)(void* context);
+        static constexpr std::size_t MaxBlocks = sizeof...(BlockRunners);  // Clean compile-time constant
+        static_assert(_N > 0, "FlowGraph must have at least one block");
+        using OnErrTerminateCallback = void (*)(void* context);
 
         FlowGraph(BlockRunners... runners)
             : _runners(std::make_tuple(std::forward<BlockRunners>(std::move(runners))...)) {}
@@ -196,7 +203,7 @@ namespace cler {
 
         void run(const FlowGraphConfig& config = FlowGraphConfig{}) {
             _config = config;
-            _stop_flag = false;
+            _stop_flag.store(false, std::memory_order_release);
             
             switch (config.scheduler) {
                 case SchedulerType::ThreadPerBlock:
@@ -216,18 +223,21 @@ namespace cler {
         template<typename Rep, typename Period>
         void run_for(const std::chrono::duration<Rep, Period>& duration, const FlowGraphConfig& config = FlowGraphConfig{}) {
             // Start the flowgraph
-            auto start_time = std::chrono::steady_clock::now();
+            auto start_time = std::chrono::high_resolution_clock::now();
             run(config);
             
             // For longer durations, use sleep_us to avoid busy waiting
+            static constexpr int64_t PRECISE_TIMING_THRESHOLD_US = 100000;  // 100ms
+            static constexpr int64_t PRECISE_TIMING_BUFFER_US = 50000;      // 50ms
+            
             auto total_us = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
-            if (total_us > 100000) { // More than 100ms
+            if (total_us > PRECISE_TIMING_THRESHOLD_US) { // More than 100ms
                 // Sleep for most of the duration, leaving 50ms for precise timing
-                TaskPolicy::sleep_us(total_us - 50000);
+                TaskPolicy::sleep_us(total_us - PRECISE_TIMING_BUFFER_US);
             }
             
             // Use yield for the remaining time for precise timing
-            while (std::chrono::steady_clock::now() - start_time < duration) {
+            while (std::chrono::high_resolution_clock::now() - start_time < duration) {
                 TaskPolicy::yield();
             }
             
@@ -236,16 +246,18 @@ namespace cler {
         }
 
         void stop() {
-            _stop_flag = true;
-            for (auto& t : _tasks) {
-                TaskPolicy::join_task(t);
+            _stop_flag.store(true, std::memory_order_release);
+            // Only join tasks that were actually created to prevent hang
+            for (size_t i = 0; i < _active_task_count; ++i) {
+                TaskPolicy::join_task(_tasks[i]);
             }
         }
 
         bool is_stopped() const {
-            return _stop_flag.load(std::memory_order_seq_cst);
+            return _stop_flag.load(std::memory_order_acquire);
         }
 
+        // Immutable config accessor
         const FlowGraphConfig& config() const { return _config; }
         const std::array<BlockExecutionStats, _N>& stats() const { return _stats; }
 
@@ -257,9 +269,10 @@ namespace cler {
             auto& stats = _stats[block_idx];
             
             if (procedure_succeeded) {
-                // Reset sleep state on success
+                // Exponential decay instead of hard reset for better bursty workload handling
                 stats.consecutive_fails.store(0);
-                stats.current_adaptive_sleep_us.store(0.0);
+                double current_sleep = stats.current_adaptive_sleep_us.load();
+                stats.current_adaptive_sleep_us.store(current_sleep * 0.5);  // Gradual decay
             } else {
                 // Increment failure count
                 size_t fails = stats.consecutive_fails.fetch_add(1) + 1;
@@ -270,12 +283,19 @@ namespace cler {
                     
                     if (current_sleep == 0.0) {
                         // Start sleeping with 1 microsecond
-                        stats.current_adaptive_sleep_us.store(1.0);
-                        TaskPolicy::sleep_us(1);
+                        static constexpr double INITIAL_SLEEP_US = 1.0;
+                        stats.current_adaptive_sleep_us.store(INITIAL_SLEEP_US);
+                        TaskPolicy::sleep_us(static_cast<size_t>(INITIAL_SLEEP_US));
                     } else {
-                        // Exponential backoff
+                        // Exponential backoff with deterministic jitter to prevent thundering herd
+                        double base_sleep = current_sleep * _config.adaptive_sleep_multiplier;
+                        
+                        // Deterministic jitter based on block index (10% variation)
+                        static constexpr double JITTER_FACTOR = 0.1;
+                        double block_jitter = 1.0 + JITTER_FACTOR * (double(block_idx % 10) / 10.0 - 0.5);
+                        
                         double new_sleep = std::min(
-                            current_sleep * _config.adaptive_sleep_multiplier,
+                            base_sleep * block_jitter,
                             _config.adaptive_sleep_max_us
                         );
                         stats.current_adaptive_sleep_us.store(new_sleep);
@@ -287,96 +307,127 @@ namespace cler {
                 }
             }
         }
-        void run_thread_per_block(const FlowGraphConfig& config) {
-            // Launch one thread per block (original behavior)
-            auto launch_helper = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            ((_tasks[Is] = TaskPolicy::create_task([this]() {
-                auto& runner = std::get<Is>(_runners);
-                auto& stats  = _stats[Is];
+        
+        // C++17 compatible member template functions replacing templated lambdas
+        template<std::size_t I>
+        void run_block_at_index_thread_per_block(const FlowGraphConfig& config) {
+            static_assert(I < _N, "Block index out of bounds");
+            auto& runner = std::get<I>(_runners);
+            auto& stats = _stats[I];
 
-                stats.name = runner.block->name();
+            stats.name = runner.block->name();
 
-                auto t_start = std::chrono::steady_clock::now();
-                auto t_last  = t_start;
+            auto t_start = std::chrono::high_resolution_clock::now();
+            auto t_last = t_start;
 
-                size_t successful = 0;
-                size_t failed = 0;
-                double total_dead_time_s = 0.0;
+            size_t successful = 0;
+            size_t failed = 0;
+            double total_dead_time_s = 0.0;
 
-                while (!_stop_flag) {
-                    auto t_now = std::chrono::steady_clock::now();
-                    std::chrono::duration<double> dt = t_now - t_last;
-                    t_last = t_now;
+            while (!_stop_flag) {
+                auto t_now = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double> dt = t_now - t_last;
+                t_last = t_now;
 
-                    Result<Empty, Error> result = std::apply([&](auto*... outs) {
-                        return runner.block->procedure(outs...);
-                    }, runner.outputs);
+                Result<Empty, Error> result = std::apply([&](auto*... outs) {
+                    return runner.block->procedure(outs...);
+                }, runner.outputs);
 
-                    if (result.is_err()) {
-                        failed++;
-                        auto err = result.unwrap_err();
+                if (result.is_err()) {
+                    failed++;
+                    auto err = result.unwrap_err();
 
-                        if (err > Error::TERMINATE_FLOWGRAPH) {
-                            _stop_flag = true;
-                            if (_on_err_terminate_cb) {
-                                _on_err_terminate_cb(_on_err_terminate_context);
-                            }
-                            return;
+                    if (is_fatal(err)) {
+                        _stop_flag.store(true, std::memory_order_release);
+                        if (_on_err_terminate_cb) {
+                            _on_err_terminate_cb(_on_err_terminate_context);
                         }
-
-                        if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
-                            total_dead_time_s += dt.count();
-                            // Use block-centric adaptive sleep
-                            handle_adaptive_sleep(Is, false);
-                        } else {
-                            TaskPolicy::yield();
-                        }
-
-                    } else {
-                        successful++;
-                        // Use block-centric adaptive sleep  
-                        handle_adaptive_sleep(Is, true);
+                        return;
                     }
+
+                    if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
+                        total_dead_time_s += dt.count();
+                        handle_adaptive_sleep(I, false);
+                    } else {
+                        TaskPolicy::yield();
+                    }
+
+                } else {
+                    successful++;
+                    handle_adaptive_sleep(I, true);
                 }
+            }
 
-                auto t_end = std::chrono::steady_clock::now();
-                std::chrono::duration<double> total_runtime_s = t_end - t_start;
+            auto t_end = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> total_runtime_s = t_end - t_start;
 
-                stats.successful_procedures = successful;
-                stats.failed_procedures = failed;
-                stats.total_dead_time_s = total_dead_time_s;
-                stats.final_adaptive_sleep_us = _config.adaptive_sleep ? stats.current_adaptive_sleep_us.load() : 0.0;
-                stats.total_runtime_s = total_runtime_s.count();
+            stats.successful_procedures = successful;
+            stats.failed_procedures = failed;
+            stats.total_dead_time_s = total_dead_time_s;
+            stats.final_adaptive_sleep_us = config.adaptive_sleep ? stats.current_adaptive_sleep_us.load() : 0.0;
+            stats.total_runtime_s = total_runtime_s.count();
+        }
+        
+        template<std::size_t... Is>
+        void launch_tasks_impl(std::index_sequence<Is...>, const FlowGraphConfig& config) {
+            // C++17 fold expression: validates all indices are within bounds at compile time
+            static_assert(((Is < _N) && ...), "All block indices must be within bounds");
+            ((_tasks[Is] = TaskPolicy::create_task([this, config]() {
+                run_block_at_index_thread_per_block<Is>(config);
             })), ...);
-            };
-            launch_helper(std::make_index_sequence<_N>{});
+            _active_task_count = _N;  // ThreadPerBlock creates one task per block
+        }
+        
+        template<std::size_t... Is>
+        void init_stats_impl(std::index_sequence<Is...>) {
+            static_assert(((Is < _N) && ...), "All block indices must be within bounds");
+            ((_stats[Is].name = std::get<Is>(_runners).block->name()), ...);
+        }
+        
+        template<std::size_t... Is>
+        bool execute_block_dispatch_impl(std::index_sequence<Is...>, size_t index, const FlowGraphConfig& config) {
+            static_assert(((Is < _N) && ...), "All block indices must be within bounds");
+            bool result = false;
+            ((index == Is ? (result = execute_block_at_index_helper<Is>(config), true) : false) || ...);
+            return result;
+        }
+        
+        void run_thread_per_block(const FlowGraphConfig& config) {
+            // Initialize stats for all blocks
+            initialize_block_stats();
+            // Launch one thread per block using C++17 compatible approach
+            launch_tasks_impl(std::make_index_sequence<_N>{}, config);
         }
 
         std::tuple<BlockRunners...> _runners;
         std::array<typename TaskPolicy::task_type, _N> _tasks;
-        std::atomic<bool> _stop_flag = false;
+        std::atomic<bool> _stop_flag{false};
         FlowGraphConfig _config;
         std::array<BlockExecutionStats, _N> _stats;
         OnErrTerminateCallback _on_err_terminate_cb = nullptr;
         void* _on_err_terminate_context = nullptr;
-        std::array<std::chrono::steady_clock::time_point, _N> _block_start_times;
+        std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
+        size_t _active_task_count{0};  // Track actual created tasks to fix stop() hang
         
         // Initialize block stats with names
         void initialize_block_stats() {
-            auto init_helper = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-                ((_stats[Is].name = std::get<Is>(_runners).block->name()), ...);
-            };
-            init_helper(std::make_index_sequence<_N>{});
+            init_stats_impl(std::make_index_sequence<_N>{});
         }
         
         // Adaptive Load Balancer
-        template<size_t MaxBlocks = _N, size_t MaxWorkers = 8>
+        static constexpr size_t DEFAULT_MAX_WORKERS = 8;
+        template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
         class AdaptiveLoadBalancer {
+            // Compile-time validation for embedded systems safety
+            static_assert(MaxBlocksParam >= 1, "Must support at least one block");
+            static_assert(MaxWorkers >= 1, "Must support at least one worker");
+            static_assert(MaxBlocksParam <= 64, "MaxBlocks should be reasonable for embedded systems");
+            static_assert(MaxWorkers <= 32, "MaxWorkers should be reasonable for embedded systems");
+            
         public:
             struct BlockMetrics {
                 std::atomic<uint64_t> total_time_ns{0};
                 std::atomic<uint64_t> successful_calls{0};
-                std::atomic<uint64_t> samples_processed{0};
                 
                 double get_avg_time_per_call() const {
                     uint64_t calls = successful_calls.load();
@@ -390,52 +441,102 @@ namespace cler {
             
             
         private:
-            std::array<BlockMetrics, MaxBlocks> block_metrics;
+            std::array<BlockMetrics, MaxBlocksParam> block_metrics;
             std::array<std::atomic<size_t>, MaxWorkers> worker_iteration_count;
             
-            // Static assignment arrays - embedded-safe
-            std::array<std::array<size_t, MaxBlocks>, MaxWorkers> worker_assignments;
-            std::array<std::atomic<size_t>, MaxWorkers> assignment_counts;
+            // Double-buffered assignment arrays to prevent race conditions
+            std::array<std::array<size_t, MaxBlocksParam>, MaxWorkers> worker_assignments_a;
+            std::array<std::array<size_t, MaxBlocksParam>, MaxWorkers> worker_assignments_b;
+            std::array<std::atomic<size_t>, MaxWorkers> assignment_counts_a;
+            std::array<std::atomic<size_t>, MaxWorkers> assignment_counts_b;
+            std::atomic<bool> use_buffer_a{true};  // Which buffer is currently active for reading
             
             size_t num_blocks = 0;
             size_t num_workers = 0;
             
         public:
             void initialize(size_t blocks, size_t workers) {
-                num_blocks = std::min(blocks, MaxBlocks);
-                num_workers = std::min(workers, MaxWorkers);
+                // Runtime validation with helpful error messages
+                if (blocks == 0) {
+                    assert(false && "Must have at least one block");
+                    return;
+                }
+                if (workers == 0) {
+                    assert(false && "Must have at least one worker");
+                    return;
+                }
+                if (blocks > MaxBlocksParam) {
+                    assert(false && "Block count exceeds MaxBlocksParam template parameter");
+                    return;
+                }
+                if (workers > MaxWorkers) {
+                    assert(false && "Worker count exceeds MaxWorkers template parameter");
+                    return;
+                }
                 
-                // Initialize assignment counts to zero
+                num_blocks = blocks;  // No need to truncate - we validated above
+                num_workers = workers;
+                
+                // Initialize both assignment buffers to zero
                 for (size_t w = 0; w < num_workers; ++w) {
-                    assignment_counts[w].store(0);
+                    assignment_counts_a[w].store(0);
+                    assignment_counts_b[w].store(0);
                     worker_iteration_count[w].store(0);
                 }
                 
-                // Initial round-robin assignment
+                // Initial round-robin assignment to buffer A
                 for (size_t i = 0; i < num_blocks; ++i) {
                     size_t worker_id = i % num_workers;
-                    size_t count = assignment_counts[worker_id].load();
-                    worker_assignments[worker_id][count] = i;
-                    assignment_counts[worker_id]++;
+                    size_t count = assignment_counts_a[worker_id].load();
+                    worker_assignments_a[worker_id][count] = i;
+                    assignment_counts_a[worker_id]++;
                 }
+                
+                // Copy to buffer B for consistency
+                for (size_t w = 0; w < num_workers; ++w) {
+                    size_t count = assignment_counts_a[w].load();
+                    assignment_counts_b[w].store(count);
+                    for (size_t i = 0; i < count; ++i) {
+                        worker_assignments_b[w][i] = worker_assignments_a[w][i];
+                    }
+                }
+                
+                use_buffer_a.store(true);
             }
             
-            void update_block_metrics(size_t block_idx, uint64_t time_ns, uint64_t samples) {
+            void update_block_metrics(size_t block_idx, uint64_t time_ns) {
                 if (block_idx >= num_blocks) return;
                 
                 block_metrics[block_idx].total_time_ns += time_ns;
                 block_metrics[block_idx].successful_calls++;
-                block_metrics[block_idx].samples_processed += samples;
             }
             
             size_t get_worker_assignments(size_t worker_id, size_t* assignments_out, size_t max_assignments) {
+                // Compile-time safeguards for embedded systems  
+                // Each worker's assignment array can hold MaxBlocksParam blocks
+                // In worst case, one worker gets all blocks, so MaxBlocksParam must be >= total blocks
+                static_assert(MaxWorkers >= 1, "Must have at least one worker");
+                static_assert(MaxBlocksParam >= 1, "Must have at least one block");
+                // Note: The capacity constraint is inherently satisfied since MaxBlocksParam = total blocks
+                
                 if (worker_id >= num_workers) return 0;
                 
-                size_t count = assignment_counts[worker_id].load();
-                size_t copy_count = std::min(count, max_assignments);
+                // Use atomic read to determine which buffer is active
+                bool use_a = use_buffer_a.load(std::memory_order_acquire);
                 
-                for (size_t i = 0; i < copy_count; ++i) {
-                    assignments_out[i] = worker_assignments[worker_id][i];
+                size_t count, copy_count;
+                if (use_a) {
+                    count = assignment_counts_a[worker_id].load();
+                    copy_count = std::min(count, max_assignments);
+                    for (size_t i = 0; i < copy_count; ++i) {
+                        assignments_out[i] = worker_assignments_a[worker_id][i];
+                    }
+                } else {
+                    count = assignment_counts_b[worker_id].load();
+                    copy_count = std::min(count, max_assignments);
+                    for (size_t i = 0; i < copy_count; ++i) {
+                        assignments_out[i] = worker_assignments_b[worker_id][i];
+                    }
                 }
                 
                 return copy_count;
@@ -444,8 +545,10 @@ namespace cler {
             bool should_rebalance(size_t worker_id, size_t interval) {
                 worker_iteration_count[worker_id]++;
                 
-                // Only worker 0 triggers rebalancing to avoid races
-                if (worker_id == 0 && worker_iteration_count[worker_id] % interval == 0) {
+                // Distributed rebalance triggering to prevent worker 0 starvation
+                // Each worker can trigger, but offset by worker_id to stagger timing
+                // This ensures at least one worker will trigger even if others are starved
+                if ((worker_iteration_count[worker_id] + worker_id) % interval == 0) {
                     return true;
                 }
                 return false;
@@ -453,7 +556,7 @@ namespace cler {
             
             void rebalance_workers(double threshold) {
                 // Calculate load weights for each block
-                std::array<double, MaxBlocks> block_weights;
+                std::array<double, MaxBlocksParam> block_weights;
                 double total_weight = 0.0;
                 
                 for (size_t i = 0; i < num_blocks; ++i) {
@@ -461,15 +564,20 @@ namespace cler {
                     total_weight += block_weights[i];
                 }
                 
-                if (total_weight < 1e-9) return; // No meaningful data yet
+                static constexpr double MIN_MEANINGFUL_WEIGHT = 1e-9;
+                if (total_weight < MIN_MEANINGFUL_WEIGHT) return; // No meaningful data yet
                 
-                // Calculate current worker loads
+                // Calculate current worker loads from active buffer
+                bool use_a = use_buffer_a.load(std::memory_order_acquire);
+                auto& read_assignments = use_a ? worker_assignments_a : worker_assignments_b;
+                auto& read_counts = use_a ? assignment_counts_a : assignment_counts_b;
+                
                 std::array<double, MaxWorkers> current_loads;
                 for (size_t w = 0; w < num_workers; ++w) {
                     current_loads[w] = 0.0;
-                    size_t count = assignment_counts[w].load();
+                    size_t count = read_counts[w].load();
                     for (size_t i = 0; i < count; ++i) {
-                        size_t block_idx = worker_assignments[w][i];
+                        size_t block_idx = read_assignments[w][i];
                         current_loads[w] += block_weights[block_idx];
                     }
                 }
@@ -489,20 +597,27 @@ namespace cler {
             }
             
         private:
-            void rebalance_greedy(const std::array<double, MaxBlocks>& block_weights) {
-                // Clear current assignments
+            void rebalance_greedy(const std::array<double, MaxBlocksParam>& block_weights) {
+                // Determine which buffer to write to (opposite of current active buffer)
+                bool use_a = use_buffer_a.load(std::memory_order_acquire);
+                auto& write_assignments = use_a ? worker_assignments_b : worker_assignments_a;
+                auto& write_counts = use_a ? assignment_counts_b : assignment_counts_a;
+                
+                // Clear the write buffer assignments
                 for (size_t w = 0; w < num_workers; ++w) {
-                    assignment_counts[w] = 0;
+                    write_counts[w].store(0);
                 }
                 
                 // Create sorted block list (heaviest first) using bounds-safe approach
-                std::array<size_t, MaxBlocks> sorted_blocks;
+                std::array<size_t, MaxBlocksParam> sorted_blocks;
+                // Initialize all elements to invalid value for safety
+                sorted_blocks.fill(MaxBlocksParam); // Use MaxBlocksParam as sentinel (invalid index)
                 for (size_t i = 0; i < num_blocks; ++i) {
                     sorted_blocks[i] = i;
                 }
                 
                 // Use simple insertion sort for small arrays to avoid std::sort bounds issues
-                // This is more efficient for small MaxBlocks anyway (typical embedded use)
+                // This is more efficient for small MaxBlocksParam anyway (typical embedded use)
                 for (size_t i = 1; i < num_blocks; ++i) {
                     size_t key = sorted_blocks[i];
                     double key_weight = block_weights[key];
@@ -520,25 +635,35 @@ namespace cler {
                 
                 for (size_t i = 0; i < num_blocks; ++i) {
                     size_t block_idx = sorted_blocks[i];
+                    
+                    // Bounds checking - this should never fail but defensive programming
+                    if (block_idx >= MaxBlocksParam) {
+                        assert(false && "Invalid block index in rebalance_greedy");
+                        continue; // Skip invalid assignment
+                    }
+                    
                     // Find least loaded worker
                     auto min_it = std::min_element(worker_loads.begin(), 
                                                  worker_loads.begin() + num_workers);
                     size_t worker_id = min_it - worker_loads.begin();
                     
-                    // Assign block to this worker
-                    size_t count = assignment_counts[worker_id].load();
-                    worker_assignments[worker_id][count] = block_idx;
-                    assignment_counts[worker_id]++;
+                    // Assign block to this worker (write to inactive buffer)
+                    size_t count = write_counts[worker_id].load();
+                    write_assignments[worker_id][count] = block_idx;
+                    write_counts[worker_id].store(count + 1);
                     worker_loads[worker_id] += block_weights[block_idx];
                 }
+                
+                // Atomically swap buffers - this makes the new assignments visible
+                use_buffer_a.store(!use_a, std::memory_order_release);
             }
         };
         
-        AdaptiveLoadBalancer<_N, 8> load_balancer;  // Template parameterized for better efficacy
+        AdaptiveLoadBalancer<MaxBlocks, DEFAULT_MAX_WORKERS> load_balancer;  // Clean template parameterization
         
         // Enhanced scheduling implementations
         void run_with_load_balancing(const FlowGraphConfig& config) {
-            _stop_flag = false;
+            _stop_flag.store(false, std::memory_order_release);
             
             // Validate worker count - must be at least 2 for load balancing
             size_t num_workers = config.num_workers;
@@ -551,16 +676,18 @@ namespace cler {
             load_balancer.initialize(_N, num_workers);
             
             // Record start time for all blocks
-            auto start_time = std::chrono::steady_clock::now();
+            auto start_time = std::chrono::high_resolution_clock::now();
             for (size_t i = 0; i < _N; ++i) {
                 _block_start_times[i] = start_time;
             }
             
             // Create worker tasks that use load balancer assignments
+            _active_task_count = 0;
             for (size_t worker_id = 0; worker_id < num_workers && worker_id < _N; ++worker_id) {
                 _tasks[worker_id] = TaskPolicy::create_task([this, worker_id, config]() {
                     run_load_balanced_worker(worker_id, config);
                 });
+                _active_task_count++;
             }
         }
         
@@ -571,13 +698,20 @@ namespace cler {
                 bool did_work = false;
                 
                 // Get current block assignments for this worker
-                std::array<size_t, _N> assignments;  // Max _N blocks per worker
-                size_t assignment_count = load_balancer.get_worker_assignments(worker_id, assignments.data(), _N);
+                std::array<size_t, MaxBlocks> assignments;  // Max MaxBlocks blocks per worker
+                size_t assignment_count = load_balancer.get_worker_assignments(worker_id, assignments.data(), MaxBlocks);
                 
                 // Process assigned blocks
                 for (size_t i = 0; i < assignment_count; ++i) {
                     size_t block_idx = assignments[i];
                     if (_stop_flag) break;
+                    
+                    // Bounds checking - critical for embedded safety
+                    if (block_idx >= _N) {
+                        // This should never happen, but defensive programming
+                        assert(false && "Load balancer returned invalid block index");
+                        continue; // Skip this invalid assignment
+                    }
                     
                     // Time the execution for load balancing metrics
                     auto start_time = std::chrono::high_resolution_clock::now();
@@ -589,7 +723,7 @@ namespace cler {
                     if (block_did_work) {
                         auto end_time = std::chrono::high_resolution_clock::now();
                         auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-                        load_balancer.update_block_metrics(block_idx, duration.count(), 1); // Assume 1 sample processed
+                        load_balancer.update_block_metrics(block_idx, duration.count());
                     } else {
                         // Track dead time
                         auto end_time = std::chrono::high_resolution_clock::now();
@@ -598,9 +732,8 @@ namespace cler {
                     }
                 }
                 
-                // Check if rebalancing is needed
-                if (config.load_balancing && 
-                    load_balancer.should_rebalance(worker_id, config.load_balancing_interval)) {
+                // Check if rebalancing is needed (always enabled for AdaptiveLoadBalancing scheduler)
+                if (load_balancer.should_rebalance(worker_id, config.load_balancing_interval)) {
                     load_balancer.rebalance_workers(config.load_balancing_threshold);
                 }
                 
@@ -613,13 +746,21 @@ namespace cler {
             }
             
             // Finalize stats when worker exits
-            auto end_time = std::chrono::steady_clock::now();
+            auto end_time = std::chrono::high_resolution_clock::now();
             
             // Update stats for all blocks this worker processed
-            std::array<size_t, _N> final_assignments;
-            size_t final_count = load_balancer.get_worker_assignments(worker_id, final_assignments.data(), _N);
+            std::array<size_t, MaxBlocks> final_assignments;
+            size_t final_count = load_balancer.get_worker_assignments(worker_id, final_assignments.data(), MaxBlocks);
             for (size_t i = 0; i < final_count; ++i) {
                 size_t block_idx = final_assignments[i];
+                
+                // Bounds checking - critical for embedded safety
+                if (block_idx >= _N) {
+                    // This should never happen, but defensive programming
+                    assert(false && "Load balancer returned invalid block index in final stats");
+                    continue; // Skip this invalid assignment
+                }
+                
                 std::chrono::duration<double> total_runtime = end_time - _block_start_times[block_idx];
                 _stats[block_idx].total_runtime_s = total_runtime.count();
                 _stats[block_idx].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[block_idx].current_adaptive_sleep_us.load() : 0.0;
@@ -627,16 +768,11 @@ namespace cler {
         }
         
         bool execute_block_at_index_with_metrics(size_t index, const FlowGraphConfig& config) {
-            // Similar to execute_block_at_index but with metrics tracking
-            bool result = false;
-            auto dispatch = [&]<size_t... Is>(std::index_sequence<Is...>) {
-                ((index == Is ? (result = execute_block_at_index_helper<Is>(config), true) : false) || ...);
-            };
-            dispatch(std::make_index_sequence<_N>{});
-            return result;
+            // Similar to execute_block_at_index but with metrics tracking using C++17 compatible approach
+            return execute_block_dispatch_impl(std::make_index_sequence<_N>{}, index, config);
         }
         void run_with_thread_pool(const FlowGraphConfig& config) {
-            _stop_flag = false;
+            _stop_flag.store(false, std::memory_order_release);
             
             // Validate worker count - must be at least 2 for thread pooling
             size_t num_workers = config.num_workers;
@@ -658,7 +794,7 @@ namespace cler {
         
         void launch_shared_workers(size_t num_workers, const FlowGraphConfig& config) {
             // Record start time for all blocks
-            auto start_time = std::chrono::steady_clock::now();
+            auto start_time = std::chrono::high_resolution_clock::now();
             
             // Store start time for stats calculation
             for (size_t i = 0; i < _N; ++i) {
@@ -666,10 +802,12 @@ namespace cler {
             }
             
             // Create worker tasks that process multiple blocks
+            _active_task_count = 0;
             for (size_t worker_id = 0; worker_id < num_workers && worker_id < _N; ++worker_id) {
                 _tasks[worker_id] = TaskPolicy::create_task([this, worker_id, num_workers, config]() {
                     run_worker_thread(worker_id, num_workers, config);
                 });
+                _active_task_count++;
             }
         }
         
@@ -683,9 +821,9 @@ namespace cler {
                     if (_stop_flag) break;
                     
                     // Track timing for dead time calculation
-                    auto t_before = std::chrono::steady_clock::now();
+                    auto t_before = std::chrono::high_resolution_clock::now();
                     bool block_did_work = execute_block_at_index(block_idx, config);
-                    auto t_after = std::chrono::steady_clock::now();
+                    auto t_after = std::chrono::high_resolution_clock::now();
                     
                     // Update dead time if block failed to process
                     if (!block_did_work) {
@@ -703,7 +841,7 @@ namespace cler {
             }
             
             // Finalize stats when worker exits
-            auto end_time = std::chrono::steady_clock::now();
+            auto end_time = std::chrono::high_resolution_clock::now();
             for (size_t block_idx = worker_id; block_idx < _N; block_idx += total_workers) {
                 std::chrono::duration<double> total_runtime = end_time - _block_start_times[block_idx];
                 _stats[block_idx].total_runtime_s = total_runtime.count();
@@ -714,8 +852,9 @@ namespace cler {
         
         template<size_t I>
         bool execute_block_at_index_helper(const FlowGraphConfig& config) {
+            static_assert(I < _N, "Block index out of bounds");
             if constexpr (I >= _N) {
-                return false;  // Invalid index
+                return false;  // Invalid index (redundant but kept for runtime safety)
             }
             
             auto& runner = std::get<I>(_runners);
@@ -729,8 +868,8 @@ namespace cler {
             if (result.is_err()) {
                 stats.failed_procedures++;
                 auto err = result.unwrap_err();
-                if (err > Error::TERMINATE_FLOWGRAPH) {
-                    _stop_flag = true;
+                if (is_fatal(err)) {
+                    _stop_flag.store(true, std::memory_order_release);
                     if (_on_err_terminate_cb) {
                         _on_err_terminate_cb(_on_err_terminate_context);
                     }
@@ -755,13 +894,8 @@ namespace cler {
         }
         
         bool execute_block_at_index(size_t index, const FlowGraphConfig& config) {
-            // Runtime dispatch to compile-time template
-            bool result = false;
-            auto dispatch = [&]<size_t... Is>(std::index_sequence<Is...>) {
-                ((index == Is ? (result = execute_block_at_index_helper<Is>(config), true) : false) || ...);
-            };
-            dispatch(std::make_index_sequence<_N>{});
-            return result;
+            // Runtime dispatch to compile-time template using C++17 compatible approach
+            return execute_block_dispatch_impl(std::make_index_sequence<_N>{}, index, config);
         }
     };
 
