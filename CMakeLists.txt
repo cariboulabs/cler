@@ -26,8 +26,12 @@ option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
 option(CLER_BUILD_PERFORMANCE "Build CLER performance tests" OFF)
 option(CLER_BUILD_TESTS "Build CLER unit tests" OFF)
 
+# Runtime configuration options
+set(CLER_DEFAULT_MAX_WORKERS "8" CACHE STRING "Maximum number of worker threads for thread pools (embedded=8, desktop=16, server=32+)")
+add_definitions(-DCLER_DEFAULT_MAX_WORKERS=${CLER_DEFAULT_MAX_WORKERS}) #not attaching to a library to allow includers
+
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type")
 endif()
 
 #Its more idomatic to link against cler::cler, 
@@ -57,6 +61,8 @@ target_compile_options(cler INTERFACE
     -Wno-interference-size
   >
 )
+
+message(STATUS "CLER: Using CLER_DEFAULT_MAX_WORKERS=${CLER_DEFAULT_MAX_WORKERS}")
 
 add_subdirectory(logger)
 
