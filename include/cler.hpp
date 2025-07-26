@@ -295,9 +295,15 @@ namespace cler {
                         stats.current_adaptive_sleep_us.store(INITIAL_SLEEP_US);
                         TaskPolicy::sleep_us(static_cast<size_t>(INITIAL_SLEEP_US));
                     } else {
-                        // Exponential backoff
+                        // Exponential backoff with deterministic jitter to prevent thundering herd
+                        double base_sleep = current_sleep * _config.adaptive_sleep_multiplier;
+                        
+                        // Deterministic jitter based on block index (10% variation)
+                        static constexpr double JITTER_FACTOR = 0.1;
+                        double block_jitter = 1.0 + JITTER_FACTOR * (double(block_idx % 10) / 10.0 - 0.5);
+                        
                         double new_sleep = std::min(
-                            current_sleep * _config.adaptive_sleep_multiplier,
+                            base_sleep * block_jitter,
                             _config.adaptive_sleep_max_us
                         );
                         stats.current_adaptive_sleep_us.store(new_sleep);

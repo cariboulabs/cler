@@ -129,7 +129,8 @@ int main() {
     );
 
     cler::FlowGraphConfig config;
-    config.adaptive_sleep = true;
+    config.scheduler = cler::SchedulerType::AdaptiveLoadBalancing; // Use adaptive load balancing
+    config.load_balancing = true; // Enable load balancing
     flowgraph.run(config);
     
     const float GW = 1800.0f;
