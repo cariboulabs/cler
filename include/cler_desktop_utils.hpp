@@ -71,10 +71,9 @@ void print_flowgraph_execution_report(const DesktopFlowGraph<BlockRunners...>& f
         // Use optimized getter methods (calculated offline, no runtime overhead)
         double throughput = s.get_throughput_samples_per_sec();
 
-        printf("%-20s | %8.1f | %10zu | %12.1f | %10.1f | %12.2f | %8.1f\n",
+        printf("%-20s | %8.1f | %12.1f | %10.1f | %12.2f | %8.1f\n",
             s.name.c_str(),
             success_rate,
-            s.samples_processed,
             throughput / 1000.0,  // Display as KSamples/sec
             s.get_cpu_utilization_percent(),
             s.get_avg_execution_time_us(),

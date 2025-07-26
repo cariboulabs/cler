@@ -14,16 +14,24 @@
 namespace cler {
 
     enum class Error {
+        // Non-fatal errors (< TERMINATE_FLOWGRAPH)
         NotEnoughSamples,
         NotEnoughSpace,
         ProcedureError,
         BadData,
+        
+        // Fatal errors (>= TERMINATE_FLOWGRAPH)
         TERMINATE_FLOWGRAPH,
         TERM_InvalidChannelIndex,
         TERM_ProcedureError,
         TERM_IOError,
         TERM_EOFReached,
     };
+    
+    // Helper function for error classification
+    constexpr bool is_fatal(Error error) {
+        return error >= Error::TERMINATE_FLOWGRAPH;
+    }
 
     inline const char* to_str(Error error) {
         switch (error) {
@@ -149,7 +157,8 @@ namespace cler {
     // Configuration for performance optimization
     struct FlowGraphConfig {
         SchedulerType scheduler = SchedulerType::ThreadPerBlock;
-        size_t num_workers = 4;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
+        static constexpr size_t DEFAULT_NUM_WORKERS = 4;
+        size_t num_workers = DEFAULT_NUM_WORKERS;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
 
         // Optimizes CPU usage, usually at the cost of reducing throughput
         // Most useful for:
@@ -157,17 +166,24 @@ namespace cler {
         // - Network packet processing with gaps
         // - File processing with I/O delays
         bool adaptive_sleep = false;
-        double adaptive_sleep_multiplier = 1.5;       // How aggressively to increase sleep time
-        double adaptive_sleep_max_us = 5000.0;        // Maximum sleep time in microseconds
-        size_t adaptive_sleep_fail_threshold = 10;    // Start sleeping after N consecutive fails
+        static constexpr double DEFAULT_ADAPTIVE_SLEEP_MULTIPLIER = 1.5;
+        static constexpr double DEFAULT_ADAPTIVE_SLEEP_MAX_US = 5000.0;
+        static constexpr size_t DEFAULT_ADAPTIVE_SLEEP_FAIL_THRESHOLD = 10;
+        
+        double adaptive_sleep_multiplier = DEFAULT_ADAPTIVE_SLEEP_MULTIPLIER;  // How aggressively to increase sleep time
+        double adaptive_sleep_max_us = DEFAULT_ADAPTIVE_SLEEP_MAX_US;          // Maximum sleep time in microseconds
+        size_t adaptive_sleep_fail_threshold = DEFAULT_ADAPTIVE_SLEEP_FAIL_THRESHOLD;  // Start sleeping after N consecutive fails
         
         // Dynamic work redistribution
         //especially useful for:
         // - Imbalanced workloads (where some paths or blocks are much slower)
         // - Dynamic data rates (where some blocks receive more data than others)
         bool load_balancing = false;
-        size_t load_balancing_interval = 1000;     // Rebalance every N procedure calls
-        double load_balancing_threshold = 0.2;     // 20% imbalance triggers rebalancing
+        static constexpr size_t DEFAULT_LOAD_BALANCING_INTERVAL = 1000;
+        static constexpr double DEFAULT_LOAD_BALANCING_THRESHOLD = 0.2;
+        
+        size_t load_balancing_interval = DEFAULT_LOAD_BALANCING_INTERVAL;  // Rebalance every N procedure calls
+        double load_balancing_threshold = DEFAULT_LOAD_BALANCING_THRESHOLD; // 20% imbalance triggers rebalancing
     };
 
     template<typename TaskPolicy, typename... BlockRunners>
@@ -176,7 +192,7 @@ namespace cler {
         static constexpr std::size_t _N = sizeof...(BlockRunners);
         static constexpr std::size_t MaxBlocks = sizeof...(BlockRunners);  // Clean compile-time constant
         static_assert(_N > 0, "FlowGraph must have at least one block");
-        typedef void (*OnErrTerminateCallback)(void* context);
+        using OnErrTerminateCallback = void (*)(void* context);
 
         FlowGraph(BlockRunners... runners)
             : _runners(std::make_tuple(std::forward<BlockRunners>(std::move(runners))...)) {}
@@ -198,7 +214,7 @@ namespace cler {
 
         void run(const FlowGraphConfig& config = FlowGraphConfig{}) {
             _config = config;
-            _stop_flag = false;
+            _stop_flag.store(false, std::memory_order_release);
             
             switch (config.scheduler) {
                 case SchedulerType::ThreadPerBlock:
@@ -222,10 +238,13 @@ namespace cler {
             run(config);
             
             // For longer durations, use sleep_us to avoid busy waiting
+            static constexpr int64_t PRECISE_TIMING_THRESHOLD_US = 100000;  // 100ms
+            static constexpr int64_t PRECISE_TIMING_BUFFER_US = 50000;      // 50ms
+            
             auto total_us = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
-            if (total_us > 100000) { // More than 100ms
+            if (total_us > PRECISE_TIMING_THRESHOLD_US) { // More than 100ms
                 // Sleep for most of the duration, leaving 50ms for precise timing
-                TaskPolicy::sleep_us(total_us - 50000);
+                TaskPolicy::sleep_us(total_us - PRECISE_TIMING_BUFFER_US);
             }
             
             // Use yield for the remaining time for precise timing
@@ -238,14 +257,14 @@ namespace cler {
         }
 
         void stop() {
-            _stop_flag = true;
+            _stop_flag.store(true, std::memory_order_release);
             for (auto& t : _tasks) {
                 TaskPolicy::join_task(t);
             }
         }
 
         bool is_stopped() const {
-            return _stop_flag.load(std::memory_order_seq_cst);
+            return _stop_flag.load(std::memory_order_acquire);
         }
 
         const FlowGraphConfig& config() const { return _config; }
@@ -272,8 +291,9 @@ namespace cler {
                     
                     if (current_sleep == 0.0) {
                         // Start sleeping with 1 microsecond
-                        stats.current_adaptive_sleep_us.store(1.0);
-                        TaskPolicy::sleep_us(1);
+                        static constexpr double INITIAL_SLEEP_US = 1.0;
+                        stats.current_adaptive_sleep_us.store(INITIAL_SLEEP_US);
+                        TaskPolicy::sleep_us(static_cast<size_t>(INITIAL_SLEEP_US));
                     } else {
                         // Exponential backoff
                         double new_sleep = std::min(
@@ -319,8 +339,8 @@ namespace cler {
                     failed++;
                     auto err = result.unwrap_err();
 
-                    if (err > Error::TERMINATE_FLOWGRAPH) {
-                        _stop_flag = true;
+                    if (is_fatal(err)) {
+                        _stop_flag.store(true, std::memory_order_release);
                         if (_on_err_terminate_cb) {
                             _on_err_terminate_cb(_on_err_terminate_context);
                         }
@@ -373,13 +393,15 @@ namespace cler {
         }
         
         void run_thread_per_block(const FlowGraphConfig& config) {
+            // Initialize stats for all blocks
+            initialize_block_stats();
             // Launch one thread per block using C++17 compatible approach
             launch_tasks_impl(std::make_index_sequence<_N>{}, config);
         }
 
         std::tuple<BlockRunners...> _runners;
         std::array<typename TaskPolicy::task_type, _N> _tasks;
-        std::atomic<bool> _stop_flag = false;
+        std::atomic<bool> _stop_flag{false};
         FlowGraphConfig _config;
         std::array<BlockExecutionStats, _N> _stats;
         OnErrTerminateCallback _on_err_terminate_cb = nullptr;
@@ -392,13 +414,13 @@ namespace cler {
         }
         
         // Adaptive Load Balancer
-        template<size_t MaxBlocksParam, size_t MaxWorkers = 8>
+        static constexpr size_t DEFAULT_MAX_WORKERS = 8;
+        template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
         class AdaptiveLoadBalancer {
         public:
             struct BlockMetrics {
                 std::atomic<uint64_t> total_time_ns{0};
                 std::atomic<uint64_t> successful_calls{0};
-                std::atomic<uint64_t> samples_processed{0};
                 
                 double get_avg_time_per_call() const {
                     uint64_t calls = successful_calls.load();
@@ -463,12 +485,11 @@ namespace cler {
                 use_buffer_a.store(true);
             }
             
-            void update_block_metrics(size_t block_idx, uint64_t time_ns, uint64_t samples) {
+            void update_block_metrics(size_t block_idx, uint64_t time_ns) {
                 if (block_idx >= num_blocks) return;
                 
                 block_metrics[block_idx].total_time_ns += time_ns;
                 block_metrics[block_idx].successful_calls++;
-                block_metrics[block_idx].samples_processed += samples;
             }
             
             size_t get_worker_assignments(size_t worker_id, size_t* assignments_out, size_t max_assignments) {
@@ -505,8 +526,10 @@ namespace cler {
             bool should_rebalance(size_t worker_id, size_t interval) {
                 worker_iteration_count[worker_id]++;
                 
-                // Only worker 0 triggers rebalancing to avoid races
-                if (worker_id == 0 && worker_iteration_count[worker_id] % interval == 0) {
+                // Distributed rebalance triggering to prevent worker 0 starvation
+                // Each worker can trigger, but offset by worker_id to stagger timing
+                // This ensures at least one worker will trigger even if others are starved
+                if ((worker_iteration_count[worker_id] + worker_id) % interval == 0) {
                     return true;
                 }
                 return false;
@@ -522,7 +545,8 @@ namespace cler {
                     total_weight += block_weights[i];
                 }
                 
-                if (total_weight < 1e-9) return; // No meaningful data yet
+                static constexpr double MIN_MEANINGFUL_WEIGHT = 1e-9;
+                if (total_weight < MIN_MEANINGFUL_WEIGHT) return; // No meaningful data yet
                 
                 // Calculate current worker loads from active buffer
                 bool use_a = use_buffer_a.load(std::memory_order_acquire);
@@ -616,11 +640,11 @@ namespace cler {
             }
         };
         
-        AdaptiveLoadBalancer<MaxBlocks, 8> load_balancer;  // Clean template parameterization
+        AdaptiveLoadBalancer<MaxBlocks, DEFAULT_MAX_WORKERS> load_balancer;  // Clean template parameterization
         
         // Enhanced scheduling implementations
         void run_with_load_balancing(const FlowGraphConfig& config) {
-            _stop_flag = false;
+            _stop_flag.store(false, std::memory_order_release);
             
             // Validate worker count - must be at least 2 for load balancing
             size_t num_workers = config.num_workers;
@@ -678,7 +702,7 @@ namespace cler {
                     if (block_did_work) {
                         auto end_time = std::chrono::high_resolution_clock::now();
                         auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-                        load_balancer.update_block_metrics(block_idx, duration.count(), 1); // Assume 1 sample processed
+                        load_balancer.update_block_metrics(block_idx, duration.count());
                     } else {
                         // Track dead time
                         auto end_time = std::chrono::high_resolution_clock::now();
@@ -728,7 +752,7 @@ namespace cler {
             return execute_block_dispatch_impl(std::make_index_sequence<_N>{}, index, config);
         }
         void run_with_thread_pool(const FlowGraphConfig& config) {
-            _stop_flag = false;
+            _stop_flag.store(false, std::memory_order_release);
             
             // Validate worker count - must be at least 2 for thread pooling
             size_t num_workers = config.num_workers;
@@ -822,8 +846,8 @@ namespace cler {
             if (result.is_err()) {
                 stats.failed_procedures++;
                 auto err = result.unwrap_err();
-                if (err > Error::TERMINATE_FLOWGRAPH) {
-                    _stop_flag = true;
+                if (is_fatal(err)) {
+                    _stop_flag.store(true, std::memory_order_release);
                     if (_on_err_terminate_cb) {
                         _on_err_terminate_cb(_on_err_terminate_context);
                     }
