@@ -3,27 +3,40 @@ set -e
 
 echo "=== Cler WASM Setup and Build ==="
 
-# Check if emsdk already exists
-if [ ! -d "../emsdk" ]; then
-    echo "📦 Installing Emscripten SDK..."
-    cd ..
+#check if /tmp is a valid directory
+if [ ! -d "/tmp" ]; then
+    mkdir -p /tmp
+    echo "Created /tmp directory"
+fi
+
+# Check if emsdk already exists in /tmp
+if [ ! -d "/tmp/emsdk" ]; then
+    echo "📦 Installing Emscripten SDK to /tmp..."
+    cd /tmp
     git clone https://github.com/emscripten-core/emsdk.git
     cd emsdk
     ./emsdk install latest
     ./emsdk activate latest
-    cd ../wasm_examples
+    cd - > /dev/null
     echo "✅ Emscripten installed"
 else
     echo "✅ Emscripten already installed"
 fi
 
-# Source the environment
+# Source the environment and activate
 echo "🔧 Setting up Emscripten environment..."
-source ../emsdk/emsdk_env.sh
+export EMSDK="/tmp/emsdk"
+export PATH="$EMSDK:$EMSDK/upstream/emscripten:$PATH"
+source /tmp/emsdk/emsdk_env.sh
 
-# Verify emcc is available
+# Verify emcc and emcmake are available
 if ! command -v emcc &> /dev/null; then
     echo "❌ Error: emcc still not found after setup"
+    exit 1
+fi
+
+if ! command -v emcmake &> /dev/null; then
+    echo "❌ Error: emcmake still not found after setup"
     exit 1
 fi
 
@@ -34,13 +47,14 @@ echo "📋 Emscripten version: $(emcc --version | head -n1)"
 echo "🔨 Building Cler WASM examples..."
 
 # Clean previous build
+echo "Cleaning previous build..."
 rm -rf build
 mkdir -p build
 cd build
 
-# Configure with emscripten
+# Configure with emscripten - point to wasm_examples directory
 echo "⚙️  Configuring with emscripten..."
-emcmake cmake .. -DCMAKE_BUILD_TYPE=Release
+emcmake cmake ..
 
 # Build
 echo "🔨 Building..."

@@ -95,6 +95,9 @@
         </div>
 
         <div id="output"></div>
+        
+        <!-- Canvas for ImGui/GLFW rendering -->
+        <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex=-1 style="border: 1px solid black; margin-top: 20px;"></canvas>
     </div>
 
     <script type="text/javascript">
@@ -146,18 +149,25 @@
             outputDiv.textContent = '';
         }
 
-        // Simple Emscripten configuration
+        // Emscripten configuration with canvas
         var Module = {
+            canvas: (function() {
+                return document.getElementById('canvas');
+            })(),
             print: console.log,
             printErr: console.log,
             onRuntimeInitialized: function() {
                 document.getElementById('startBtn').disabled = false;
                 updateStatus('Ready! Click Start to begin signal processing.');
-                console.log('Cler WASM module loaded successfully');
+                console.log('Cler WASM GUI module loaded successfully');
             }
         };
 
-        updateStatus('Loading WebAssembly module...');
+        // Wait for DOM to be ready
+        document.addEventListener('DOMContentLoaded', function() {
+            Module.canvas = document.getElementById('canvas');
+            updateStatus('Loading WebAssembly module...');
+        });
     </script>
     
     <script src="@NAME@.js"></script>
