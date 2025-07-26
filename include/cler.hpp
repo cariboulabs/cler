@@ -13,6 +13,8 @@
 
 namespace cler {
 
+    constexpr size_t DEFAULT_MAX_WORKERS = 8;
+
     enum class Error {
         // Non-fatal errors (< TERMINATE_FLOWGRAPH)
         NotEnoughSamples,
@@ -408,6 +410,7 @@ namespace cler {
         void* _on_err_terminate_context = nullptr;
         std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
         size_t _active_task_count{0};  // Track actual created tasks to fix stop() hang
+        std::array<std::atomic<size_t>, DEFAULT_MAX_WORKERS> _worker_iterations{};
         
         // Initialize block stats with names
         void initialize_block_stats() {
@@ -415,7 +418,6 @@ namespace cler {
         }
         
         // Adaptive Load Balancer
-        static constexpr size_t DEFAULT_MAX_WORKERS = 8;
         template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
         class AdaptiveLoadBalancer {
             // Compile-time validation for embedded systems safety
@@ -812,12 +814,16 @@ namespace cler {
         }
         
         void run_worker_thread(size_t worker_id, size_t total_workers, const FlowGraphConfig& config) {
-            // Each worker processes blocks assigned to it (round-robin)
+            // Each worker processes blocks using sliding round-robin shuffle for fairness
             while (!_stop_flag) {
                 bool did_work = false;
                 
-                // Process blocks assigned to this worker
-                for (size_t block_idx = worker_id; block_idx < _N; block_idx += total_workers) {
+                // Sliding round-robin: rotate starting position each iteration to prevent starvation
+                size_t start = (_worker_iterations[worker_id].fetch_add(1)) % total_workers;
+                
+                // Process all blocks assigned to this worker with rotating start
+                for (size_t i = 0; i < _N; ++i) {
+                    size_t block_idx = (start + i * total_workers + worker_id) % _N;
                     if (_stop_flag) break;
                     
                     // Track timing for dead time calculation
@@ -840,12 +846,15 @@ namespace cler {
                 }
             }
             
-            // Finalize stats when worker exits
+            // Finalize stats when worker exits - use same pattern as processing loop
             auto end_time = std::chrono::high_resolution_clock::now();
-            for (size_t block_idx = worker_id; block_idx < _N; block_idx += total_workers) {
-                std::chrono::duration<double> total_runtime = end_time - _block_start_times[block_idx];
-                _stats[block_idx].total_runtime_s = total_runtime.count();
-                _stats[block_idx].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[block_idx].current_adaptive_sleep_us.load() : 0.0;
+            for (size_t i = 0; i < _N; ++i) {
+                size_t block_idx = (i * total_workers + worker_id) % _N;
+                if (block_idx < _N) {  // Safety check
+                    std::chrono::duration<double> total_runtime = end_time - _block_start_times[block_idx];
+                    _stats[block_idx].total_runtime_s = total_runtime.count();
+                    _stats[block_idx].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[block_idx].current_adaptive_sleep_us.load() : 0.0;
+                }
             }
         }
         

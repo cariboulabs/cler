@@ -102,7 +102,7 @@ struct TestResult {
     double throughput;
     double duration;
     size_t samples;
-    double cpu_efficiency;  // successful procedures / total procedures
+    double cpu_efficiency;  // Average CPU utilization across all blocks (0.0-1.0)
     
     void print() const {
         std::cout << "=== " << name << " ===" << std::endl;
@@ -139,15 +139,17 @@ TestResult run_baseline_test(std::chrono::seconds test_duration) {
     
     double duration = test_duration.count();
     
-    // Calculate CPU efficiency from stats
+    // Calculate CPU efficiency from stats using built-in function
     const auto& stats = fg.stats();
-    size_t total_successful = 0;
-    size_t total_procedures = 0;
+    double total_cpu_utilization = 0.0;
+    size_t active_blocks = 0;
     for (const auto& stat : stats) {
-        total_successful += stat.successful_procedures;
-        total_procedures += stat.successful_procedures + stat.failed_procedures;
+        if (stat.total_runtime_s > 0.0) {
+            total_cpu_utilization += stat.get_cpu_utilization_percent();
+            active_blocks++;
+        }
     }
-    double cpu_efficiency = total_procedures > 0 ? double(total_successful) / total_procedures : 0.0;
+    double cpu_efficiency = active_blocks > 0 ? total_cpu_utilization / (active_blocks * 100.0) : 0.0;
     
     std::cout << " DONE" << std::endl;
     
@@ -184,15 +186,17 @@ TestResult run_enhanced_test(const std::string& name, cler::FlowGraphConfig conf
     
     double duration = test_duration.count();
     
-    // Calculate CPU efficiency from stats
+    // Calculate CPU efficiency from stats using built-in function
     const auto& stats = fg.stats();
-    size_t total_successful = 0;
-    size_t total_procedures = 0;
+    double total_cpu_utilization = 0.0;
+    size_t active_blocks = 0;
     for (const auto& stat : stats) {
-        total_successful += stat.successful_procedures;
-        total_procedures += stat.successful_procedures + stat.failed_procedures;
+        if (stat.total_runtime_s > 0.0) {
+            total_cpu_utilization += stat.get_cpu_utilization_percent();
+            active_blocks++;
+        }
     }
-    double cpu_efficiency = total_procedures > 0 ? double(total_successful) / total_procedures : 0.0;
+    double cpu_efficiency = active_blocks > 0 ? total_cpu_utilization / (active_blocks * 100.0) : 0.0;
     
     std::cout << " DONE" << std::endl;
     
