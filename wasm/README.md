@@ -1,25 +1,42 @@
 # Cler WASM Demo Infrastructure
 
-Complete WebAssembly build system for Cler DSP framework demos with interactive browser support.
+WebAssembly build system for Cler DSP framework demos with interactive browser support.
 
 ## 🎯 Overview
 
 This infrastructure enables building Cler desktop examples as WebAssembly demos that run directly in browsers with full pthread support, interactive controls, and professional UI.
 
-## ✅ Current Status
+## 🚧 Current Status - WORK IN PROGRESS
 
-- **Build System**: Complete with automatic emsdk setup via build script
-- **Demo Templates**: HTML templates with restart/fullscreen functionality  
-- **Demo Gallery**: Professional gallery page at `/docs/demos/index.html`
-- **CORS Support**: SharedArrayBuffer headers for pthread compatibility
-- **DRY Architecture**: Direct references to original source files
+**What Works:**
+- ✅ Clean CMake Integration: No scripts needed, standard build flow
+- ✅ Conditional GUI Compilation: Desktop vs WASM library selection
+- ✅ FetchContent Dependencies: Proper dependency management
+- ✅ Build Safety: Prevents common emmake/make mistakes
+- ✅ Demo Templates: HTML templates with restart/fullscreen functionality  
+- ✅ Demo Gallery: Professional gallery page at `/docs/demos/index.html`
+- ✅ CORS Support: SharedArrayBuffer headers for pthread compatibility
+- ✅ DRY Architecture: Direct references to original source files
 
-## 🚀 Quick Start
+**Current Issue:**
+- 🔧 **RESOLVED: GLFW Symbol Resolution**: Fixed by using `CLER_BUILD_WASM_EXAMPLES` instead of `EMSCRIPTEN` in GUI library
+
+**Build Status:**
+- ✅ CMake Configuration: Works correctly
+- ✅ Compilation: C++ source compiles successfully  
+- ✅ Linking: GLFW symbols now resolved via Emscripten's built-in GLFW
+
+## 🚀 Planned Quick Start (After Cleanup)
 
 ### Build and Run Demos
 ```bash
-cd wasm
-./build_wasm.sh                    # Downloads emsdk, builds WASM demos
+# From project root - no separate scripts needed
+mkdir build
+cd build
+emcmake cmake .. -DCLER_BUILD_WASM_EXAMPLES=ON -DCLER_BUILD_BLOCKS_GUI=ON
+emmake make
+
+# Start demo server
 cd ../docs  
 python3 simple_server.py          # Start server with CORS headers
 # Open http://localhost:8000/demos/
@@ -155,11 +172,31 @@ emmake make
 **Problem**: CMake needs Emscripten toolchain file
 **Solution**: emcmake automatically sets correct toolchain after emsdk activation
 
-#### GLFW/OpenGL Linking Issues (Current)
-**Problem**: `wasm-ld: error: undefined symbol: glfwWindowHint` and OpenGL symbols
-**Cause**: Desktop GUI libraries linking to system GLFW/OpenGL instead of Emscripten's implementation
-**Status**: 🔧 **IN PROGRESS** - GUI CMakeLists.txt updated, added ERROR_ON_UNDEFINED_SYMBOLS=0
-**Next**: Verify GLFW/OpenGL symbols are properly provided by Emscripten USE_GLFW=3 flag
+#### Fixed Issues & Solutions
+
+**🔧 RESOLVED: GLFW Symbol Resolution**
+- **Issue**: `undefined symbol: glfwInit` and other GLFW functions during linking
+- **Root Cause**: CMake subdirectory order - GUI library processes before WASM, so `EMSCRIPTEN` undefined
+- **Solution**: Use `CLER_BUILD_WASM_EXAMPLES` flag instead of `EMSCRIPTEN` in GUI library
+- **Technical Details**:
+  - Root CMakeLists.txt: `add_subdirectory(desktop_blocks)` at line 65
+  - Root CMakeLists.txt: `add_subdirectory(wasm)` at line 85
+  - When GUI CMakeLists.txt processes, `EMSCRIPTEN` not yet available
+  - Fixed by changing GUI library conditionals from `if(NOT EMSCRIPTEN)` to `if(NOT CLER_BUILD_WASM_EXAMPLES)`
+  - Also removed redundant `-lglfw` flag, using only Emscripten's built-in GLFW via `-sUSE_GLFW=3`
+
+**🔧 RESOLVED: WASM Build System Structure**
+- **Issue**: build_wasm.sh script complexity, separate build directories
+- **Solution**: Integrated into root CMake, standard build flow
+- **Reference**: WebGUI Makefile approach with emcc directly
+
+**🔧 RESOLVED: Dependency Management**
+- **Issue**: git clone for emsdk, complex path management  
+- **Solution**: Use CMake FetchContent for cleaner dependency handling
+
+**🔧 RESOLVED: Default Build Configuration**
+- **Issue**: WASM examples enabled by default, causes confusion
+- **Solution**: Default OFF, require explicit enabling with proper flags
 
 ## 🔍 Debugging
 

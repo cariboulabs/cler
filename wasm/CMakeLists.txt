@@ -1,60 +1,88 @@
 # WASM build configuration for Cler examples
 # This file is included from the main CMakeLists.txt when CLER_BUILD_WASM_EXAMPLES=ON
-# Note: Emscripten SDK should be set up via build_wasm.sh before running CMake
+# Requires: emcmake cmake .. -DCLER_BUILD_WASM_EXAMPLES=ON -DCLER_BUILD_BLOCKS_GUI=ON
 
 # Ensure we have the required libraries available
 if(NOT TARGET cler::cler_desktop_blocks)
     message(FATAL_ERROR "cler::cler_desktop_blocks target not found. Make sure CLER_BUILD_BLOCKS_GUI=ON")
 endif()
 
-# Verify we're using Emscripten
+# Verify we're using Emscripten toolchain
 if(NOT DEFINED EMSCRIPTEN)
-    message(FATAL_ERROR "Emscripten not detected. Please run build_wasm.sh to set up the environment.")
+    message(FATAL_ERROR "Emscripten toolchain not detected. Use: emcmake cmake .. -DCLER_BUILD_WASM_EXAMPLES=ON")
 endif()
 
-message(STATUS "Building WASM examples with Emscripten: ${EMSCRIPTEN}")
+message(STATUS "Building WASM examples with Emscripten")
+message(STATUS "Note: Using Emscripten's built-in GLFW/OpenGL (not desktop libraries)")
 
-# Emscripten link flags only (no compile flags needed)
+# Important reminder for users
+message(STATUS "")
+message(STATUS "===============================================")
+message(STATUS "⚠️  IMPORTANT: Use 'emmake make' not 'make'")
+message(STATUS "===============================================")
+message(STATUS "After emcmake cmake, you MUST use:")
+message(STATUS "  emmake make")
+message(STATUS "Regular 'make' will fail with undefined symbols")
+message(STATUS "===============================================")
+message(STATUS "")
+
+# Check if we're being built with emmake (EMMAKE_JUST_CONFIGURE is set by emmake)
+# This helps catch the common mistake of using 'make' instead of 'emmake make'
+if(NOT DEFINED EMMAKE_JUST_CONFIGURE AND NOT "$ENV{EMMAKE_JUST_CONFIGURE}" STREQUAL "")
+    # We're in emmake context during build
+    message(STATUS "✅ Building with emmake - good!")
+endif()
+
+# Set up emsdk via FetchContent if not available
+if(NOT EXISTS "${CMAKE_BINARY_DIR}/_deps/emsdk-src/emsdk")
+    include(FetchContent)
+    FetchContent_Declare(
+        emsdk
+        GIT_REPOSITORY https://github.com/emscripten-core/emsdk.git
+        GIT_TAG main
+    )
+    FetchContent_MakeAvailable(emsdk)
+endif()
+
+# Emscripten link flags following WebGUI pattern
+# Note: Use Emscripten's built-in GLFW/OpenGL, not desktop libraries
 set(WASM_LINK_FLAGS
-    "-s USE_GLFW=3"
-    "-s USE_WEBGL2=1" 
-    "-s FULL_ES3=1"
-    "-s WASM=1"
-    "-s ALLOW_MEMORY_GROWTH=1"
-    "-s NO_EXIT_RUNTIME=1"
-    "-s USE_PTHREADS=1"
-    "-s PTHREAD_POOL_SIZE=4"
-    "-s PROXY_TO_PTHREAD=1"
-    "-s ASSERTIONS=1"
-    "-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
-    "-s MODULARIZE=1"
-    "-s EXPORT_NAME=ClerDemo"
-    "-s ERROR_ON_UNDEFINED_SYMBOLS=0"
+    "-sUSE_GLFW=3"
+    "-sUSE_WEBGL2=1" 
+    "-sFULL_ES3=1"
+    "-sWASM=1"
+    "-sALLOW_MEMORY_GROWTH=1"
+    "-sNO_EXIT_RUNTIME=1"
+    "-sUSE_PTHREADS=1"
+    "-sPTHREAD_POOL_SIZE=4"
+    "-sPROXY_TO_PTHREAD=1"
+    "-sASSERTIONS=1"
+    "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
+    "-sMODULARIZE=1"
+    "-sEXPORT_NAME=ClerDemo"
+    "-sERROR_ON_UNDEFINED_SYMBOLS=0"
+    "-sLLD_REPORT_UNDEFINED"
+    "-sFORCE_FILESYSTEM=1"
 )
 
 find_package(Threads REQUIRED)
 
-# Function to create a WASM demo from an existing desktop example
+# Function to create a WASM demo from an existing desktop example  
 function(add_wasm_demo NAME SOURCE_FILE)
     # Create executable from the original source file with wasm_ prefix
     add_executable(wasm_${NAME} ${CMAKE_SOURCE_DIR}/desktop_examples/${SOURCE_FILE})
     
-    # Add include directories for Cler headers
-    target_include_directories(wasm_${NAME} PRIVATE
-        ${CMAKE_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/include
-    )
-    
-    # Link with only the specific libraries we need, avoiding desktop GL/GLFW
-    target_link_libraries(wasm_${NAME} PRIVATE
-        cler::blocks_udp
-        cler::blocks_plots
-        cler::blocks_gui
-        liquid
+    # Link with Cler desktop blocks (includes all necessary libraries and include paths)
+    target_link_libraries(wasm_${NAME} PRIVATE 
+        cler::cler_desktop_blocks
         Threads::Threads
     )
     
-    # Apply Emscripten flags only for linking
+    # Enable pthread support for both compile and link (required for shared memory)
+    target_compile_options(wasm_${NAME} PRIVATE -pthread)
+    target_link_options(wasm_${NAME} PRIVATE -pthread)
+    
+    # Apply Emscripten link flags following WebGUI pattern
     target_link_options(wasm_${NAME} PRIVATE ${WASM_LINK_FLAGS})
     
     # Generate HTML from template
