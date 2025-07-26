@@ -157,8 +157,7 @@ namespace cler {
     // Configuration for performance optimization
     struct FlowGraphConfig {
         SchedulerType scheduler = SchedulerType::ThreadPerBlock;
-        static constexpr size_t DEFAULT_NUM_WORKERS = 4;
-        size_t num_workers = DEFAULT_NUM_WORKERS;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
+        size_t num_workers = 4;  // Number of worker threads (used by FixedThreadPool and AdaptiveLoadBalancing, ignored for ThreadPerBlock)
 
         // Optimizes CPU usage, usually at the cost of reducing throughput
         // Most useful for:
@@ -166,24 +165,13 @@ namespace cler {
         // - Network packet processing with gaps
         // - File processing with I/O delays
         bool adaptive_sleep = false;
-        static constexpr double DEFAULT_ADAPTIVE_SLEEP_MULTIPLIER = 1.5;
-        static constexpr double DEFAULT_ADAPTIVE_SLEEP_MAX_US = 5000.0;
-        static constexpr size_t DEFAULT_ADAPTIVE_SLEEP_FAIL_THRESHOLD = 10;
-        
-        double adaptive_sleep_multiplier = DEFAULT_ADAPTIVE_SLEEP_MULTIPLIER;  // How aggressively to increase sleep time
-        double adaptive_sleep_max_us = DEFAULT_ADAPTIVE_SLEEP_MAX_US;          // Maximum sleep time in microseconds
-        size_t adaptive_sleep_fail_threshold = DEFAULT_ADAPTIVE_SLEEP_FAIL_THRESHOLD;  // Start sleeping after N consecutive fails
-        
-        // Dynamic work redistribution
-        //especially useful for:
-        // - Imbalanced workloads (where some paths or blocks are much slower)
-        // - Dynamic data rates (where some blocks receive more data than others)
-        bool load_balancing = false;
-        static constexpr size_t DEFAULT_LOAD_BALANCING_INTERVAL = 1000;
-        static constexpr double DEFAULT_LOAD_BALANCING_THRESHOLD = 0.2;
-        
-        size_t load_balancing_interval = DEFAULT_LOAD_BALANCING_INTERVAL;  // Rebalance every N procedure calls
-        double load_balancing_threshold = DEFAULT_LOAD_BALANCING_THRESHOLD; // 20% imbalance triggers rebalancing
+        double adaptive_sleep_multiplier = 1.5;  // How aggressively to increase sleep time
+        double adaptive_sleep_max_us = 5000.0;          // Maximum sleep time in microseconds
+        size_t adaptive_sleep_fail_threshold = 10;  // Start sleeping after N consecutive fails
+
+        // Load balancing parameters (only used with AdaptiveLoadBalancing scheduler)
+        size_t load_balancing_interval = 1000;  // Rebalance every N procedure calls
+        double load_balancing_threshold = 0.2;  // 20% imbalance triggers rebalancing
     };
 
     template<typename TaskPolicy, typename... BlockRunners>
@@ -717,9 +705,8 @@ namespace cler {
                     }
                 }
                 
-                // Check if rebalancing is needed
-                if (config.load_balancing && 
-                    load_balancer.should_rebalance(worker_id, config.load_balancing_interval)) {
+                // Check if rebalancing is needed (always enabled for AdaptiveLoadBalancing scheduler)
+                if (load_balancer.should_rebalance(worker_id, config.load_balancing_interval)) {
                     load_balancer.rebalance_workers(config.load_balancing_threshold);
                 }
                 

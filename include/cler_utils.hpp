@@ -82,7 +82,6 @@ namespace flowgraph_config {
         FlowGraphConfig config;
         config.scheduler = SchedulerType::AdaptiveLoadBalancing;
         config.num_workers = 4;  // Good default for load balancing
-        config.load_balancing = true;
         config.load_balancing_interval = 1000;
         config.load_balancing_threshold = 0.2;
         return config;
