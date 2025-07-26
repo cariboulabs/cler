@@ -13,7 +13,11 @@
 
 namespace cler {
 
-    constexpr size_t DEFAULT_MAX_WORKERS = 8;
+    // Configurable at compile-time for different target platforms
+    #ifndef CLER_DEFAULT_MAX_WORKERS
+    #define CLER_DEFAULT_MAX_WORKERS (8)  // Conservative default for embedded systems
+    #endif
+    constexpr size_t DEFAULT_MAX_WORKERS = CLER_DEFAULT_MAX_WORKERS;
 
     enum class Error {
         // Non-fatal errors (< TERMINATE_FLOWGRAPH)
