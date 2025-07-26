@@ -1,0 +1,32 @@
+# System dependencies for Cler development
+# Install with: xargs -a apt_list.txt sudo apt-get install -y
+
+# Core build tools
+build-essential
+cmake
+ninja-build
+pkg-config
+
+# GUI dependencies (for desktop builds)
+libglfw3-dev
+libgl1-mesa-dev
+libglu1-mesa-dev
+
+# DSP libraries
+libliquid-dev
+fftw3-dev
+
+# Python (for tools and docs)
+python3
+python3-pip
+python3-venv
+
+# Emscripten dependencies (for WASM builds via FetchContent)
+git
+nodejs
+npm
+# Note: Emscripten SDK is automatically downloaded via CMake FetchContent
+
+# Optional: SDR hardware support
+libhackrf-dev
+# libcariboulite-dev  # Not in standard repos, build from source

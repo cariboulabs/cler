@@ -25,6 +25,7 @@ option(CLER_BUILD_BLOCKS_LIQUID "Build CLER blocks that use liquid-dsp" ON)
 option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
 option(CLER_BUILD_PERFORMANCE "Build CLER performance tests" OFF)
 option(CLER_BUILD_TESTS "Build CLER unit tests" OFF)
+option(CLER_BUILD_WASM_EXAMPLES "Build WebAssembly examples" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
@@ -58,7 +59,7 @@ target_compile_options(cler INTERFACE
   >
 )
 
-add_subdirectory(logger)
+# add_subdirectory(logger)
 
 if (CLER_BUILD_BLOCKS)
   add_subdirectory(desktop_blocks)
@@ -75,4 +76,12 @@ endif()
 
 if(CLER_BUILD_TESTS)
   add_subdirectory(tests)
+endif()
+
+if(CLER_BUILD_WASM_EXAMPLES)
+  if(NOT DEFINED CMAKE_TOOLCHAIN_FILE OR NOT CMAKE_TOOLCHAIN_FILE MATCHES "Emscripten")
+    message(WARNING "CLER_BUILD_WASM_EXAMPLES is ON but Emscripten toolchain not detected. Skipping WASM examples.")
+  else()
+    add_subdirectory(wasm)
+  endif()
 endif()

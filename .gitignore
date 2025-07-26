@@ -1,3 +1,12 @@
 build
 *.pyc
 .vscode/settings.json
+
+# WASM build artifacts
+wasm/build-wasm/
+wasm/emsdk/
+docs/demos/*/
+!docs/demos/index.html
+
+# Python server script
+wasm/serve_demos.py
