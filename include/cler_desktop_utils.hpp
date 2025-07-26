@@ -56,25 +56,19 @@ void print_flowgraph_execution_report(const DesktopFlowGraph<BlockRunners...>& f
 
 
     // Optimized table header - removed worker reassignments (load balancing debug info)
-    printf("%-20s | %8s | %10s | %12s | %10s | %12s | %8s\n",
-        "Block", "Success%", "Samples", "Throughput", "CPU %", "AvgTime(us)", "Dead %");
+    printf("%-30s | %8s | %10s | %12s\n",
+        "Block", "Success%", "CPU %", "AvgTime(us)");
     printf("%s\n", std::string(95, '-').c_str());
 
     for (const auto& s : fg.stats()) {
         size_t total = s.successful_procedures + s.failed_procedures;
         float success_rate = total > 0 ? (static_cast<float>(s.successful_procedures) / total) * 100.0f : 0.0f;
-        float dead_ratio = s.total_runtime_s > 0 ? (s.total_dead_time_s / s.total_runtime_s) * 100.0f : 0.0f;
         
-        // Use optimized getter methods (calculated offline, no runtime overhead)
-        double throughput = s.get_throughput_samples_per_sec();
-
-        printf("%-20s | %8.1f | %12.1f | %10.1f | %12.2f | %8.1f\n",
+        printf("%-30s | %8.1f | %10.1f | %12.1f\n",
             s.name.c_str(),
             success_rate,
-            throughput / 1000.0,  // Display as KSamples/sec
             s.get_cpu_utilization_percent(),
-            s.get_avg_execution_time_us(),
-            dead_ratio
+            s.get_avg_execution_time_us()
         );
     }
 }

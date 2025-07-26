@@ -121,6 +121,8 @@ namespace cler {
             : block(blk), outputs(static_cast<Channels*>(outs)...) {}
     };
 
+    // C++17 deduction guide: automatically deduces channel base types from concrete channel types
+    // This allows: BlockRunner(&block, &channel) instead of BlockRunner<Block, ChannelBase<T>>(&block, &channel)
     template<typename Block, typename... Channels>
     BlockRunner(Block*, Channels*...) -> BlockRunner<Block, channel_to_base_t<Channels>...>;
 
@@ -128,7 +130,6 @@ namespace cler {
         EmbeddableString<64> name;
         size_t successful_procedures = 0;
         size_t failed_procedures = 0;
-        size_t samples_processed = 0;
         double total_dead_time_s = 0.0;
         double total_runtime_s = 0.0;
         double final_adaptive_sleep_us = 0.0;
@@ -142,8 +143,8 @@ namespace cler {
             return total_runtime_s > 0 ? ((total_runtime_s - total_dead_time_s) / total_runtime_s) * 100.0 : 0.0;
         }
         
-        double get_throughput_samples_per_sec() const {
-            return total_runtime_s > 0 ? samples_processed / total_runtime_s : 0.0;
+        double get_avg_dead_time_per_fail() const {
+            return failed_procedures > 0 ? total_dead_time_s / failed_procedures : 0.0;
         }
     };
 
@@ -222,7 +223,7 @@ namespace cler {
         template<typename Rep, typename Period>
         void run_for(const std::chrono::duration<Rep, Period>& duration, const FlowGraphConfig& config = FlowGraphConfig{}) {
             // Start the flowgraph
-            auto start_time = std::chrono::steady_clock::now();
+            auto start_time = std::chrono::high_resolution_clock::now();
             run(config);
             
             // For longer durations, use sleep_us to avoid busy waiting
@@ -236,7 +237,7 @@ namespace cler {
             }
             
             // Use yield for the remaining time for precise timing
-            while (std::chrono::steady_clock::now() - start_time < duration) {
+            while (std::chrono::high_resolution_clock::now() - start_time < duration) {
                 TaskPolicy::yield();
             }
             
@@ -246,8 +247,9 @@ namespace cler {
 
         void stop() {
             _stop_flag.store(true, std::memory_order_release);
-            for (auto& t : _tasks) {
-                TaskPolicy::join_task(t);
+            // Only join tasks that were actually created to prevent hang
+            for (size_t i = 0; i < _active_task_count; ++i) {
+                TaskPolicy::join_task(_tasks[i]);
             }
         }
 
@@ -255,6 +257,7 @@ namespace cler {
             return _stop_flag.load(std::memory_order_acquire);
         }
 
+        // Immutable config accessor
         const FlowGraphConfig& config() const { return _config; }
         const std::array<BlockExecutionStats, _N>& stats() const { return _stats; }
 
@@ -266,9 +269,10 @@ namespace cler {
             auto& stats = _stats[block_idx];
             
             if (procedure_succeeded) {
-                // Reset sleep state on success
+                // Exponential decay instead of hard reset for better bursty workload handling
                 stats.consecutive_fails.store(0);
-                stats.current_adaptive_sleep_us.store(0.0);
+                double current_sleep = stats.current_adaptive_sleep_us.load();
+                stats.current_adaptive_sleep_us.store(current_sleep * 0.5);  // Gradual decay
             } else {
                 // Increment failure count
                 size_t fails = stats.consecutive_fails.fetch_add(1) + 1;
@@ -313,7 +317,7 @@ namespace cler {
 
             stats.name = runner.block->name();
 
-            auto t_start = std::chrono::steady_clock::now();
+            auto t_start = std::chrono::high_resolution_clock::now();
             auto t_last = t_start;
 
             size_t successful = 0;
@@ -321,7 +325,7 @@ namespace cler {
             double total_dead_time_s = 0.0;
 
             while (!_stop_flag) {
-                auto t_now = std::chrono::steady_clock::now();
+                auto t_now = std::chrono::high_resolution_clock::now();
                 std::chrono::duration<double> dt = t_now - t_last;
                 t_last = t_now;
 
@@ -354,7 +358,7 @@ namespace cler {
                 }
             }
 
-            auto t_end = std::chrono::steady_clock::now();
+            auto t_end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> total_runtime_s = t_end - t_start;
 
             stats.successful_procedures = successful;
@@ -366,10 +370,12 @@ namespace cler {
         
         template<std::size_t... Is>
         void launch_tasks_impl(std::index_sequence<Is...>, const FlowGraphConfig& config) {
+            // C++17 fold expression: validates all indices are within bounds at compile time
             static_assert(((Is < _N) && ...), "All block indices must be within bounds");
             ((_tasks[Is] = TaskPolicy::create_task([this, config]() {
                 run_block_at_index_thread_per_block<Is>(config);
             })), ...);
+            _active_task_count = _N;  // ThreadPerBlock creates one task per block
         }
         
         template<std::size_t... Is>
@@ -400,7 +406,8 @@ namespace cler {
         std::array<BlockExecutionStats, _N> _stats;
         OnErrTerminateCallback _on_err_terminate_cb = nullptr;
         void* _on_err_terminate_context = nullptr;
-        std::array<std::chrono::steady_clock::time_point, _N> _block_start_times;
+        std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
+        size_t _active_task_count{0};  // Track actual created tasks to fix stop() hang
         
         // Initialize block stats with names
         void initialize_block_stats() {
@@ -411,6 +418,12 @@ namespace cler {
         static constexpr size_t DEFAULT_MAX_WORKERS = 8;
         template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
         class AdaptiveLoadBalancer {
+            // Compile-time validation for embedded systems safety
+            static_assert(MaxBlocksParam >= 1, "Must support at least one block");
+            static_assert(MaxWorkers >= 1, "Must support at least one worker");
+            static_assert(MaxBlocksParam <= 64, "MaxBlocks should be reasonable for embedded systems");
+            static_assert(MaxWorkers <= 32, "MaxWorkers should be reasonable for embedded systems");
+            
         public:
             struct BlockMetrics {
                 std::atomic<uint64_t> total_time_ns{0};
@@ -443,14 +456,26 @@ namespace cler {
             
         public:
             void initialize(size_t blocks, size_t workers) {
-                num_blocks = std::min(blocks, MaxBlocksParam);
-                num_workers = std::min(workers, MaxWorkers);
+                // Runtime validation with helpful error messages
+                if (blocks == 0) {
+                    assert(false && "Must have at least one block");
+                    return;
+                }
+                if (workers == 0) {
+                    assert(false && "Must have at least one worker");
+                    return;
+                }
+                if (blocks > MaxBlocksParam) {
+                    assert(false && "Block count exceeds MaxBlocksParam template parameter");
+                    return;
+                }
+                if (workers > MaxWorkers) {
+                    assert(false && "Worker count exceeds MaxWorkers template parameter");
+                    return;
+                }
                 
-                // Runtime validation for embedded safety
-                assert(num_workers > 0 && "Must have at least one worker");
-                assert(num_blocks > 0 && "Must have at least one block");
-                assert(num_workers <= MaxWorkers && "Worker count exceeds template parameter");
-                assert(num_blocks <= MaxBlocksParam && "Block count exceeds template parameter");
+                num_blocks = blocks;  // No need to truncate - we validated above
+                num_workers = workers;
                 
                 // Initialize both assignment buffers to zero
                 for (size_t w = 0; w < num_workers; ++w) {
@@ -651,16 +676,18 @@ namespace cler {
             load_balancer.initialize(_N, num_workers);
             
             // Record start time for all blocks
-            auto start_time = std::chrono::steady_clock::now();
+            auto start_time = std::chrono::high_resolution_clock::now();
             for (size_t i = 0; i < _N; ++i) {
                 _block_start_times[i] = start_time;
             }
             
             // Create worker tasks that use load balancer assignments
+            _active_task_count = 0;
             for (size_t worker_id = 0; worker_id < num_workers && worker_id < _N; ++worker_id) {
                 _tasks[worker_id] = TaskPolicy::create_task([this, worker_id, config]() {
                     run_load_balanced_worker(worker_id, config);
                 });
+                _active_task_count++;
             }
         }
         
@@ -719,7 +746,7 @@ namespace cler {
             }
             
             // Finalize stats when worker exits
-            auto end_time = std::chrono::steady_clock::now();
+            auto end_time = std::chrono::high_resolution_clock::now();
             
             // Update stats for all blocks this worker processed
             std::array<size_t, MaxBlocks> final_assignments;
@@ -767,7 +794,7 @@ namespace cler {
         
         void launch_shared_workers(size_t num_workers, const FlowGraphConfig& config) {
             // Record start time for all blocks
-            auto start_time = std::chrono::steady_clock::now();
+            auto start_time = std::chrono::high_resolution_clock::now();
             
             // Store start time for stats calculation
             for (size_t i = 0; i < _N; ++i) {
@@ -775,10 +802,12 @@ namespace cler {
             }
             
             // Create worker tasks that process multiple blocks
+            _active_task_count = 0;
             for (size_t worker_id = 0; worker_id < num_workers && worker_id < _N; ++worker_id) {
                 _tasks[worker_id] = TaskPolicy::create_task([this, worker_id, num_workers, config]() {
                     run_worker_thread(worker_id, num_workers, config);
                 });
+                _active_task_count++;
             }
         }
         
@@ -792,9 +821,9 @@ namespace cler {
                     if (_stop_flag) break;
                     
                     // Track timing for dead time calculation
-                    auto t_before = std::chrono::steady_clock::now();
+                    auto t_before = std::chrono::high_resolution_clock::now();
                     bool block_did_work = execute_block_at_index(block_idx, config);
-                    auto t_after = std::chrono::steady_clock::now();
+                    auto t_after = std::chrono::high_resolution_clock::now();
                     
                     // Update dead time if block failed to process
                     if (!block_did_work) {
@@ -812,7 +841,7 @@ namespace cler {
             }
             
             // Finalize stats when worker exits
-            auto end_time = std::chrono::steady_clock::now();
+            auto end_time = std::chrono::high_resolution_clock::now();
             for (size_t block_idx = worker_id; block_idx < _N; block_idx += total_workers) {
                 std::chrono::duration<double> total_runtime = end_time - _block_start_times[block_idx];
                 _stats[block_idx].total_runtime_s = total_runtime.count();
