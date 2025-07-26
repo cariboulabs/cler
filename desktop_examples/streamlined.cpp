@@ -12,8 +12,8 @@ struct SourceBlock : public cler::BlockBase {
     } 
 
     cler::Result<cler::Empty, cler::Error> procedure(
-        cler::Channel<float>* out0,
-        cler::Channel<double>* out1) {
+        cler::ChannelBase<float>* out0,
+        cler::ChannelBase<double>* out1) {
 
         //this is faster than pushing one by one
         out0->writeN(_ones, out0->space());
@@ -33,16 +33,28 @@ struct AdderBlock : public cler::BlockBase {
 
     //                                             Adderblock pushes to gain block which has a stack buffer!
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        size_t transferable = std::min({in0.size(), in1.size(), out->space()});
-        for (size_t i = 0; i < transferable; ++i) {
-            float value0;
-            double value1;
-            in0.pop(value0);
-            in1.pop(value1);
-            out->push(value0 + static_cast<float>(value1));
+        size_t in_size = std::min({in0.size(), in1.size()});
+        if (in_size == 0) {
+            return cler::Error::NotEnoughSamples; // No samples to process
         }
+        size_t out_size = out->space();
+        if (out_size == 0) {
+            return cler::Error::NotEnoughSpace; // No space to write
+        }
+        size_t transferable = std::min(in_size, out_size);
+
+        in0.readN(_tmp1, transferable);
+        in1.readN(_tmp2, transferable);
+        for (size_t i = 0; i < transferable; ++i) {
+            _tmp1[i] += static_cast<float>(_tmp2[i]);
+        }
+        out->writeN(_tmp1, transferable);
         return cler::Empty{};
     }
+
+    private:
+        float _tmp1[CHANNEL_SIZE]; // Temporary buffer for processing
+        double _tmp2[CHANNEL_SIZE]; // Temporary buffer for processing
 };
 
 struct GainBlock : public cler::BlockBase {
@@ -52,14 +64,26 @@ struct GainBlock : public cler::BlockBase {
     GainBlock(const char* name, float gain_value) : BlockBase(name), gain(gain_value) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        size_t transferable = std::min(in.size(), out->space());
-        for (size_t i = 0; i < transferable; ++i) {
-            float value;
-            in.pop(value);
-            out->push(value * gain);
+        size_t in_size = in.size();
+        if (in_size == 0) {
+            return cler::Error::NotEnoughSamples; // No samples to process
         }
+        size_t out_size = out->space();
+        if (out_size == 0) {
+            return cler::Error::NotEnoughSpace; // No space to write
+        }
+        size_t transferable = std::min(in_size, out_size);
+
+        in.readN(_tmp, transferable);
+        for (size_t i = 0; i < transferable; ++i) {
+            _tmp[i] *= gain;
+        }
+        out->writeN(_tmp, transferable);
         return cler::Empty{};
     }
+
+    private:
+        float _tmp[CHANNEL_SIZE];
 };
 
 struct SinkBlock : public cler::BlockBase {
@@ -70,11 +94,9 @@ struct SinkBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
-        for (size_t i = 0; i < in.size(); ++i) {
-            float sample;
-            in.pop(sample);
-            _samples_processed++;
-        }
+        size_t transferable = in.size();
+        _samples_processed += transferable;
+        in.commit_read(transferable);
 
         if (_samples_processed % 1000000 < CHANNEL_SIZE) {
             std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
@@ -100,7 +122,7 @@ int main() {
 
     while (true) {
         res = source.procedure(&adder.in0, &adder.in1);
-        res = adder.procedure(static_cast<cler::ChannelBase<float>*>(&gain.in));
+        res = adder.procedure(&gain.in);
         res = gain.procedure(&sink.in);
         res = sink.procedure();
     }
