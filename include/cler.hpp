@@ -495,13 +495,24 @@ namespace cler {
                     assignment_counts[w] = 0;
                 }
                 
-                // Create sorted block list (heaviest first)
+                // Create sorted block list (heaviest first) using bounds-safe approach
                 std::array<size_t, MaxBlocks> sorted_blocks;
                 for (size_t i = 0; i < num_blocks; ++i) {
                     sorted_blocks[i] = i;
                 }
-                std::sort(sorted_blocks.begin(), sorted_blocks.begin() + num_blocks,
-                    [&](size_t a, size_t b) { return block_weights[a] > block_weights[b]; });
+                
+                // Use simple insertion sort for small arrays to avoid std::sort bounds issues
+                // This is more efficient for small MaxBlocks anyway (typical embedded use)
+                for (size_t i = 1; i < num_blocks; ++i) {
+                    size_t key = sorted_blocks[i];
+                    double key_weight = block_weights[key];
+                    size_t j = i;
+                    while (j > 0 && block_weights[sorted_blocks[j-1]] < key_weight) {
+                        sorted_blocks[j] = sorted_blocks[j-1];
+                        --j;
+                    }
+                    sorted_blocks[j] = key;
+                }
                 
                 // Greedy assignment: always assign to least loaded worker
                 std::array<double, MaxWorkers> worker_loads;
@@ -523,7 +534,7 @@ namespace cler {
             }
         };
         
-        AdaptiveLoadBalancer<32, 8> load_balancer;  // Static size for embedded compatibility
+        AdaptiveLoadBalancer<_N, 8> load_balancer;  // Template parameterized for better efficacy
         
         // Enhanced scheduling implementations
         void run_with_load_balancing(const FlowGraphConfig& config) {
@@ -560,8 +571,8 @@ namespace cler {
                 bool did_work = false;
                 
                 // Get current block assignments for this worker
-                std::array<size_t, 32> assignments;  // Max 32 blocks per worker
-                size_t assignment_count = load_balancer.get_worker_assignments(worker_id, assignments.data(), 32);
+                std::array<size_t, _N> assignments;  // Max _N blocks per worker
+                size_t assignment_count = load_balancer.get_worker_assignments(worker_id, assignments.data(), _N);
                 
                 // Process assigned blocks
                 for (size_t i = 0; i < assignment_count; ++i) {
@@ -605,8 +616,8 @@ namespace cler {
             auto end_time = std::chrono::steady_clock::now();
             
             // Update stats for all blocks this worker processed
-            std::array<size_t, 32> final_assignments;
-            size_t final_count = load_balancer.get_worker_assignments(worker_id, final_assignments.data(), 32);
+            std::array<size_t, _N> final_assignments;
+            size_t final_count = load_balancer.get_worker_assignments(worker_id, final_assignments.data(), _N);
             for (size_t i = 0; i < final_count; ++i) {
                 size_t block_idx = final_assignments[i];
                 std::chrono::duration<double> total_runtime = end_time - _block_start_times[block_idx];
