@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cler WASM Streamlined Example</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { 
+            color: #2c3e50; 
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #7f8c8d;
+            margin-bottom: 30px;
+        }
+        .status {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            font-family: monospace;
+        }
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 0 10px;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+        #output {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            margin-top: 20px;
+        }
+        .info {
+            background: #e8f5e8;
+            border: 1px solid #4caf50;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Cler DSP Framework</h1>
+        <div class="subtitle">WebAssembly Streamlined Example</div>
+        
+        <div class="info">
+            <strong>What you're seeing:</strong> A real-time DSP flowgraph running entirely in your browser using WebAssembly. 
+            This demonstrates Cler's streamlined execution mode - no threading, just efficient signal processing.
+        </div>
+
+        <div class="status" id="status">Loading...</div>
+        
+        <div class="controls">
+            <button id="startBtn" onclick="startDemo()" disabled>Start Processing</button>
+            <button id="stopBtn" onclick="stopDemo()" disabled>Stop</button>
+            <button onclick="clearOutput()">Clear Output</button>
+        </div>
+
+        <div id="output"></div>
+    </div>
+
+    <script type="text/javascript">
+        let moduleInstance = null;
+        let isRunning = false;
+
+        // Capture console output
+        const outputDiv = document.getElementById('output');
+        const originalLog = console.log;
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            outputDiv.textContent += args.join(' ') + '\n';
+            outputDiv.scrollTop = outputDiv.scrollHeight;
+        };
+
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+
+        function startDemo() {
+            if (!isRunning && Module) {
+                try {
+                    Module._start_processing();
+                    document.getElementById('startBtn').disabled = true;
+                    document.getElementById('stopBtn').disabled = false;
+                    isRunning = true;
+                    updateStatus('Processing... Check output below for throughput measurements.');
+                } catch(e) {
+                    console.log('Error starting processing:', e);
+                }
+            }
+        }
+
+        function stopDemo() {
+            if (isRunning && Module) {
+                try {
+                    Module._stop_processing();
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('stopBtn').disabled = true;
+                    isRunning = false;
+                    updateStatus('Stopped. Click Start to resume processing.');
+                } catch(e) {
+                    console.log('Error stopping processing:', e);
+                }
+            }
+        }
+
+        function clearOutput() {
+            outputDiv.textContent = '';
+        }
+
+        // Simple Emscripten configuration
+        var Module = {
+            print: console.log,
+            printErr: console.log,
+            onRuntimeInitialized: function() {
+                document.getElementById('startBtn').disabled = false;
+                updateStatus('Ready! Click Start to begin signal processing.');
+                console.log('Cler WASM module loaded successfully');
+            }
+        };
+
+        updateStatus('Loading WebAssembly module...');
+    </script>
+    
+    <script src="@NAME@.js"></script>
+</body>
+</html>

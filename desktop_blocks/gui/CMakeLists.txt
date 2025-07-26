@@ -1,14 +1,11 @@
 # === Dependencies (GLFW, OpenGL, ImGui, ImPlot) ===
 find_package(Threads REQUIRED)
 
-# For WASM builds, skip system package detection (Emscripten provides GLFW/OpenGL)
-if(NOT CLER_BUILD_WASM_EXAMPLES)
-    find_package(PkgConfig REQUIRED)
-    pkg_search_module(GLFW REQUIRED glfw3)
-    cmake_policy(SET CMP0072 NEW)
-    set(OpenGL_GL_PREFERENCE GLVND)
-    find_package(OpenGL REQUIRED)
-endif()
+find_package(PkgConfig REQUIRED)
+pkg_search_module(GLFW REQUIRED glfw3)
+cmake_policy(SET CMP0072 NEW)
+set(OpenGL_GL_PREFERENCE GLVND)
+find_package(OpenGL REQUIRED)
 
 include(FetchContent)
 
@@ -52,30 +49,20 @@ target_include_directories(blocks_gui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# Add system GLFW includes only for non-WASM builds
-if(NOT CLER_BUILD_WASM_EXAMPLES)
-  target_include_directories(blocks_gui PUBLIC ${GLFW_INCLUDE_DIRS})
-endif()
+target_include_directories(blocks_gui PUBLIC ${GLFW_INCLUDE_DIRS})
 
 # === Link dependencies ===
 target_link_libraries(blocks_gui PUBLIC
   Threads::Threads
 )
 
-# Link system libraries only for non-WASM builds (Emscripten provides GLFW/OpenGL)
-if(NOT CLER_BUILD_WASM_EXAMPLES)
-  target_link_libraries(blocks_gui PUBLIC
-    glfw
-    OpenGL::GL
-  )
-  
-  if(UNIX AND NOT APPLE)
-    target_link_libraries(blocks_gui PUBLIC dl)
-  endif()
-else()
-  # For WASM builds, enable pthread support for shared memory
-  target_compile_options(blocks_gui PUBLIC -pthread)
-  target_link_options(blocks_gui PUBLIC -pthread)
+target_link_libraries(blocks_gui PUBLIC
+  glfw
+  OpenGL::GL
+)
+
+if(UNIX AND NOT APPLE)
+  target_link_libraries(blocks_gui PUBLIC dl)
 endif()
 
 # Optional: Show status
