@@ -160,8 +160,8 @@ namespace cler {
 
     // Scheduling types for performance optimization  
     enum class SchedulerType {
-        ThreadPerBlock,        //Best for small flowgraphs or debugging
-        FixedThreadPool        //Best for uniform workloads (cache-optimized)
+        ThreadPerBlock,        // Best for small flowgraphs or debugging
+        FixedThreadPool        // Best for uniform workloads (cache-optimized)
     };
     
     // Configuration for performance optimization
@@ -420,7 +420,6 @@ namespace cler {
         void* _on_err_terminate_context = nullptr;
         std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
         size_t _active_task_count{0};  // Track actual created tasks to fix stop() hang
-        std::array<std::atomic<size_t>, DEFAULT_MAX_WORKERS> _worker_iterations{};
         
         // Initialize block stats with names
         void initialize_block_stats() {
@@ -577,74 +576,9 @@ namespace cler {
             }
         }
         
-        // Helper method for cooperative scheduler to capture error information
-        template<size_t I>
-        bool execute_block_with_error_capture_helper(const FlowGraphConfig& config, Error& error_out) {
-            static_assert(I < _N, "Block index out of bounds");
-            if constexpr (I >= _N) {
-                error_out = Error::Unknown;
-                return false;
-            }
-            
-            auto& runner = std::get<I>(_runners);
-            auto& stats = _stats[I];
-            
-            // Execute procedure and handle errors
-            auto result = std::apply([&](auto*... outs) {
-                return runner.block->procedure(outs...);
-            }, runner.outputs);
-            
-            if (result.is_err()) {
-                stats.failed_procedures++;
-                auto err = result.unwrap_err();
-                error_out = err; // Capture the actual error
-                
-                if (is_fatal(err)) {
-                    _stop_flag.store(true, std::memory_order_release);
-                    if (_on_err_terminate_cb) {
-                        _on_err_terminate_cb(_on_err_terminate_context);
-                    }
-                }
-                
-                // Handle adaptive sleep for failed procedure (if enabled)
-                if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
-                    handle_adaptive_sleep(I, false);
-                } else {
-                    TaskPolicy::yield();
-                }
-                
-                return false;
-            } else {
-                stats.successful_procedures++;
-                error_out = Error::Unknown; // No error
-                
-                // Handle adaptive sleep for successful procedure (if enabled)
-                handle_adaptive_sleep(I, true);
-                
-                return true;
-            }
-        }
-        
-        template<std::size_t... Is>
-        bool execute_block_with_error_capture_dispatch_impl(std::index_sequence<Is...>, size_t index, const FlowGraphConfig& config, Error& error_out) {
-            static_assert(((Is < _N) && ...), "All block indices must be within bounds");
-            bool result = false;
-            ((index == Is ? (result = execute_block_with_error_capture_helper<Is>(config, error_out), true) : false) || ...);
-            return result;
-        }
-        
-        bool execute_block_with_error_capture(size_t index, const FlowGraphConfig& config, Error& error_out) {
-            // Runtime dispatch to compile-time template with error capture
-            return execute_block_with_error_capture_dispatch_impl(std::make_index_sequence<_N>{}, index, config, error_out);
-        }
-        
-        
         template<size_t I>
         bool execute_block_at_index_helper(const FlowGraphConfig& config) {
             static_assert(I < _N, "Block index out of bounds");
-            if constexpr (I >= _N) {
-                return false;  // Invalid index (redundant but kept for runtime safety)
-            }
             
             auto& runner = std::get<I>(_runners);
             auto& stats = _stats[I];
@@ -690,9 +624,6 @@ namespace cler {
         template<size_t I>
         bool execute_block_without_sleep_helper() {
             static_assert(I < _N, "Block index out of bounds");
-            if constexpr (I >= _N) {
-                return false;  // Invalid index (redundant but kept for runtime safety)
-            }
             
             auto& runner = std::get<I>(_runners);
             auto& stats = _stats[I];
@@ -721,12 +652,6 @@ namespace cler {
                 return true;
             }
         }
-        
-        bool execute_block_without_sleep(size_t index) {
-            // Runtime dispatch to compile-time template for non-adaptive sleep execution
-            return execute_block_without_sleep_dispatch_impl(std::make_index_sequence<_N>{}, index);
-        }
-        
     };
 
     constexpr size_t DEFAULT_BUFFER_SIZE = 256;
