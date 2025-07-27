@@ -183,7 +183,7 @@ namespace cler {
         // Performance optimization: disable detailed stats collection for ultra-high throughput
         // When false: saves ~200 bytes per block, eliminates procedure counting and timing
         // When true: full diagnostics available (successful_procedures, timing, etc.)
-        bool collect_detailed_stats = true;
+        bool collect_detailed_stats = false;
 
     };
 
