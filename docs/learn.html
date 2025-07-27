@@ -238,7 +238,7 @@ int main() {
     
     // Configure scheduler for optimal performance
     cler::FlowGraphConfig config;
-    config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Good default
+    config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Default scheduler scheduler
     // config.adaptive_sleep = true;  // Optional: reduce CPU when idle
     flowgraph.run(config);
     return 0;
@@ -509,13 +509,13 @@ while (running) {
                     <div class="code-block">
                         <button class="copy-button" onclick="copyCode(this)">Copy</button>
                         <pre><code class="language-cpp line-numbers">cler::FlowGraphConfig config;
-config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Default
+config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Default scheduler
 // config.adaptive_sleep = true;  // Only for sparse/intermittent data
 flowgraph.run(config);</code></pre>
                     </div>
-                    <p><strong>Best for:</strong> Small flowgraphs, debugging, uniform workloads</p>
-                    <p><strong>Characteristics:</strong> One dedicated thread per block</p>
-                    <p class="design-note"><strong>Trade-offs:</strong> Simple and predictable, but thread overhead grows with block count. Good starting point for most applications.</p>
+                    <p><strong>Best for:</strong> Default choice, debugging, simple flowgraphs, guaranteed per-block isolation</p>
+                    <p><strong>Characteristics:</strong> One dedicated thread per block (default, simple, debuggable)</p>
+                    <p class="design-note"><strong>Trade-offs:</strong> Simple and predictable, but thread overhead grows with block count. Excellent starting point for most applications.</p>
                     
                     <h3>FixedThreadPool (Cache-Optimized)</h3>
                     <div class="code-block">
@@ -524,11 +524,12 @@ flowgraph.run(config);</code></pre>
 config.scheduler = cler::SchedulerType::FixedThreadPool;  // Recommended
 config.num_workers = 4;  // Number of worker threads (minimum 2, adjust for your CPU)
 // config.adaptive_sleep = true;  // Optional: only for sparse data
+// config.collect_detailed_stats = false;  // Ultra-high performance mode
 flowgraph.run(config);</code></pre>
                     </div>
-                    <p><strong>Best for:</strong> Most desktop applications, uniform workloads, performance-critical scenarios</p>
-                    <p><strong>Characteristics:</strong> Cache-aligned worker threads with platform-aware memory layout</p>
-                    <p class="key-point"><strong>Benefits:</strong> +30-40% performance improvement, automatic cache line detection for x86/ARM/RISC-V, lower thread overhead than ThreadPerBlock.</p>
+                    <p><strong>Best for:</strong> Constrained systems, embedded applications, memory-limited environments</p>
+                    <p><strong>Characteristics:</strong> Cache-optimized worker threads with platform-aware memory layout</p>
+                    <p class="key-point"><strong>Benefits:</strong> Better for constrained systems, automatic cache line detection for x86/ARM/RISC-V, lower thread overhead than ThreadPerBlock.</p>
                     
                     <h3>Adaptive Sleep Configuration</h3>
                     <p><strong>⚠️ Warning:</strong> Adaptive sleep reduces CPU usage but can significantly impact throughput. Only use for sparse/intermittent data sources like sensors or network packets with gaps.</p>

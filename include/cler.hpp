@@ -161,14 +161,14 @@ namespace cler {
 
     // Scheduling types for performance optimization  
     enum class SchedulerType {
-        ThreadPerBlock,        // Best for small flowgraphs or debugging
-        FixedThreadPool        // Best for uniform workloads (cache-optimized)
+        ThreadPerBlock,        // Default: Simple, Debuggable
+        FixedThreadPool        // Cache-optimized: Better for constrained systems
     };
     
     // Configuration for performance optimization
     struct FlowGraphConfig {
         SchedulerType scheduler = SchedulerType::ThreadPerBlock;
-        size_t num_workers = 4;  // Number of worker threads (used by FixedThreadPool, ignored for ThreadPerBlock)
+        size_t num_workers = 4;  // Used by FixedThreadPool; ThreadPerBlock creates one thread per block
 
         // Optimizes CPU usage, usually at the cost of reducing throughput
         // Most useful for:
@@ -329,20 +329,19 @@ namespace cler {
                 stats.name = runner.block->name();
             }
 
-            std::chrono::high_resolution_clock::time_point t_start, t_last, t_now;
-            size_t successful = 0;
-            size_t failed = 0;
+            // Only declare timing variables if needed
+            std::chrono::high_resolution_clock::time_point t_start, t_last;
+            size_t successful = 0, failed = 0;
             double total_dead_time_s = 0.0;
 
             if (config.collect_detailed_stats) {
-                t_start = std::chrono::high_resolution_clock::now();
-                t_last = t_start;
+                t_start = t_last = std::chrono::high_resolution_clock::now();
             }
 
             while (!_stop_flag) {
                 std::chrono::duration<double> dt{};
                 if (config.collect_detailed_stats) {
-                    t_now = std::chrono::high_resolution_clock::now();
+                    auto t_now = std::chrono::high_resolution_clock::now();
                     dt = t_now - t_last;
                     t_last = t_now;
                 }
@@ -435,9 +434,17 @@ namespace cler {
         std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
         size_t _active_task_count{0};  // Track actual created tasks to fix stop() hang
         
-        // Initialize block stats with names
+        // Initialize block stats with names (only if detailed stats enabled)
         void initialize_block_stats() {
-            init_stats_impl(std::make_index_sequence<_N>{});
+            if (_config.collect_detailed_stats) {
+                init_stats_impl(std::make_index_sequence<_N>{});
+            }
+        }
+        
+        // Helper for conditional timing
+        auto get_time_if_needed(bool collect_stats) {
+            return collect_stats ? std::chrono::high_resolution_clock::now() : 
+                                 std::chrono::high_resolution_clock::time_point{};
         }
         
         
@@ -476,6 +483,7 @@ namespace cler {
                           "WorkerQueue is too large, consider reducing MaxBlocksParam");
             
             std::array<WorkerQueue, MaxWorkers> queues;
+            std::array<size_t, MaxBlocksParam> block_owner;  // Track which worker owns each block
             size_t num_blocks = 0;
             size_t num_workers = 0;
             
@@ -488,6 +496,7 @@ namespace cler {
                 for (size_t i = 0; i < blocks; ++i) {
                     size_t worker = i % workers;
                     queues[worker].blocks[queues[worker].count++] = static_cast<block_index_t>(i);
+                    block_owner[i] = worker;  // Track ownership for stats finalization
                 }
             }
             
@@ -501,6 +510,10 @@ namespace cler {
                 queues[worker_id].reset();
                 return queues[worker_id].get_block(block_idx_out);
             }
+            
+            bool is_block_owner(size_t worker_id, size_t block_idx) const {
+                return block_idx < num_blocks && block_owner[block_idx] == worker_id;
+            }
         };
         
         
@@ -508,10 +521,6 @@ namespace cler {
         
         // Enhanced scheduling implementations
         
-        bool execute_block_at_index_with_metrics(size_t index, const FlowGraphConfig& config) {
-            // Similar to execute_block_at_index but with metrics tracking using C++17 compatible approach
-            return execute_block_dispatch_impl(std::make_index_sequence<_N>{}, index, config);
-        }
         // Cache-optimized FixedThreadPool implementation
         void run_with_cache_optimized_scheduler(const FlowGraphConfig& config) {
             _stop_flag.store(false, std::memory_order_release);
@@ -561,10 +570,7 @@ namespace cler {
                     if (_stop_flag) break;
                     
                     // Track timing for dead time calculation (only if detailed stats enabled)
-                    std::chrono::high_resolution_clock::time_point t_before;
-                    if (config.collect_detailed_stats) {
-                        t_before = std::chrono::high_resolution_clock::now();
-                    }
+                    auto t_before = get_time_if_needed(config.collect_detailed_stats);
                     
                     bool block_did_work = execute_block_at_index(block_idx, config);
                     
@@ -587,13 +593,13 @@ namespace cler {
             // Finalize stats when worker exits (only if detailed stats enabled)
             if (config.collect_detailed_stats) {
                 auto end_time = std::chrono::high_resolution_clock::now();
-                // Update stats for all blocks this worker processed
-                // Note: Cache-optimized scheduler handles block assignment, so we update all blocks
-                // The scheduler ensures proper round-robin distribution
+                // Update stats only for blocks owned by this worker (fixes race condition)
                 for (size_t i = 0; i < _N; ++i) {
-                    std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
-                    _stats[i].total_runtime_s = total_runtime.count();
-                    _stats[i].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[i].current_adaptive_sleep_us.load() : 0.0;
+                    if (cache_optimized_scheduler.is_block_owner(worker_id, i)) {
+                        std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
+                        _stats[i].total_runtime_s = total_runtime.count();
+                        _stats[i].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[i].current_adaptive_sleep_us.load() : 0.0;
+                    }
                 }
             }
         }

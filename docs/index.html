@@ -60,7 +60,7 @@
                     </div>
                     <div class="principle">
                         <h4>🎯 Optimized Schedulers</h4>
-                        <p>ThreadPerBlock (compatible) and FixedThreadPool (cache-optimized) with platform-aware memory layout for best performance.</p>
+                        <p>ThreadPerBlock (default, simple, debuggable) and FixedThreadPool (cache-optimized, better for constrained systems) with platform-aware memory layout.</p>
                     </div>
                     <div class="principle">
                         <h4>🤖 AI-Friendly Core</h4>
@@ -114,6 +114,7 @@ int main() {
     config.scheduler = cler::SchedulerType::FixedThreadPool;  // Cache-optimized (recommended)
     config.num_workers = 4;  // Adjust for your CPU
     // config.adaptive_sleep = true;  // Optional: for sparse/intermittent data only
+    // config.collect_detailed_stats = false;  // Ultra-high performance mode
     flowgraph.run(config);
 
     while (!gui.should_close()) {

@@ -5,7 +5,7 @@
 </div>
 
 Cler is a C++ template-based framework for constructing and executing flowgraphs of DSP processing blocks.
-Its goal is to keep a tiny header only core allowing maximal flexability:
+Its goal is to keep a tiny header only core allowing maximal flexibility:
 
 * Defining blocks amounts to implementing a struct with a method
 * Channels are type agnostic
@@ -31,7 +31,7 @@ cd build
 cmake ..
 make -j"$(nproc --ignore=1)"   # Use all cores-1
 cd desktop_examples
-./hello_world #(or mass_spring_damper if you want to see somthing cool)
+./hello_world #(or mass_spring_damper if you want to see something cool)
 ```
 
 ⚠️ Just one thing to watch for: Cler’s template-heavy design can produce overwhelming errors, but any LLM can help with the small context window that is Cler. 
@@ -81,7 +81,7 @@ int main() {
 # Things to Know
 
 * **Schedulers** </br>
-Cler includes two schedulers: **ThreadPerBlock** (legacy, compatible) and **FixedThreadPool** (cache-optimized, better performance). The <1000 LOC core automatically detects platform cache sizes for optimal memory layout.
+Cler includes two schedulers: **ThreadPerBlock** (default, simple, debuggable) and **FixedThreadPool** (cache-optimized, better for constrained systems). The <1000 LOC core automatically detects platform cache sizes for optimal memory layout. Performance mode (`collect_detailed_stats = false`) eliminates stats overhead for ultra-high throughput applications.
 
 * **Flowgraph vs Streamlined** </br>
 Cler supports two architectural styles:

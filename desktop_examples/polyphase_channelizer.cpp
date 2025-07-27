@@ -130,6 +130,8 @@ int main() {
 
     cler::FlowGraphConfig config;
     config.scheduler = cler::SchedulerType::FixedThreadPool;
+    config.collect_detailed_stats = true;
+    config.adaptive_sleep = true;
     flowgraph.run(config);
     
     const float GW = 1800.0f;
