@@ -15,7 +15,7 @@
 
 // Fanout-focused performance test to showcase different scheduler strengths:
 // 1. Uniform fanout (all paths same complexity) -> FixedThreadPool should excel
-// 2. Imbalanced fanout (different path complexity) -> WorkStealing should excel  
+// 2. Imbalanced fanout (different path complexity) -> FixedThreadPool should handle well  
 // 3. Heavy fanout (many parallel paths) -> Load balancing should excel
 
 constexpr size_t BUFFER_SIZE = 1024;
@@ -214,7 +214,7 @@ TestResult run_imbalanced_baseline_test(std::chrono::seconds test_duration) {
     
     // Fanout with IMBALANCED workload (different path complexity):
     // Source -> Fanout -> [Path1: Light gain -> Sink, Path2: Heavy noise+gain -> Sink, Path3: Very light -> Sink]
-    // This should favor WorkStealing since it can rebalance heavy path
+    // This should favor FixedThreadPool with adaptive sleep or more workers
     
     SourceCWBlock<std::complex<float>> source("CW_Source", 1.0f, 1000.0f, 48000);
     FanoutBlock<std::complex<float>> fanout("Fanout_3way", 3);
@@ -284,7 +284,7 @@ TestResult run_imbalanced_test(const std::string& name, cler::FlowGraphConfig co
     
     // Fanout with IMBALANCED workload (different path complexity):
     // Source -> Fanout -> [Path1: Light gain -> Sink, Path2: Heavy noise+gain -> Sink, Path3: Very light -> Sink]
-    // This should favor WorkStealing since it can rebalance heavy path
+    // This should favor FixedThreadPool with adaptive sleep or more workers
     
     SourceCWBlock<std::complex<float>> source("CW_Source", 1.0f, 1000.0f, 48000);
     FanoutBlock<std::complex<float>> fanout("Fanout_3way", 3);
@@ -541,15 +541,15 @@ int main() {
     fixed_config_sleep.adaptive_sleep = true;
     test_idx++; results.push_back(run_enhanced_test("FixedThreadPool + adaptive sleep", fixed_config_sleep, test_duration));
     
-    // Test 3: WorkStealing (should be decent but not optimal for uniform)
-    auto workstealing_config = cler::flowgraph_config::work_stealing();
-    test_idx++; results.push_back(run_enhanced_test("WorkStealing", workstealing_config, test_duration));
+    // Test 3: Additional FixedThreadPool test (cache-optimized)
+    auto additional_fixed_config = cler::flowgraph_config::desktop_performance();
+    additional_fixed_config.num_workers = 8;  // Test with more workers
+    test_idx++; results.push_back(run_enhanced_test("FixedThreadPool (8 workers)", additional_fixed_config, test_duration));
     
-    // Note: WorkStealing does not support adaptive sleep
     
     std::cout << "\n⚖️ IMBALANCED FANOUT TESTS (light/heavy/very-light paths):" << std::endl;
     std::cout << "Pipeline: Source -> Fanout -> [Gain->Sink, Noise+Gain->Sink, DirectSink] (8 blocks)" << std::endl;
-    std::cout << "Expected: WorkStealing should perform best due to imbalanced load" << std::endl;
+    std::cout << "Expected: FixedThreadPool should perform well due to cache optimization" << std::endl;
     std::cout << "Adaptive sleep should help most here due to starved light paths" << std::endl;
     
     // Test 5: Baseline ThreadPerBlock (imbalanced workload)
@@ -562,18 +562,8 @@ int main() {
     // Test 7: FixedThreadPool + Adaptive Sleep (should improve CPU efficiency)
     test_idx++; results.push_back(run_imbalanced_test("FixedThreadPool + adaptive sleep", fixed_config_sleep, test_duration));
     
-    // Test 8: WorkStealing (should excel at imbalanced)
-    test_idx++; results.push_back(run_imbalanced_test("WorkStealing", workstealing_config, test_duration));
-    
-    // Note: WorkStealing does not support adaptive sleep
-    
-    // Test 10: Aggressive WorkStealing (should be even better)
-    auto aggressive_config = cler::flowgraph_config::work_stealing();
-    aggressive_config.load_balancing_interval = 100;   // Very frequent rebalancing
-    aggressive_config.load_balancing_threshold = 0.05; // Very sensitive (5% imbalance)
-    test_idx++; results.push_back(run_imbalanced_test("WorkStealing (aggressive)", aggressive_config, test_duration));
-    
-    // Note: WorkStealing does not support adaptive sleep
+    // Test 8: FixedThreadPool with more workers (additional parallelism)
+    test_idx++; results.push_back(run_imbalanced_test("FixedThreadPool (8 workers)", additional_fixed_config, test_duration));
     
     std::cout << "\n🚀 HEAVY FANOUT TESTS (8 parallel paths):" << std::endl;
     std::cout << "Pipeline: Source -> Fanout -> [8x Gain->Sink paths] (18 blocks total)" << std::endl;
@@ -590,13 +580,11 @@ int main() {
     // Test 14: FixedThreadPool + Adaptive Sleep
     test_idx++; results.push_back(run_heavy_fanout_test("FixedThreadPool + adaptive sleep", fixed_config_sleep, test_duration));
     
-    // Test 15: WorkStealing (should excel with many blocks to balance)
-    test_idx++; results.push_back(run_heavy_fanout_test("WorkStealing", workstealing_config, test_duration));
+    // Test 15: FixedThreadPool (cache-optimized, should handle many blocks well)
+    test_idx++; results.push_back(run_heavy_fanout_test("FixedThreadPool", fixed_config, test_duration));
     
-    // Note: WorkStealing does not support adaptive sleep
-    
-    // Test 16: Aggressive WorkStealing (should be excellent)
-    test_idx++; results.push_back(run_heavy_fanout_test("WorkStealing (aggressive)", aggressive_config, test_duration));
+    // Test 16: FixedThreadPool with more workers (should excel with many blocks)
+    test_idx++; results.push_back(run_heavy_fanout_test("FixedThreadPool (8 workers)", additional_fixed_config, test_duration));
 
     // Print results
     std::cout << "========================================" << std::endl;
@@ -641,14 +629,12 @@ int main() {
                 ((results[uniform_baseline_idx+2].throughput - results[uniform_baseline_idx+1].throughput) / results[uniform_baseline_idx+1].throughput) * 100.0);
         }
         
-        // WorkStealing comparison
+        // FixedThreadPool (8 workers) comparison  
         if (results.size() >= 5) {
             printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %12s\n",
-                "WorkStealing",
+                "FixedThreadPool (8 workers)",
                 results[uniform_baseline_idx+3].throughput/1e6, results[uniform_baseline_idx+3].cpu_efficiency*100,
                 ((results[uniform_baseline_idx+3].throughput - uniform_baseline_throughput) / uniform_baseline_throughput) * 100.0, "---");
-            
-            // Note: WorkStealing + adaptive sleep removed (not supported)
         }
         
         if (results.size() >= 11) {
@@ -677,13 +663,11 @@ int main() {
                 ((results[imbalanced_baseline_idx+2].throughput - imbalanced_baseline_throughput) / imbalanced_baseline_throughput) * 100.0,
                 ((results[imbalanced_baseline_idx+2].throughput - results[imbalanced_baseline_idx+1].throughput) / results[imbalanced_baseline_idx+1].throughput) * 100.0);
             
-            // WorkStealing imbalanced comparison
+            // FixedThreadPool (8 workers) imbalanced comparison
             printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %12s\n",
-                "WorkStealing",
+                "FixedThreadPool (8 workers)",
                 results[imbalanced_baseline_idx+3].throughput/1e6, results[imbalanced_baseline_idx+3].cpu_efficiency*100,
                 ((results[imbalanced_baseline_idx+3].throughput - imbalanced_baseline_throughput) / imbalanced_baseline_throughput) * 100.0, "---");
-            
-            // Note: WorkStealing + adaptive sleep removed (not supported)
         }
         
         if (results.size() >= 15) {
@@ -713,13 +697,11 @@ int main() {
                     ((results[heavy_baseline_idx+2].throughput - heavy_baseline_throughput) / heavy_baseline_throughput) * 100.0,
                     ((results[heavy_baseline_idx+2].throughput - results[heavy_baseline_idx+1].throughput) / results[heavy_baseline_idx+1].throughput) * 100.0);
                 
-                // WorkStealing heavy comparison (indices 14,15)
+                // FixedThreadPool (8 workers) heavy comparison  
                 printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %12s\n",
-                    "WorkStealing",
-                    results[heavy_baseline_idx+3].throughput/1e6, results[heavy_baseline_idx+3].cpu_efficiency*100,
-                    ((results[heavy_baseline_idx+3].throughput - heavy_baseline_throughput) / heavy_baseline_throughput) * 100.0, "---");
-                
-                // Note: WorkStealing + adaptive sleep removed (not supported)
+                    "FixedThreadPool (8 workers)",
+                    results[heavy_baseline_idx+4].throughput/1e6, results[heavy_baseline_idx+4].cpu_efficiency*100,
+                    ((results[heavy_baseline_idx+4].throughput - heavy_baseline_throughput) / heavy_baseline_throughput) * 100.0, "---");
             }
         }
         
@@ -775,7 +757,7 @@ int main() {
         }
         
         // HEAVY fanout winners (from heavy baseline through all heavy tests)
-        if (results.size() >= 17) {
+        if (results.size() > heavy_baseline_idx && heavy_baseline_idx > 0) {
             std::cout << std::endl;  // Add spacing between categories
             // Find best among all heavy tests including baseline
             auto heavy_throughput_best = std::max_element(results.begin() + heavy_baseline_idx, results.end(),

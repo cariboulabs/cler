@@ -33,16 +33,12 @@ void print_flowgraph_execution_report(const DesktopFlowGraph<BlockRunners...>& f
     switch (fg.config().scheduler) {
         case SchedulerType::ThreadPerBlock: scheduler_name = "ThreadPerBlock"; break;
         case SchedulerType::FixedThreadPool: scheduler_name = "FixedThreadPool"; break;
-        case SchedulerType::WorkStealing: scheduler_name = "WorkStealing"; break;
     }
     printf("  - Scheduler: %s\n", scheduler_name);
     
     if (fg.config().scheduler != SchedulerType::ThreadPerBlock) {
         printf("  - Workers: %zu\n", fg.config().num_workers);
         
-        if (fg.config().scheduler == SchedulerType::WorkStealing) {
-            printf("      * Lock-free work stealing enabled\n");
-        }
     }
     
     printf("  - Adaptive Sleep: %s\n", fg.config().adaptive_sleep ? "ENABLED" : "DISABLED");

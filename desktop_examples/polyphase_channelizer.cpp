@@ -129,7 +129,7 @@ int main() {
     );
 
     cler::FlowGraphConfig config;
-    config.scheduler = cler::SchedulerType::WorkStealing;
+    config.scheduler = cler::SchedulerType::FixedThreadPool;
     flowgraph.run(config);
     
     const float GW = 1800.0f;

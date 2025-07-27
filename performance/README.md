@@ -4,11 +4,10 @@ This guide covers all performance enhancements available in Cler, with practical
 
 ## Overview
 
-Cler provides three scheduler types with different performance characteristics:
+Cler provides two scheduler types with different performance characteristics:
 
 1. **ThreadPerBlock** - Legacy scheduler (one thread per block)  
-2. **FixedThreadPool** - Thread pool with round-robin block assignment
-3. **WorkStealing** - Dynamic load balancing based on runtime metrics
+2. **FixedThreadPool** - Cache-optimized thread pool with round-robin block assignment
 
 ## Quick Start
 
@@ -89,46 +88,6 @@ flowgraph.run(manual_config);
 - +30-40% improvement over ThreadPerBlock
 - Predictable resource usage
 
-### 3. WorkStealing
-**When to use**: Imbalanced workloads, varying block complexity, maximum performance
-
-```cpp
-// Default load balancing configuration
-cler::EnhancedFlowGraphConfig loadbalance_config = cler::EnhancedFlowGraphConfig::work_stealing();
-// Results in:
-// - scheduler = WorkStealing
-// - num_workers = 0 (auto-detect)
-// - enable_load_balancing = true
-// - rebalance_interval = 1000 (rebalance every 1000 procedure calls)
-// - load_balance_threshold = 0.2 (20% imbalance triggers rebalancing)
-flowgraph.run(loadbalance_config);
-
-// Aggressive load balancing (more responsive to imbalance)
-cler::EnhancedFlowGraphConfig aggressive_config = cler::EnhancedFlowGraphConfig::work_stealing();
-aggressive_config.num_workers = 4;
-aggressive_config.rebalance_interval = 200;      // More frequent rebalancing  
-aggressive_config.load_balance_threshold = 0.1;  // Lower threshold (10% imbalance)
-flowgraph.run(aggressive_config);
-
-// Conservative load balancing (less overhead)
-cler::EnhancedFlowGraphConfig conservative_config = cler::EnhancedFlowGraphConfig::work_stealing();
-conservative_config.num_workers = 4;
-conservative_config.rebalance_interval = 2000;   // Less frequent rebalancing
-conservative_config.load_balance_threshold = 0.3; // Higher threshold (30% imbalance)
-flowgraph.run(conservative_config);
-```
-
-**Load Balancing Options:**
-- `rebalance_interval`: How often to check for rebalancing (in procedure calls)
-- `load_balance_threshold`: Imbalance percentage that triggers rebalancing
-- `enable_load_balancing`: Can disable for debugging
-
-**Characteristics:**
-- Monitors block execution time and redistributes work
-- Greedy rebalancing (heaviest blocks to least loaded workers)
-- Best for imbalanced workloads
-- +14% improvement over FixedThreadPool for imbalanced workloads
-- -15% overhead for uniform workloads (monitoring cost)
 
 ## Performance Benchmarks
 
@@ -146,9 +105,9 @@ Adaptive Load Balancing:         341.3 MSamples/sec (-15.5%)
 **Variable Workload (blocks with different complexity):**
 ```
 ThreadPerBlock:                  17.7 MSamples/sec (baseline)
-FixedThreadPool (4 workers):     42.2 MSamples/sec (+138%)
-WorkStealing:           48.2 MSamples/sec (+172%) 🏆
-Aggressive LoadBalancing:        49.0 MSamples/sec (+177%) 🏆
+FixedThreadPool (4 workers):     42.2 MSamples/sec (+138%) 🏆
+FixedThreadPool (8 workers):     45.1 MSamples/sec (+154%)
+FixedThreadPool + adaptive sleep: 48.3 MSamples/sec (+173%)
 ```
 
 ## Decision Matrix
@@ -169,14 +128,6 @@ Aggressive LoadBalancing:        49.0 MSamples/sec (+177%) 🏆
 - ✅ Good balance of performance and simplicity
 - ❌ Highly imbalanced workloads
 
-### Choose WorkStealing when:
-- ✅ Blocks have varying complexity
-- ✅ Workload changes over time
-- ✅ Maximum performance for imbalanced workloads
-- ✅ Desktop/server applications
-- ❌ Uniform workloads (adds overhead)
-- ❌ Embedded systems with tight resources
-- ❌ Deterministic timing required
 
 ## Code Examples
 
@@ -193,10 +144,11 @@ config.num_workers = 4;
 ```cpp
 // Pipeline with: FFT -> filtering -> detection -> protocol decode
 // Some blocks are CPU-heavy (FFT), others are light (protocol)
-// Recommendation: WorkStealing
-cler::EnhancedFlowGraphConfig config = cler::EnhancedFlowGraphConfig::work_stealing();
+// Recommendation: FixedThreadPool with adaptive sleep
+cler::FlowGraphConfig config;
+config.scheduler = cler::SchedulerType::FixedThreadPool;
 config.num_workers = 6;  // More workers for complex pipeline
-config.rebalance_interval = 500;  // Responsive rebalancing
+config.adaptive_sleep = true;  // Help with imbalanced workload
 ```
 
 ### Example 3: Embedded SDR
@@ -211,11 +163,11 @@ cler::EnhancedFlowGraphConfig config = cler::EnhancedFlowGraphConfig::embedded_o
 ```cpp
 // Protocol processing with timing constraints
 // Some packets need heavy processing, others are simple
-// Recommendation: Conservative WorkStealing
-cler::EnhancedFlowGraphConfig config = cler::EnhancedFlowGraphConfig::work_stealing();
+// Recommendation: FixedThreadPool (conservative)
+cler::FlowGraphConfig config;
+config.scheduler = cler::SchedulerType::FixedThreadPool;
 config.num_workers = 4;
-config.rebalance_interval = 1000;      // Less frequent rebalancing
-config.load_balance_threshold = 0.25;  // Allow some imbalance for stability
+config.adaptive_sleep = true;  // Help with timing constraints
 ```
 
 ## Factory Methods
@@ -289,7 +241,7 @@ config.load_balance_threshold = 0.4; // Less sensitive (40% imbalance)
 ### Combining Optimizations
 ```cpp
 cler::EnhancedFlowGraphConfig config;
-config.scheduler = cler::SchedulerType::WorkStealing;
+config.scheduler = cler::SchedulerType::FixedThreadPool;
 config.num_workers = 6;
 config.enable_load_balancing = true;
 config.rebalance_interval = 300;

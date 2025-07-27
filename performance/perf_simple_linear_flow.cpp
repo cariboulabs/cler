@@ -234,15 +234,15 @@ int main() {
     auto default_config = cler::flowgraph_config::desktop_performance();
     results.push_back(run_enhanced_test("FixedThreadPool (4 workers)", default_config, test_duration));
     
-    // Test 4: WorkStealing with default rebalancing
-    auto workstealing_config = cler::flowgraph_config::work_stealing();
-    results.push_back(run_enhanced_test("WorkStealing (default)", workstealing_config, test_duration));
+    // Test 4: FixedThreadPool with more workers
+    auto additional_fixed_config = cler::flowgraph_config::desktop_performance();
+    additional_fixed_config.num_workers = 8;  // Test with more workers
+    results.push_back(run_enhanced_test("FixedThreadPool (8 workers)", additional_fixed_config, test_duration));
     
-    // Test 5: WorkStealing with aggressive rebalancing
-    auto aggressive_config = cler::flowgraph_config::work_stealing();
-    aggressive_config.load_balancing_interval = 200;   // More frequent rebalancing
-    aggressive_config.load_balancing_threshold = 0.1; // Lower threshold for rebalancing
-    results.push_back(run_enhanced_test("WorkStealing (aggressive)", aggressive_config, test_duration));
+    // Test 5: FixedThreadPool with minimal workers for comparison
+    auto minimal_fixed_config = cler::flowgraph_config::desktop_performance();
+    minimal_fixed_config.num_workers = 2;  // Minimal workers for comparison
+    results.push_back(run_enhanced_test("FixedThreadPool (2 workers)", minimal_fixed_config, test_duration));
     
     // Test 6: ThreadPerBlock with conservative adaptive sleep (rarely sleeps)
     auto conservative_sleep_config = cler::flowgraph_config::thread_per_block_adaptive_sleep();
@@ -270,7 +270,6 @@ int main() {
     fixed_pool_sleep_config.adaptive_sleep_fail_threshold = 10;
     results.push_back(run_enhanced_test("FixedThreadPool (with adaptive sleep)", fixed_pool_sleep_config, test_duration));
     
-    // Note: WorkStealing scheduler does not support adaptive sleep
 
     // Print results
     std::cout << "========================================" << std::endl;

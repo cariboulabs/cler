@@ -77,14 +77,6 @@ namespace flowgraph_config {
         return config;
     }
     
-    // Work stealing configuration (adaptive sleep not supported)
-    inline FlowGraphConfig work_stealing() {
-        FlowGraphConfig config;
-        config.scheduler = SchedulerType::WorkStealing;
-        config.num_workers = 4;  // Good default for work stealing
-        config.adaptive_sleep = false;  // Explicitly disabled for WorkStealing
-        return config;
-    }
     
     
     // Thread-per-block with adaptive sleep (for low-rate data scenarios)
