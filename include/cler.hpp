@@ -3,6 +3,7 @@
 #include "cler_spsc-queue.hpp"
 #include "cler_result.hpp"
 #include "cler_embeddable_string.hpp"
+#include "cler_platform.hpp"
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
 #include <complex> //again, a lot of cler blocks use complex numbers
@@ -437,10 +438,9 @@ namespace cler {
             static_assert(MaxWorkers >= 1, "Must support at least one worker");
             static_assert(MaxBlocksParam <= std::numeric_limits<block_index_t>::max(), 
                           "MaxBlocksParam exceeds block_index_t capacity");
-            static_assert(MaxWorkers <= 32, "MaxWorkers should be reasonable for embedded systems");
             
             // Align to cache line to prevent false sharing
-            struct alignas(64) WorkerQueue {
+            struct alignas(platform::cache_line_size) WorkerQueue {
                 std::array<block_index_t, MaxBlocksParam> blocks;
                 uint32_t count = 0;
                 uint32_t current = 0;
@@ -457,6 +457,10 @@ namespace cler {
                     current = 0;
                 }
             };
+            
+            // Ensure WorkerQueue doesn't grow too large for cache efficiency
+            static_assert(sizeof(WorkerQueue) <= platform::cache_line_size * 4, 
+                          "WorkerQueue is too large, consider reducing MaxBlocksParam");
             
             std::array<WorkerQueue, MaxWorkers> queues;
             size_t num_blocks = 0;

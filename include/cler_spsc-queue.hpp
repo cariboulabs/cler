@@ -22,38 +22,14 @@
 #include <type_traits> // for std::is_default_constructible
 #include <utility>     // for forward
 #include <cstring>    // for std::memcpy
+#include "cler_platform.hpp"
 
 namespace dro {
 
 namespace details {
 
-// Platform-aware cache line size detection
-#if defined(__cpp_lib_hardware_interference_size) && __cpp_lib_hardware_interference_size >= 201703L
-static constexpr std::size_t cacheLineSize = std::hardware_destructive_interference_size;
-#elif defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
-// Intel x86/x64: 64 bytes
-static constexpr std::size_t cacheLineSize = 64;
-#elif defined(__riscv) || defined(__riscv__)
-static constexpr std::size_t cacheLineSize = 64; //most are 64
-#elif defined(__ARM_ARCH_7M__) || defined(__ARM_ARCH_6M__) || defined(__ARM_ARCH_7EM__)
-// ARM Cortex-M (STM32, TI Tiva): 32 bytes
-static constexpr std::size_t cacheLineSize = 32;
-#elif defined(__ARM_ARCH) && (__ARM_ARCH >= 8)
-// ARM Cortex-A (64-bit): 64 bytes
-static constexpr std::size_t cacheLineSize = 64;
-#elif defined(__ARM_ARCH) && (__ARM_ARCH == 7)
-// ARM Cortex-A (32-bit): typically 64 bytes
-static constexpr std::size_t cacheLineSize = 64;
-#elif defined(__aarch64__)
-// ARM64: 64 bytes
-static constexpr std::size_t cacheLineSize = 64;
-#elif defined(__arm__) || defined(_M_ARM)
-// Generic ARM: conservative 32 bytes
-static constexpr std::size_t cacheLineSize = 32;
-#else
-// Safe default for unknown platforms
-static constexpr std::size_t cacheLineSize = 64;
-#endif
+// Use platform-aware cache line size from cler_platform.hpp
+static constexpr std::size_t cacheLineSize = cler::platform::cache_line_size;
 
 static constexpr std::size_t MAX_BYTES_ON_STACK = 2'097'152; // 2 MBs
 

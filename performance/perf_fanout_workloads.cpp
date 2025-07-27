@@ -580,10 +580,7 @@ int main() {
     // Test 14: FixedThreadPool + Adaptive Sleep
     test_idx++; results.push_back(run_heavy_fanout_test("FixedThreadPool + adaptive sleep", fixed_config_sleep, test_duration));
     
-    // Test 15: FixedThreadPool (cache-optimized, should handle many blocks well)
-    test_idx++; results.push_back(run_heavy_fanout_test("FixedThreadPool", fixed_config, test_duration));
-    
-    // Test 16: FixedThreadPool with more workers (should excel with many blocks)
+    // Test 15: FixedThreadPool with more workers (should excel with many blocks)
     test_idx++; results.push_back(run_heavy_fanout_test("FixedThreadPool (8 workers)", additional_fixed_config, test_duration));
 
     // Print results
@@ -670,7 +667,7 @@ int main() {
                 ((results[imbalanced_baseline_idx+3].throughput - imbalanced_baseline_throughput) / imbalanced_baseline_throughput) * 100.0, "---");
         }
         
-        if (results.size() >= 15) {
+        if (results.size() > heavy_baseline_idx && heavy_baseline_idx > 0) {
             std::cout << "\n\n🚀 HEAVY FANOUT Analysis:" << std::endl;
             printf("%-45s | %12s | %10s | %12s | %13s\n",
                 "Configuration", "Throughput", "CPU Eff", "vs Baseline", "vs No Sleep");
@@ -684,7 +681,7 @@ int main() {
                 "BASELINE (ThreadPerBlock)",
                 heavy_baseline_throughput/1e6, heavy_baseline_efficiency*100, "---", "---");
             
-            if (results.size() >= heavy_baseline_idx + 5) {
+            if (results.size() >= heavy_baseline_idx + 4) {
                 // FixedThreadPool heavy comparison (indices 12,13)
                 printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %12s\n",
                     "FixedThreadPool (4 workers)",
@@ -700,8 +697,8 @@ int main() {
                 // FixedThreadPool (8 workers) heavy comparison  
                 printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %12s\n",
                     "FixedThreadPool (8 workers)",
-                    results[heavy_baseline_idx+4].throughput/1e6, results[heavy_baseline_idx+4].cpu_efficiency*100,
-                    ((results[heavy_baseline_idx+4].throughput - heavy_baseline_throughput) / heavy_baseline_throughput) * 100.0, "---");
+                    results[heavy_baseline_idx+3].throughput/1e6, results[heavy_baseline_idx+3].cpu_efficiency*100,
+                    ((results[heavy_baseline_idx+3].throughput - heavy_baseline_throughput) / heavy_baseline_throughput) * 100.0, "---");
             }
         }
         

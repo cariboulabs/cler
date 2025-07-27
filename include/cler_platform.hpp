@@ -4,7 +4,7 @@
 namespace cler {
     
     // Platform-specific cache line size detection
-    namespace detail {
+    namespace platform {
         #if defined(__cpp_lib_hardware_interference_size) && __cpp_lib_hardware_interference_size >= 201703L
         static constexpr std::size_t cache_line_size = std::hardware_destructive_interference_size;
         #elif defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)

@@ -80,6 +80,9 @@ int main() {
 
 # Things to Know
 
+* **Schedulers** </br>
+Cler includes two schedulers: **ThreadPerBlock** (legacy, compatible) and **FixedThreadPool** (cache-optimized, better performance). The <1000 LOC core automatically detects platform cache sizes for optimal memory layout.
+
 * **Flowgraph vs Streamlined** </br>
 Cler supports two architectural styles:
     * **flowgraph** </br>

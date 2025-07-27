@@ -59,8 +59,8 @@
                         <p>Blocks can have multiple output channels via template parameters. Supports cyclic graphs for control systems.</p>
                     </div>
                     <div class="principle">
-                        <h4>🎯 Two Execution Modes</h4>
-                        <p>Flowgraph (threaded) for convenience or Streamlined (manual) for maximum control and performance.</p>
+                        <h4>🎯 Optimized Schedulers</h4>
+                        <p>ThreadPerBlock (compatible) and FixedThreadPool (cache-optimized) with platform-aware memory layout for best performance.</p>
                     </div>
                     <div class="principle">
                         <h4>🤖 AI-Friendly Core</h4>
@@ -111,7 +111,8 @@ int main() {
 
     // Configure scheduler for optimal performance
     cler::FlowGraphConfig config;
-    config.scheduler = cler::SchedulerType::ThreadPerBlock;  // One thread per block (default)
+    config.scheduler = cler::SchedulerType::FixedThreadPool;  // Cache-optimized (recommended)
+    config.num_workers = 4;  // Adjust for your CPU
     // config.adaptive_sleep = true;  // Optional: for sparse/intermittent data only
     flowgraph.run(config);
 
