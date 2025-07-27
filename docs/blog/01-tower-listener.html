@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Tower Listener: Multi-channel DSP receiver for heliostat field communication using CLER framework">
+    <meta name="keywords" content="CLER, DSP, heliostat, solar power, GMSK, SDR, polyphase channelizer">
+    <title>Tower Listener: Narrowband GMSK Multi-channel DSP for Heliostat Communication | CLER Blog</title>
+    <link rel="stylesheet" href="../styles/main.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({startOnLoad:true});</script>
+</head>
+<body>
+    <nav class="nav">
+        <div class="nav-brand">
+            <img src="../cler-logo.jpeg" alt="CLER" class="logo">
+        </div>
+        <div class="nav-tabs">
+            <a href="../index.html" class="nav-tab">Home</a>
+            <a href="../learn.html" class="nav-tab">Learn</a>
+            <a href="../blog.html" class="nav-tab active">Blog</a>
+        </div>
+        <div class="nav-links">
+            <a href="https://github.com/cariboulabs/cler" class="github-link" target="_blank">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                </svg>
+            </a>
+        </div>
+    </nav>
+    <main>
+        <article class="container blog-article">
+            <header>
+                <h1>Tower Listener: Narrowband GMSK Multi-channel DSP for Heliostat Communication</h1>
+                <p class="article-meta">December 2024 | Use Case</p>
+            </header>
+            <section>
+                <h2>The Problem</h2>
+                <p>A heliostat field for the U.S. Department of Energy consists of hundreds to thousands of motorized mirrors that track the sun and reflect light to a central tower. CaribouLabs has a contract with DOE/NREL to provide the wireless communication system for these fields. Each mirror needs bidirectional communication with the tower for:</p>
+                <ul>
+                    <li>Position commands (azimuth/elevation angles)</li>
+                    <li>Status telemetry (current position, orientation, temperature, battery state)</li>
+                    <li>Emergency stop commands</li>
+                </ul>
+                <p>With heliostats spread across several square kilometers, the communication system must handle high message rates while maintaining low latency for safety-critical commands.</p>
+                
+                <figure style="margin: 2rem 0; text-align: center;">
+                    <img src="01-nrel_csp.jpeg" alt="NREL Concentrated Solar Power facility" style="max-width: 100%; height: auto; border-radius: 4px;">
+                    <figcaption style="margin-top: 0.5rem; color: #666; font-size: 0.9rem;">NREL Concentrated Solar Power test facility</figcaption>
+                </figure>
+            </section>
+            <section>
+                <h2>The Solution</h2>
+                <p>Tower Listener is a multi-channel DSP receiver built with CLER that simultaneously monitors 15 frequency channels for heliostat communications.</p>
+                
+                <h3>Why Narrowband GMSK?</h3>
+                <p>We chose narrowband GMSK over cellular technologies like LTE for practical reasons:</p>
+                <ul>
+                    <li><strong>Better Range:</strong> Narrowband signals travel farther. By concentrating power in just 200 kHz instead of LTE's 10-20 MHz, we get much stronger signals at the same distance - crucial when heliostats can be a kilometer away from the tower.</li>
+                    <li><strong>Robust in Harsh Environments:</strong> For the same reason that range is better - narrowband signals concentrate power in a smaller frequency band, making them more resistant to wideband noise.</li>
+                    <li><strong>Cost-Effective:</strong> Simple radios mean cheaper heliostats. No need for expensive cellular modems when a basic GMSK chip does the job reliably.</li>
+                    <li><strong>Battery Friendly:</strong> GMSK radios use less power than cellular alternatives, extending battery life for solar-tracking operations.</li>
+                </ul>
+                
+                <h3>System Specifications</h3>
+                <ul>
+                    <li><strong>Input Sample Rate:</strong> 4 MSPS (CaribouLite SDR or recorded IQ)</li>
+                    <li><strong>Channel Bandwidth:</strong> 200 kHz per channel</li>
+                    <li><strong>Total Spectrum Coverage:</strong> 3 MHz (15 channels)</li>
+                    <li><strong>Modulation:</strong> GMSK with BT=0.3</li>
+                    <li><strong>Protocol:</strong> TI EasyLink (matching heliostat RF board)</li>
+                </ul>
+            </section>
+            <section>
+                <h2>DSP Pipeline Architecture</h2>
+                <div class="mermaid">
+flowchart LR
+    node_source(["switchSource"])
+    node_resampler["MultiStageResampler"]
+    node_channelizer["PolyphaseChannelizer"]
+    node_demod0[/"demod0<br/>(EZGmskDemod)"/]
+    node_demod1[/"demod1<br/>(EZGmskDemod)"/]
+    node_demod2[/"demod2<br/>(EZGmskDemod)"/]
+    node_demod3[/"demod3<br/>(EZGmskDemod)"/]
+    node_demod4[/"demod4<br/>(EZGmskDemod)"/]
+    node_demod5[/"demod5<br/>(EZGmskDemod)"/]
+    node_demod6[/"demod6<br/>(EZGmskDemod)"/]
+    node_demod7[/"demod7<br/>(EZGmskDemod)"/]
+    node_demod8[/"demod8<br/>(EZGmskDemod)"/]
+    node_demod9[/"demod9<br/>(EZGmskDemod)"/]
+    node_demod10[/"demod10<br/>(EZGmskDemod)"/]
+    node_demod11[/"demod11<br/>(EZGmskDemod)"/]
+    node_demod12[/"demod12<br/>(EZGmskDemod)"/]
+    node_demod13[/"demod13<br/>(EZGmskDemod)"/]
+    node_demod14[/"demod14<br/>(EZGmskDemod)"/]
+    node_source --> node_resampler
+    node_resampler --> node_channelizer
+    node_channelizer --> node_demod0
+    node_channelizer --> node_demod1
+    node_channelizer --> node_demod2
+    node_channelizer --> node_demod3
+    node_channelizer --> node_demod4
+    node_channelizer --> node_demod5
+    node_channelizer --> node_demod6
+    node_channelizer --> node_demod7
+    node_channelizer --> node_demod8
+    node_channelizer --> node_demod9
+    node_channelizer --> node_demod10
+    node_channelizer --> node_demod11
+    node_channelizer --> node_demod12
+    node_channelizer --> node_demod13
+    node_channelizer --> node_demod14
+    style node_source fill:#e1f5fe
+    style node_resampler fill:#e8f5e8
+    style node_channelizer fill:#e8f5e8
+    style node_demod0 fill:#f3e5f5
+    style node_demod1 fill:#f3e5f5
+    style node_demod2 fill:#f3e5f5
+    style node_demod3 fill:#f3e5f5
+    style node_demod4 fill:#f3e5f5
+    style node_demod5 fill:#f3e5f5
+    style node_demod6 fill:#f3e5f5
+    style node_demod7 fill:#f3e5f5
+    style node_demod8 fill:#f3e5f5
+    style node_demod9 fill:#f3e5f5
+    style node_demod10 fill:#f3e5f5
+    style node_demod11 fill:#f3e5f5
+    style node_demod12 fill:#f3e5f5
+    style node_demod13 fill:#f3e5f5
+    style node_demod14 fill:#f3e5f5
+                </div>
+            </section>
+            <section>
+                <h2>Processing Stages</h2>
+                
+                <h3>1. Flexible Input Source</h3>
+                <p>The <code>switchSourceBlock</code> allows runtime selection between live SDR input (CaribouLite S1G radio) or recorded IQ files for testing. This enables development without hardware and replay of field recordings.</p>
+                <h3>2. Resampling</h3>
+                <p>The multistage resampler decimates from 4 MSPS to 3 MSPS (15 channels × 200 kHz) to optimize computational load. Decimation ratio: 0.75 with 80 dB stopband attenuation.</p>
+                <h3>3. Polyphase Channelizer</h3>
+                <p>A 15-channel polyphase filterbank efficiently separates the wideband signal into individual 200 kHz channels. Using a Kaiser window with 80 dB attenuation, adjacent channel interference is minimized. The polyphase structure reduces computation by 15× compared to independent filters.</p>
+                <h3>4. GMSK Demodulation</h3>
+                <p>Each channel feeds a dedicated GMSK demodulator running at 2 samples/symbol. The demodulators implement the TI EasyLink protocol used by the heliostat RF boards, including preamble detection, sync word correlation, and header/payload processing.</p>
+            </section>
+            <section>
+                <h2>DOE Demonstration Goals</h2>
+                <p>The upcoming physical demonstration at Flatirons will validate the system against stringent Department of Energy requirements for heliostat field communication. The demonstration will test:</p>
+                <ul>
+                    <li><strong>Low Latency Control:</strong> Closed-loop control performance across the entire heliostat field</li>
+                    <li><strong>Bulk Data Transfer:</strong> Firmware update and configuration capabilities</li>
+                    <li><strong>Jamming Resilience:</strong> Performance under active RF interference conditions</li>
+                    <li><strong>Range Performance:</strong> Communication reliability across varying distances</li>
+                    <li><strong>Long-term Reliability:</strong> Extended operation across diverse weather conditions</li>
+                    <li><strong>Security:</strong> Encrypted communication with authentication</li>
+                </ul>
+                <p>Tower Listener's multi-channel architecture provides the foundation for meeting these requirements. More to come - we'll publish another blog post covering the demonstration results and field trial outcomes.</p>
+            </section>
+            <footer class="article-footer">
+                <p><a href="../blog.html">← Back to Blog</a></p>
+            </footer>
+        </article>
+    </main>
+    <style>
+        /* Reset any potential box styling from main.css */
+        .blog-article section {
+            background: none !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0 0 2rem 0 !important;
+        }
+        
+        .blog-article {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .article-meta {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 2rem;
+        }
+        
+        .blog-article h2 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.8rem;
+            color: #333;
+            background: none !important;
+            border: none !important;
+            padding: 0 !important;
+        }
+        
+        .blog-article section h2:first-child {
+            margin-top: 0;
+        }
+        
+        .blog-article h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: #555;
+            background: none !important;
+            border: none !important;
+            padding: 0 !important;
+        }
+        
+        .blog-article pre {
+            background: #f5f5f5;
+            padding: 1rem;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        
+        .blog-article code {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+        }
+        
+        .article-footer {
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid #eee;
+        }
+        
+        .mermaid {
+            margin: 2rem 0;
+            text-align: center;
+        }
+        
+        .mermaid .node rect {
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+    </style>
+</body>
+</html>

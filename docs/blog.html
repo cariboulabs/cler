@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="CLER Blog - Technical insights, use cases, and development updates for the embedded DSP framework.">
     <meta name="keywords" content="CLER blog, DSP development, embedded systems, technical articles">
-    <title>CLER Blog - Coming Soon</title>
+    <title>CLER Blog - Technical Articles and Use Cases</title>
     <link rel="stylesheet" href="styles/main.css">
 </head>
 <body>
@@ -33,24 +33,13 @@
         </section>
 
         <section class="container blog-content">
-            <div class="coming-soon">
-                <h2>Coming Soon</h2>
-                <p>We're working on sharing insights about DSP, embedded systems, and the development of CLER.</p>
-            </div>
-
-            <div class="what-to-expect">
-                <h3>What to Expect</h3>
-                <ul class="feature-list">
-                    <li><strong>Technical Deep Dives</strong> - Implementation details and design decisions</li>
-                    <li><strong>Use Cases</strong> - Real-world applications of CLER</li>
-                    <li><strong>Performance Analysis</strong> - Benchmarks and optimization techniques</li>
-                    <li><strong>Community Spotlights</strong> - Projects built with CLER</li>
-                </ul>
-            </div>
-
-            <div class="stay-updated">
-                <h3>Stay Updated</h3>
-                <p>Watch the <a href="https://github.com/cariboulabs/cler" target="_blank">GitHub repository</a> for updates or open an issue with questions.</p>
+            <div class="blog-posts">
+                <article class="blog-card">
+                    <h2><a href="blog/01-tower-listener.html">Tower Listener: Narrowband GMSK Multi-channel DSP for Heliostat Communication</a></h2>
+                    <p class="blog-meta">December 2024 | Use Case</p>
+                    <p>A 15-channel DSP receiver processing 3 MHz of spectrum for real-time heliostat field communication at a U.S. DOE facility. Uses GMSK demodulation with TI EasyLink protocol for solar mirror array control.</p>
+                    <a href="blog/01-tower-listener.html" class="read-more">Read more →</a>
+                </article>
             </div>
 
             <div class="contribute">
@@ -59,5 +48,50 @@
             </div>
         </section>
     </main>
+
+    <style>
+        .blog-posts {
+            margin: 2rem 0;
+        }
+        .blog-card {
+            background: #f9f9f9;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            border-radius: 8px;
+            border: 1px solid #eee;
+        }
+        .blog-card h2 {
+            margin-top: 0;
+            margin-bottom: 0.5rem;
+        }
+        .blog-card h2 a {
+            color: #333;
+            text-decoration: none;
+        }
+        .blog-card h2 a:hover {
+            color: #007acc;
+        }
+        .blog-meta {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+        .read-more {
+            color: #007acc;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .read-more:hover {
+            text-decoration: underline;
+        }
+        .contribute {
+            margin-top: 3rem;
+        }
+        .contribute hr {
+            border: none;
+            border-top: 1px solid #eee;
+            margin: 2rem 0;
+        }
+    </style>
 </body>
 </html>

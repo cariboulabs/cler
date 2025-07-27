@@ -81,7 +81,8 @@ int main() {
 # Things to Know
 
 * **Schedulers** </br>
-Cler includes two schedulers: **ThreadPerBlock** (default, simple, debuggable) and **FixedThreadPool** (cache-optimized, better for constrained systems). The <1000 LOC core automatically detects platform cache sizes for optimal memory layout. Performance mode (`collect_detailed_stats = false`) eliminates stats overhead for ultra-high throughput applications.
+Cler includes two schedulers: **ThreadPerBlock** (default, simple, debuggable) and **FixedThreadPool** (better for constrained systems).  It also has Performance mode which eliminates stats overhead for ultra-high throughput applications,
+and Adaptive_sleep mode which can help mitigate chocked CPU in expensive of throughput.
 
 * **Flowgraph vs Streamlined** </br>
 Cler supports two architectural styles:

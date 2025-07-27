@@ -162,7 +162,7 @@ namespace cler {
     // Scheduling types for performance optimization  
     enum class SchedulerType {
         ThreadPerBlock,        // Default: Simple, Debuggable
-        FixedThreadPool        // Cache-optimized: Better for constrained systems
+        FixedThreadPool        // Better for constrained systems
     };
     
     // Configuration for performance optimization
@@ -225,7 +225,7 @@ namespace cler {
                     break;
                     
                 case SchedulerType::FixedThreadPool:
-                    run_with_cache_optimized_scheduler(config);
+                    run_fixed_thread_pool(config);
                     break;
             }
         }
@@ -448,9 +448,8 @@ namespace cler {
         }
         
         
-        // Cache-Optimized Scheduler - Ultra-high throughput with minimal cache misses
         template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
-        class CacheOptimizedScheduler {
+        class FixedThreadPoolScheduler {
             using block_index_t = uint8_t;
             
             // Compile-time validation
@@ -517,29 +516,27 @@ namespace cler {
         };
         
         
-        CacheOptimizedScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> cache_optimized_scheduler;
+        FixedThreadPoolScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> fixed_thread_pool_scheduler;
         
-        // Enhanced scheduling implementations
-        
-        // Cache-optimized FixedThreadPool implementation
-        void run_with_cache_optimized_scheduler(const FlowGraphConfig& config) {
+        // FixedThreadPool implementation
+        void run_fixed_thread_pool(const FlowGraphConfig& config) {
             _stop_flag.store(false, std::memory_order_release);
-            
-            // Validate worker count - must be at least 2 for cache-optimized scheduling
+
+            // Validate worker count - must be at least 2 for fixed thread pool scheduling
             size_t num_workers = config.num_workers;
-            assert(num_workers >= 2 && "CacheOptimizedScheduler requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
+            assert(num_workers >= 2 && "FixedThreadPoolScheduler requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
             
             // Initialize stats for all blocks
             initialize_block_stats();
             
-            // For cache-optimized scheduler: handle different worker/block ratios
+            // If more workers than blocks, use thread-per-block scheduling
             if (num_workers >= _N) {
                 // More workers than blocks - use thread-per-block (current behavior)
                 run_thread_per_block(config);
             } else {
-                // Fewer workers than blocks - use cache-optimized scheduler
-                // Initialize cache-optimized scheduler with round-robin block distribution
-                cache_optimized_scheduler.initialize(_N, num_workers);
+                // Fewer workers than blocks - use fixed thread pool scheduler
+                // Initialize fixed thread pool scheduler with round-robin block distribution
+                fixed_thread_pool_scheduler.initialize(_N, num_workers);
                 
                 // Record start time for all blocks (only if detailed stats enabled)
                 if (config.collect_detailed_stats) {
@@ -549,24 +546,24 @@ namespace cler {
                     }
                 }
                 
-                // Create worker tasks using cache-optimized scheduler
+                // Create worker tasks using fixed thread pool scheduler
                 _active_task_count = 0;
                 for (size_t worker_id = 0; worker_id < num_workers && worker_id < _N; ++worker_id) {
                     _tasks[worker_id] = TaskPolicy::create_task([this, worker_id, config]() {
-                        run_cache_optimized_worker(worker_id, config);
+                        run_fixed_thread_pool_worker(worker_id, config);
                     });
                     _active_task_count++;
                 }
             }
         }
         
-        void run_cache_optimized_worker(size_t worker_id, const FlowGraphConfig& config) {
+        void run_fixed_thread_pool_worker(size_t worker_id, const FlowGraphConfig& config) {
             while (!_stop_flag) {
                 bool did_work = false;
                 size_t block_idx;
-                
-                // Get next block from cache-optimized scheduler (super fast - no atomics!)
-                while (cache_optimized_scheduler.get_next_block(worker_id, block_idx)) {
+
+                // Get next block from fixed thread pool scheduler (super fast - no atomics!)
+                while (fixed_thread_pool_scheduler.get_next_block(worker_id, block_idx)) {
                     if (_stop_flag) break;
                     
                     // Track timing for dead time calculation (only if detailed stats enabled)
@@ -595,7 +592,7 @@ namespace cler {
                 auto end_time = std::chrono::high_resolution_clock::now();
                 // Update stats only for blocks owned by this worker (fixes race condition)
                 for (size_t i = 0; i < _N; ++i) {
-                    if (cache_optimized_scheduler.is_block_owner(worker_id, i)) {
+                    if (fixed_thread_pool_scheduler.is_block_owner(worker_id, i)) {
                         std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
                         _stats[i].total_runtime_s = total_runtime.count();
                         _stats[i].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[i].current_adaptive_sleep_us.load() : 0.0;
