@@ -34,6 +34,7 @@ void print_flowgraph_execution_report(const DesktopFlowGraph<BlockRunners...>& f
         case SchedulerType::ThreadPerBlock: scheduler_name = "ThreadPerBlock"; break;
         case SchedulerType::FixedThreadPool: scheduler_name = "FixedThreadPool"; break;
         case SchedulerType::AdaptiveLoadBalancing: scheduler_name = "AdaptiveLoadBalancing"; break;
+        case SchedulerType::WorkStealing: scheduler_name = "WorkStealing"; break;
     }
     printf("  - Scheduler: %s\n", scheduler_name);
     
@@ -43,6 +44,8 @@ void print_flowgraph_execution_report(const DesktopFlowGraph<BlockRunners...>& f
         if (fg.config().scheduler == SchedulerType::AdaptiveLoadBalancing) {
             printf("      * Interval: %zu procedure calls\n", fg.config().load_balancing_interval);
             printf("      * Threshold: %.1f%%\n", fg.config().load_balancing_threshold * 100.0);
+        } else if (fg.config().scheduler == SchedulerType::WorkStealing) {
+            printf("      * Lock-free work stealing enabled\n");
         }
     }
     

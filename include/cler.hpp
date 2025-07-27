@@ -159,7 +159,8 @@ namespace cler {
     enum class SchedulerType {
         ThreadPerBlock,        //Best for small flowgraphs or debugging
         FixedThreadPool,       //Best for uniform workloads
-        AdaptiveLoadBalancing  //Best for imbalanced workloads
+        AdaptiveLoadBalancing, //Best for imbalanced workloads
+        WorkStealing          //Best for unpredictable workloads with simple lock-free design
     };
     
     // Configuration for performance optimization
@@ -224,6 +225,10 @@ namespace cler {
                     
                 case SchedulerType::AdaptiveLoadBalancing:
                     run_with_load_balancing(config);
+                    break;
+                    
+                case SchedulerType::WorkStealing:
+                    run_with_work_stealing(config);
                     break;
             }
         }
@@ -675,7 +680,167 @@ namespace cler {
             }
         };
         
+        // Work-Stealing Scheduler - Simple and lock-free
+        template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
+        class WorkStealingScheduler {
+            // Type alias for block indices - consistent with AdaptiveLoadBalancer
+            using block_index_t = uint8_t;
+            
+            // Compile-time validation
+            static_assert(MaxBlocksParam >= 1, "Must support at least one block");
+            static_assert(MaxWorkers >= 1, "Must support at least one worker");
+            static_assert(MaxBlocksParam <= std::numeric_limits<block_index_t>::max(), 
+                          "MaxBlocksParam exceeds block_index_t capacity");
+            static_assert(MaxWorkers <= 32, "MaxWorkers should be reasonable for embedded systems");
+            
+            // Each worker has a local queue of blocks to process
+            struct alignas(64) WorkerQueue {  // Cache line alignment to prevent false sharing
+                std::array<block_index_t, MaxBlocksParam> blocks;
+                std::atomic<uint32_t> head{0};
+                std::atomic<uint32_t> tail{0};
+                
+                bool try_push(block_index_t block_idx) {
+                    uint32_t t = tail.load(std::memory_order_relaxed);
+                    uint32_t h = head.load(std::memory_order_acquire);
+                    
+                    // Check if queue is full
+                    if (t - h >= MaxBlocksParam) return false;
+                    
+                    blocks[t % MaxBlocksParam] = block_idx;
+                    tail.store(t + 1, std::memory_order_release);
+                    return true;
+                }
+                
+                bool try_pop(block_index_t& block_idx) {
+                    uint32_t h = head.load(std::memory_order_relaxed);
+                    uint32_t t = tail.load(std::memory_order_acquire);
+                    
+                    if (h >= t) return false;
+                    
+                    block_idx = blocks[h % MaxBlocksParam];
+                    head.store(h + 1, std::memory_order_release);
+                    return true;
+                }
+                
+                bool try_steal(block_index_t& block_idx) {
+                    // Steal from head (opposite end from owner to minimize contention)
+                    uint32_t h = head.load(std::memory_order_acquire);
+                    uint32_t t = tail.load(std::memory_order_acquire);
+                    
+                    // Loop to handle CAS failures
+                    while (h < t) {
+                        // Read the block we want to steal
+                        block_idx = blocks[h % MaxBlocksParam];
+                        
+                        // Try to advance head atomically
+                        if (head.compare_exchange_weak(h, h + 1,
+                                                      std::memory_order_release,
+                                                      std::memory_order_acquire)) {
+                            return true;  // Successfully stole the block
+                        }
+                        // If CAS failed, h was updated, loop will re-check condition
+                    }
+                    return false;
+                }
+                
+                size_t size() const {
+                    uint32_t h = head.load(std::memory_order_relaxed);
+                    uint32_t t = tail.load(std::memory_order_relaxed);
+                    return (h <= t) ? (t - h) : 0;
+                }
+            };
+            
+        private:
+            std::array<WorkerQueue, MaxWorkers> queues;
+            size_t num_workers = 0;
+            size_t num_blocks = 0;
+            
+            // Track which blocks are being processed (for work returning)
+            std::array<std::atomic<int8_t>, MaxBlocksParam> block_owner;  // -1 = unassigned, >=0 = worker id
+            
+        public:
+            void initialize(size_t blocks, size_t workers) {
+                // Runtime validation
+                if (blocks == 0 || blocks > MaxBlocksParam) {
+                    assert(false && "Invalid block count");
+                    return;
+                }
+                if (workers == 0 || workers > MaxWorkers) {
+                    assert(false && "Invalid worker count");
+                    return;
+                }
+                
+                num_blocks = blocks;
+                num_workers = workers;
+                
+                // Initialize block ownership
+                for (size_t i = 0; i < blocks; ++i) {
+                    block_owner[i].store(-1, std::memory_order_relaxed);
+                }
+                
+                // Initial distribution: round-robin
+                for (size_t i = 0; i < blocks; ++i) {
+                    size_t worker_id = i % workers;
+                    queues[worker_id].try_push(static_cast<block_index_t>(i));
+                }
+            }
+            
+            bool get_next_block(size_t worker_id, size_t& block_idx_out) {
+                if (worker_id >= num_workers) return false;
+                
+                block_index_t local_block_idx;
+                
+                // Try local queue first (fast path)
+                if (queues[worker_id].try_pop(local_block_idx)) {
+                    block_idx_out = local_block_idx;
+                    block_owner[local_block_idx].store(static_cast<int8_t>(worker_id), 
+                                                       std::memory_order_relaxed);
+                    return true;
+                }
+                
+                // Try stealing from others (start from next worker for fairness)
+                for (size_t i = 1; i < num_workers; ++i) {
+                    size_t victim = (worker_id + i) % num_workers;
+                    if (queues[victim].try_steal(local_block_idx)) {
+                        block_idx_out = local_block_idx;
+                        block_owner[local_block_idx].store(static_cast<int8_t>(worker_id), 
+                                                           std::memory_order_relaxed);
+                        return true;
+                    }
+                }
+                
+                return false;
+            }
+            
+            // Return a block to the work pool (useful if a block fails repeatedly)
+            void return_block(size_t worker_id, size_t block_idx) {
+                if (worker_id >= num_workers || block_idx >= num_blocks) return;
+                
+                // Clear ownership
+                block_owner[block_idx].store(-1, std::memory_order_relaxed);
+                
+                // Try to put it back in the worker's queue
+                if (!queues[worker_id].try_push(static_cast<block_index_t>(block_idx))) {
+                    // If local queue is full, try other workers
+                    for (size_t i = 1; i <= num_workers; ++i) {
+                        size_t target = (worker_id + i) % num_workers;
+                        if (queues[target].try_push(static_cast<block_index_t>(block_idx))) {
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Get queue sizes for monitoring
+            void get_queue_sizes(std::array<size_t, MaxWorkers>& sizes) const {
+                for (size_t i = 0; i < num_workers; ++i) {
+                    sizes[i] = queues[i].size();
+                }
+            }
+        };
+        
         AdaptiveLoadBalancer<MaxBlocks, DEFAULT_MAX_WORKERS> load_balancer;  // Clean template parameterization
+        WorkStealingScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> work_stealing_scheduler;
         
         // Enhanced scheduling implementations
         void run_with_load_balancing(const FlowGraphConfig& config) {
@@ -919,6 +1084,107 @@ namespace cler {
         bool execute_block_at_index(size_t index, const FlowGraphConfig& config) {
             // Runtime dispatch to compile-time template using C++17 compatible approach
             return execute_block_dispatch_impl(std::make_index_sequence<_N>{}, index, config);
+        }
+        
+        // Work-stealing scheduler implementation
+        void run_with_work_stealing(const FlowGraphConfig& config) {
+            _stop_flag.store(false, std::memory_order_release);
+            
+            // Validate worker count - must be at least 2 for work stealing
+            size_t num_workers = config.num_workers;
+            assert(num_workers >= 2 && "WorkStealing requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
+            
+            // Initialize stats for all blocks
+            initialize_block_stats();
+            
+            // Initialize work-stealing scheduler
+            work_stealing_scheduler.initialize(_N, num_workers);
+            
+            // Record start time for all blocks
+            auto start_time = std::chrono::high_resolution_clock::now();
+            for (size_t i = 0; i < _N; ++i) {
+                _block_start_times[i] = start_time;
+            }
+            
+            // Create worker tasks that use work stealing
+            _active_task_count = 0;
+            for (size_t worker_id = 0; worker_id < num_workers && worker_id < _N; ++worker_id) {
+                _tasks[worker_id] = TaskPolicy::create_task([this, worker_id, config]() {
+                    run_work_stealing_worker(worker_id, config);
+                });
+                _active_task_count++;
+            }
+        }
+        
+        void run_work_stealing_worker(size_t worker_id, const FlowGraphConfig& config) {
+            size_t consecutive_steal_failures = 0;
+            static constexpr size_t MAX_CONSECUTIVE_STEAL_FAILURES = 10;
+            
+            while (!_stop_flag) {
+                size_t block_idx;
+                
+                // Try to get work
+                if (work_stealing_scheduler.get_next_block(worker_id, block_idx)) {
+                    consecutive_steal_failures = 0;  // Reset failure counter
+                    
+                    // Bounds checking
+                    if (block_idx >= _N) {
+                        assert(false && "Work-stealing scheduler returned invalid block index");
+                        continue;
+                    }
+                    
+                    // Track timing for statistics
+                    auto start_time = std::chrono::high_resolution_clock::now();
+                    
+                    bool block_did_work = execute_block_at_index(block_idx, config);
+                    
+                    auto end_time = std::chrono::high_resolution_clock::now();
+                    std::chrono::duration<double> dt = end_time - start_time;
+                    
+                    if (!block_did_work) {
+                        // Block had no work - update dead time
+                        _stats[block_idx].total_dead_time_s += dt.count();
+                        
+                        // Consider returning the block if it repeatedly has no work
+                        _stats[block_idx].consecutive_fails.fetch_add(1);
+                        if (_stats[block_idx].consecutive_fails.load() > config.adaptive_sleep_fail_threshold * 2) {
+                            // Return block to pool for potential redistribution
+                            work_stealing_scheduler.return_block(worker_id, block_idx);
+                            _stats[block_idx].consecutive_fails.store(0);
+                        }
+                    }
+                } else {
+                    // No work available from any queue
+                    consecutive_steal_failures++;
+                    
+                    if (consecutive_steal_failures > MAX_CONSECUTIVE_STEAL_FAILURES) {
+                        // All queues seem empty, sleep a bit longer
+                        if (config.adaptive_sleep) {
+                            TaskPolicy::sleep_us(100);  // 100 microseconds
+                        } else {
+                            TaskPolicy::yield();
+                        }
+                        consecutive_steal_failures = MAX_CONSECUTIVE_STEAL_FAILURES;  // Cap it
+                    } else {
+                        // Just yield for now
+                        TaskPolicy::yield();
+                    }
+                }
+            }
+            
+            // Finalize stats when worker exits
+            auto end_time = std::chrono::high_resolution_clock::now();
+            
+            // We can't easily track which blocks this worker processed in work-stealing
+            // So we'll update all block stats at the end based on their final runtime
+            if (worker_id == 0) {  // Only do this once (first worker to exit)
+                for (size_t i = 0; i < _N; ++i) {
+                    std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
+                    _stats[i].total_runtime_s = total_runtime.count();
+                    _stats[i].final_adaptive_sleep_us = config.adaptive_sleep ? 
+                        _stats[i].current_adaptive_sleep_us.load() : 0.0;
+                }
+            }
         }
     };
 
