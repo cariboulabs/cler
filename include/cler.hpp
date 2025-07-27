@@ -10,6 +10,7 @@
 #include <tuple> // for storing block runners
 #include <cassert> // for assertions
 #include <atomic> // for atomic adaptive sleep state
+#include <limits> // for std::numeric_limits
 
 namespace cler {
 
@@ -187,6 +188,7 @@ namespace cler {
         static constexpr std::size_t _N = sizeof...(BlockRunners);
         static constexpr std::size_t MaxBlocks = sizeof...(BlockRunners);  // Clean compile-time constant
         static_assert(_N > 0, "FlowGraph must have at least one block");
+        static_assert(_N <= 256, "FlowGraph cannot have more than 256 blocks (due to uint8_t indexing)");
         using OnErrTerminateCallback = void (*)(void* context);
 
         FlowGraph(BlockRunners... runners)
@@ -424,10 +426,14 @@ namespace cler {
         // Adaptive Load Balancer
         template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
         class AdaptiveLoadBalancer {
+            // Type alias for block indices - easily changeable for different requirements
+            using block_index_t = uint8_t;
+            
             // Compile-time validation for embedded systems safety
             static_assert(MaxBlocksParam >= 1, "Must support at least one block");
             static_assert(MaxWorkers >= 1, "Must support at least one worker");
-            static_assert(MaxBlocksParam <= 64, "MaxBlocks should be reasonable for embedded systems");
+            static_assert(MaxBlocksParam <= std::numeric_limits<block_index_t>::max(), 
+                          "MaxBlocksParam exceeds block_index_t capacity");
             static_assert(MaxWorkers <= 32, "MaxWorkers should be reasonable for embedded systems");
             
         public:
@@ -451,8 +457,12 @@ namespace cler {
             std::array<std::atomic<size_t>, MaxWorkers> worker_iteration_count;
             
             // Double-buffered assignment arrays to prevent race conditions
-            std::array<std::array<size_t, MaxBlocksParam>, MaxWorkers> worker_assignments_a;
-            std::array<std::array<size_t, MaxBlocksParam>, MaxWorkers> worker_assignments_b;
+            // Using block_index_t for block indices to save memory
+            // Memory usage: 2 buffers × MaxWorkers × MaxBlocksParam × sizeof(block_index_t)
+            // Example: 8 workers, 64 blocks, uint8_t = 2 × 8 × 64 × 1 = 1,024 bytes (1 KB)
+            // This is 8x smaller than using size_t (8,192 bytes)
+            std::array<std::array<block_index_t, MaxBlocksParam>, MaxWorkers> worker_assignments_a;
+            std::array<std::array<block_index_t, MaxBlocksParam>, MaxWorkers> worker_assignments_b;
             std::array<std::atomic<size_t>, MaxWorkers> assignment_counts_a;
             std::array<std::atomic<size_t>, MaxWorkers> assignment_counts_b;
             std::atomic<bool> use_buffer_a{true};  // Which buffer is currently active for reading
@@ -494,7 +504,7 @@ namespace cler {
                 for (size_t i = 0; i < num_blocks; ++i) {
                     size_t worker_id = i % num_workers;
                     size_t count = assignment_counts_a[worker_id].load();
-                    worker_assignments_a[worker_id][count] = i;
+                    worker_assignments_a[worker_id][count] = static_cast<block_index_t>(i);
                     assignment_counts_a[worker_id]++;
                 }
                 
@@ -655,7 +665,7 @@ namespace cler {
                     
                     // Assign block to this worker (write to inactive buffer)
                     size_t count = write_counts[worker_id].load();
-                    write_assignments[worker_id][count] = block_idx;
+                    write_assignments[worker_id][count] = static_cast<block_index_t>(block_idx);
                     write_counts[worker_id].store(count + 1);
                     worker_loads[worker_id] += block_weights[block_idx];
                 }
