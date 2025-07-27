@@ -72,6 +72,7 @@ struct GenericDatagramSocket {
     ssize_t send(const uint8_t* data, size_t len) const;
     ssize_t recv(uint8_t* buffer, size_t max_len, int flags = 0) const;
     inline bool is_valid() const { return _sockfd >= 0; }
+    void set_receive_timeout(std::chrono::milliseconds timeout);
 
 private:
     GenericDatagramSocket(SocketType type,

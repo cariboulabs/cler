@@ -252,4 +252,15 @@ ssize_t GenericDatagramSocket::recv(uint8_t* buffer, size_t max_len, int flags) 
 
     return bytes_received;
 }
+
+void GenericDatagramSocket::set_receive_timeout(std::chrono::milliseconds timeout) {
+    struct timeval tv;
+    tv.tv_sec = static_cast<time_t>(timeout.count() / 1000);
+    tv.tv_usec = static_cast<suseconds_t>((timeout.count() % 1000) * 1000);
+
+    if (setsockopt(_sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        throw std::runtime_error("GenericDatagramSocket: setsockopt SO_RCVTIMEO failed: " + std::string(strerror(errno)));
+    }
+}
+
 } // namespace UDPBlock
