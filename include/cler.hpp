@@ -874,28 +874,9 @@ namespace cler {
         
         void run_load_balanced_worker(size_t worker_id, const FlowGraphConfig& config) {
             size_t iteration_count = 0;
-            static constexpr size_t STARVATION_CHECK_INTERVAL = 100;
             
             while (!_stop_flag) {
                 bool did_work = false;
-                
-                // Periodic starvation prevention: ensure all blocks get visited
-                if (iteration_count % STARVATION_CHECK_INTERVAL == 0 && worker_id == 0) {
-                    // Worker 0 does a full sweep to prevent any block starvation
-                    for (size_t block_idx = 0; block_idx < _N; ++block_idx) {
-                        if (_stop_flag) break;
-                        
-                        auto start_time = std::chrono::high_resolution_clock::now();
-                        bool block_did_work = execute_block_at_index_with_metrics(block_idx, config);
-                        
-                        if (block_did_work) {
-                            auto end_time = std::chrono::high_resolution_clock::now();
-                            auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-                            load_balancer.update_block_metrics(block_idx, duration.count());
-                            did_work = true;
-                        }
-                    }
-                }
                 
                 // Get current block assignments for this worker
                 std::array<size_t, MaxBlocks> assignments;  // Max MaxBlocks blocks per worker
@@ -933,13 +914,23 @@ namespace cler {
                 }
                 
                 // Check if rebalancing is needed (always enabled for AdaptiveLoadBalancing scheduler)
-                if (load_balancer.should_rebalance(worker_id, config.load_balancing_interval)) {
+                // But only rebalance if we actually did work (to avoid thrashing on blocked dataflow)
+                if (did_work && load_balancer.should_rebalance(worker_id, config.load_balancing_interval)) {
                     load_balancer.rebalance_workers(config.load_balancing_threshold);
                 }
                 
+                // Emergency fallback: if no worker is making progress for too long,
+                // worker 0 does a full sweep to break potential deadlocks
                 if (!did_work) {
-                    // No work available, yield to other workers
                     TaskPolicy::yield();
+                    
+                    // After many iterations with no work, force execution of all blocks
+                    if (worker_id == 0 && iteration_count % 1000 == 999) {
+                        for (size_t emergency_idx = 0; emergency_idx < _N; ++emergency_idx) {
+                            if (_stop_flag) break;
+                            execute_block_at_index_with_metrics(emergency_idx, config);
+                        }
+                    }
                 }
                 
                 iteration_count++;
@@ -1012,30 +1003,27 @@ namespace cler {
         }
         
         void run_worker_thread(size_t worker_id, size_t total_workers, const FlowGraphConfig& config) {
-            // Each worker must visit ALL blocks to prevent starvation in dataflow graphs
-            size_t iteration = 0;
+            // Simple round-robin: each worker is responsible for specific blocks
+            // This avoids contention and ensures all blocks are covered
             
             while (!_stop_flag) {
                 bool did_work = false;
                 
-                // Each worker processes ALL blocks but starts at different offsets
-                // This ensures every block is visited by every worker periodically
-                size_t start_offset = (iteration++ * total_workers + worker_id) % _N;
-                
-                // Process ALL blocks, starting from our offset
-                for (size_t i = 0; i < _N; ++i) {
-                    size_t block_idx = (start_offset + i) % _N;
+                // Each worker only processes blocks assigned to it
+                // Worker 0 gets blocks 0, N, 2N, ...
+                // Worker 1 gets blocks 1, N+1, 2N+1, ...
+                for (size_t i = worker_id; i < _N; i += total_workers) {
                     if (_stop_flag) break;
                     
                     // Track timing for dead time calculation
                     auto t_before = std::chrono::high_resolution_clock::now();
-                    bool block_did_work = execute_block_at_index(block_idx, config);
+                    bool block_did_work = execute_block_at_index(i, config);
                     auto t_after = std::chrono::high_resolution_clock::now();
                     
                     // Update dead time if block failed to process
                     if (!block_did_work) {
                         std::chrono::duration<double> dt = t_after - t_before;
-                        _stats[block_idx].total_dead_time_s += dt.count();
+                        _stats[i].total_dead_time_s += dt.count();
                     }
                     
                     did_work = did_work || block_did_work;
@@ -1047,15 +1035,13 @@ namespace cler {
                 }
             }
             
-            // Finalize stats when worker exits - use same pattern as processing loop
+            // Finalize stats when worker exits
             auto end_time = std::chrono::high_resolution_clock::now();
-            for (size_t i = 0; i < _N; ++i) {
-                size_t block_idx = (i * total_workers + worker_id) % _N;
-                if (block_idx < _N) {  // Safety check
-                    std::chrono::duration<double> total_runtime = end_time - _block_start_times[block_idx];
-                    _stats[block_idx].total_runtime_s = total_runtime.count();
-                    _stats[block_idx].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[block_idx].current_adaptive_sleep_us.load() : 0.0;
-                }
+            // Update stats for blocks assigned to this worker
+            for (size_t i = worker_id; i < _N; i += total_workers) {
+                std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
+                _stats[i].total_runtime_s = total_runtime.count();
+                _stats[i].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[i].current_adaptive_sleep_us.load() : 0.0;
             }
         }
         
