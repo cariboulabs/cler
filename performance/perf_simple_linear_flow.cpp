@@ -234,15 +234,15 @@ int main() {
     auto default_config = cler::flowgraph_config::desktop_performance();
     results.push_back(run_enhanced_test("FixedThreadPool (4 workers)", default_config, test_duration));
     
-    // Test 4: AdaptiveLoadBalancing with default rebalancing
-    auto loadbalance_config = cler::flowgraph_config::adaptive_load_balancing();
-    results.push_back(run_enhanced_test("AdaptiveLoadBalancing (default)", loadbalance_config, test_duration));
+    // Test 4: WorkStealing with default rebalancing
+    auto workstealing_config = cler::flowgraph_config::work_stealing();
+    results.push_back(run_enhanced_test("WorkStealing (default)", workstealing_config, test_duration));
     
-    // Test 5: AdaptiveLoadBalancing with aggressive rebalancing
-    auto aggressive_config = cler::flowgraph_config::adaptive_load_balancing();
+    // Test 5: WorkStealing with aggressive rebalancing
+    auto aggressive_config = cler::flowgraph_config::work_stealing();
     aggressive_config.load_balancing_interval = 200;   // More frequent rebalancing
     aggressive_config.load_balancing_threshold = 0.1; // Lower threshold for rebalancing
-    results.push_back(run_enhanced_test("AdaptiveLoadBalancing (aggressive)", aggressive_config, test_duration));
+    results.push_back(run_enhanced_test("WorkStealing (aggressive)", aggressive_config, test_duration));
     
     // Test 6: ThreadPerBlock with conservative adaptive sleep (rarely sleeps)
     auto conservative_sleep_config = cler::flowgraph_config::thread_per_block_adaptive_sleep();
@@ -270,13 +270,7 @@ int main() {
     fixed_pool_sleep_config.adaptive_sleep_fail_threshold = 10;
     results.push_back(run_enhanced_test("FixedThreadPool (with adaptive sleep)", fixed_pool_sleep_config, test_duration));
     
-    // Test 10: AdaptiveLoadBalancing with adaptive sleep (NEW - best of both worlds!)
-    auto loadbalance_sleep_config = cler::flowgraph_config::adaptive_load_balancing();
-    loadbalance_sleep_config.adaptive_sleep = true;
-    loadbalance_sleep_config.adaptive_sleep_multiplier = 1.5;
-    loadbalance_sleep_config.adaptive_sleep_max_us = 5000.0;
-    loadbalance_sleep_config.adaptive_sleep_fail_threshold = 10;
-    results.push_back(run_enhanced_test("AdaptiveLoadBalancing (with adaptive sleep)", loadbalance_sleep_config, test_duration));
+    // Note: WorkStealing scheduler does not support adaptive sleep
 
     // Print results
     std::cout << "========================================" << std::endl;

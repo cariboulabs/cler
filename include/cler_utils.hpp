@@ -77,15 +77,15 @@ namespace flowgraph_config {
         return config;
     }
     
-    // Adaptive load balancing configuration
-    inline FlowGraphConfig adaptive_load_balancing() {
+    // Work stealing configuration (adaptive sleep not supported)
+    inline FlowGraphConfig work_stealing() {
         FlowGraphConfig config;
-        config.scheduler = SchedulerType::AdaptiveLoadBalancing;
-        config.num_workers = 4;  // Good default for load balancing
-        config.load_balancing_interval = 1000;
-        config.load_balancing_threshold = 0.2;
+        config.scheduler = SchedulerType::WorkStealing;
+        config.num_workers = 4;  // Good default for work stealing
+        config.adaptive_sleep = false;  // Explicitly disabled for WorkStealing
         return config;
     }
+    
     
     // Thread-per-block with adaptive sleep (for low-rate data scenarios)
     inline FlowGraphConfig thread_per_block_adaptive_sleep() {
