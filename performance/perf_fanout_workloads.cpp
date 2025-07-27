@@ -546,6 +546,11 @@ int main() {
     additional_fixed_config.num_workers = 8;  // Test with more workers
     test_idx++; results.push_back(run_enhanced_test("FixedThreadPool (8 workers)", additional_fixed_config, test_duration));
     
+    // Test 4: Ultra-high performance mode (no detailed stats collection)
+    auto ultra_perf_config = cler::flowgraph_config::desktop_performance();
+    ultra_perf_config.collect_detailed_stats = false;  // Disable detailed stats for maximum performance
+    test_idx++; results.push_back(run_enhanced_test("FixedThreadPool (ultra-perf mode)", ultra_perf_config, test_duration));
+    
     
     std::cout << "\n⚖️ IMBALANCED FANOUT TESTS (light/heavy/very-light paths):" << std::endl;
     std::cout << "Pipeline: Source -> Fanout -> [Gain->Sink, Noise+Gain->Sink, DirectSink] (8 blocks)" << std::endl;
@@ -565,6 +570,9 @@ int main() {
     // Test 8: FixedThreadPool with more workers (additional parallelism)
     test_idx++; results.push_back(run_imbalanced_test("FixedThreadPool (8 workers)", additional_fixed_config, test_duration));
     
+    // Test 9: Ultra-high performance mode (no detailed stats collection)
+    test_idx++; results.push_back(run_imbalanced_test("FixedThreadPool (ultra-perf mode)", ultra_perf_config, test_duration));
+    
     std::cout << "\n🚀 HEAVY FANOUT TESTS (8 parallel paths):" << std::endl;
     std::cout << "Pipeline: Source -> Fanout -> [8x Gain->Sink paths] (18 blocks total)" << std::endl;
     std::cout << "Expected: Load balancing should excel with many blocks to distribute" << std::endl;
@@ -582,6 +590,9 @@ int main() {
     
     // Test 15: FixedThreadPool with more workers (should excel with many blocks)
     test_idx++; results.push_back(run_heavy_fanout_test("FixedThreadPool (8 workers)", additional_fixed_config, test_duration));
+    
+    // Test 16: Ultra-high performance mode (no detailed stats collection)
+    test_idx++; results.push_back(run_heavy_fanout_test("FixedThreadPool (ultra-perf mode)", ultra_perf_config, test_duration));
 
     // Print results
     std::cout << "========================================" << std::endl;
