@@ -224,7 +224,7 @@ namespace cler {
                     break;
                     
                 case SchedulerType::FixedThreadPool:
-                    run_with_thread_pool(config);
+                    run_with_cache_optimized_scheduler(config);
                     break;
                     
                 case SchedulerType::WorkStealing:
@@ -437,6 +437,65 @@ namespace cler {
         }
         
         
+        // Cache-Optimized Scheduler - Ultra-high throughput with minimal cache misses
+        template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
+        class CacheOptimizedScheduler {
+            using block_index_t = uint8_t;
+            
+            // Compile-time validation
+            static_assert(MaxBlocksParam >= 1, "Must support at least one block");
+            static_assert(MaxWorkers >= 1, "Must support at least one worker");
+            static_assert(MaxBlocksParam <= std::numeric_limits<block_index_t>::max(), 
+                          "MaxBlocksParam exceeds block_index_t capacity");
+            static_assert(MaxWorkers <= 32, "MaxWorkers should be reasonable for embedded systems");
+            
+            // Align to cache line to prevent false sharing
+            struct alignas(64) WorkerQueue {
+                std::array<block_index_t, MaxBlocksParam> blocks;
+                uint32_t count = 0;
+                uint32_t current = 0;
+                
+                bool get_block(size_t& block_idx_out) {
+                    if (current < count) {
+                        block_idx_out = blocks[current++];
+                        return true;
+                    }
+                    return false;
+                }
+                
+                void reset() {
+                    current = 0;
+                }
+            };
+            
+            std::array<WorkerQueue, MaxWorkers> queues;
+            size_t num_blocks = 0;
+            size_t num_workers = 0;
+            
+        public:
+            void initialize(size_t blocks, size_t workers) {
+                num_blocks = blocks;
+                num_workers = workers;
+                
+                // Pre-distribute all blocks round-robin across workers
+                for (size_t i = 0; i < blocks; ++i) {
+                    size_t worker = i % workers;
+                    queues[worker].blocks[queues[worker].count++] = static_cast<block_index_t>(i);
+                }
+            }
+            
+            bool get_next_block(size_t worker_id, size_t& block_idx_out) {
+                // Super fast path - no atomics!
+                if (queues[worker_id].get_block(block_idx_out)) {
+                    return true;
+                }
+                
+                // Reset and go again (continuous round-robin)
+                queues[worker_id].reset();
+                return queues[worker_id].get_block(block_idx_out);
+            }
+        };
+        
         // Work-Stealing Scheduler - Simple and lock-free
         template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
         class WorkStealingScheduler {
@@ -597,6 +656,7 @@ namespace cler {
         };
         
         WorkStealingScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> work_stealing_scheduler;
+        CacheOptimizedScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> cache_optimized_scheduler;
         
         // Enhanced scheduling implementations
         
@@ -604,68 +664,61 @@ namespace cler {
             // Similar to execute_block_at_index but with metrics tracking using C++17 compatible approach
             return execute_block_dispatch_impl(std::make_index_sequence<_N>{}, index, config);
         }
-        void run_with_thread_pool(const FlowGraphConfig& config) {
+        // Cache-optimized FixedThreadPool implementation
+        void run_with_cache_optimized_scheduler(const FlowGraphConfig& config) {
             _stop_flag.store(false, std::memory_order_release);
             
-            // Validate worker count - must be at least 2 for thread pooling
+            // Validate worker count - must be at least 2 for cache-optimized scheduling
             size_t num_workers = config.num_workers;
-            assert(num_workers >= 2 && "FixedThreadPool requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
+            assert(num_workers >= 2 && "CacheOptimizedScheduler requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
             
             // Initialize stats for all blocks
             initialize_block_stats();
             
-            // For fixed thread pool: distribute blocks round-robin across workers
-            // This is a simplified implementation - real thread pool would be more sophisticated
+            // For cache-optimized scheduler: handle different worker/block ratios
             if (num_workers >= _N) {
                 // More workers than blocks - use thread-per-block (current behavior)
                 run_thread_per_block(config);
             } else {
-                // Fewer workers than blocks - use shared worker implementation
-                launch_shared_workers(num_workers, config);
+                // Fewer workers than blocks - use cache-optimized scheduler
+                // Initialize cache-optimized scheduler with round-robin block distribution
+                cache_optimized_scheduler.initialize(_N, num_workers);
+                
+                // Record start time for all blocks
+                auto start_time = std::chrono::high_resolution_clock::now();
+                for (size_t i = 0; i < _N; ++i) {
+                    _block_start_times[i] = start_time;
+                }
+                
+                // Create worker tasks using cache-optimized scheduler
+                _active_task_count = 0;
+                for (size_t worker_id = 0; worker_id < num_workers && worker_id < _N; ++worker_id) {
+                    _tasks[worker_id] = TaskPolicy::create_task([this, worker_id, config]() {
+                        run_cache_optimized_worker(worker_id, config);
+                    });
+                    _active_task_count++;
+                }
             }
         }
         
-        void launch_shared_workers(size_t num_workers, const FlowGraphConfig& config) {
-            // Record start time for all blocks
-            auto start_time = std::chrono::high_resolution_clock::now();
-            
-            // Store start time for stats calculation
-            for (size_t i = 0; i < _N; ++i) {
-                _block_start_times[i] = start_time;
-            }
-            
-            // Create worker tasks that process multiple blocks
-            _active_task_count = 0;
-            for (size_t worker_id = 0; worker_id < num_workers && worker_id < _N; ++worker_id) {
-                _tasks[worker_id] = TaskPolicy::create_task([this, worker_id, num_workers, config]() {
-                    run_worker_thread(worker_id, num_workers, config);
-                });
-                _active_task_count++;
-            }
-        }
-        
-        void run_worker_thread(size_t worker_id, size_t total_workers, const FlowGraphConfig& config) {
-            // Simple round-robin: each worker is responsible for specific blocks
-            // This avoids contention and ensures all blocks are covered
-            
+        void run_cache_optimized_worker(size_t worker_id, const FlowGraphConfig& config) {
             while (!_stop_flag) {
                 bool did_work = false;
+                size_t block_idx;
                 
-                // Each worker only processes blocks assigned to it
-                // Worker 0 gets blocks 0, N, 2N, ...
-                // Worker 1 gets blocks 1, N+1, 2N+1, ...
-                for (size_t i = worker_id; i < _N; i += total_workers) {
+                // Get next block from cache-optimized scheduler (super fast - no atomics!)
+                while (cache_optimized_scheduler.get_next_block(worker_id, block_idx)) {
                     if (_stop_flag) break;
                     
                     // Track timing for dead time calculation
                     auto t_before = std::chrono::high_resolution_clock::now();
-                    bool block_did_work = execute_block_at_index(i, config);
+                    bool block_did_work = execute_block_at_index(block_idx, config);
                     auto t_after = std::chrono::high_resolution_clock::now();
                     
                     // Update dead time if block failed to process
                     if (!block_did_work) {
                         std::chrono::duration<double> dt = t_after - t_before;
-                        _stats[i].total_dead_time_s += dt.count();
+                        _stats[block_idx].total_dead_time_s += dt.count();
                     }
                     
                     did_work = did_work || block_did_work;
@@ -679,8 +732,10 @@ namespace cler {
             
             // Finalize stats when worker exits
             auto end_time = std::chrono::high_resolution_clock::now();
-            // Update stats for blocks assigned to this worker
-            for (size_t i = worker_id; i < _N; i += total_workers) {
+            // Update stats for all blocks this worker processed
+            // Note: Cache-optimized scheduler handles block assignment, so we update all blocks
+            // The scheduler ensures proper round-robin distribution
+            for (size_t i = 0; i < _N; ++i) {
                 std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
                 _stats[i].total_runtime_s = total_runtime.count();
                 _stats[i].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[i].current_adaptive_sleep_us.load() : 0.0;
