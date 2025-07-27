@@ -659,14 +659,6 @@ Cler provides three scheduler types to optimize for different workload character
 - **Cons**: Can suffer from work imbalance
 - **Requires**: `config.num_workers` (minimum 2)
 
-#### AdaptiveLoadBalancing
-- **Best for**: Imbalanced workloads, dynamic data rates, varying block complexity
-- **Characteristics**: Dynamic work distribution based on block performance metrics
-- **Pros**: Automatically balances work across threads, handles heterogeneous blocks
-- **Cons**: Slight overhead from load tracking and rebalancing
-- **Requires**: `config.num_workers` (minimum 2)
-- **Options**: `load_balancing_interval`, `load_balancing_threshold`
-
 ### Execution Statistics and Block Performance
 ```cpp
 // Configure for optimal performance based on workload
@@ -676,20 +668,6 @@ cler::FlowGraphConfig config;
 config.scheduler = cler::SchedulerType::FixedThreadPool;
 config.num_workers = 4;
 // config.adaptive_sleep = true;  // Optional: only if data is sparse
-
-// Example 2: Imbalanced workload (e.g., fanout with different processing paths)
-config.scheduler = cler::SchedulerType::AdaptiveLoadBalancing;
-config.num_workers = 4;
-config.load_balancing = true;
-config.load_balancing_interval = 500;   // Check balance every 500 calls
-config.load_balancing_threshold = 0.15; // Rebalance at 15% imbalance
-
-// Example 3: Sparse data (e.g., intermittent sensor readings)
-config.scheduler = cler::SchedulerType::ThreadPerBlock;
-config.adaptive_sleep = true;  // Appropriate for sparse data
-config.adaptive_sleep_multiplier = 2.0;    // Aggressive backoff
-config.adaptive_sleep_max_us = 10000.0;    // Up to 10ms sleep
-config.adaptive_sleep_fail_threshold = 5;  // Sleep after 5 failures
 
 flowgraph.run(config);
 
