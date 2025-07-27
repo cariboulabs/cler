@@ -874,9 +874,28 @@ namespace cler {
         
         void run_load_balanced_worker(size_t worker_id, const FlowGraphConfig& config) {
             size_t iteration_count = 0;
+            static constexpr size_t STARVATION_CHECK_INTERVAL = 100;
             
             while (!_stop_flag) {
                 bool did_work = false;
+                
+                // Periodic starvation prevention: ensure all blocks get visited
+                if (iteration_count % STARVATION_CHECK_INTERVAL == 0 && worker_id == 0) {
+                    // Worker 0 does a full sweep to prevent any block starvation
+                    for (size_t block_idx = 0; block_idx < _N; ++block_idx) {
+                        if (_stop_flag) break;
+                        
+                        auto start_time = std::chrono::high_resolution_clock::now();
+                        bool block_did_work = execute_block_at_index_with_metrics(block_idx, config);
+                        
+                        if (block_did_work) {
+                            auto end_time = std::chrono::high_resolution_clock::now();
+                            auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+                            load_balancer.update_block_metrics(block_idx, duration.count());
+                            did_work = true;
+                        }
+                    }
+                }
                 
                 // Get current block assignments for this worker
                 std::array<size_t, MaxBlocks> assignments;  // Max MaxBlocks blocks per worker
@@ -993,16 +1012,19 @@ namespace cler {
         }
         
         void run_worker_thread(size_t worker_id, size_t total_workers, const FlowGraphConfig& config) {
-            // Each worker processes blocks using sliding round-robin shuffle for fairness
+            // Each worker must visit ALL blocks to prevent starvation in dataflow graphs
+            size_t iteration = 0;
+            
             while (!_stop_flag) {
                 bool did_work = false;
                 
-                // Sliding round-robin: rotate starting position each iteration to prevent starvation
-                size_t start = (_worker_iterations[worker_id].fetch_add(1)) % total_workers;
+                // Each worker processes ALL blocks but starts at different offsets
+                // This ensures every block is visited by every worker periodically
+                size_t start_offset = (iteration++ * total_workers + worker_id) % _N;
                 
-                // Process all blocks assigned to this worker with rotating start
+                // Process ALL blocks, starting from our offset
                 for (size_t i = 0; i < _N; ++i) {
-                    size_t block_idx = (start + i * total_workers + worker_id) % _N;
+                    size_t block_idx = (start_offset + i) % _N;
                     if (_stop_flag) break;
                     
                     // Track timing for dead time calculation
@@ -1119,11 +1141,42 @@ namespace cler {
         void run_work_stealing_worker(size_t worker_id, const FlowGraphConfig& config) {
             size_t consecutive_steal_failures = 0;
             static constexpr size_t MAX_CONSECUTIVE_STEAL_FAILURES = 10;
+            size_t round_robin_counter = 0;
+            static constexpr size_t ROUND_ROBIN_INTERVAL = 100;  // Force RR every N attempts
             
             while (!_stop_flag) {
                 size_t block_idx;
+                bool got_work = false;
                 
-                // Try to get work
+                // Periodic round-robin to prevent starvation
+                if (++round_robin_counter >= ROUND_ROBIN_INTERVAL) {
+                    round_robin_counter = 0;
+                    // Each worker checks specific blocks in round-robin fashion
+                    for (size_t i = worker_id; i < _N; i += config.num_workers) {
+                        if (_stop_flag) break;
+                        
+                        // Force execution of this block to prevent starvation
+                        auto start_time = std::chrono::high_resolution_clock::now();
+                        bool block_did_work = execute_block_at_index(i, config);
+                        auto end_time = std::chrono::high_resolution_clock::now();
+                        
+                        if (!block_did_work) {
+                            std::chrono::duration<double> dt = end_time - start_time;
+                            _stats[i].total_dead_time_s += dt.count();
+                        }
+                        
+                        if (block_did_work) {
+                            got_work = true;
+                        }
+                    }
+                    
+                    if (got_work) {
+                        consecutive_steal_failures = 0;
+                        continue;
+                    }
+                }
+                
+                // Normal work-stealing path
                 if (work_stealing_scheduler.get_next_block(worker_id, block_idx)) {
                     consecutive_steal_failures = 0;  // Reset failure counter
                     
