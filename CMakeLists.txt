@@ -27,28 +27,24 @@ option(CLER_BUILD_PERFORMANCE "Build CLER performance tests" OFF)
 option(CLER_BUILD_TESTS "Build CLER unit tests" OFF)
 
 # Runtime configuration options
-set(CLER_DEFAULT_MAX_WORKERS "8" CACHE STRING "Maximum number of worker threads for thread pools (embedded=8, desktop=16, server=32+)")
+set(CLER_DEFAULT_MAX_WORKERS "16" CACHE STRING "Maximum number of worker threads for thread pools (embedded=8, desktop=16, server=32+)")
 add_definitions(-DCLER_DEFAULT_MAX_WORKERS=${CLER_DEFAULT_MAX_WORKERS}) #not attaching to a library to allow includers
 
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type")
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
 endif()
+
+# For Release, force -O3
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  add_compile_options(-O3)
+elseif (CMAKE_BUILD_TYPE STREQUAL "Debug")
+  add_compile_options(-g)
+endif()
+message(STATUS "CLER: CMAKE_BUILD_TYPE is '${CMAKE_BUILD_TYPE}'")
 
 #Its more idomatic to link against cler::cler, 
 #but if provide this so that people can just include cler.hpp directly
 set(CLER_INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include")
-
-# For Release, force -O3
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-  message(STATUS "CLER sources: Configuring Release build with -O3")
-  add_compile_options(-O3)
-endif()
-
-# For Debug, force debug symbols
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  message(STATUS "CLER sources: Configuring Debug build with -g")
-  add_compile_options(-g)
-endif()
 
 add_library(cler INTERFACE)
 add_library(cler::cler ALIAS cler)

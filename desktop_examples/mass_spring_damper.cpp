@@ -142,14 +142,12 @@ struct PlantBlock : public cler::BlockBase {
     void set_initial_window(float x, float y, float w, float h) {
         _initial_window_position = ImVec2(x, y);
         _initial_window_size = ImVec2(w, h);
-        _has_initial_window_position = true;
     }
 
     private:
         float _x = 0.0;
         float _v = 0.0;
-
-        bool _has_initial_window_position = false;
+        
         ImVec2 _initial_window_position {0.0f, 0.0f};
         ImVec2 _initial_window_size {600.0f, 300.0f};
 };
@@ -246,7 +244,6 @@ struct ControllerBlock : public cler::BlockBase {
     void set_initial_window(float x, float y, float w, float h) {
         _initial_window_position = ImVec2(x, y);
         _initial_window_size = ImVec2(w, h);
-        _has_initial_window_position = true;
     }
 
 private:
@@ -260,7 +257,6 @@ private:
     std::atomic<float> _kd {1.0f};
     std::atomic<bool>  _feed_forward {false};
 
-    bool _has_initial_window_position = false;
     ImVec2 _initial_window_position {0.0f, 0.0f};
     ImVec2 _initial_window_size {600.0f, 300.0f};
 };
