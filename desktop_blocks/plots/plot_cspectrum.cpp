@@ -210,5 +210,4 @@ void PlotCSpectrumBlock::render() {
 void PlotCSpectrumBlock::set_initial_window(float x, float y, float w, float h) {
     _initial_window_position = ImVec2(x, y);
     _initial_window_size = ImVec2(w, h);
-    _has_initial_window_position = true;
 }

@@ -40,7 +40,6 @@ private:
 
     std::atomic<bool> _gui_pause = false;
 
-    bool _has_initial_window_position = false;
     ImVec2 _initial_window_position {0.0f, 0.0f};
     ImVec2 _initial_window_size {600.0f, 300.0f};
 };
