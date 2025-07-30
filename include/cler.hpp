@@ -71,7 +71,9 @@ namespace cler {
         virtual size_t peek_write(T*& ptr1, size_t& size1, T*& ptr2, size_t& size2) = 0;
         virtual size_t peek_read(const T*& ptr1, size_t& size1, const T*& ptr2, size_t& size2) = 0;
         virtual void commit_read(size_t count) = 0;
+        virtual void commit_write(size_t count) = 0;
         virtual std::pair<const T*, std::size_t> read_span() = 0;
+        virtual std::pair<T*, std::size_t> write_span() = 0;
     };
 
     template <typename T, size_t N = 0>
@@ -100,6 +102,10 @@ namespace cler {
         }
         void commit_read(size_t count) override { _queue.commit_read(count); }
         std::pair<const T*, std::size_t> read_span() override { return _queue.read_span(); }
+        void commit_write(size_t count) override { _queue.commit_write(count); }
+
+        std::pair<const T*, std::size_t> read_span() override { return _queue.read_span(); }
+        std::pair<T*, std::size_t> write_span() override { return _queue.write_span(); }
     };
 
     struct BlockBase {
