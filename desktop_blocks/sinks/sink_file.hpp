@@ -44,6 +44,17 @@ struct SinkFileBlock : public cler::BlockBase {
             return cler::Error::TERM_IOError;
         }
 
+        // Try zero-copy path first (for doubly mapped buffers)
+        auto [span_ptr, span_size] = in.read_span();
+        if (span_ptr && span_size > 0) {
+            // Single write, no copy - optimal path!
+            size_t written = std::fwrite(span_ptr, sizeof(T), span_size, _fp);
+            if (written != span_size) return cler::Error::TERM_IOError;
+            in.commit_read(written);
+            return cler::Empty{};
+        }
+
+        // Fall back to standard peek_read (existing code)
         const T* ptr1 = nullptr;
         const T* ptr2 = nullptr;
         size_t sz1 = 0, sz2 = 0;
@@ -57,15 +68,14 @@ struct SinkFileBlock : public cler::BlockBase {
         if (sz1 > 0 && ptr1) {
             size_t written = std::fwrite(ptr1, sizeof(T), sz1, _fp);
             if (written != sz1) return cler::Error::TERM_IOError;
-            in.commit_read(sz1);
         }
 
         if (sz2 > 0 && ptr2) {
             size_t written = std::fwrite(ptr2, sizeof(T), sz2, _fp);
             if (written != sz2) return cler::Error::TERM_IOError;
-            in.commit_read(sz2);
         }
 
+        in.commit_read(sz1 + sz2);
         return cler::Empty{};
     }
 

@@ -24,6 +24,13 @@
 #include <cstring>    // for std::memcpy
 #include "cler_platform.hpp"
 
+// Include platform-specific virtual memory support
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
+    #include "virtual_memory/cler_vmem_posix.hpp"
+#else
+    #include "virtual_memory/cler_vmem_none.hpp"
+#endif
+
 namespace dro {
 
 namespace details {
@@ -53,20 +60,25 @@ using SPSC_NoThrow_Type = std::enable_if_t<
 template <typename T, std::size_t N>
 using MAX_STACK_SIZE = std::enable_if_t<(N <= (MAX_BYTES_ON_STACK / sizeof(T)))>;
 
-// Memory Allocated on the Heap (Default Option)
+// Enhanced heap buffer that tries doubly mapped first, falls back to standard
 template <typename T, typename Allocator = std::allocator<T>,
           typename = SPSC_Type<T>>
-struct HeapBuffer {
+struct AdaptiveHeapBuffer {
   const std::size_t capacity_;
   T* buffer_;
   [[no_unique_address]] Allocator allocator_;
+  bool is_doubly_mapped_ = false;
 
   static constexpr std::size_t padding = ((cacheLineSize - 1) / sizeof(T)) + 1;
-  static constexpr std::size_t MAX_SIZE_T =
-      std::numeric_limits<std::size_t>::max();
+  static constexpr std::size_t MAX_SIZE_T = std::numeric_limits<std::size_t>::max();
+  static constexpr std::size_t DOUBLY_MAPPED_MIN_SIZE = 32768; // 32KB threshold
 
-  explicit HeapBuffer(const std::size_t capacity,
-                      const Allocator &allocator = Allocator())
+private:
+  cler::vmem::DoublyMappedAllocation vmem_allocation_;
+  
+public:
+  explicit AdaptiveHeapBuffer(const std::size_t capacity,
+                             const Allocator &allocator = Allocator())
       // +1 prevents live lock e.g. reader and writer share 1 slot for size 1
       : capacity_(capacity + 1), allocator_(allocator) {
     if (capacity < 1) {
@@ -79,6 +91,36 @@ struct HeapBuffer {
           "Capacity with padding exceeds std::size_t. Reduce size of queue.");
     }
     
+    const std::size_t buffer_bytes = capacity_ * sizeof(T);
+    
+    // Try doubly mapped allocation for buffers ≥32KB (typical SDR buffer size)
+    if (cler::platform::supports_doubly_mapped_buffers() && 
+        buffer_bytes >= DOUBLY_MAPPED_MIN_SIZE) {
+      
+      // Calculate total size including padding
+      const std::size_t total_bytes = (capacity_ + (2 * padding)) * sizeof(T);
+      
+      if (vmem_allocation_.create(total_bytes)) {
+        buffer_ = static_cast<T*>(vmem_allocation_.data());
+        if (buffer_) {
+          // Adjust for padding
+          buffer_ += padding;
+          is_doubly_mapped_ = true;
+          
+          // Initialize elements if needed (only in first mapping)
+          if constexpr (!std::is_trivially_constructible_v<T>) {
+            T* init_ptr = static_cast<T*>(vmem_allocation_.data());
+            const std::size_t total_elements = capacity_ + (2 * padding);
+            for (std::size_t i = 0; i < total_elements; ++i) {
+              std::allocator_traits<Allocator>::construct(allocator_, init_ptr + i);
+            }
+          }
+          return; // Success!
+        }
+      }
+    }
+    
+    // Fallback to standard heap allocation
     const std::size_t total_size = capacity_ + (2 * padding);
     buffer_ = std::allocator_traits<Allocator>::allocate(allocator_, total_size);
     
@@ -88,26 +130,45 @@ struct HeapBuffer {
         std::allocator_traits<Allocator>::construct(allocator_, buffer_ + i);
       }
     }
+    
+    // Adjust for padding
+    buffer_ += padding;
   }
 
-  ~HeapBuffer() {
+  ~AdaptiveHeapBuffer() {
     if (buffer_) {
-      const std::size_t total_size = capacity_ + (2 * padding);
-      // Destroy elements if T is not trivially destructible
-      if constexpr (!std::is_trivially_destructible_v<T>) {
-        for (std::size_t i = 0; i < total_size; ++i) {
-          std::allocator_traits<Allocator>::destroy(allocator_, buffer_ + i);
+      if (is_doubly_mapped_) {
+        // Destroy elements in doubly mapped buffer (only in first mapping)
+        if constexpr (!std::is_trivially_destructible_v<T>) {
+          T* destroy_ptr = static_cast<T*>(vmem_allocation_.data());
+          const std::size_t total_elements = capacity_ + (2 * padding);
+          for (std::size_t i = 0; i < total_elements; ++i) {
+            std::allocator_traits<Allocator>::destroy(allocator_, destroy_ptr + i);
+          }
         }
+        // vmem_allocation_ destructor will clean up mmap
+      } else {
+        // Standard heap buffer cleanup
+        // Adjust back to original allocation
+        T* original_buffer = buffer_ - padding;
+        const std::size_t total_size = capacity_ + (2 * padding);
+        
+        // Destroy elements if T is not trivially destructible
+        if constexpr (!std::is_trivially_destructible_v<T>) {
+          for (std::size_t i = 0; i < total_size; ++i) {
+            std::allocator_traits<Allocator>::destroy(allocator_, original_buffer + i);
+          }
+        }
+        std::allocator_traits<Allocator>::deallocate(allocator_, original_buffer, total_size);
       }
-      std::allocator_traits<Allocator>::deallocate(allocator_, buffer_, total_size);
     }
   }
   
   // Non-Copyable and Non-Movable
-  HeapBuffer(const HeapBuffer &lhs) = delete;
-  HeapBuffer &operator=(const HeapBuffer &lhs) = delete;
-  HeapBuffer(HeapBuffer &&lhs) = delete;
-  HeapBuffer &operator=(HeapBuffer &&lhs) = delete;
+  AdaptiveHeapBuffer(const AdaptiveHeapBuffer &lhs) = delete;
+  AdaptiveHeapBuffer &operator=(const AdaptiveHeapBuffer &lhs) = delete;
+  AdaptiveHeapBuffer(AdaptiveHeapBuffer &&lhs) = delete;
+  AdaptiveHeapBuffer &operator=(AdaptiveHeapBuffer &&lhs) = delete;
 };
 
 // Memory Allocated on the Stack
@@ -143,11 +204,11 @@ template <typename T, std::size_t N = 0,
           typename = details::SPSC_Type<T>,
           typename = details::MAX_STACK_SIZE<T, N>>
 class SPSCQueue
-    : public std::conditional_t<N == 0, details::HeapBuffer<T, Allocator>,
+    : public std::conditional_t<N == 0, details::AdaptiveHeapBuffer<T, Allocator>,
                                 details::StackBuffer<T, N>> {
 private:
   using base_type =
-      std::conditional_t<N == 0, details::HeapBuffer<T, Allocator>,
+      std::conditional_t<N == 0, details::AdaptiveHeapBuffer<T, Allocator>,
                          details::StackBuffer<T, N>>;
   static constexpr bool nothrow_v = 
     std::is_nothrow_constructible_v<T> &&
@@ -488,7 +549,36 @@ void commit_read(std::size_t count) noexcept {
   reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
 }
 
-
+// NEW: Zero-copy contiguous read (only available with doubly mapped heap buffers)
+std::pair<const T*, std::size_t> read_span() noexcept {
+  if constexpr (N == 0) {
+    // Only heap buffers can be doubly mapped
+    if (this->is_doubly_mapped_) {
+      const auto capacity = base_type::capacity_;
+      const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
+      auto writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
+      reader_.writeIndexCache_ = writeIndexCache;
+      
+      std::size_t available;
+      if (writeIndexCache >= readIndex) {
+        available = writeIndexCache - readIndex;
+      } else {
+        available = capacity - readIndex + writeIndexCache;
+      }
+      
+      if (available == 0) {
+        return {nullptr, 0};
+      }
+      
+      // With doubly mapped buffer, ALL data is contiguous
+      // Need to add padding offset to match write_value behavior
+      const T* ptr = &base_type::buffer_[readIndex + base_type::padding];
+      return {ptr, available};
+    }
+  }
+  // Stack buffers or non-doubly-mapped heap buffers
+  return {nullptr, 0};
+}
 
 private:
   // Note: The "+ padding" is a constant offset used to prevent false sharing

@@ -78,12 +78,14 @@ endfunction()
 add_spsc_test(spsc_basic_test test_spsc_basic.cpp)
 add_spsc_test(spsc_batch_test test_spsc_batch.cpp)
 add_spsc_test(spsc_bounds_test test_spsc_bounds.cpp)
+add_spsc_test(spsc_doubly_mapped_test test_spsc_doubly_mapped.cpp)
 
 # Optional: Create a combined test runner
 add_executable(spsc_all_tests 
     test_spsc_basic.cpp
     test_spsc_batch.cpp
     test_spsc_bounds.cpp
+    test_spsc_doubly_mapped.cpp
 )
 
 target_compile_options(spsc_all_tests PRIVATE ${SPSC_TEST_COMPILE_OPTIONS})
@@ -109,14 +111,14 @@ message(STATUS "  Tests created: spsc_basic_test, spsc_batch_test, spsc_bounds_t
 # Custom target for running all SPSC queue tests
 add_custom_target(run_spsc_tests
     COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_CURRENT_BINARY_DIR} --output-on-failure -R "spsc_"
-    DEPENDS spsc_basic_test spsc_batch_test spsc_bounds_test
+    DEPENDS spsc_basic_test spsc_batch_test spsc_bounds_test spsc_doubly_mapped_test
     COMMENT "Running all SPSC Queue tests"
 )
 
 # Custom target for verbose test output
 add_custom_target(run_spsc_tests_verbose
     COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_CURRENT_BINARY_DIR} --output-on-failure --verbose -R "spsc_"
-    DEPENDS spsc_basic_test spsc_batch_test spsc_bounds_test
+    DEPENDS spsc_basic_test spsc_batch_test spsc_bounds_test spsc_doubly_mapped_test
     COMMENT "Running all SPSC Queue tests with verbose output"
 )
 
@@ -129,7 +131,7 @@ add_custom_target(spsc_performance_test
     COMMAND $<TARGET_FILE:spsc_batch_test> --gtest_filter="*NoSampleLoss*"
     COMMAND echo "Bounds test:"
     COMMAND $<TARGET_FILE:spsc_bounds_test> --gtest_filter="*ConcurrentBoundsSafety*"
-    DEPENDS spsc_basic_test spsc_batch_test spsc_bounds_test
+    DEPENDS spsc_basic_test spsc_batch_test spsc_bounds_test spsc_doubly_mapped_test
     COMMENT "Running SPSC Queue performance-focused tests"
 )
 
