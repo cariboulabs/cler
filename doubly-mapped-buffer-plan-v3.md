@@ -512,3 +512,37 @@ size_t readN(T* dst, size_t count) noexcept;
 - The 32KB threshold can be tuned based on testing
 - Consider adding huge page support in V4 for ≥1MB buffers
 - File structure allows future platform additions without breaking changes
+
+## 14. Implementation Notes (Post-Completion)
+
+### Critical Architecture Decisions Made:
+1. **Padding Strategy**: Handle at allocation time, not access
+   - Doubly mapped: No padding (page-aligned)
+   - Standard heap: Allocate+padding, adjust buffer_ pointer  
+   - Stack: Padding via get_buffer_ptr() at access
+
+2. **Buffer Management**: 
+   - raw_allocation_ for cleanup, buffer_ for usage
+   - get_buffer_ptr() centralizes access logic
+
+3. **Method Cleanup**: Removed unused force_* and commit_write methods
+
+### Platform Error Handling:
+- cler_vmem_none.hpp throws exceptions (not silent failure)
+- Clear user guidance to supported platforms
+
+### Performance Confirmation:
+- File I/O: 1 write call (vs multiple small writes)
+- All tests passing, backward compatible
+- CaribouLite integration confirmed working
+
+## 15. Success Criteria ✅ ACHIEVED:
+- [✅] Zero-copy file I/O (1 write vs multiple)
+- [✅] Platform detection working  
+- [✅] Transparent fallback functional
+- [✅] All existing tests pass
+- [✅] Source blocks (peek_write) work
+- [✅] 32KB threshold appropriate for SDR
+- [✅] Exception-based error handling for unsupported platforms
+- [✅] Clean method interface (removed unused methods)
+- [✅] Centralized buffer access logic
