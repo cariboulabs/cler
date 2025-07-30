@@ -78,9 +78,21 @@ public:
             cleanup();
         }
         
-        // Align size to page boundary
+        // Get page sizes
         const std::size_t page_size = cler::platform::get_page_size();
-        const std::size_t aligned_size = ((size + page_size - 1) / page_size) * page_size;
+        std::size_t aligned_size = ((size + page_size - 1) / page_size) * page_size;
+        
+        // Determine if we should try huge pages
+        bool use_huge_pages = false;
+        
+        #ifdef MAP_HUGETLB
+        const std::size_t huge_page_size = get_huge_page_size();
+        if (huge_page_size > 0 && aligned_size >= huge_page_size) {
+            // Align to huge page boundary
+            aligned_size = ((size + huge_page_size - 1) / huge_page_size) * huge_page_size;
+            use_huge_pages = true;
+        }
+        #endif
         
         // Create shared memory file descriptor
         shm_fd_ = create_shared_memory();
@@ -95,10 +107,38 @@ public:
             return false;
         }
         
+        // Prepare mmap flags
+        int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS;
+        
+        #ifdef MAP_HUGETLB
+        if (use_huge_pages) {
+            mmap_flags |= MAP_HUGETLB;
+            
+            // Explicitly specify huge page size if available
+            #ifdef MAP_HUGE_2MB
+            if (huge_page_size == 2 * 1024 * 1024) {
+                mmap_flags |= MAP_HUGE_2MB;
+            }
+            #endif
+            #ifdef MAP_HUGE_1GB
+            if (huge_page_size == 1024 * 1024 * 1024) {
+                mmap_flags |= MAP_HUGE_1GB;
+            }
+            #endif
+        }
+        #endif
+        
         // Reserve address space for both mappings
         void* addr_space = mmap(nullptr, aligned_size * 2, 
-                               PROT_NONE, 
-                               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                               PROT_NONE, mmap_flags, -1, 0);
+                               
+        // If huge pages failed, try without
+        if (addr_space == MAP_FAILED && use_huge_pages) {
+            mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS;
+            addr_space = mmap(nullptr, aligned_size * 2, 
+                             PROT_NONE, mmap_flags, -1, 0);
+        }
+        
         if (addr_space == MAP_FAILED) {
             close(shm_fd_);
             shm_fd_ = -1;
@@ -200,6 +240,31 @@ private:
             }
             return fd;
         #endif
+    }
+    
+    static std::size_t get_huge_page_size() {
+        #ifdef __linux__
+        // First try sysconf if available
+        #ifdef _SC_LARGE_PAGESIZE
+        long size = sysconf(_SC_LARGE_PAGESIZE);
+        if (size > 0) return static_cast<std::size_t>(size);
+        #endif
+        
+        // Fallback to parsing /proc/meminfo
+        FILE* f = fopen("/proc/meminfo", "r");
+        if (f) {
+            char line[256];
+            while (fgets(line, sizeof(line), f)) {
+                std::size_t size_kb;
+                if (sscanf(line, "Hugepagesize: %zu kB", &size_kb) == 1) {
+                    fclose(f);
+                    return size_kb * 1024;
+                }
+            }
+            fclose(f);
+        }
+        #endif
+        return 0;  // No huge pages available
     }
 };
 

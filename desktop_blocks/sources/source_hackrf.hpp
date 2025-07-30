@@ -1,6 +1,15 @@
 #pragma once
 #include "cler.hpp"
-#include <libhackrf/hackrf.h>
+
+#ifdef __has_include
+    #if __has_include(<libhackrf/hackrf.h>)
+        #include <libhackrf/hackrf.h>
+    #elif __has_include(<hackrf.h>)
+        #include <hackrf.h>
+    #else
+        #error "HackRF header not found. Please install libhackrf or hackrf-dev package."
+    #endif
+#endif
 
 struct SourceHackRFBlock : public cler::BlockBase {
     SourceHackRFBlock(const char* name,
