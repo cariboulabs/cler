@@ -482,6 +482,8 @@ void benchmark_sdr_file_write() {
 ```cpp
 // NEW: Zero-copy read (returns {nullptr, 0} if not available)
 std::pair<const T*, size_t> read_span() noexcept;
+std::pair<T*, size_t> write_span() noexcept;
+
 
 // EXISTING: Unchanged methods
 size_t peek_read(const T*& ptr1, size_t& size1, 

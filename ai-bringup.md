@@ -364,6 +364,21 @@ struct GainBlock : public cler::BlockBase {
 
 #### Buffer Access Patterns (Performance Order)
 ```cpp
+// 0. Zero-copy span access (NEW - BEST for file/network I/O when available)
+auto [read_ptr, read_size] = in.read_span();
+if (read_ptr) {
+    // Direct access to contiguous data (no wrap-around with doubly mapped)
+    fwrite(read_ptr, sizeof(T), read_size, fp);
+    in.commit_read(read_size);
+}
+
+auto [write_ptr, write_size] = out->write_span();
+if (write_ptr) {
+    // Direct write to buffer (no wrap-around with doubly mapped)
+    size_t n = fread(write_ptr, sizeof(T), write_size, fp);
+    out->commit_write(n);
+}
+
 // 1. Read/Write (bulk transfer - PREFERRED)
 size_t written = out->writeN(buffer, count);
 size_t read = in.readN(buffer, count);
@@ -387,6 +402,11 @@ float sample;
 in.pop(sample);
 out->push(processed_sample);
 ```
+
+### Channel Implementation Notes
+- **Doubly Mapped Buffers**: On Linux/macOS/FreeBSD, heap buffers ≥32KB automatically use doubly mapped memory for zero-copy wraparound access
+- **read_span()/write_span()**: Return {nullptr, 0} on unsupported platforms or stack buffers
+- **Transparent Fallback**: Blocks should try span methods first, then fall back to peek/commit
 
 ### Error Handling Pattern
 ```cpp

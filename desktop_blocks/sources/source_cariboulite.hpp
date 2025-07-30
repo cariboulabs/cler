@@ -79,47 +79,20 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
         }
 
         cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
-            size_t transferable = std::min({out->space(), _max_samples_to_read});
-            if (transferable == 0) {
-                return cler::Error::NotEnoughSpace;
-            }
-
-            size_t sz1, sz2;
-            T* ptr1, *ptr2;
-            out->peek_write(ptr1, sz1, ptr2, sz2);
-
-            if (sz1 > transferable) {
-                sz1 = transferable;
-            }
-            if (sz2 > transferable - sz1) {
-                sz2 = transferable - sz1;
-            }
-
-            size_t total_written = 0;
-            if (sz1 > 0 && ptr1) {
-                int ret = _radio->ReadSamples(ptr1, sz1);
+            auto [ptr, space] = out->write_span();
+            if (ptr && space > 0) {
+                // Fast path: single ReadSamples call
+                size_t to_read = std::min(space, _max_samples_to_read);
+                int ret = _radio->ReadSamples(ptr, to_read);
+                if (ret > 0) {
+                    out->commit_write(ret);
+                }
                 if (ret < 0) {
-                    return cler::Error::ProcedureError; 
-                }    
-                total_written += static_cast<size_t>(ret); 
-            };
-
-            //we have space, but cariboulabs doesnt have samples to give
-            if (static_cast<size_t>(total_written) < sz1) {
-                out->commit_write(total_written);
+                    return cler::Error::ProcedureError;
+                }
                 return cler::Empty{};
-            };
-
-            if (sz2 > 0 && ptr2) {
-                int ret = _radio->ReadSamples(ptr2, sz2);
-                if (ret < 0) {
-                    return cler::Error::ProcedureError; 
-                }    
-                 total_written += static_cast<size_t>(ret); 
-            };
-
-            out->commit_write(total_written);
-            return cler::Empty{};
+            }
+            return cler::Error::NotEnoughSpace;
         }
 
         private:    

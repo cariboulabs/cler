@@ -101,7 +101,6 @@ namespace cler {
             return _queue.peek_read(ptr1, size1, ptr2, size2);
         }
         void commit_read(size_t count) override { _queue.commit_read(count); }
-        std::pair<const T*, std::size_t> read_span() override { return _queue.read_span(); }
         void commit_write(size_t count) override { _queue.commit_write(count); }
 
         std::pair<const T*, std::size_t> read_span() override { return _queue.read_span(); }

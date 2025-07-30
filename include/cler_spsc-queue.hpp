@@ -81,7 +81,7 @@ public:
   explicit AdaptiveHeapBuffer(const std::size_t capacity,
                              const Allocator &allocator = Allocator())
       // +1 prevents live lock e.g. reader and writer share 1 slot for size 1
-      : capacity_(capacity + 1), allocator_(allocator), buffer_(nullptr) {
+      : capacity_(capacity + 1), buffer_(nullptr), allocator_(allocator) {
     if (capacity < 1) {
       throw std::logic_error("Capacity must be a positive number; Heap "
                              "allocations require capacity argument");
