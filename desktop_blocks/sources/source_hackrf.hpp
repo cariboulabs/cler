@@ -1,6 +1,6 @@
 #pragma once
 #include "cler.hpp"
-#include <hackrf.h>
+#include <libhackrf/hackrf.h>
 
 struct SourceHackRFBlock : public cler::BlockBase {
     SourceHackRFBlock(const char* name,

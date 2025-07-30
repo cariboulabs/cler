@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
-#include <fstream>
+#include <cstdio>
 #include <stdexcept>
 
 template <typename T>
@@ -18,54 +18,59 @@ struct SinkFileBlock : public cler::BlockBase {
             throw std::invalid_argument("Filename must not be empty.");
         }
 
-        _filename = filename;
-
-        _file.open(_filename, std::ios::binary | std::ios::out | std::ios::trunc);
-        if (!_file.is_open()) {
+        _fp = std::fopen(_filename, "wb");
+        if (!_fp) {
             throw std::runtime_error("Failed to open file for writing: " + std::string(filename));
         }
 
-        _buffer_size = buffer_size;
+        // Optional: tune buffer to a larger size (e.g., 64 KB)
+        _internal_buffer = new char[buffer_size * sizeof(T)];
+        if (std::setvbuf(_fp, _internal_buffer, _IOFBF, buffer_size * sizeof(T)) != 0) {
+            throw std::runtime_error("Failed to setvbuf() on file stream.");
+        }
     }
 
     ~SinkFileBlock() {
-        if (_file.is_open()) {
-            _file.close();
+        if (_fp) {
+            std::fflush(_fp);
+            std::fclose(_fp);
         }
+        delete[] _internal_buffer;
     }
 
     cler::Result<cler::Empty, cler::Error> procedure()
     {
-        if (!_file.is_open()) {
+        if (!_fp) {
             return cler::Error::TERM_IOError;
         }
 
-        const T* ptr1, *ptr2;
-        size_t sz1, sz2;
+        const T* ptr1 = nullptr;
+        const T* ptr2 = nullptr;
+        size_t sz1 = 0, sz2 = 0;
         size_t available_samples = in.peek_read(ptr1, sz1, ptr2, sz2);
 
         if (available_samples == 0) {
-            _file.flush();
+            std::fflush(_fp);  // Only do this occasionally if needed
             return cler::Error::NotEnoughSamples;
         }
+
         if (sz1 > 0 && ptr1) {
-            _file.write(reinterpret_cast<const char*>(ptr1), sz1 * sizeof(T));
+            size_t written = std::fwrite(ptr1, sizeof(T), sz1, _fp);
+            if (written != sz1) return cler::Error::TERM_IOError;
             in.commit_read(sz1);
         }
+
         if (sz2 > 0 && ptr2) {
-            _file.write(reinterpret_cast<const char*>(ptr2), sz2 * sizeof(T));
+            size_t written = std::fwrite(ptr2, sizeof(T), sz2, _fp);
+            if (written != sz2) return cler::Error::TERM_IOError;
             in.commit_read(sz2);
         }
 
-
-        if (!_file) {
-            return cler::Error::TERM_IOError;
-        }
         return cler::Empty{};
     }
 
 private:
     const char* _filename;
-    std::ofstream _file;
-    size_t _buffer_size;
+    FILE* _fp = nullptr;
+    char* _internal_buffer = nullptr;
 };

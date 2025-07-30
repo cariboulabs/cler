@@ -22,7 +22,7 @@ inline bool detect_cariboulite_board()
 template <typename T>
 struct SourceCaribouliteBlock : public cler::BlockBase {
     static_assert(std::is_same_v<T, std::complex<short>> || std::is_same_v<T, std::complex<float>>,
-            "SourceCWBlock only supports std::complex<short> or std::complex<float>");
+            "SourceCaribouliteBlock only supports std::complex<short> or std::complex<float>");
 
     SourceCaribouliteBlock(const char* name,
         CaribouLiteRadio::RadioType radio_type,
@@ -31,6 +31,8 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
         bool agc,
         float rx_gain_db = 0.0f
         ) : cler::BlockBase(name) {
+            bool freq_valid = false;
+            
             if (!detect_cariboulite_board()) {
                 throw std::runtime_error("CaribouLite board not detected!");
             }
@@ -42,15 +44,13 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             }
 
             std::vector<CaribouLiteFreqRange> ranges = _radio->GetFrequencyRange();
-            bool valid_freq = false;
             for (const auto& range : ranges) {
-                if (range.fmin() <= freq_hz && range.fmax() >= freq_hz) {
-                    valid_freq = true;
-                    break;
+                if (freq_hz > range.fmin() && freq_hz < range.fmax()) {
+                    freq_valid = true;
                 }
             }
-            if (!valid_freq) {
-                throw std::invalid_argument("Sample rate is out of range for the selected radio type.");
+            if (!freq_valid) {
+                throw std::invalid_argument("Freqeuncy is out of range for the selected radio type.");
             }
 
             if (samp_rate_hz > _radio->GetRxSampleRateMax() || samp_rate_hz < _radio->GetRxSampleRateMin()) {
@@ -101,7 +101,7 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
                 if (ret < 0) {
                     return cler::Error::ProcedureError; 
                 }    
-                 total_written += static_cast<size_t>(ret); 
+                total_written += static_cast<size_t>(ret); 
             };
 
             //we have space, but cariboulabs doesnt have samples to give
