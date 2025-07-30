@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Andrew Drogalis
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the “Software”), to deal
+// of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
@@ -21,7 +21,7 @@
 #include <stdexcept>   // for std::logic_error
 #include <type_traits> // for std::is_default_constructible
 #include <utility>     // for forward
-#include <cstring>    // for std::memcpy
+#include <cstring>     // for std::memcpy
 #include "cler_platform.hpp"
 
 // Include platform-specific virtual memory support
@@ -75,12 +75,13 @@ struct AdaptiveHeapBuffer {
 
 private:
   cler::vmem::DoublyMappedAllocation vmem_allocation_;
+  T* raw_allocation_ = nullptr;  // For standard allocation cleanup
   
 public:
   explicit AdaptiveHeapBuffer(const std::size_t capacity,
                              const Allocator &allocator = Allocator())
       // +1 prevents live lock e.g. reader and writer share 1 slot for size 1
-      : capacity_(capacity + 1), allocator_(allocator) {
+      : capacity_(capacity + 1), allocator_(allocator), buffer_(nullptr) {
     if (capacity < 1) {
       throw std::logic_error("Capacity must be a positive number; Heap "
                              "allocations require capacity argument");
@@ -97,22 +98,17 @@ public:
     if (cler::platform::supports_doubly_mapped_buffers() && 
         buffer_bytes >= DOUBLY_MAPPED_MIN_SIZE) {
       
-      // Calculate total size including padding
-      const std::size_t total_bytes = (capacity_ + (2 * padding)) * sizeof(T);
-      
-      if (vmem_allocation_.create(total_bytes)) {
+      // For doubly mapped buffers, we don't need cache-line padding
+      // Just allocate exactly what we need
+      if (vmem_allocation_.create(buffer_bytes)) {
         buffer_ = static_cast<T*>(vmem_allocation_.data());
         if (buffer_) {
-          // Adjust for padding
-          buffer_ += padding;
           is_doubly_mapped_ = true;
           
-          // Initialize elements if needed (only in first mapping)
+          // Initialize elements if needed
           if constexpr (!std::is_trivially_constructible_v<T>) {
-            T* init_ptr = static_cast<T*>(vmem_allocation_.data());
-            const std::size_t total_elements = capacity_ + (2 * padding);
-            for (std::size_t i = 0; i < total_elements; ++i) {
-              std::allocator_traits<Allocator>::construct(allocator_, init_ptr + i);
+            for (std::size_t i = 0; i < capacity_; ++i) {
+              std::allocator_traits<Allocator>::construct(allocator_, buffer_ + i);
             }
           }
           return; // Success!
@@ -120,47 +116,41 @@ public:
       }
     }
     
-    // Fallback to standard heap allocation
+    // Fallback to standard heap allocation WITH padding
     const std::size_t total_size = capacity_ + (2 * padding);
-    buffer_ = std::allocator_traits<Allocator>::allocate(allocator_, total_size);
+    raw_allocation_ = std::allocator_traits<Allocator>::allocate(allocator_, total_size);
     
-    // Initialize elements if T is not trivially constructible
+    // Initialize all elements including padding
     if constexpr (!std::is_trivially_constructible_v<T>) {
       for (std::size_t i = 0; i < total_size; ++i) {
-        std::allocator_traits<Allocator>::construct(allocator_, buffer_ + i);
+        std::allocator_traits<Allocator>::construct(allocator_, raw_allocation_ + i);
       }
     }
     
-    // Adjust for padding
-    buffer_ += padding;
+    // Adjust buffer to skip initial padding
+    buffer_ = raw_allocation_ + padding;
   }
 
   ~AdaptiveHeapBuffer() {
-    if (buffer_) {
-      if (is_doubly_mapped_) {
-        // Destroy elements in doubly mapped buffer (only in first mapping)
-        if constexpr (!std::is_trivially_destructible_v<T>) {
-          T* destroy_ptr = static_cast<T*>(vmem_allocation_.data());
-          const std::size_t total_elements = capacity_ + (2 * padding);
-          for (std::size_t i = 0; i < total_elements; ++i) {
-            std::allocator_traits<Allocator>::destroy(allocator_, destroy_ptr + i);
-          }
+    if (is_doubly_mapped_) {
+      // Destroy elements in doubly mapped buffer
+      if constexpr (!std::is_trivially_destructible_v<T>) {
+        for (std::size_t i = 0; i < capacity_; ++i) {
+          std::allocator_traits<Allocator>::destroy(allocator_, buffer_ + i);
         }
-        // vmem_allocation_ destructor will clean up mmap
-      } else {
-        // Standard heap buffer cleanup
-        // Adjust back to original allocation
-        T* original_buffer = buffer_ - padding;
-        const std::size_t total_size = capacity_ + (2 * padding);
-        
-        // Destroy elements if T is not trivially destructible
-        if constexpr (!std::is_trivially_destructible_v<T>) {
-          for (std::size_t i = 0; i < total_size; ++i) {
-            std::allocator_traits<Allocator>::destroy(allocator_, original_buffer + i);
-          }
-        }
-        std::allocator_traits<Allocator>::deallocate(allocator_, original_buffer, total_size);
       }
+      // vmem_allocation_ destructor will clean up mmap
+    } else if (raw_allocation_) {
+      // Standard heap buffer cleanup
+      const std::size_t total_size = capacity_ + (2 * padding);
+      
+      // Destroy all elements including padding
+      if constexpr (!std::is_trivially_destructible_v<T>) {
+        for (std::size_t i = 0; i < total_size; ++i) {
+          std::allocator_traits<Allocator>::destroy(allocator_, raw_allocation_ + i);
+        }
+      }
+      std::allocator_traits<Allocator>::deallocate(allocator_, raw_allocation_, total_size);
     }
   }
   
@@ -180,6 +170,7 @@ struct StackBuffer {
   static constexpr std::size_t padding = ((cacheLineSize - 1) / sizeof(T)) + 1;
   // (2 * padding) is for preventing cache contention between adjacent memory
   std::array<T, capacity_ + (2 * padding)> buffer_;
+  bool is_doubly_mapped_ = false;  // Always false for stack buffers
 
   explicit StackBuffer(const std::size_t capacity,
                        [[maybe_unused]] const Allocator &allocator = Allocator()) {
@@ -218,16 +209,35 @@ private:
   struct alignas(details::cacheLineSize) WriterCacheLine {
     std::atomic<std::size_t> writeIndex_{0};
     std::size_t readIndexCache_{0};
-    // Reduces cache contention on very small queues
-    const size_t paddingCache_ = base_type::padding;
   } writer_;
 
   struct alignas(details::cacheLineSize) ReaderCacheLine {
     std::atomic<std::size_t> readIndex_{0};
     std::size_t writeIndexCache_{0};
-    // Reduces cache contention on very small queues
+    // Cache capacity for performance
     std::size_t capacityCache_{};
   } reader_;
+
+  // Helper to get buffer pointer with correct offset
+  T* get_buffer_ptr() noexcept {
+    if constexpr (N == 0) {
+      // Heap buffer - padding already handled in buffer pointer
+      return base_type::buffer_;
+    } else {
+      // Stack buffer - need to add padding offset
+      return base_type::buffer_.data() + base_type::padding;
+    }
+  }
+
+  const T* get_buffer_ptr() const noexcept {
+    if constexpr (N == 0) {
+      // Heap buffer - padding already handled in buffer pointer
+      return base_type::buffer_;
+    } else {
+      // Stack buffer - need to add padding offset
+      return base_type::buffer_.data() + base_type::padding;
+    }
+  }
 
 public:
   explicit SPSCQueue(const std::size_t capacity = 0,
@@ -243,10 +253,23 @@ public:
   SPSCQueue(SPSCQueue &&lhs) = delete;
   SPSCQueue &operator=(SPSCQueue &&lhs) = delete;
 
-  template <typename... Args,
-            typename = std::enable_if_t<std::is_constructible_v<T, Args &&...>>>
-  void
-  emplace(Args &&...args) noexcept(std::is_nothrow_constructible_v<T, Args &&...> &&
+  // Blocking push - waits for space
+  void push(const T &val) noexcept(nothrow_v) {
+    const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
+    const auto nextWriteIndex =
+        (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
+    // Loop while waiting for reader to catch up
+    while (nextWriteIndex == writer_.readIndexCache_) {
+      writer_.readIndexCache_ =
+          reader_.readIndex_.load(std::memory_order_acquire);
+    }
+    write_value(writeIndex, val);
+    writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+  }
+
+  template <typename P,
+            typename = std::enable_if_t<std::is_constructible_v<T, P &&>>>
+  void push(P &&val) noexcept(std::is_nothrow_constructible_v<T, P &&> &&
     ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
      (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
@@ -257,27 +280,32 @@ public:
       writer_.readIndexCache_ =
           reader_.readIndex_.load(std::memory_order_acquire);
     }
-    write_value(writeIndex, std::forward<Args>(args)...);
+    write_value(writeIndex, std::forward<P>(val));
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
   }
 
-  template <typename... Args,
-            typename = std::enable_if_t<std::is_constructible_v<T, Args &&...>>>
-  void force_emplace(Args &&...args) noexcept(
-      std::is_nothrow_constructible_v<T, Args &&...> &&
-    ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
-     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
+  // Non-blocking push - returns false if no space
+  [[nodiscard]] bool try_push(const T &val) noexcept(nothrow_v) {
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     const auto nextWriteIndex =
         (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
-    write_value(writeIndex, std::forward<Args>(args)...);
+    // Check reader cache and if actually equal then fail to write
+    if (nextWriteIndex == writer_.readIndexCache_) {
+      writer_.readIndexCache_ =
+          reader_.readIndex_.load(std::memory_order_acquire);
+      if (nextWriteIndex == writer_.readIndexCache_) {
+        return false;
+      }
+    }
+    write_value(writeIndex, val);
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+    return true;
   }
 
-  template <typename... Args,
-            typename = std::enable_if_t<std::is_constructible_v<T, Args &&...>>>
-  [[nodiscard]] bool try_emplace(Args &&...args) noexcept(
-      std::is_nothrow_constructible_v<T, Args &&...> &&
+  template <typename P,
+            typename = std::enable_if_t<std::is_constructible_v<T, P &&>>>
+  [[nodiscard]] bool
+  try_push(P &&val) noexcept(std::is_nothrow_constructible_v<T, P &&> &&
     ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
      (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
@@ -291,42 +319,9 @@ public:
         return false;
       }
     }
-    write_value(writeIndex, std::forward<Args>(args)...);
+    write_value(writeIndex, std::forward<P>(val));
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
     return true;
-  }
-
-  void push(const T &val) noexcept(nothrow_v) { emplace(val); }
-
-  template <typename P,
-            typename = std::enable_if_t<std::is_constructible_v<T, P &&>>>
-  void push(P &&val) noexcept(std::is_nothrow_constructible_v<T, P &&> &&
-    ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
-     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
-    emplace(std::forward<P>(val));
-  }
-
-  void force_push(const T &val) noexcept(nothrow_v) { force_emplace(val); }
-
-  template <typename P,
-            typename = std::enable_if_t<std::is_constructible_v<T, P &&>>>
-  void force_push(P &&val) noexcept(std::is_nothrow_constructible_v<T, P &&> &&
-    ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
-     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
-    force_emplace(std::forward<P>(val));
-  }
-
-  [[nodiscard]] bool try_push(const T &val) noexcept(nothrow_v) {
-    return try_emplace(val);
-  }
-
-  template <typename P,
-            typename = std::enable_if_t<std::is_constructible_v<T, P &&>>>
-  [[nodiscard]] bool
-  try_push(P &&val) noexcept(std::is_nothrow_constructible_v<T, P &&> &&
-    ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
-     (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
-    return try_emplace(std::forward<P>(val));
   }
 
   void pop(T &val) noexcept(nothrow_v) {
@@ -386,7 +381,6 @@ public:
     static_assert(std::is_trivially_copyable_v<T>, 
                   "writeN requires trivially copyable types");
     const auto capacity = base_type::capacity_;
-    const auto padding  = writer_.paddingCache_;
     auto writeIndex     = writer_.writeIndex_.load(std::memory_order_relaxed);
 
     auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
@@ -403,23 +397,22 @@ public:
     if (toWrite == 0) return 0;
 
     const std::size_t firstChunk = std::min(toWrite, capacity - writeIndex);
+    T* buffer = get_buffer_ptr();
 
-    std::memcpy(&base_type::buffer_[writeIndex + padding], src, firstChunk * sizeof(T));
+    std::memcpy(&buffer[writeIndex], src, firstChunk * sizeof(T));
 
     if (firstChunk < toWrite) {
-      std::memcpy(&base_type::buffer_[padding], src + firstChunk, (toWrite - firstChunk) * sizeof(T));
+      std::memcpy(&buffer[0], src + firstChunk, (toWrite - firstChunk) * sizeof(T));
     }
 
     writer_.writeIndex_.store((writeIndex + toWrite) % capacity, std::memory_order_release);
     return toWrite;
   }
 
-
   std::size_t readN(T* dst, std::size_t count) noexcept(nothrow_v) {
     static_assert(std::is_trivially_copyable_v<T>, 
                   "readN requires trivially copyable types");
     const auto capacity = base_type::capacity_;
-    const auto padding  = base_type::padding;
 
     auto readIndex  = reader_.readIndex_.load(std::memory_order_relaxed);
     auto writeIndex = writer_.writeIndex_.load(std::memory_order_acquire);
@@ -436,11 +429,12 @@ public:
     if (toRead == 0) return 0;
 
     const std::size_t firstChunk = std::min(toRead, capacity - readIndex);
+    const T* buffer = get_buffer_ptr();
 
-    std::memcpy(dst, &base_type::buffer_[readIndex + padding], firstChunk * sizeof(T));
+    std::memcpy(dst, &buffer[readIndex], firstChunk * sizeof(T));
 
     if (firstChunk < toRead) {
-      std::memcpy(dst + firstChunk, &base_type::buffer_[padding], (toRead - firstChunk) * sizeof(T));
+      std::memcpy(dst + firstChunk, &buffer[0], (toRead - firstChunk) * sizeof(T));
     }
 
     const auto nextReadIndex = (readIndex + toRead) % capacity;
@@ -449,148 +443,143 @@ public:
     return toRead;
   }
 
-std::size_t peek_write(T*& ptr1, std::size_t& size1, T*& ptr2, std::size_t& size2) noexcept {
-  const auto capacity = base_type::capacity_;
-  const auto padding  = writer_.paddingCache_;
-  const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
-  auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
-  writer_.readIndexCache_ = readIndexCache;
+  std::size_t peek_write(T*& ptr1, std::size_t& size1, T*& ptr2, std::size_t& size2) noexcept {
+    const auto capacity = base_type::capacity_;
+    const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
+    auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
+    writer_.readIndexCache_ = readIndexCache;
 
-  std::size_t space;
-  if (readIndexCache > writeIndex) {
-    space = readIndexCache - writeIndex - 1;
-  } else {
-    space = capacity - writeIndex + readIndexCache - 1;
-  }
-
-  if (space == 0) {
-    ptr1 = nullptr;
-    ptr2 = nullptr;
-    size1 = 0;
-    size2 = 0;
-    return 0;
-  }
-
-  // First chunk: contiguous to end
-  std::size_t first_chunk = (readIndexCache > writeIndex)
-      ? space  // contiguous, no wrap
-      : std::min(space, capacity - writeIndex);
-
-  ptr1 = &base_type::buffer_[writeIndex + padding];
-  size1 = first_chunk;
-
-  if (readIndexCache <= writeIndex && first_chunk < space) {
-    // Wrapped: second chunk exists
-    ptr2 = &base_type::buffer_[padding];
-    size2 = space - first_chunk;
-  } else {
-    ptr2 = nullptr;
-    size2 = 0;
-  }
-
-  return space;
-}
-
-void commit_write(std::size_t count) noexcept {
-  const auto capacity = base_type::capacity_;
-  const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
-  const auto nextWriteIndex = (writeIndex + count) % capacity;
-  writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
-}
-
-std::size_t peek_read(const T*& ptr1, std::size_t& size1,  const T*& ptr2, std::size_t& size2) noexcept {
-  const auto capacity = base_type::capacity_;
-  const auto padding  = base_type::padding;
-
-  const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
-
-  auto writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
-  reader_.writeIndexCache_ = writeIndexCache;
-
-  std::size_t available;
-  if (writeIndexCache >= readIndex) {
-    available = writeIndexCache - readIndex;
-  } else {
-    available = capacity - readIndex + writeIndexCache;
-  }
-
-  if (available == 0) {
-    ptr1 = nullptr;
-    ptr2 = nullptr;
-    size1 = 0;
-    size2 = 0;
-    return 0;
-  }
-
-  // First chunk: contiguous
-  std::size_t first_chunk = (writeIndexCache >= readIndex)
-      ? available   // no wrap
-      : std::min(available, capacity - readIndex);
-
-  ptr1 = &base_type::buffer_[readIndex + padding];
-  size1 = first_chunk;
-
-  if (writeIndexCache < readIndex) {
-    // Wrapped, so second chunk exists
-    ptr2 = &base_type::buffer_[padding];
-    size2 = writeIndexCache;
-  } else {
-    ptr2 = nullptr;
-    size2 = 0;
-  }
-
-  return available;
-}
-
-void commit_read(std::size_t count) noexcept {
-  const auto capacity = base_type::capacity_;
-  const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
-  const auto nextReadIndex = (readIndex + count) % capacity;
-  reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
-}
-
-// NEW: Zero-copy contiguous read (only available with doubly mapped heap buffers)
-std::pair<const T*, std::size_t> read_span() noexcept {
-  if constexpr (N == 0) {
-    // Only heap buffers can be doubly mapped
-    if (this->is_doubly_mapped_) {
-      const auto capacity = base_type::capacity_;
-      const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
-      auto writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
-      reader_.writeIndexCache_ = writeIndexCache;
-      
-      std::size_t available;
-      if (writeIndexCache >= readIndex) {
-        available = writeIndexCache - readIndex;
-      } else {
-        available = capacity - readIndex + writeIndexCache;
-      }
-      
-      if (available == 0) {
-        return {nullptr, 0};
-      }
-      
-      // With doubly mapped buffer, ALL data is contiguous
-      // Need to add padding offset to match write_value behavior
-      const T* ptr = &base_type::buffer_[readIndex + base_type::padding];
-      return {ptr, available};
+    std::size_t space;
+    if (readIndexCache > writeIndex) {
+      space = readIndexCache - writeIndex - 1;
+    } else {
+      space = capacity - writeIndex + readIndexCache - 1;
     }
+
+    if (space == 0) {
+      ptr1 = nullptr;
+      ptr2 = nullptr;
+      size1 = 0;
+      size2 = 0;
+      return 0;
+    }
+
+    T* buffer = get_buffer_ptr();
+
+    // First chunk: contiguous to end
+    std::size_t first_chunk = (readIndexCache > writeIndex)
+        ? space  // contiguous, no wrap
+        : std::min(space, capacity - writeIndex);
+
+    ptr1 = &buffer[writeIndex];
+    size1 = first_chunk;
+
+    if (readIndexCache <= writeIndex && first_chunk < space) {
+      // Wrapped: second chunk exists
+      ptr2 = &buffer[0];
+      size2 = space - first_chunk;
+    } else {
+      ptr2 = nullptr;
+      size2 = 0;
+    }
+
+    return space;
   }
-  // Stack buffers or non-doubly-mapped heap buffers
-  return {nullptr, 0};
-}
+
+
+  std::size_t peek_read(const T*& ptr1, std::size_t& size1, const T*& ptr2, std::size_t& size2) noexcept {
+    const auto capacity = base_type::capacity_;
+    const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
+
+    auto writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
+    reader_.writeIndexCache_ = writeIndexCache;
+
+    std::size_t available;
+    if (writeIndexCache >= readIndex) {
+      available = writeIndexCache - readIndex;
+    } else {
+      available = capacity - readIndex + writeIndexCache;
+    }
+
+    if (available == 0) {
+      ptr1 = nullptr;
+      ptr2 = nullptr;
+      size1 = 0;
+      size2 = 0;
+      return 0;
+    }
+
+    const T* buffer = get_buffer_ptr();
+
+    // First chunk: contiguous
+    std::size_t first_chunk = (writeIndexCache >= readIndex)
+        ? available   // no wrap
+        : std::min(available, capacity - readIndex);
+
+    ptr1 = &buffer[readIndex];
+    size1 = first_chunk;
+
+    if (writeIndexCache < readIndex) {
+      // Wrapped, so second chunk exists
+      ptr2 = &buffer[0];
+      size2 = writeIndexCache;
+    } else {
+      ptr2 = nullptr;
+      size2 = 0;
+    }
+
+    return available;
+  }
+
+  void commit_read(std::size_t count) noexcept {
+    const auto capacity = base_type::capacity_;
+    const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
+    const auto nextReadIndex = (readIndex + count) % capacity;
+    reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
+  }
+
+  // NEW: Zero-copy contiguous read (only available with doubly mapped heap buffers)
+  std::pair<const T*, std::size_t> read_span() noexcept {
+    if constexpr (N == 0) {
+      // Only heap buffers can be doubly mapped
+      if (base_type::is_doubly_mapped_) {
+        const auto capacity = base_type::capacity_;
+        const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
+        auto writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
+        reader_.writeIndexCache_ = writeIndexCache;
+        
+        std::size_t available;
+        if (writeIndexCache >= readIndex) {
+          available = writeIndexCache - readIndex;
+        } else {
+          available = capacity - readIndex + writeIndexCache;
+        }
+        
+        if (available == 0) {
+          return {nullptr, 0};
+        }
+        
+        // With doubly mapped buffer, ALL data is contiguous
+        const T* ptr = &base_type::buffer_[readIndex];
+        return {ptr, available};
+      }
+    }
+    // Stack buffers or non-doubly-mapped heap buffers
+    return {nullptr, 0};
+  }
 
 private:
-  // Note: The "+ padding" is a constant offset used to prevent false sharing
-  // with memory in front of the SPSC allocations
+  // Note: The padding is handled differently for heap vs stack buffers
   template <typename Index>
   T read_value(const Index &readIndex) noexcept(nothrow_v) {
-    return std::move(base_type::buffer_[readIndex + base_type::padding]);
+    T* buffer = get_buffer_ptr();
+    return std::move(buffer[readIndex]);
   }
 
   template <typename Index, typename U>
   void write_value(const Index &writeIndex, U &&val) noexcept(nothrow_v) {
-    base_type::buffer_[writeIndex + writer_.paddingCache_] = std::forward<U>(val);
+    T* buffer = get_buffer_ptr();
+    buffer[writeIndex] = std::forward<U>(val);
   }
 
   template <typename Index, typename... Args>
@@ -600,7 +589,8 @@ private:
       std::is_nothrow_constructible_v<T, Args &&...> &&
     ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
      (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>))) {
-    base_type::buffer_[writeIndex + writer_.paddingCache_] = T(std::forward<Args>(args)...);
+    T* buffer = get_buffer_ptr();
+    buffer[writeIndex] = T(std::forward<Args>(args)...);
   }
 };
 

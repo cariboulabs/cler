@@ -1,6 +1,9 @@
 #pragma once
+#include <stdexcept>
+#include <cstddef>
 
 // Fallback implementation for platforms without doubly mapped buffer support
+// Throws exceptions to give users clear feedback about missing support
 
 namespace cler {
 namespace vmem {
@@ -27,30 +30,34 @@ public:
     
     ~DoublyMappedAllocation() = default;
     
-    // Always fails on unsupported platforms
+    // Throws exception to clearly indicate missing platform support
     bool create(std::size_t size) {
         (void)size;
-        return false;
+        throw std::runtime_error(
+            "Doubly mapped buffers are not supported on this platform. "
+            "Available on Linux, macOS, and FreeBSD only. "
+            "Use standard heap buffers or compile on a supported platform."
+        );
     }
     
-    // Always returns null
+    // Throws exception to clearly indicate missing platform support
     void* data() const {
-        return nullptr;
+        throw std::runtime_error("Doubly mapped buffers not supported on this platform");
     }
     
-    // Always returns null  
+    // Throws exception to clearly indicate missing platform support
     void* second_mapping() const {
-        return nullptr;
+        throw std::runtime_error("Doubly mapped buffers not supported on this platform");
     }
     
-    // Always returns 0
+    // Throws exception to clearly indicate missing platform support
     std::size_t size() const {
-        return 0;
+        throw std::runtime_error("Doubly mapped buffers not supported on this platform");
     }
     
-    // Always false
+    // Throws exception to clearly indicate missing platform support
     bool valid() const {
-        return false;
+        throw std::runtime_error("Doubly mapped buffers not supported on this platform");
     }
 };
 
