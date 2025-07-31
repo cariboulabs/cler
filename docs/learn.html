@@ -50,6 +50,7 @@
                         <li><a href="#performance-example">Performance Considerations</a></li>
                         <li><a href="#scheduler-types">Scheduler Types & Optimization</a></li>
                         <li><a href="#buffer-patterns">Buffer Access Patterns</a></li>
+                        <li><a href="#real-world">Real-World Applications</a></li>
                         <li><a href="#architecture">Architecture Deep Dive</a></li>
                     </ul>
                 </nav>
@@ -658,6 +659,370 @@ out->push(sample * gain);</code></pre>
                             <li><strong>Fallback strategy</strong>: Try dbf methods first, then fall back to peek/commit</li>
                             <li><strong>Run benchmarks</strong>: <code>cd build/performance && ./perf_read_write_techniques</code></li>
                         </ul>
+                    </div>
+                </section>
+
+                <section id="real-world">
+                    <h2>Real-World Applications</h2>
+                    <p>CLER shines in embedded systems where clean architecture meets resource constraints. Here are practical applications showing when flowgraphs excel and when manual approaches work better.</p>
+                    
+                    <h3>Microcontroller Applications</h3>
+                    
+                    <h4>IoT Sensor Hub (STM32)</h4>
+                    <p>A environmental monitoring node collecting data from multiple sensors and forwarding to a gateway. <strong>RAM requirement: 64-128KB for comfortable operation.</strong></p>
+                    
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">// Manual callback hell approach - hard to maintain
+struct SensorManager {
+    void (*temp_callback)(float);
+    void (*humidity_callback)(float);  
+    void (*pressure_callback)(float);
+    void (*network_callback)(SensorPacket);
+    
+    void process_sensors() {
+        float temp = read_temperature();
+        if (temp_callback) temp_callback(temp);
+        
+        float humidity = read_humidity();
+        if (humidity_callback) humidity_callback(humidity);
+        
+        // ... multiply by 6 sensors, nested callbacks, error handling
+    }
+};
+
+// CLER flowgraph approach - clean and testable
+struct TemperatureSensor : public cler::BlockBase {
+    cler::Channel<float, 32> out;
+    
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        if (out.space() > 0) {
+            float temp = read_temperature_sensor();
+            out.push(temp);
+        }
+        return cler::Empty{};
+    }
+};
+
+struct SensorAggregator : public cler::BlockBase {
+    cler::Channel<float, 16> temp_in, humidity_in, pressure_in;
+    
+    template<typename... OChannels>
+    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... network_out) {
+        if (temp_in.size() && humidity_in.size() && pressure_in.size()) {
+            SensorPacket packet;
+            temp_in.pop(packet.temperature);
+            humidity_in.pop(packet.humidity);
+            pressure_in.pop(packet.pressure);
+            packet.timestamp = get_system_time();
+            
+            ((network_out->push(packet)), ...);
+        }
+        return cler::Empty{};
+    }
+};
+
+// Clean, testable flowgraph  
+auto flowgraph = cler::FlowGraph<cler::FreeRTOSTaskPolicy>(
+    cler::BlockRunner(&temp_sensor, &aggregator.temp_in),
+    cler::BlockRunner(&humidity_sensor, &aggregator.humidity_in),
+    cler::BlockRunner(&pressure_sensor, &aggregator.pressure_in),
+    cler::BlockRunner(&aggregator, &network_transmitter.in),
+    cler::BlockRunner(&network_transmitter)
+);</code></pre>
+                    </div>
+                    <p class="key-point"><strong>Why Flowgraphs Win:</strong> Complex data flows with multiple sensors become manageable. Each sensor can be tested independently, and adding new sensors doesn't require rewiring callbacks.</p>
+                    
+                    <h4>Real-Time Audio Processing</h4>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">struct AudioFilterBlock : public cler::BlockBase {
+    cler::Channel<int16_t, 128> in;  // 44.1kHz audio samples
+    BiquadFilter filter;             // State preserved between calls
+    
+    template<typename... OChannels>
+    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
+        int16_t samples[64];
+        size_t count = in.readN(samples, 64);
+        
+        // Process audio block with preserved filter state
+        for (size_t i = 0; i < count; ++i) {
+            samples[i] = filter.process(samples[i]);
+        }
+        
+        ((outs->writeN(samples, count)), ...);
+        return cler::Empty{};
+    }
+};
+
+// Real-time audio chain: ADC → Filter → Compressor → DAC
+auto audio_flowgraph = cler::FlowGraph<cler::FreeRTOSTaskPolicy>(
+    cler::BlockRunner(&adc_source, &filter.in),
+    cler::BlockRunner(&filter, &compressor.in),
+    cler::BlockRunner(&compressor, &dac_sink.in),
+    cler::BlockRunner(&dac_sink)
+);</code></pre>
+                    </div>
+                    <p class="design-note"><strong>Real-Time Constraints:</strong> Audio processing needs deterministic timing. CLER's static allocation and predictable execution makes this possible on microcontrollers.</p>
+                    
+                    <h4>Motor Control System</h4>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">struct EncoderBlock : public cler::BlockBase {
+    cler::Channel<float, 16> position_out;
+    volatile uint32_t* encoder_register;
+    
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        if (position_out.space() > 0) {
+            uint32_t raw_count = *encoder_register; 
+            float position = (raw_count * 2.0f * M_PI) / 4096.0f; // Convert to radians
+            position_out.push(position);
+        }
+        return cler::Empty{};
+    }
+};
+
+struct PIDController : public cler::BlockBase {
+    cler::Channel<float, 8> setpoint_in, feedback_in;
+    std::atomic<float> kp{1.0f}, ki{0.1f}, kd{0.01f};
+    float integral = 0.0f, previous_error = 0.0f;
+    
+    template<typename... OChannels>  
+    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... control_out) {
+        float setpoint, feedback;
+        if (setpoint_in.pop(setpoint) && feedback_in.pop(feedback)) {
+            float error = setpoint - feedback;
+            integral += error * DT;
+            float derivative = (error - previous_error) / DT;
+            
+            float output = kp.load() * error + ki.load() * integral + kd.load() * derivative;
+            previous_error = error;
+            
+            ((control_out->push(output)), ...);
+        }
+        return cler::Empty{};
+    }
+};
+
+// Control loop: Setpoint → PID Controller → Motor Driver
+//                      ↑     Encoder ←  Motor ←</code></pre>
+                    </div>
+                    <p class="key-point"><strong>Control Systems:</strong> Flowgraphs naturally express feedback loops. Thread-safe atomic parameters allow runtime tuning without stopping the control loop.</p>
+                    
+                    <h3>FPGA Hybrid Designs</h3>
+                    <p>CLER excels in FPGA systems where hardware acceleration combines with software flexibility.</p>
+                    
+                    <h4>SDR with FPGA Preprocessing</h4>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">// FPGA handles high-rate operations, ARM processes protocols
+struct FPGAInterface : public cler::BlockBase {
+    cler::Channel<std::complex<float>, 1024> iq_out;
+    volatile uint32_t* fpga_fifo;           // Memory-mapped FPGA interface
+    volatile uint32_t* fpga_control;
+    
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        // Check FPGA FIFO status
+        if ((*fpga_control & FIFO_NOT_EMPTY) && (iq_out.space() >= 256)) {
+            std::complex<float> samples[256];
+            
+            // Burst read from FPGA (preprocessed samples)
+            for (int i = 0; i < 256; ++i) {
+                uint32_t iq_data = *fpga_fifo;
+                float i_val = (int16_t)(iq_data >> 16) / 32768.0f;
+                float q_val = (int16_t)(iq_data & 0xFFFF) / 32768.0f;
+                samples[i] = std::complex<float>(i_val, q_val);
+            }
+            
+            iq_out.writeN(samples, 256);
+        }
+        return cler::Empty{};
+    }
+};
+
+struct ProtocolDecoder : public cler::BlockBase {
+    cler::Channel<std::complex<float>, 512> iq_in;
+    DemodulatorState demod_state;           // Complex software processing
+    
+    template<typename... OChannels>
+    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... packet_out) {
+        std::complex<float> samples[128];
+        size_t count = iq_in.readN(samples, 128);
+        
+        if (count > 0) {
+            // Complex demodulation that benefits from ARM cores
+            for (size_t i = 0; i < count; ++i) {
+                if (process_sample(&demod_state, samples[i])) {
+                    // Packet detected and decoded
+                    ((packet_out->push(demod_state.decoded_packet)), ...);
+                }
+            }
+        }
+        return cler::Empty{};
+    }
+};
+
+// Hybrid architecture: FPGA → ARM Processing → Network
+auto sdr_flowgraph = cler::FlowGraph<cler::LinuxTaskPolicy>(
+    cler::BlockRunner(&fpga_interface, &channelizer.in),      // High-rate data from FPGA
+    cler::BlockRunner(&channelizer, &decoder1.in, &decoder2.in), // Split to protocols
+    cler::BlockRunner(&decoder1, &network1.in),               // Process on ARM cores
+    cler::BlockRunner(&decoder2, &network2.in),
+    cler::BlockRunner(&network1),
+    cler::BlockRunner(&network2)
+);</code></pre>
+                    </div>
+                    <p class="design-note"><strong>Hybrid Benefits:</strong> FPGA handles computationally intensive tasks (filtering, channelization) while ARM cores handle complex protocol processing. CLER coordinates the data flow between hardware and software domains.</p>
+                    
+                    <h4>Real-Time Image Processing</h4>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">struct ImageAcquisition : public cler::BlockBase {
+    cler::Channel<ImageFrame, 4> frame_out; // Small buffer for real-time
+    CameraInterface* camera;
+    
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        if (frame_out.space() > 0 && camera->frame_ready()) {
+            ImageFrame frame;
+            camera->capture_frame(&frame);
+            frame_out.push(std::move(frame));
+        }
+        return cler::Empty{};
+    }
+};
+
+struct FPGAEdgeDetection : public cler::BlockBase {
+    cler::Channel<ImageFrame, 2> frame_in;
+    volatile uint32_t* fpga_processor;      // Hardware accelerated
+    
+    template<typename... OChannels>
+    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... processed_out) {
+        ImageFrame frame;
+        if (frame_in.pop(frame)) {
+            // DMA transfer to FPGA, hardware processes edges
+            setup_fpga_dma(frame.data, frame.width, frame.height);
+            start_fpga_processing();
+            
+            // Wait for completion (or use interrupt-driven approach)
+            while (!fpga_processing_complete()) { /* yield or sleep */ }
+            
+            // Processed frame ready
+            ((processed_out->push(std::move(frame))), ...);
+        }
+        return cler::Empty{};
+    }
+};
+
+// Computer vision pipeline: Camera → FPGA Edge Detection → ARM Analysis → Display
+auto vision_flowgraph = cler::FlowGraph<cler::LinuxTaskPolicy>(
+    cler::BlockRunner(&camera, &fpga_edge.frame_in),
+    cler::BlockRunner(&fpga_edge, &arm_analysis.in),  
+    cler::BlockRunner(&arm_analysis, &display.in),
+    cler::BlockRunner(&display)
+);</code></pre>
+                    </div>
+                    <p class="key-point"><strong>Real-Time Vision:</strong> Hardware accelerates compute-intensive operations while software handles higher-level analysis. Natural pipeline structure matches hardware capabilities.</p>
+                    
+                    <h3>When to Use Flowgraphs vs Manual Wiring</h3>
+                    
+                    <h4>✅ Flowgraphs Excel When:</h4>
+                    <div class="key-point">
+                        <strong>Complex Data Flows:</strong> Multiple inputs, outputs, or feedback loops benefit from flowgraph structure.
+                    </div>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">// Multi-sensor fusion with feedback - naturally expressed as flowgraph
+auto sensor_fusion = cler::FlowGraph<cler::FreeRTOSTaskPolicy>(
+    cler::BlockRunner(&gps, &kalman_filter.gps_in),
+    cler::BlockRunner(&imu, &kalman_filter.imu_in),
+    cler::BlockRunner(&mag, &kalman_filter.mag_in),
+    cler::BlockRunner(&kalman_filter, &navigation.in, &control_feedback.in),
+    cler::BlockRunner(&navigation, &display.in),
+    cler::BlockRunner(&control_feedback, &actuator.in),
+    cler::BlockRunner(&actuator)
+);</code></pre>
+                    </div>
+                    
+                    <div class="key-point">
+                        <strong>Rapid Prototyping:</strong> Easy to add/remove blocks, change connections, test different configurations.
+                    </div>
+                    
+                    <div class="key-point">
+                        <strong>Testing & Validation:</strong> Each block can be unit tested independently. Mock blocks easily replace hardware interfaces.
+                    </div>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">// Easy testing - replace hardware blocks with test blocks
+#ifdef UNIT_TEST
+    MockGPSBlock mock_gps("GPS", test_positions);
+    auto test_flowgraph = cler::FlowGraph<cler::DesktopTaskPolicy>(
+        cler::BlockRunner(&mock_gps, &kalman_filter.gps_in),  // Mock instead of real GPS
+        // ... rest of flowgraph unchanged
+    );
+#endif</code></pre>
+                    </div>
+                    
+                    <div class="key-point">
+                        <strong>Parallel Processing:</strong> Natural parallelism when blocks can run independently on multiple cores.
+                    </div>
+                    
+                    <h4>❌ Manual Wiring Better When:</h4>
+                    <div class="design-note">
+                        <strong>Simple Linear Chains:</strong> A → B → C with minimal processing overhead benefits from direct calls.
+                    </div>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">// Simple processing chain - manual is more efficient
+while (running) {
+    sensor.read_raw(&raw_data);           // Direct hardware access
+    filter.process(raw_data, &filtered);  // Inline processing  
+    transmit.send(filtered);              // Direct transmission
+    delay_ms(10);                         // Simple timing
+}</code></pre>
+                    </div>
+                    
+                    <div class="design-note">
+                        <strong>Tight Timing Constraints:</strong> Hard real-time systems may need manual control for predictability.
+                    </div>
+                    
+                    <div class="design-note">
+                        <strong>Minimal Resource Usage:</strong> Systems with <32KB RAM may benefit from eliminating flowgraph overhead.
+                    </div>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">// Ultra-constrained system (8KB RAM)
+void main_loop() {
+    uint16_t adc_value = read_adc();
+    uint16_t filtered = simple_filter(adc_value);  // Stack-based, no allocation
+    if (filtered > threshold) {
+        trigger_output();
+    }
+}  // Total overhead: ~100 bytes</code></pre>
+                    </div>
+                    
+                    <div class="design-note">
+                        <strong>Single-Threaded Embedded:</strong> Baremetal systems without RTOS may prefer direct control loops.
+                    </div>
+                    
+                    <h4>STM32 Practical Guidelines</h4>
+                    <div class="performance-notes">
+                        <h3>Memory Requirements</h3>
+                        <ul>
+                            <li><strong>Minimum for flowgraphs:</strong> 64KB RAM (simple chains, 2-4 blocks)</li>
+                            <li><strong>Comfortable operation:</strong> 128KB+ RAM (complex flowgraphs, 6+ blocks)</li>
+                            <li><strong>Per-block overhead:</strong> ~2-4KB (threads, channels, state)</li>
+                            <li><strong>Manual alternative:</strong> <32KB systems, use streamlined mode</li>
+                            <li><strong>Optimization:</strong> Stack-allocated channels reduce heap pressure</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="key-point">
+                        <strong>Architecture Decision Framework:</strong><br>
+                        • <3 blocks + simple chain → Manual wiring<br>
+                        • 3-6 blocks + moderate complexity → Consider both approaches<br>  
+                        • 6+ blocks OR complex data flow → Flowgraphs excel<br>
+                        • Need testing/modularity → Flowgraphs<br>
+                        • <64KB RAM OR hard real-time → Manual wiring
                     </div>
                 </section>
 

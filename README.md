@@ -121,7 +121,37 @@ Cler supports four buffer access patterns with dramatically different performanc
 
 **Performance Recommendation**: Use `read_dbf/write_dbf` for high-throughput paths, `readN/writeN` for general use, and avoid `push/pop` except for control data.
 
-# RoadMap
+# When to Use CLER
+
+## Memory Requirements (STM32)
+- **Minimum**: 64KB RAM (2-4 blocks)
+- **Recommended**: 128KB+ RAM (complex flowgraphs)
+- **Tight on memory?** Use streamlined mode if <32KB
+
+## Use Flowgraphs When You Have
+- Multiple async inputs (sensors at different rates)
+- Complex routing (data goes to multiple destinations)
+- Feedback loops (control systems)
+- Need to swap/test components independently
+- 6+ processing stages
+
+## Skip Flowgraphs For
+- Simple sensor → process → transmit
+- <3 blocks total
+- Hard real-time loops (<10μs deadlines)
+- Bare metal without RTOS
+- Every byte counts scenarios
+
+## Where It's Actually Used
+- Sensor fusion (IMU + GPS + barometer)
+- Audio effects processors
+- FPGA hybrid systems (software handles complex algorithms)
+- Motor controllers with multiple feedback sensors
+- Protocol bridges (UART ↔ SPI ↔ CAN)
+
+Bottom line: If you're juggling multiple data streams or your requirements keep changing, flowgraphs save time. If it's a simple pipeline, just write the loop yourself
+
+# What is missing?
 Below is a wish-list for this library, sorted by importance.
 
 * <ins>Comparing to GnuRadio / FutureSDR:</ins> </br>
@@ -131,7 +161,7 @@ Its important that we know where we stand. We need to measure our performence ag
 If we are already producing a report, might aswell build a benchmark for core patterns to endure performence doesnt regress with updates
 
 * <ins>Blocks for Embedded Systems:</ins>
-Our /Blocks library is built as a broad, general-purpose toolkit for desktop experiments and quick testing — but for real end-node applications, we need an /EmbeddedBlocks.
+Our /desktop_blocks library is built as a broad, general-purpose toolkit for desktop experiments and quick testing — but for real end-node applications, we need an /EmbeddedBlocks.
 
 * <ins>Hardware Support:</ins> </br>
 If we are serious about this, we need to support real hardware: FPGAs, SDRs, DAC/ADC boards, RF transceivers, and similar peripherals. For this, we must ensure support for commodity hardware by introducing source/sink blocks for them.
@@ -145,6 +175,8 @@ We need to address the current situation where small mistakes can lead to pages 
    - ...
 
     Additionally, we could develop a VS Code extension to automate watch files and squiggle errors.
+
+an initial implementation already exists tools.
 
 * <ins>GUI FrontEnd:</ins> </br>
 This is more of a nice to have, but if we are already creating a reflection tool for Flowgraph validation, we could also create an interactive FlowGraph generator.
