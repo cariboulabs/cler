@@ -11,8 +11,8 @@ protected:
     void TearDown() override {}
 };
 
-// Test that stack buffers never return valid read_span
-TEST_F(SPSCQueueDoublyMappedTest, StackBuffersNoReadSpan) {
+// Test that stack buffers never return valid read_dbf
+TEST_F(SPSCQueueDoublyMappedTest, StackBuffersNoReadDbf) {
     dro::SPSCQueue<float, 1024> stack_queue;
     
     // Fill with some data
@@ -20,8 +20,8 @@ TEST_F(SPSCQueueDoublyMappedTest, StackBuffersNoReadSpan) {
         stack_queue.push(i * 0.1f);
     }
     
-    // read_span should always return null for stack buffers
-    auto [ptr, size] = stack_queue.read_span();
+    // read_dbf should always return null for stack buffers
+    auto [ptr, size] = stack_queue.read_dbf();
     EXPECT_EQ(ptr, nullptr);
     EXPECT_EQ(size, 0);
     
@@ -34,7 +34,7 @@ TEST_F(SPSCQueueDoublyMappedTest, StackBuffersNoReadSpan) {
 }
 
 // Test that small heap buffers fall back to standard allocation
-TEST_F(SPSCQueueDoublyMappedTest, SmallHeapBuffersNoReadSpan) {
+TEST_F(SPSCQueueDoublyMappedTest, SmallHeapBuffersNoReadDbf) {
     dro::SPSCQueue<float> small_queue(1024);  // 4KB - below 32KB threshold
     
     // Fill with some data
@@ -42,8 +42,8 @@ TEST_F(SPSCQueueDoublyMappedTest, SmallHeapBuffersNoReadSpan) {
         small_queue.push(i * 0.1f);
     }
     
-    // read_span may or may not work (depends on platform support and if it falls back)
-    auto [ptr, size] = small_queue.read_span();
+    // read_dbf may or may not work (depends on platform support and if it falls back)
+    auto [ptr, size] = small_queue.read_dbf();
     // We don't assert anything specific here since it depends on platform and size
     (void)ptr; (void)size; // Suppress unused variable warnings
     
@@ -89,7 +89,7 @@ TEST_F(SPSCQueueDoublyMappedTest, LargeBufferBehavior) {
     EXPECT_GT(large_queue.size(), 0);
     
     // Test both APIs work
-    auto [span_ptr, span_size] = large_queue.read_span();
+    auto [span_ptr, span_size] = large_queue.read_dbf();
     const float* p1, *p2;
     size_t s1, s2;
     size_t total = large_queue.peek_read(p1, s1, p2, s2);
@@ -133,8 +133,8 @@ TEST_F(SPSCQueueDoublyMappedTest, ComplexFloatSDRBuffer) {
         sdr_queue.push(sample);
     }
     
-    // Test read_span
-    auto [ptr, size] = sdr_queue.read_span();
+    // Test read_dbf
+    auto [ptr, size] = sdr_queue.read_dbf();
     if (ptr && size > 0) {
         // Verify first few samples match
         for (size_t i = 0; i < std::min(size, size_t(10)); i++) {
@@ -173,10 +173,10 @@ TEST_F(SPSCQueueDoublyMappedTest, FileIOIntegration) {
     size_t total_written = 0;
     int write_calls = 0;
     
-    // Write data using read_span (if available) or peek_read fallback
+    // Write data using read_dbf (if available) or peek_read fallback
     while (queue.size() > 0) {
-        // Try read_span first (optimal path)
-        auto [span_ptr, span_size] = queue.read_span();
+        // Try read_dbf first (optimal path)
+        auto [span_ptr, span_size] = queue.read_dbf();
         if (span_ptr && span_size > 0) {
             size_t written = std::fwrite(span_ptr, sizeof(float), span_size, fp);
             EXPECT_EQ(written, span_size);

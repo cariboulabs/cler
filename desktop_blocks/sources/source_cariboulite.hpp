@@ -79,7 +79,7 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
         }
 
         cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
-            auto [ptr, space] = out->write_span();
+            auto [ptr, space] = out->write_dbf();
             if (ptr && space > 0) {
                 // Fast path: single ReadSamples call
                 size_t to_read = std::min(space, _max_samples_to_read);

@@ -539,7 +539,7 @@ public:
   }
 
   // NEW: Zero-copy contiguous read (only available with doubly mapped heap buffers)
-  std::pair<const T*, std::size_t> read_span() noexcept {
+  std::pair<const T*, std::size_t> read_dbf() noexcept {
     if constexpr (N == 0) {
       // Only heap buffers can be doubly mapped
       if (base_type::is_doubly_mapped_) {
@@ -576,7 +576,7 @@ public:
       writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
   }
 
-  std::pair<T*, std::size_t> write_span() noexcept {
+  std::pair<T*, std::size_t> write_dbf() noexcept {
     if constexpr (N == 0) {
         // Only heap buffers can be doubly mapped
         if (base_type::is_doubly_mapped_) {

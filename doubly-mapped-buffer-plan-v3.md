@@ -224,7 +224,7 @@ public:
     // All existing methods remain unchanged
     
     // NEW: Zero-copy read (only available with doubly mapped heap buffers)
-    std::pair<const T*, std::size_t> read_span() noexcept {
+    std::pair<const T*, std::size_t> read_dbf() noexcept {
         if constexpr (N == 0) {
             // Only heap buffers can be doubly mapped
             if (this->is_doubly_mapped_) {
@@ -285,7 +285,7 @@ struct SinkFileBlock : public cler::BlockBase {
     
     cler::Result<cler::Empty, cler::Error> procedure() {
         // Try zero-copy path first
-        auto [ptr, size] = in.read_span();
+        auto [ptr, size] = in.read_dbf();
         if (ptr && size > 0) {
             // Single write, no copy!
             size_t written = std::fwrite(ptr, sizeof(T), size, _fp);
@@ -327,9 +327,9 @@ struct SinkFileBlock : public cler::BlockBase {
 
 ```cpp
 TEST(SPSCQueue, DoublyMappedOnlyHeapBuffers) {
-    // Stack buffer - read_span should always return null
+    // Stack buffer - read_dbf should always return null
     SPSCQueue<float, 1024> stack_queue;
-    auto [ptr, size] = stack_queue.read_span();
+    auto [ptr, size] = stack_queue.read_dbf();
     ASSERT_EQ(ptr, nullptr);
     ASSERT_EQ(size, 0);
     
@@ -357,7 +357,7 @@ TEST(SPSCQueue, LargeBufferDoublyMapped) {
     }
     
     // Test both APIs
-    auto [span_ptr, span_size] = queue.read_span();
+    auto [span_ptr, span_size] = queue.read_dbf();
     const float* p1, *p2;
     size_t s1, s2;
     size_t total = queue.peek_read(p1, s1, p2, s2);
@@ -410,7 +410,7 @@ void benchmark_sdr_file_write() {
     size_t write_calls = 0;
     
     while (total_written < total_samples) {
-        auto [ptr, size] = queue.read_span();
+        auto [ptr, size] = queue.read_dbf();
         if (ptr && size > 0) {
             fwrite(ptr, sizeof(float), size, fp);
             queue.commit_read(size);
@@ -440,7 +440,7 @@ void benchmark_sdr_file_write() {
 - Basic unit tests
 
 ### Week 2: Integration
-- Add read_span() method to SPSCQueue
+- Add read_dbf() method to SPSCQueue
 - Remove peek_write/commit_write methods
 - Test on Linux and macOS
 - Verify fallback behavior
@@ -461,7 +461,7 @@ void benchmark_sdr_file_write() {
 
 - ✓ Zero API changes for existing code
 - ✓ Transparent fallback on all platforms
-- ✓ read_span() returns null for stack buffers
+- ✓ read_dbf() returns null for stack buffers
 - ✓ 32KB minimum size for doubly mapped attempt
 - ✓ 10-30% throughput improvement for file I/O
 - ✓ 50% reduction in write calls for wrapped buffers
@@ -481,8 +481,8 @@ void benchmark_sdr_file_write() {
 
 ```cpp
 // NEW: Zero-copy read (returns {nullptr, 0} if not available)
-std::pair<const T*, size_t> read_span() noexcept;
-std::pair<T*, size_t> write_span() noexcept;
+std::pair<const T*, size_t> read_dbf() noexcept;
+std::pair<T*, size_t> write_dbf() noexcept;
 
 
 // EXISTING: Unchanged methods
@@ -501,7 +501,7 @@ size_t readN(T* dst, size_t count) noexcept;
 
 1. **Only heap buffers**: Stack buffers cannot be doubly mapped
 2. **32KB threshold**: Appropriate for SDR applications
-3. **Single new method**: Only add read_span()
+3. **Single new method**: Only add read_dbf()
 4. **Remove unused APIs**: Delete peek_write/commit_write
 5. **Transparent fallback**: Returns {nullptr, 0} when unavailable
 6. **No exceptions**: All failures handled gracefully

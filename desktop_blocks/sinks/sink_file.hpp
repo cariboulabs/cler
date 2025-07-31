@@ -45,7 +45,7 @@ struct SinkFileBlock : public cler::BlockBase {
         }
 
         // Try zero-copy path first (for doubly mapped buffers)
-        auto [span_ptr, span_size] = in.read_span();
+        auto [span_ptr, span_size] = in.read_dbf();
         if (span_ptr && span_size > 0) {
             // Single write, no copy - optimal path!
             size_t written = std::fwrite(span_ptr, sizeof(T), span_size, _fp);
