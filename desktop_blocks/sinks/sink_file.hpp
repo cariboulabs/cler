@@ -8,8 +8,8 @@ template <typename T>
 struct SinkFileBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
-    SinkFileBlock(const char* name, const char* filename, size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
-        : cler::BlockBase(name), in(buffer_size), _filename(filename) {
+    SinkFileBlock(const char* name, const char* filename, size_t buffer_size = 1024)
+        : cler::BlockBase(name), in(buffer_size), _filename(filename) { // Default 1024 for 4KB minimum
 
         if (buffer_size == 0) {
             throw std::invalid_argument("Buffer size must be greater than zero.");
@@ -44,38 +44,15 @@ struct SinkFileBlock : public cler::BlockBase {
             return cler::Error::TERM_IOError;
         }
 
-        // Try zero-copy path first (for doubly mapped buffers)
+        // Use zero-copy path
         auto [span_ptr, span_size] = in.read_dbf();
-        if (span_ptr && span_size > 0) {
-            // Single write, no copy - optimal path!
+        
+        if (span_size > 0) {
+            // Single write, no copy
             size_t written = std::fwrite(span_ptr, sizeof(T), span_size, _fp);
             if (written != span_size) return cler::Error::TERM_IOError;
             in.commit_read(written);
-            return cler::Empty{};
         }
-
-        // Fall back to standard peek_read (existing code)
-        const T* ptr1 = nullptr;
-        const T* ptr2 = nullptr;
-        size_t sz1 = 0, sz2 = 0;
-        size_t available_samples = in.peek_read(ptr1, sz1, ptr2, sz2);
-
-        if (available_samples == 0) {
-            std::fflush(_fp);  // Only do this occasionally if needed
-            return cler::Error::NotEnoughSamples;
-        }
-
-        if (sz1 > 0 && ptr1) {
-            size_t written = std::fwrite(ptr1, sizeof(T), sz1, _fp);
-            if (written != sz1) return cler::Error::TERM_IOError;
-        }
-
-        if (sz2 > 0 && ptr2) {
-            size_t written = std::fwrite(ptr2, sizeof(T), sz2, _fp);
-            if (written != sz2) return cler::Error::TERM_IOError;
-        }
-
-        in.commit_read(sz1 + sz2);
         return cler::Empty{};
     }
 

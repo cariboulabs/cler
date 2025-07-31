@@ -15,14 +15,13 @@ struct SourceChirpBlock : public cler::BlockBase {
                     float f1_hz,
                     size_t sps,
                     float chirp_duration_s,
-                    size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+                    size_t buffer_size = 1024)
         : cler::BlockBase(name),
           _amplitude(amplitude),
           _f0_hz(f0_hz),
           _f1_hz(f1_hz),
           _sps(sps),
-          _chirp_duration_s(chirp_duration_s),
-          _buffer_size(buffer_size)
+          _chirp_duration_s(chirp_duration_s)
     {
         if (_sps == 0) throw std::invalid_argument("Sample rate must be greater than zero.");
         if (_chirp_duration_s <= 0) throw std::invalid_argument("Chirp duration must be positive.");
@@ -40,18 +39,16 @@ struct SourceChirpBlock : public cler::BlockBase {
 
         _phasor = std::complex<float>(1.0f, 0.0f); // Unit phasor
 
-        _tmp = new T[_buffer_size];
     }
 
-    ~SourceChirpBlock() {
-        delete[] _tmp;
-    }
+    ~SourceChirpBlock() = default;
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
-        // Try zero-copy path first (for doubly mapped buffers)
+        // Use zero-copy path
         auto [write_ptr, write_size] = out->write_dbf();
-        if (write_ptr && write_size > 0) {
-            // Generate directly into output buffer - optimal path!
+        
+        if (write_size > 0) {
+            // Generate directly into output buffer
             for (size_t i = 0; i < write_size; ++i) {
                 std::complex<float> chirp = _phasor;
 
@@ -72,33 +69,7 @@ struct SourceChirpBlock : public cler::BlockBase {
             }
 
             out->commit_write(write_size);
-            return cler::Empty{};
         }
-
-        // Fall back to standard approach with temporary buffer
-        const size_t n_samples = std::min(out->space(), _buffer_size);
-
-        for (size_t i = 0; i < n_samples; ++i) {
-            std::complex<float> chirp = _phasor;
-
-            if constexpr (std::is_same_v<T, std::complex<float>>) {
-                _tmp[i] = _amplitude * chirp;
-            } else {
-                _tmp[i] = _amplitude * chirp.real();
-            }
-
-            _phasor *= _psi;
-            _phasor /= std::abs(_phasor); // Normalize to keep phasor on the unit circle, CRUCIAL for stability
-            _psi *= _psi_inc; // Update phase increment for next sample
-
-            ++_samples_counter;
-            if (_samples_counter >= _n_samples_before_reset) {
-                reset();
-            }
-        }
-
-        out->writeN(_tmp, n_samples);
-
         return cler::Empty{};
     }
 
@@ -126,7 +97,4 @@ private:
     std::complex<float> _phasor;   // Current sample phasor
     std::complex<float> _psi;      // Current phase increment
     std::complex<float> _psi_inc;  // Second difference (sweep)
-
-    size_t _buffer_size;
-    T* _tmp;
 };

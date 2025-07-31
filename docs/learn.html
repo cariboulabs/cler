@@ -326,7 +326,7 @@ int main() {
                         <pre><code class="language-cpp line-numbers">struct PlantBlock : public cler::BlockBase {
     cler::Channel&lt;float&gt; force_in;
     
-    PlantBlock(const char* name) : BlockBase(name), force_in(cler::DEFAULT_BUFFER_SIZE) {
+    PlantBlock(const char* name) : BlockBase(name), force_in(1024) {
         force_in.push(0.0f); // CRITICAL: Initial force for cyclic graph
     }
     

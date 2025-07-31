@@ -15,17 +15,13 @@ struct SourceOneBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure(
         cler::ChannelBase<float>* out) {
 
-        // Try zero-copy path first
+        // Use zero-copy path
         auto [write_ptr, write_size] = out->write_dbf();
-        if (write_ptr && write_size > 0) {
-            size_t to_write = std::min(write_size, CHANNEL_SIZE);
+        size_t to_write = std::min(write_size, CHANNEL_SIZE);
+        if (to_write > 0) {
             std::memcpy(write_ptr, _ones, to_write * sizeof(float));
             out->commit_write(to_write);
-            return cler::Empty{};
         }
-        
-        // Fallback
-        out->writeN(_ones, out->space());
         return cler::Empty{};
     }
 
@@ -43,17 +39,13 @@ struct SourceTwoBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure(
         cler::ChannelBase<float>* out) {
 
-        // Try zero-copy path first
+        // Use zero-copy path
         auto [write_ptr, write_size] = out->write_dbf();
-        if (write_ptr && write_size > 0) {
-            size_t to_write = std::min(write_size, CHANNEL_SIZE);
+        size_t to_write = std::min(write_size, CHANNEL_SIZE);
+        if (to_write > 0) {
             std::memcpy(write_ptr, _twos, to_write * sizeof(float));
             out->commit_write(to_write);
-            return cler::Empty{};
         }
-        
-        // Fallback
-        out->writeN(_twos, out->space());
         return cler::Empty{};
     }
 
@@ -62,64 +54,44 @@ struct SourceTwoBlock : public cler::BlockBase {
 };
 
 struct Gain2Block : public cler::BlockBase {
-    cler::Channel<float, CHANNEL_SIZE> in; //this is a stack buffer!
+    cler::Channel<float> in; // Heap allocated for dbf support
 
-    Gain2Block(const char* name) : BlockBase(name) {}
+    Gain2Block(const char* name) : BlockBase(name), in(1024) {} // 1024 * 4 = 4KB
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        // Try zero-copy path first
+        // Use zero-copy path
         auto [read_ptr, read_size] = in.read_dbf();
-        if (read_ptr && read_size > 0) {
-            auto [write_ptr, write_size] = out->write_dbf();
-            if (write_ptr && write_size > 0) {
-                size_t to_process = std::min(read_size, write_size);
-                for (size_t i = 0; i < to_process; ++i) {
-                    write_ptr[i] = read_ptr[i] * 2.0f;
-                }
-                in.commit_read(to_process);
-                out->commit_write(to_process);
-                return cler::Empty{};
-            }
-        }
+        auto [write_ptr, write_size] = out->write_dbf();
         
-        // Fallback to simple approach
-        size_t transferable = std::min(in.size(), out->space());
-        for (size_t i = 0; i < transferable; ++i) {
-            float value;
-            in.pop(value);
-            out->push(value * 2.0f);
+        size_t to_process = std::min(read_size, write_size);
+        if (to_process > 0) {
+            for (size_t i = 0; i < to_process; ++i) {
+                write_ptr[i] = read_ptr[i] * 2.0f;
+            }
+            in.commit_read(to_process);
+            out->commit_write(to_process);
         }
         return cler::Empty{};
     }
 };
 
 struct Gain3Block : public cler::BlockBase {
-    cler::Channel<float, CHANNEL_SIZE> in; //this is a stack buffer!
+    cler::Channel<float> in; // Heap allocated for dbf support
 
-    Gain3Block(const char* name) : BlockBase(name) {}
+    Gain3Block(const char* name) : BlockBase(name), in(1024) {} // 1024 * 4 = 4KB
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        // Try zero-copy path first
+        // Use zero-copy path
         auto [read_ptr, read_size] = in.read_dbf();
-        if (read_ptr && read_size > 0) {
-            auto [write_ptr, write_size] = out->write_dbf();
-            if (write_ptr && write_size > 0) {
-                size_t to_process = std::min(read_size, write_size);
-                for (size_t i = 0; i < to_process; ++i) {
-                    write_ptr[i] = read_ptr[i] * 3.0f;
-                }
-                in.commit_read(to_process);
-                out->commit_write(to_process);
-                return cler::Empty{};
-            }
-        }
+        auto [write_ptr, write_size] = out->write_dbf();
         
-        // Fallback to simple approach
-        size_t transferable = std::min(in.size(), out->space());
-        for (size_t i = 0; i < transferable; ++i) {
-            float value;
-            in.pop(value);
-            out->push(value * 3.0f);
+        size_t to_process = std::min(read_size, write_size);
+        if (to_process > 0) {
+            for (size_t i = 0; i < to_process; ++i) {
+                write_ptr[i] = read_ptr[i] * 3.0f;
+            }
+            in.commit_read(to_process);
+            out->commit_write(to_process);
         }
         return cler::Empty{};
     }
@@ -175,7 +147,7 @@ struct switchGainBlock : public cler::BlockBase {
 struct SinkPrintBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
-    SinkPrintBlock(const char* name) : BlockBase(name), in(CHANNEL_SIZE) {}
+    SinkPrintBlock(const char* name) : BlockBase(name), in(1024) {} // 1024 * 4 = 4KB
 
     cler::Result<cler::Empty, cler::Error> procedure() {
         size_t transferable = in.size();

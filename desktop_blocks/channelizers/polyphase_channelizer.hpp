@@ -12,7 +12,7 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
                               size_t num_channels,
                               float kaiser_attenuation,
                               size_t kaiser_filter_semilength,
-                              size_t in_buffer_size = cler::DEFAULT_BUFFER_SIZE)
+                              size_t in_buffer_size = 512)
         : cler::BlockBase(std::move(name)), in(in_buffer_size), _num_channels(num_channels)
     {
          assert(kaiser_filter_semilength > 0 && kaiser_filter_semilength < 9 && 
@@ -54,44 +54,26 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSpace;
         }
 
-        // Try to use read_dbf for better performance on input
+        // Use zero-copy path
         auto [read_ptr, read_size] = in.read_dbf();
-        if (read_ptr && read_size >= _num_channels * num_frames) {
-            // Process frames directly from doubly-mapped buffer
-            for (size_t i = 0; i < num_frames; ++i) {
-                std::memcpy(_tmp_in, read_ptr + i * _num_channels, _num_channels * sizeof(std::complex<float>));
+        
+        // Process frames directly from doubly-mapped buffer
+        for (size_t i = 0; i < num_frames; ++i) {
+            std::memcpy(_tmp_in, read_ptr + i * _num_channels, _num_channels * sizeof(std::complex<float>));
 
-                firpfbch_crcf_analyzer_execute(
-                    _pfch,
-                    reinterpret_cast<liquid_float_complex*>(_tmp_in),
-                    reinterpret_cast<liquid_float_complex*>(_tmp_out)
-                );
+            firpfbch_crcf_analyzer_execute(
+                _pfch,
+                reinterpret_cast<liquid_float_complex*>(_tmp_in),
+                reinterpret_cast<liquid_float_complex*>(_tmp_out)
+            );
 
-                size_t idx = 0;
-                auto push_outputs = [&](auto*... chs) {
-                    ((chs->push(_tmp_out[idx++])), ...);
-                };
-                push_outputs(outs...);
-            }
-            in.commit_read(num_frames * _num_channels);
-        } else {
-            // Fallback to standard approach
-            for (size_t i = 0; i < num_frames; ++i) {
-                in.readN(_tmp_in, _num_channels);
-
-                firpfbch_crcf_analyzer_execute(
-                    _pfch,
-                    reinterpret_cast<liquid_float_complex*>(_tmp_in),
-                    reinterpret_cast<liquid_float_complex*>(_tmp_out)
-                );
-
-                size_t idx = 0;
-                auto push_outputs = [&](auto*... chs) {
-                    ((chs->push(_tmp_out[idx++])), ...);
-                };
-                push_outputs(outs...);
-            }
+            size_t idx = 0;
+            auto push_outputs = [&](auto*... chs) {
+                ((chs->push(_tmp_out[idx++])), ...);
+            };
+            push_outputs(outs...);
         }
+        in.commit_read(num_frames * _num_channels);
 
         return cler::Empty{};
     }

@@ -660,7 +660,6 @@ namespace cler {
         
     };
 
-    constexpr size_t DEFAULT_BUFFER_SIZE = 256;
     constexpr float PI = 3.14159265358979323846f;
 
 } // namespace cler

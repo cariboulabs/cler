@@ -11,7 +11,7 @@ struct SinkNullBlock : public cler::BlockBase {
     SinkNullBlock(const char* name,
                       OnReceiveCallback callback = nullptr,
                       [[maybe_unused]] void* callback_context = nullptr,
-                      size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+                      size_t buffer_size = 1024)
         : cler::BlockBase(name), in(buffer_size), _callback(callback), _callback_context(callback_context) {
 
         if (buffer_size == 0) {

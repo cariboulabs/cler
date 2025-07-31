@@ -12,7 +12,7 @@ struct MultiStageResamplerBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
     MultiStageResamplerBlock(const char* name, const float ratio, const float attenuation,
-        const size_t buffer_size = cler::DEFAULT_BUFFER_SIZE)
+        const size_t buffer_size = 1024)
         : cler::BlockBase(name), in(buffer_size), _ratio(ratio)
     {
         if constexpr (std::is_same_v<T, float>) {
