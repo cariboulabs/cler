@@ -42,6 +42,8 @@ static constexpr std::size_t cacheLineSize = cler::platform::cache_line_size;
 
 static constexpr std::size_t MAX_BYTES_ON_STACK = 2'097'152; // 2 MBs
 
+ static constexpr std::size_t DOUBLY_MAPPED_MIN_SIZE = 4096; // 4 Kbs
+
 // C++17 version using type traits
 template <typename T>
 using SPSC_Type = std::enable_if_t<
@@ -73,7 +75,6 @@ struct AdaptiveHeapBuffer {
 
   static constexpr std::size_t padding = ((cacheLineSize - 1) / sizeof(T)) + 1;
   static constexpr std::size_t MAX_SIZE_T = std::numeric_limits<std::size_t>::max();
-  static constexpr std::size_t DOUBLY_MAPPED_MIN_SIZE = 32768; // 32KB threshold
 
 private:
   cler::vmem::DoublyMappedAllocation vmem_allocation_;

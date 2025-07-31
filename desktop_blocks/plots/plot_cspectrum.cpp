@@ -105,9 +105,29 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
         size_t commit_size = (_signal_channels[i].size() + work_size > _buffer_size)
             ? (_signal_channels[i].size() + work_size - _buffer_size) : 0;
 
-        in[i].readN(_tmp_buffer, work_size);
-        _signal_channels[i].commit_read(commit_size);
-        _signal_channels[i].writeN(_tmp_buffer, work_size);
+        // Try zero-copy path first
+        auto [read_ptr, read_size] = in[i].read_dbf();
+        if (read_ptr && read_size >= work_size) {
+            // Try to write directly to internal buffer
+            auto [write_ptr, write_size] = _signal_channels[i].write_dbf();
+            if (write_ptr && write_size >= work_size) {
+                // FAST PATH: Direct copy from input to internal buffer
+                _signal_channels[i].commit_read(commit_size);
+                std::memcpy(write_ptr, read_ptr, work_size * sizeof(std::complex<float>));
+                _signal_channels[i].commit_write(work_size);
+                in[i].commit_read(work_size);
+            } else {
+                // Input has dbf but output doesn't
+                _signal_channels[i].commit_read(commit_size);
+                _signal_channels[i].writeN(read_ptr, work_size);
+                in[i].commit_read(work_size);
+            }
+        } else {
+            // Fall back to standard approach
+            in[i].readN(_tmp_buffer, work_size);
+            _signal_channels[i].commit_read(commit_size);
+            _signal_channels[i].writeN(_tmp_buffer, work_size);
+        }
     }
 
     _samples_counter += work_size;

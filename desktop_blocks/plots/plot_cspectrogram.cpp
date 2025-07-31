@@ -1,5 +1,6 @@
 #include "plot_cspectrogram.hpp"
 #include "implot.h"
+#include <cstring>
 
 PlotCSpectrogramBlock::PlotCSpectrogramBlock(const char*name,
     const std::vector<std::string> signal_labels,
@@ -23,7 +24,7 @@ PlotCSpectrogramBlock::PlotCSpectrogramBlock(const char*name,
         ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
     );
     for (size_t i = 0; i < _num_inputs; ++i) {
-        new (&in[i]) cler::Channel<std::complex<float>>(BUFFER_SIZE_MULTIPLIER * _n_fft_samples);
+        new (&in[i]) cler::Channel<std::complex<float>>(std::min(_n_fft_samples, cler::DOUBLY_MAPPED_MIN_SIZE));
     }
 
     _liquid_inout = new std::complex<float>[_n_fft_samples];
@@ -83,8 +84,17 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
     std::lock_guard<std::mutex> lock(_spectrogram_mutex);
 
     for (size_t i = 0; i < _num_inputs; ++i) {
-        in[i].readN(_tmp_y_buffer, _n_fft_samples);
-        memcpy(_liquid_inout, _tmp_y_buffer, _n_fft_samples * sizeof(std::complex<float>));
+        // Try zero-copy path first
+        auto [read_ptr, read_size] = in[i].read_dbf();
+        if (read_ptr && read_size >= _n_fft_samples) {
+            // FAST PATH: Copy directly from doubly-mapped buffer
+            memcpy(_liquid_inout, read_ptr, _n_fft_samples * sizeof(std::complex<float>));
+            in[i].commit_read(_n_fft_samples);
+        } else {
+            // Fall back to standard approach
+            in[i].readN(_tmp_y_buffer, _n_fft_samples);
+            memcpy(_liquid_inout, _tmp_y_buffer, _n_fft_samples * sizeof(std::complex<float>));
+        }
 
         float coherent_gain = 0.0f;
         for (size_t n = 0; n < _n_fft_samples; ++n) {

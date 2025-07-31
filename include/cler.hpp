@@ -15,6 +15,9 @@
 
 namespace cler {
 
+    //here so we can insure blocks use this feature
+    constexpr size_t DOUBLY_MAPPED_MIN_SIZE = dro::details::DOUBLY_MAPPED_MIN_SIZE;
+
     // Configurable at compile-time for different target platforms
     #ifndef CLER_DEFAULT_MAX_WORKERS
     #define CLER_DEFAULT_MAX_WORKERS (8)  // Conservative default for embedded systems

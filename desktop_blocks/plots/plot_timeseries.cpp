@@ -89,16 +89,48 @@ cler::Result<cler::Empty, cler::Error> PlotTimeSeriesBlock::procedure() {
     size_t commit_read_size = (_x_channel->size() + work_size > _buffer_size)
         ? (_x_channel->size() + work_size - _buffer_size) : 0;
 
+    // Process each input channel
     for (size_t i = 0; i < _num_inputs; ++i) {
-        in[i].readN(_tmp_y_buffer, work_size);
-        _y_channels[i].commit_read(commit_read_size);
-        _y_channels[i].writeN(_tmp_y_buffer, work_size);
+        // Try zero-copy path first
+        auto [read_ptr, read_size] = in[i].read_dbf();
+        if (read_ptr && read_size >= work_size) {
+            // Try to write directly to internal buffer
+            auto [write_ptr, write_size] = _y_channels[i].write_dbf();
+            if (write_ptr && write_size >= work_size) {
+                // FAST PATH: Direct copy from input to internal buffer
+                _y_channels[i].commit_read(commit_read_size);
+                std::memcpy(write_ptr, read_ptr, work_size * sizeof(float));
+                _y_channels[i].commit_write(work_size);
+                in[i].commit_read(work_size);
+            } else {
+                // Input has dbf but output doesn't
+                _y_channels[i].commit_read(commit_read_size);
+                _y_channels[i].writeN(read_ptr, work_size);
+                in[i].commit_read(work_size);
+            }
+        } else {
+            // Fall back to standard approach
+            in[i].readN(_tmp_y_buffer, work_size);
+            _y_channels[i].commit_read(commit_read_size);
+            _y_channels[i].writeN(_tmp_y_buffer, work_size);
+        }
     }
 
+    // Handle X channel (timestamps) - try dbf first
     _x_channel->commit_read(commit_read_size);
-    for (size_t i = 0; i < work_size; ++i) {
-        float t = static_cast<float>(_samples_counter + i) / _sps;
-        _x_channel->push(t);
+    auto [x_write_ptr, x_write_size] = _x_channel->write_dbf();
+    if (x_write_ptr && x_write_size >= work_size) {
+        // Generate timestamps directly into buffer
+        for (size_t i = 0; i < work_size; ++i) {
+            x_write_ptr[i] = static_cast<float>(_samples_counter + i) / _sps;
+        }
+        _x_channel->commit_write(work_size);
+    } else {
+        // Fall back to push
+        for (size_t i = 0; i < work_size; ++i) {
+            float t = static_cast<float>(_samples_counter + i) / _sps;
+            _x_channel->push(t);
+        }
     }
     _samples_counter += work_size;
 
