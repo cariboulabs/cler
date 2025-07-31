@@ -542,35 +542,40 @@ public:
   }
 
   // NEW: Zero-copy contiguous read (only available with doubly mapped heap buffers)
-  std::pair<const T*, std::size_t> read_dbf() noexcept {
-    if constexpr (N == 0) {
-      // Only heap buffers can be doubly mapped
-      if (base_type::is_doubly_mapped_) {
-        const auto capacity = base_type::capacity_;
-        const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
-        auto writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
-        reader_.writeIndexCache_ = writeIndexCache;
-        
-        std::size_t available;
-        if (writeIndexCache >= readIndex) {
-          available = writeIndexCache - readIndex;
-        } else {
-          available = capacity - readIndex + writeIndexCache;
-        }
-        
-        if (available == 0) {
-          return {nullptr, 0};
-        }
-        
-        // With doubly mapped buffer, ALL data is contiguous
-        const T* ptr = &base_type::buffer_[readIndex];
-        return {ptr, available};
+  std::pair<const T*, std::size_t> read_dbf() {  // Remove noexcept!
+      if constexpr (N == 0) {
+          // Only heap buffers can be doubly mapped
+          if (base_type::is_doubly_mapped_) {
+              const auto capacity = base_type::capacity_;
+              const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
+              auto writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
+              reader_.writeIndexCache_ = writeIndexCache;
+              
+              std::size_t available;
+              if (writeIndexCache >= readIndex) {
+                  available = writeIndexCache - readIndex;
+              } else {
+                  available = capacity - readIndex + writeIndexCache;
+              }
+              
+              if (available == 0) {
+                  return {nullptr, 0};
+              }
+              
+              // With doubly mapped buffer, ALL data is contiguous
+              const T* ptr = &base_type::buffer_[readIndex];
+              return {ptr, available};
+          }
+          // NOT doubly mapped - throw here!
+          const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
+          throw std::runtime_error(
+              "read_dbf() requires doubly-mapped buffer. "
+              "Current size: " + std::to_string(buffer_bytes) + " bytes, "
+              "minimum: " + std::to_string(details::DOUBLY_MAPPED_MIN_SIZE) + " bytes."
+          );
       }
-    }
-    // Stack buffers or non-doubly-mapped heap buffers
-    return {nullptr, 0};
+      throw std::runtime_error("read_dbf() not supported for stack-allocated buffers");
   }
-
   // Also need commit_write (which you currently have)
   void commit_write(std::size_t count) noexcept {
       const auto capacity = base_type::capacity_;
@@ -579,34 +584,40 @@ public:
       writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
   }
 
-  std::pair<T*, std::size_t> write_dbf() noexcept {
-    if constexpr (N == 0) {
-        // Only heap buffers can be doubly mapped
-        if (base_type::is_doubly_mapped_) {
-            const auto capacity = base_type::capacity_;
-            const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
-            auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
-            writer_.readIndexCache_ = readIndexCache;
-            
-            std::size_t space;
-            if (readIndexCache > writeIndex) {
-                space = readIndexCache - writeIndex - 1;
-            } else {
-                space = capacity - writeIndex + readIndexCache - 1;
-            }
-            
-            if (space == 0) {
-                return {nullptr, 0};
-            }
-            
-            // With doubly mapped buffer, ALL space is contiguous
-            T* ptr = &base_type::buffer_[writeIndex];
-            return {ptr, space};
-        }
-    }
-    // Stack buffers or non-doubly-mapped heap buffers
-    return {nullptr, 0};
-}
+  std::pair<T*, std::size_t> write_dbf() {  // Remove noexcept!
+      if constexpr (N == 0) {
+          // Only heap buffers can be doubly mapped
+          if (base_type::is_doubly_mapped_) {
+              const auto capacity = base_type::capacity_;
+              const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
+              auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
+              writer_.readIndexCache_ = readIndexCache;
+              
+              std::size_t space;
+              if (readIndexCache > writeIndex) {
+                  space = readIndexCache - writeIndex - 1;
+              } else {
+                  space = capacity - writeIndex + readIndexCache - 1;
+              }
+              
+              if (space == 0) {
+                  return {nullptr, 0};
+              }
+              
+              // With doubly mapped buffer, ALL space is contiguous
+              T* ptr = &base_type::buffer_[writeIndex];
+              return {ptr, space};
+          }
+          // NOT doubly mapped - throw here!
+          const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
+          throw std::runtime_error(
+              "write_dbf() requires doubly-mapped buffer. "
+              "Current size: " + std::to_string(buffer_bytes) + " bytes, "
+              "minimum: " + std::to_string(details::DOUBLY_MAPPED_MIN_SIZE) + " bytes."
+          );
+      }
+      throw std::runtime_error("write_dbf() not supported for stack-allocated buffers");
+  }
 
 private:
   // Note: The padding is handled differently for heap vs stack buffers
