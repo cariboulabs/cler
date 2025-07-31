@@ -27,6 +27,8 @@
 // Include platform-specific virtual memory support
 #if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
     #include "virtual_memory/cler_vmem_posix.hpp"
+#elif defined(_WIN32)
+    #include "virtual_memory/cler_vmem_win.hpp"
 #else
     #include "virtual_memory/cler_vmem_none.hpp"
 #endif

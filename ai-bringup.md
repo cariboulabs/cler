@@ -362,51 +362,79 @@ struct GainBlock : public cler::BlockBase {
 };
 ```
 
-#### Buffer Access Patterns (Performance Order)
+#### Buffer Access Patterns (Benchmarked Performance Order)
+
+**Performance Characteristics**:
+- **Push/Pop**: Orders of magnitude slower (AVOID for high-throughput)
+- **ReadN/WriteN**: Good baseline performance
+- **Peek/Commit**: Similar performance to readN/writeN
+- **read_dbf/write_dbf**: OPTIMAL - Approximately 2x faster than other techniques
+
 ```cpp
-// 0. Zero-copy span access (NEW - BEST for file/network I/O when available)
+// TECHNIQUE 1: read_dbf/write_dbf (OPTIMAL)
+// Doubly-mapped buffers: True zero-copy on supported platforms
 auto [read_ptr, read_size] = in.read_dbf();
 if (read_ptr) {
     // Direct access to contiguous data (no wrap-around with doubly mapped)
-    fwrite(read_ptr, sizeof(T), read_size, fp);
-    in.commit_read(read_size);
+    auto [write_ptr, write_size] = out->write_dbf();
+    if (write_ptr) {
+        // ULTIMATE FAST PATH: Direct processing between doubly-mapped buffers
+        size_t to_process = std::min(read_size, write_size);
+        for (size_t i = 0; i < to_process; ++i) {
+            write_ptr[i] = read_ptr[i] * gain; // Process directly
+        }
+        in.commit_read(to_process);
+        out->commit_write(to_process);
+    } else {
+        // Semi-fast path: read from doubly-mapped, write normally
+        fwrite(read_ptr, sizeof(T), read_size, fp);
+        in.commit_read(read_size);
+    }
 }
 
-auto [write_ptr, write_size] = out->write_dbf();
-if (write_ptr) {
-    // Direct write to buffer (no wrap-around with doubly mapped)
-    size_t n = fread(write_ptr, sizeof(T), write_size, fp);
-    out->commit_write(n);
+// TECHNIQUE 2: ReadN/WriteN (GOOD BASELINE)
+// Bulk transfer with single memory copy
+size_t transferable = std::min({in.size(), out->space(), BUFFER_SIZE});
+in.readN(buffer, transferable);
+// Process buffer...
+for (size_t i = 0; i < transferable; ++i) {
+    buffer[i] *= gain;
 }
+out->writeN(buffer, transferable);
 
-// 1. Read/Write (bulk transfer - PREFERRED)
-size_t written = out->writeN(buffer, count);
-size_t read = in.readN(buffer, count);
-
-// 2. Peek/Commit (inspect before processing)
+// TECHNIQUE 3: Peek/Commit (ZERO-COPY READ)
+// Inspect before processing, still needs one copy for output
 const float* ptr1, *ptr2;
 size_t size1, size2;
 size_t available = in.peek_read(ptr1, size1, ptr2, size2);
-// Process data...
-in.commit_read(processed_count);
+if (available > 0) {
+    // Process first segment
+    size_t from_seg1 = std::min(size1, BUFFER_SIZE);
+    for (size_t i = 0; i < from_seg1; ++i) {
+        buffer[i] = ptr1[i] * gain;
+    }
+    // Handle second segment if needed...
+    in.commit_read(processed_count);
+    out->writeN(buffer, processed_count);
+}
 
-// For writing with peek_write (NOTE: variables passed by reference, not pointers)
-float* write_ptr1, *write_ptr2;
-size_t write_size1, write_size2;
-size_t writable = out->peek_write(write_ptr1, write_size1, write_ptr2, write_size2);
-// Write data...
-out->commit_write(written_count);
-
-// 3. Push/Pop (single values - AVOID in hot paths)
+// TECHNIQUE 4: Push/Pop (AVOID)
+// Single sample processing - EXTREMELY SLOW
 float sample;
 in.pop(sample);
-out->push(processed_sample);
+sample *= gain;
+out->push(sample);
 ```
 
+**Performance Analysis**:
+- **Doubly-mapped buffers** eliminate one memory copy operation, providing significant speedup
+- **ReadN/WriteN and Peek/Commit** have similar performance as both require one memory copy
+- **Push/Pop** is orders of magnitude slower due to function call overhead per sample
+- **Memory copy reduction** is the key to performance - each eliminated copy significantly improves throughput
+
 ### Channel Implementation Notes
-- **Doubly Mapped Buffers**: On Linux/macOS/FreeBSD, heap buffers ≥32KB automatically use doubly mapped memory for zero-copy wraparound access
-- **read_dbf()/write_dbf()**: Return {nullptr, 0} on unsupported platforms or stack buffers
-- **Transparent Fallback**: Blocks should try span methods first, then fall back to peek/commit
+- **read_dbf()/write_dbf()**: Return {nullptr, 0} when doubly-mapped buffers are not available
+- **Transparent Fallback**: Blocks should try dbf methods first, then fall back to peek/commit
 
 ### Error Handling Pattern
 ```cpp
@@ -705,8 +733,24 @@ cler::print_flowgraph_execution_report(flowgraph);
 
 ### Benchmarking
 ```bash
-cd build/performance && ./cler_throughput
+# Run comprehensive performance suite
+cd build/performance
+
+# Compare different read/write techniques
+./perf_read_write_techniques
+
+# Compare scheduler configurations
+./perf_simple_linear_flow
+
+# Compare fanout workload strategies  
+./perf_fanout_workloads
 ```
+
+**Read/Write Technique Performance**:
+- **read_dbf/write_dbf**: OPTIMAL (fastest when available)
+- **readN/writeN**: Good baseline performance
+- **peek/commit**: Zero-copy read, similar to readN/writeN
+- **push/pop**: AVOID - orders of magnitude slower
 
 ### Common Performance Patterns
 ```cpp

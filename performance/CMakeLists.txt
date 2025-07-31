@@ -4,6 +4,9 @@ target_link_libraries(perf_simple_linear_flow cler::cler_desktop_blocks)
 add_executable(perf_fanout_workloads perf_fanout_workloads.cpp)
 target_link_libraries(perf_fanout_workloads cler::cler_desktop_blocks)
 
+add_executable(perf_read_write_techniques perf_read_write_techniques.cpp)
+target_link_libraries(perf_read_write_techniques cler::cler_desktop_blocks)
+
 if(UNIX)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/cpugov.sh

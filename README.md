@@ -22,7 +22,7 @@ Embedded Linux aside, most embedded devices traditionally relied on dedicated ch
 
 **Why reinvent the DSP wheel?** Existing frameworks rely heavily on runtime polymorphism to manage blocks and channels. This adds overhead, limits type safety, and complicates deployment on resource-constrained systems. For example, GNU Radio uses void* buffers in its work() calls to achieve flexibility, but that sacrifices clarity and static guarantees. Cler takes a different path: using C++17 features like variadic templates and std::apply, it achieves compile-time safety, zero-cost abstraction, and minimal runtime footprint — making it practical for everything from desktop SDR to bare-metal MCUs.
 
-**How does it compare to GNURadio or FutureSDR**? It’s not trying to — though it can be competitive in desktop environments. Cler isn’t a general-purpose SDR toolkit; it’s built from the ground up for embedded systems, where memory is limited, timing is critical, and you can’t rely on having an MMU. Instead of shared runtime schedulers or double-mapped buffers, Cler uses block-owned ring buffers and minimal coordination to keep things simple and deterministic. Yet it remains powerful enough for many SDR and control applications — just without the overhead.
+**How does it compare to GNURadio or FutureSDR**? Cler takes a hybrid approach — combining the performance optimizations of modern frameworks with embedded-first design. On desktop systems, Cler leverages advanced techniques like doubly-mapped buffers for zero-copy performance that can match or exceed established frameworks. On embedded systems, it gracefully falls back to lightweight alternatives, maintaining deterministic behavior even without an MMU. This allows the same codebase to achieve optimal performance across platforms — from high-throughput desktop SDR to resource-constrained MCUs.
 
 Want to try out some examples on a Desktop?
 ```
@@ -100,20 +100,26 @@ Cler supports two architectural styles:
 To include its headers and link against it, link against `cler::cler_blocks` with CMake.
 In Cler, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
 
-* **Buffers** </br>
+* **Buffers & Performance** </br>
 Our buffers are modified version of `https://github.com/drogalis/SPSC-Queue`. They allow for static or heap allocation. See the gain block in `streamlined.cpp` for an example.</br> 
-Cler supports three buffer access patterns: 
-    * **Push/Pop** </br>
+Cler supports four buffer access patterns with dramatically different performance characteristics:
+
+    * **Push/Pop (AVOID)** </br>
     For single values. there is also a try push/pop you can use if you dont inspect size() beforehand.
     Remember though, after you have poped a value, you must not put it back! Cler channels are lock-free SPSC that *ASSUME* that one thread is a writer while another is a reader. No mixin' it up. </br>
-    This is **SLOW** in our context. Always prefer the other access patterns.
+    **⚠️ This is EXTREMELY SLOW** - Orders of magnitude slower than optimal patterns. Only use for control/configuration data.
 
-    * **Peek/Commit** </br>
-    Allows you to inspect (peek) data in the buffer without removing it, then explicitly commit the number of items you’ve processed.
-    The downside is that you can only access data up to the physical end of the ring buffer at a time — so if your logical window wraps, you may need to handle two chunks.
+    * **ReadN/WriteN (Good baseline)** </br>
+    Provides bulk access to buffer data with automatic pointer management. You copy data to a temporary buffer for processing. ReadN/WriteN automatically advances the ring buffer pointers — no manual commit needed. Good general-purpose pattern with single memory copy.
 
-    * **Read/Write (your go-to)**. </br>
-    Provides access to the full available buffer space for larger chunks of data. You’ll typically copy data to a temporary buffer for processing. Read/Write automatically advances the ring buffer pointers for you — no manual commit needed. This should be your *go to* pattern.
+    * **Peek/Commit (Zero-copy read)** </br>
+    Allows you to inspect (peek) data in the buffer without removing it, then explicitly commit the number of items you've processed.
+    The downside is that you can only access data up to the physical end of the ring buffer at a time — so if your logical window wraps, you may need to handle two chunks. Similar performance to ReadN/WriteN as it still requires one memory copy for output.
+
+    * **read_dbf/write_dbf (OPTIMAL)** </br>
+    **Doubly-mapped buffers** provide true zero-copy access when available. Uses virtual memory tricks to present ring buffer data as a contiguous array, eliminating wrap-around handling. **Significantly faster** than other techniques due to eliminating one memory copy operation.
+
+**Performance Recommendation**: Use `read_dbf/write_dbf` for high-throughput paths, `readN/writeN` for general use, and avoid `push/pop` except for control data.
 
 # RoadMap
 Below is a wish-list for this library, sorted by importance.

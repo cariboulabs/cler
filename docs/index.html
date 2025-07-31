@@ -42,7 +42,7 @@
                 
                 <p class="problem">Existing frameworks like GNU Radio are battle-tested but require significant expertise and development time. Their runtime flexibility comes with overhead that makes embedded deployment challenging, and their large filesystem footprint doesn't fit today's AI context windows for modern development workflows.</p>
 
-                <p class="solution"><strong>CLER fills this gap.</strong> Using compile-time C++ templates, it minimizes overhead while keeping the runtime footprint tiny — practical for everything from desktop SDR to bare-metal MCUs. Its &lt;1000 line core fits perfectly in AI context windows, enabling rapid development with modern tools.</p>
+                <p class="solution"><strong>CLER bridges this gap with a hybrid approach.</strong> On desktop systems, it leverages advanced techniques like doubly-mapped buffers for zero-copy performance that can match established frameworks. On embedded systems, it gracefully falls back to lightweight alternatives, maintaining deterministic behavior even without an MMU. Using compile-time C++ templates, the same codebase achieves optimal performance across platforms while keeping the core &lt;1000 lines — perfect for AI-assisted development.</p>
             </div>
         </section>
 
@@ -61,6 +61,10 @@
                     <div class="principle">
                         <h4>🎯 Optimized Schedulers</h4>
                         <p>ThreadPerBlock (default, simple, debuggable) and FixedThreadPool (cache-optimized, better for constrained systems) with platform-aware memory layout.</p>
+                    </div>
+                    <div class="principle">
+                        <h4>⚡ High-Performance I/O</h4>
+                        <p>Doubly-mapped buffers for zero-copy performance on desktop, with graceful fallback to lightweight alternatives on embedded systems.</p>
                     </div>
                     <div class="principle">
                         <h4>🤖 AI-Friendly Core</h4>

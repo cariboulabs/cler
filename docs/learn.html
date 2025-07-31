@@ -551,22 +551,64 @@ config.adaptive_sleep_fail_threshold = 5;     // Sleep after 5 failures</code></
                 </section>
 
                 <section id="buffer-patterns">
-                    <h2>Three Buffer Access Patterns</h2>
-                    <p>Different algorithms need different memory access patterns. CLER supports them all efficiently, from simple single-sample processing to zero-copy bulk operations.</p>
+                    <h2>Buffer Access Performance</h2>
+                    <p>CLER supports four buffer access patterns with dramatically different performance characteristics. Choose the right pattern for optimal throughput:</p>
+                    
+                    <div class="performance-results">
+                        <h3>Performance Characteristics</h3>
+                        <div class="perf-table">
+                            <div class="perf-row header">
+                                <div class="perf-technique">Technique</div>
+                                <div class="perf-throughput">Performance</div>
+                                <div class="perf-vs">Relative Speed</div>
+                            </div>
+                            <div class="perf-row optimal">
+                                <div class="perf-technique">read_dbf/write_dbf</div>
+                                <div class="perf-throughput">OPTIMAL</div>
+                                <div class="perf-vs">~2x faster</div>
+                            </div>
+                            <div class="perf-row good">
+                                <div class="perf-technique">readN/writeN</div>
+                                <div class="perf-throughput">Good baseline</div>
+                                <div class="perf-vs">Good</div>
+                            </div>
+                            <div class="perf-row good">
+                                <div class="perf-technique">peek/commit</div>
+                                <div class="perf-throughput">Similar to readN</div>
+                                <div class="perf-vs">Good</div>
+                            </div>
+                            <div class="perf-row avoid">
+                                <div class="perf-technique">push/pop</div>
+                                <div class="perf-throughput">AVOID</div>
+                                <div class="perf-vs">Orders of magnitude slower</div>
+                            </div>
+                        </div>
+                    </div>
                     
                     <div class="pattern-comparison">
                         <div class="pattern">
-                            <h3>1. Push/Pop (Simplest)</h3>
+                            <h3>1. read_dbf/write_dbf (OPTIMAL)</h3>
                             <div class="code-block">
-                                <pre><code class="language-cpp line-numbers">float sample;
-in->pop(sample);
-out->push(sample * gain);</code></pre>
+                                <pre><code class="language-cpp line-numbers">// Doubly-mapped buffers: True zero-copy when available
+auto [read_ptr, read_size] = in.read_dbf();
+if (read_ptr) {
+    auto [write_ptr, write_size] = out->write_dbf();
+    if (write_ptr) {
+        // ULTIMATE FAST PATH: Direct processing
+        size_t to_process = std::min(read_size, write_size);
+        for (size_t i = 0; i < to_process; ++i) {
+            write_ptr[i] = read_ptr[i] * gain;
+        }
+        in.commit_read(to_process);
+        out->commit_write(to_process);
+    }
+}</code></pre>
                             </div>
-                            <p class="pattern-note slow">⚠️ <strong>Slowest</strong> - Use only for simple, low-rate processing</p>
+                            <p class="pattern-note optimal">🚀 <strong>Significantly faster</strong> - Eliminates one memory copy when available</p>
                         </div>
                         
                         <div class="pattern">
-                            <h3>2. Read/Write (Recommended)</h3>
+                            <h3>2. readN/writeN (Good Baseline)</h3>
                             <div class="code-block">
                                 <pre><code class="language-cpp line-numbers">float buffer[256];
 size_t count = in->readN(buffer, 256);
@@ -576,38 +618,46 @@ for (size_t i = 0; i < count; ++i) {
 }
 out->writeN(buffer, count);</code></pre>
                             </div>
-                            <p class="pattern-note fast">✅ <strong>Fast</strong> - Handles ring buffer wrapping automatically, good for most use cases</p>
+                            <p class="pattern-note fast">✅ <strong>Good baseline</strong> - Single memory copy, automatic ring buffer handling</p>
                         </div>
                         
                         <div class="pattern">
-                            <h3>3. Peek/Commit (Zero-Copy)</h3>
+                            <h3>3. peek/commit (Zero-Copy Read)</h3>
                             <div class="code-block">
-                                <pre><code class="language-cpp line-numbers">// Reading with peek/commit
-const float *ptr1, *ptr2;
+                                <pre><code class="language-cpp line-numbers">const float *ptr1, *ptr2;
 size_t size1, size2;
 size_t available = in.peek_read(ptr1, size1, ptr2, size2);
 
-// Process ptr1[0..size1] and ptr2[0..size2] directly
-process_samples(ptr1, size1);
-if (size2 > 0) process_samples(ptr2, size2);
+// Process directly from input buffer
+for (size_t i = 0; i < size1; ++i) buffer[i] = ptr1[i] * gain;
+for (size_t i = 0; i < size2; ++i) buffer[size1+i] = ptr2[i] * gain;
+
 in.commit_read(size1 + size2);
-
-// Writing with peek/commit (variables passed by reference, NOT pointers)
-float* write_ptr1, *write_ptr2;
-size_t write_size1, write_size2;
-size_t writable = out->peek_write(write_ptr1, write_size1, write_ptr2, write_size2);
-
-// Write to both segments
-for (size_t i = 0; i < write_size1; ++i) {
-    write_ptr1[i] = processed_data[i];
-}
-for (size_t i = 0; i < write_size2; ++i) {
-    write_ptr2[i] = processed_data[write_size1 + i];
-}
-out->commit_write(write_size1 + write_size2);</code></pre>
+out->writeN(buffer, size1 + size2);</code></pre>
                             </div>
-                            <p class="pattern-note fastest">⚡ <strong>Fastest</strong> - Zero-copy access. Note: peek_write variables passed by reference, not pointers</p>
+                            <p class="pattern-note fast">⚡ <strong>Zero-copy read</strong> - Direct access to input, still one copy for output</p>
                         </div>
+                        
+                        <div class="pattern">
+                            <h3>4. push/pop (AVOID)</h3>
+                            <div class="code-block">
+                                <pre><code class="language-cpp line-numbers">float sample;
+in->pop(sample);
+out->push(sample * gain);</code></pre>
+                            </div>
+                            <p class="pattern-note avoid">⚠️ <strong>Orders of magnitude slower</strong> - Function call overhead per sample. Use only for control data</p>
+                        </div>
+                    </div>
+                    
+                    <div class="performance-notes">
+                        <h3>Performance Notes</h3>
+                        <ul>
+                            <li><strong>Memory copies are the bottleneck</strong> - Each eliminated copy significantly improves throughput</li>
+                            <li><strong>Doubly-mapped buffers</strong> use virtual memory to present ring buffers as contiguous arrays</li>
+                            <li><strong>Availability</strong>: read_dbf/write_dbf returns {nullptr, 0} when not available</li>
+                            <li><strong>Fallback strategy</strong>: Try dbf methods first, then fall back to peek/commit</li>
+                            <li><strong>Run benchmarks</strong>: <code>cd build/performance && ./perf_read_write_techniques</code></li>
+                        </ul>
                     </div>
                 </section>
 
@@ -653,8 +703,8 @@ struct BlockRunner {
                     <h3>Embedded-First Design</h3>
                     <p>CLER's design choices address real embedded constraints:</p>
                     <ul>
-                        <li><strong>No MMU required:</strong> Unlike GNU Radio's double-mapped buffers</li>
-                        <li><strong>Predictable timing:</strong> No garbage collection, no unexpected allocations</li>
+                        <li><strong>Adaptive performance:</strong> Uses advanced techniques like doubly-mapped buffers when available, falls back gracefully on constrained systems</li>
+                        <li><strong>Predictable timing:</strong> Manual memory management, no unexpected allocations</li>
                         <li><strong>Small memory footprint:</strong> Perfect for microcontrollers</li>
                         <li><strong>Type safety:</strong> Catch connection errors at compile time, not runtime</li>
                     </ul>

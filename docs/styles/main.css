@@ -336,6 +336,114 @@ section li {
     border-left: 4px solid #28a745;
 }
 
+.pattern-note.optimal {
+    background: #e8f5e8;
+    color: #2e7d2e;
+    border-left: 4px solid #4caf50;
+    font-weight: 600;
+}
+
+.pattern-note.avoid {
+    background: #ffebee;
+    color: #c62828;
+    border-left: 4px solid #f44336;
+    font-weight: 600;
+}
+
+/* Performance results table */
+.performance-results {
+    margin: 2rem 0;
+}
+
+.perf-table {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 0;
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    margin: 1rem 0;
+}
+
+.perf-row {
+    display: contents;
+}
+
+.perf-row.header > div {
+    background: var(--cler-black);
+    color: var(--cler-white);
+    font-weight: 600;
+    padding: 1rem;
+    text-align: center;
+}
+
+.perf-row:not(.header) > div {
+    padding: 0.75rem 1rem;
+    text-align: center;
+    border-bottom: 1px solid var(--cler-light-gray);
+}
+
+.perf-row.optimal > div {
+    background: #e8f5e8;
+    color: #2e7d2e;
+    font-weight: 600;
+}
+
+.perf-row.good > div {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.perf-row.avoid > div {
+    background: #ffebee;
+    color: #c62828;
+    font-weight: 600;
+}
+
+.perf-technique {
+    text-align: left !important;
+    font-family: 'Courier New', monospace;
+}
+
+.performance-notes {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: #f8f9fa;
+    border-radius: var(--border-radius);
+    border-left: 4px solid var(--cler-red);
+}
+
+.performance-notes h3 {
+    margin-bottom: 1rem;
+    color: var(--cler-black);
+}
+
+.performance-notes ul {
+    list-style-type: none;
+    padding-left: 0;
+}
+
+.performance-notes li {
+    margin-bottom: 0.5rem;
+    padding-left: 1.5rem;
+    position: relative;
+}
+
+.performance-notes li::before {
+    content: "→";
+    position: absolute;
+    left: 0;
+    color: var(--cler-red);
+    font-weight: bold;
+}
+
+.performance-notes code {
+    background: #e9ecef;
+    padding: 0.2rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.85rem;
+}
+
 /* Hello world section */
 .hello-world {
     background: var(--cler-gray);
