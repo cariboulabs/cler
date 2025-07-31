@@ -24,6 +24,22 @@ struct ThroughputBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
+        // Try zero-copy path first (for doubly mapped buffers)
+        auto [read_ptr, read_size] = in.read_dbf();
+        if (read_ptr && read_size > 0) {
+            auto [write_ptr, write_size] = out->write_dbf();
+            if (write_ptr && write_size > 0) {
+                // ULTIMATE FAST PATH: Direct copy between doubly-mapped buffers
+                size_t to_transfer = std::min(read_size, write_size);
+                std::memcpy(write_ptr, read_ptr, to_transfer * sizeof(T));
+                in.commit_read(to_transfer);
+                out->commit_write(to_transfer);
+                _samples_passed += to_transfer;
+                return cler::Empty{};
+            }
+        }
+
+        // Fall back to standard approach
         if (in.size() == 0) {
             return cler::Error::NotEnoughSamples;
         }

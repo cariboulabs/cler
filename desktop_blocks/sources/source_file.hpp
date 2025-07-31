@@ -35,6 +35,32 @@ struct SourceFileBlock : public cler::BlockBase {
             return cler::Error::TERM_IOError;
         }
 
+        // Try zero-copy path first (for doubly mapped buffers)
+        auto [write_ptr, write_size] = out->write_dbf();
+        if (write_ptr && write_size > 0) {
+            // Direct read into output buffer - optimal path!
+            _file.read(reinterpret_cast<char*>(write_ptr), write_size * sizeof(T));
+            size_t samples_read = _file.gcount() / sizeof(T);
+            
+            if (samples_read == 0) {
+                if (_file.eof() && _repeat) {
+                    _file.clear(); // Clear EOF flag
+                    _file.seekg(0, std::ios::beg);
+                    return cler::Empty{}; // Don't return an error, just let the flowgraph/loop call this again
+                } else {
+                    if (_callback) {
+                        _callback(_filename);
+                    }
+                    if (_file.is_open()) {_file.close();}
+                    return cler::Empty{};
+                }
+            }
+            
+            out->commit_write(samples_read);
+            return cler::Empty{};
+        }
+
+        // Fall back to standard approach with temporary buffer
         size_t available_space = out->space();
         if (available_space == 0) {
             return cler::Error::NotEnoughSpace;

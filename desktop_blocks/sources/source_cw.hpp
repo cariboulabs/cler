@@ -37,6 +37,28 @@ struct SourceCWBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
+        // Try zero-copy path first (for doubly mapped buffers)
+        auto [write_ptr, write_size] = out->write_dbf();
+        if (write_ptr && write_size > 0) {
+            // Generate directly into output buffer - optimal path!
+            for (size_t i = 0; i < write_size; ++i) {
+                std::complex<float> cw = _phasor;
+
+                if constexpr (std::is_same_v<T, std::complex<float>>) {
+                    write_ptr[i] = _amplitude * cw;
+                } else {
+                    write_ptr[i] = _amplitude * cw.real();
+                }
+
+                _phasor *= _phasor_inc;
+                _phasor /= std::abs(_phasor); // Normalize to keep phasor on the unit circle, CRUCIAL for stability
+            }
+            
+            out->commit_write(write_size);
+            return cler::Empty{};
+        }
+
+        // Fall back to standard approach with temporary buffer
         size_t available_space = std::min(out->space(), _buffer_size);
         if (available_space == 0) {
             return cler::Error::NotEnoughSpace;

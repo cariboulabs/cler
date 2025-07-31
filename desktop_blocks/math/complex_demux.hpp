@@ -35,6 +35,37 @@ struct ComplexToMagPhaseBlock : public cler::BlockBase {
         cler::ChannelBase<float>* a_out,
         cler::ChannelBase<float>* b_out)
     {
+        // Try zero-copy path first (for doubly mapped buffers)
+        auto [read_ptr, read_size] = in.read_dbf();
+        if (read_ptr && read_size > 0) {
+            auto [a_write_ptr, a_write_size] = a_out->write_dbf();
+            auto [b_write_ptr, b_write_size] = b_out->write_dbf();
+            
+            if (a_write_ptr && a_write_size > 0 && b_write_ptr && b_write_size > 0) {
+                // ULTIMATE FAST PATH: Process directly between doubly-mapped buffers
+                size_t to_process = std::min({read_size, a_write_size, b_write_size});
+                
+                for (size_t i = 0; i < to_process; ++i) {
+                    switch (_block_mode) {
+                        case Mode::MagPhase:
+                            a_write_ptr[i] = std::abs(read_ptr[i]);
+                            b_write_ptr[i] = std::arg(read_ptr[i]);
+                            break;
+                        case Mode::RealImag:
+                            a_write_ptr[i] = read_ptr[i].real();
+                            b_write_ptr[i] = read_ptr[i].imag();
+                            break;
+                    }
+                }
+                
+                in.commit_read(to_process);
+                a_out->commit_write(to_process);
+                b_out->commit_write(to_process);
+                return cler::Empty{};
+            }
+        }
+
+        // Fall back to standard approach
         size_t transferable = std::min({in.size(), a_out->space(), b_out->space(), _buffer_size});
 
         if (transferable == 0) {

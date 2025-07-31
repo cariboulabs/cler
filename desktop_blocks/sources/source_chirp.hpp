@@ -48,6 +48,34 @@ struct SourceChirpBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
+        // Try zero-copy path first (for doubly mapped buffers)
+        auto [write_ptr, write_size] = out->write_dbf();
+        if (write_ptr && write_size > 0) {
+            // Generate directly into output buffer - optimal path!
+            for (size_t i = 0; i < write_size; ++i) {
+                std::complex<float> chirp = _phasor;
+
+                if constexpr (std::is_same_v<T, std::complex<float>>) {
+                    write_ptr[i] = _amplitude * chirp;
+                } else {
+                    write_ptr[i] = _amplitude * chirp.real();
+                }
+
+                _phasor *= _psi;
+                _phasor /= std::abs(_phasor); // Normalize to keep phasor on the unit circle, CRUCIAL for stability
+                _psi *= _psi_inc; // Update phase increment for next sample
+
+                ++_samples_counter;
+                if (_samples_counter >= _n_samples_before_reset) {
+                    reset();
+                }
+            }
+
+            out->commit_write(write_size);
+            return cler::Empty{};
+        }
+
+        // Fall back to standard approach with temporary buffer
         const size_t n_samples = std::min(out->space(), _buffer_size);
 
         for (size_t i = 0; i < n_samples; ++i) {

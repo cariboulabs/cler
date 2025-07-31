@@ -26,6 +26,31 @@ struct NoiseAWGNBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
+        // Try zero-copy path first (for doubly mapped buffers)
+        auto [read_ptr, read_size] = in.read_dbf();
+        if (read_ptr && read_size > 0) {
+            auto [write_ptr, write_size] = out->write_dbf();
+            if (write_ptr && write_size > 0) {
+                // FAST PATH: Process directly between doubly-mapped buffers
+                size_t to_process = std::min(read_size, write_size);
+                
+                for (size_t i = 0; i < to_process; ++i) {
+                    if constexpr (std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>) {
+                        auto n_re = _normal_dist(_rng);
+                        auto n_im = _normal_dist(_rng);
+                        write_ptr[i] = read_ptr[i] + T{n_re, n_im};
+                    } else {
+                        write_ptr[i] = read_ptr[i] + _normal_dist(_rng);
+                    }
+                }
+                
+                in.commit_read(to_process);
+                out->commit_write(to_process);
+                return cler::Empty{};
+            }
+        }
+
+        // Fall back to standard approach
         size_t available_space = out->space();
         if (available_space == 0) {
             return cler::Error::NotEnoughSpace;
