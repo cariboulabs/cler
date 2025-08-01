@@ -68,13 +68,19 @@ using MAX_STACK_SIZE = std::enable_if_t<(N <= (MAX_BYTES_ON_STACK / sizeof(T)))>
 template <typename T, typename Allocator = std::allocator<T>,
           typename = SPSC_Type<T>>
 struct AdaptiveHeapBuffer {
-  const std::size_t capacity_;
+  const std::size_t capacity_;           // Logical capacity (what user requested + 1)
+  std::size_t capacity_dbf_;             // Physical capacity for DBF (page-aligned)
   T* buffer_;
   [[no_unique_address]] Allocator allocator_;
   bool is_doubly_mapped_ = false;
 
   static constexpr std::size_t padding = ((cacheLineSize - 1) / sizeof(T)) + 1;
   static constexpr std::size_t MAX_SIZE_T = std::numeric_limits<std::size_t>::max();
+
+  // Get the actual mapped size (for doubly-mapped buffers)
+  std::size_t get_mapped_size() const noexcept {
+    return is_doubly_mapped_ ? vmem_allocation_.size() : 0;
+  }
 
 private:
   cler::vmem::DoublyMappedAllocation vmem_allocation_;
@@ -84,7 +90,10 @@ public:
   explicit AdaptiveHeapBuffer(const std::size_t capacity,
                              const Allocator &allocator = Allocator())
       // +1 prevents live lock e.g. reader and writer share 1 slot for size 1
-      : capacity_(capacity + 1), buffer_(nullptr), allocator_(allocator) {
+      : capacity_(capacity + 1), 
+        capacity_dbf_(capacity + 1),  // Default to same as capacity_
+        buffer_(nullptr), 
+        allocator_(allocator) {
     if (capacity < 1) {
       throw std::logic_error("Capacity must be a positive number; Heap "
                              "allocations require capacity argument");
@@ -101,20 +110,46 @@ public:
     if (cler::platform::supports_doubly_mapped_buffers() && 
         buffer_bytes >= DOUBLY_MAPPED_MIN_SIZE) {
       
-      // For doubly mapped buffers, we don't need cache-line padding
-      // Just allocate exactly what we need
-      if (vmem_allocation_.create(buffer_bytes)) {
+      // Calculate page-aligned size
+      const std::size_t page_size = cler::platform::get_page_size();
+      const std::size_t aligned_bytes = ((buffer_bytes + page_size - 1) / page_size) * page_size;
+      const std::size_t aligned_elements = aligned_bytes / sizeof(T);
+      
+      if (vmem_allocation_.create(aligned_bytes)) {
         buffer_ = static_cast<T*>(vmem_allocation_.data());
         if (buffer_) {
+          // Set the DBF capacity to the aligned size
+          capacity_dbf_ = aligned_elements;
           is_doubly_mapped_ = true;
           
-          // Initialize elements if needed
-          if constexpr (!std::is_trivially_constructible_v<T>) {
-            for (std::size_t i = 0; i < capacity_; ++i) {
-              std::allocator_traits<Allocator>::construct(allocator_, buffer_ + i);
+          // Verify the mapping works at the DBF boundary
+          if constexpr (std::is_trivially_copyable_v<T>) {
+            // Write to first element
+            buffer_[0] = T{42};
+            // Check if it appears at the DBF boundary
+            volatile T* second = &buffer_[capacity_dbf_];
+            if (*second == T{42}) {
+              // Success - double mapping works at the correct boundary!
+              buffer_[0] = T{};  // Clean up
+            } else {
+              // Double mapping doesn't work, fall back
+              is_doubly_mapped_ = false;
+              capacity_dbf_ = capacity_;  // Reset to logical capacity
+              vmem_allocation_ = cler::vmem::DoublyMappedAllocation();
+              buffer_ = nullptr;
+              // Fall through to standard allocation
             }
           }
-          return; // Success!
+          
+          if (is_doubly_mapped_) {
+            // Initialize ALL elements up to capacity_dbf_
+            if constexpr (!std::is_trivially_constructible_v<T>) {
+              for (std::size_t i = 0; i < capacity_dbf_; ++i) {
+                std::allocator_traits<Allocator>::construct(allocator_, buffer_ + i);
+              }
+            }
+            return; // Success!
+          }
         }
       }
     }
@@ -136,9 +171,9 @@ public:
 
   ~AdaptiveHeapBuffer() {
     if (is_doubly_mapped_) {
-      // Destroy elements in doubly mapped buffer
+      // Destroy elements in doubly mapped buffer up to capacity_dbf_
       if constexpr (!std::is_trivially_destructible_v<T>) {
-        for (std::size_t i = 0; i < capacity_; ++i) {
+        for (std::size_t i = 0; i < capacity_dbf_; ++i) {
           std::allocator_traits<Allocator>::destroy(allocator_, buffer_ + i);
         }
       }
@@ -375,9 +410,52 @@ public:
   [[nodiscard]] std::size_t capacity() const noexcept {
     return base_type::capacity_ - 1;
   }
+  
+  // Get the effective capacity for DBF operations
+  [[nodiscard]] std::size_t capacity_dbf() const noexcept {
+    if constexpr (N == 0) {
+      return base_type::capacity_dbf_;
+    }
+    return base_type::capacity_;
+  }
 
   [[nodiscard]] std::size_t space() const noexcept {
     return capacity() - size();
+  }
+
+  // Test if double mapping actually works
+  bool verify_double_mapping() noexcept {
+    if constexpr (N == 0) {
+      if (!base_type::is_doubly_mapped_) return false;
+      
+      // For DBF, the second mapping should start at capacity_dbf_
+      const auto capacity_dbf = base_type::capacity_dbf_;
+      
+      std::cout << "DEBUG: capacity_=" << base_type::capacity_ 
+                << ", capacity_dbf_=" << capacity_dbf
+                << ", actual mapped size=" << base_type::get_mapped_size() << std::endl;
+      
+      // Write test pattern to first element
+      base_type::buffer_[0] = T{42};
+      
+      // The second mapping starts at capacity_dbf_
+      volatile T* second_map = &base_type::buffer_[capacity_dbf];
+      bool verified = (*second_map == T{42});
+      
+      // Clean up
+      base_type::buffer_[0] = T{};
+      
+      return verified;
+    }
+    return false;
+  }
+
+  // Check if this queue uses doubly-mapped memory
+  bool is_doubly_mapped() const noexcept {
+    if constexpr (N == 0) {
+      return base_type::is_doubly_mapped_;
+    }
+    return false;
   }
 
   std::size_t writeN(const T* src, std::size_t count) noexcept(nothrow_v) {
@@ -547,6 +625,7 @@ public:
           // Only heap buffers can be doubly mapped
           if (base_type::is_doubly_mapped_) {
               const auto capacity = base_type::capacity_;
+              const auto capacity_dbf = base_type::capacity_dbf_;
               const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
               auto writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
               reader_.writeIndexCache_ = writeIndexCache;
@@ -562,17 +641,18 @@ public:
                   return {nullptr, 0};
               }
               
-              // With doubly mapped buffer, we can read contiguously up to capacity
               const T* ptr = &base_type::buffer_[readIndex];
               
-              // CRITICAL FIX: In wraparound scenarios, limit to what's safely readable
-              // From readIndex, we can read at most (capacity - readIndex) before wrapping
-              // But with doubly mapped buffer, the wrap is handled by the second mapping
-              // However, we must not read more than what's contiguous in the logical buffer
-              std::size_t max_contiguous = capacity - readIndex;
-              std::size_t safe_read_size = std::min(available, max_contiguous);
+              // For DBF, we can read beyond capacity_ up to capacity_dbf_
+              // The key insight: when readIndex + available > capacity_,
+              // we're reading into indices [capacity_, capacity_dbf_) which
+              // mirror indices [0, capacity_dbf_ - capacity_)
               
-              return {ptr, safe_read_size};
+              // Maximum contiguous read depends on DBF capacity
+              std::size_t max_contiguous = capacity_dbf - readIndex;
+              std::size_t contiguous_readable = std::min(available, max_contiguous);
+              
+              return {ptr, contiguous_readable};
           }
           // NOT doubly mapped - throw here!
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
@@ -584,7 +664,7 @@ public:
       }
       throw std::runtime_error("read_dbf() not supported for stack-allocated buffers");
   }
-  // Also need commit_write (which you currently have)
+  
   void commit_write(std::size_t count) noexcept {
       const auto capacity = base_type::capacity_;
       const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
@@ -597,6 +677,7 @@ public:
           // Only heap buffers can be doubly mapped
           if (base_type::is_doubly_mapped_) {
               const auto capacity = base_type::capacity_;
+              const auto capacity_dbf = base_type::capacity_dbf_;
               const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
               auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
               writer_.readIndexCache_ = readIndexCache;
@@ -612,15 +693,18 @@ public:
                   return {nullptr, 0};
               }
               
-              // With doubly mapped buffer, we can write contiguously up to capacity
               T* ptr = &base_type::buffer_[writeIndex];
               
-              // CRITICAL FIX: In wraparound scenarios, limit to what's safely writable
-              // From writeIndex, we can write at most (capacity - writeIndex) before wrapping
-              std::size_t max_contiguous = capacity - writeIndex;
-              std::size_t safe_write_size = std::min(space, max_contiguous);
+              // For DBF, we can write beyond capacity_ up to capacity_dbf_
+              // The key insight: when writeIndex + space > capacity_,
+              // we're writing into indices [capacity_, capacity_dbf_) which
+              // mirror indices [0, capacity_dbf_ - capacity_)
               
-              return {ptr, safe_write_size};
+              // Maximum contiguous write depends on DBF capacity
+              std::size_t max_contiguous = capacity_dbf - writeIndex;
+              std::size_t contiguous_writable = std::min(space, max_contiguous);
+              
+              return {ptr, contiguous_writable};
           }
           // NOT doubly mapped - throw here!
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);

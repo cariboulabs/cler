@@ -168,6 +168,25 @@ public:
             return false;
         }
         
+        // Verify the double mapping actually works
+        volatile char* first_byte = static_cast<char*>(first);
+        volatile char* second_byte = static_cast<char*>(second);
+        
+        // Write to first mapping
+        *first_byte = 42;
+        
+        // Check if it appears in second mapping
+        if (*second_byte != 42) {
+            // Double mapping failed!
+            munmap(addr_space, aligned_size * 2);
+            close(shm_fd_);
+            shm_fd_ = -1;
+            return false;
+        }
+        
+        // Clean up test
+        *first_byte = 0;
+        
         mmap_base_ = addr_space;
         mmap_size_ = aligned_size;
         is_valid_ = true;
