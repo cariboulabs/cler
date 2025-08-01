@@ -6,15 +6,17 @@ template <typename T>
 struct ThrottleBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
-    ThrottleBlock(const char* name, const size_t sps, size_t const buffer_size = 1024)
+    ThrottleBlock(const char* name, const size_t sps, size_t const buffer_size = 0)
         : cler::BlockBase(name),
-          in(buffer_size),
+          in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size),
           _sps(sps),
           _interval(1.0 / static_cast<double>(sps)),
           _next_tick(std::chrono::high_resolution_clock::now())
     {
-        if (buffer_size == 0) {
-            throw std::invalid_argument("Buffer size must be greater than zero.");
+        // If user provided a non-zero buffer size, validate it's sufficient
+        if (buffer_size > 0 && buffer_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
+            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
+                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) + " elements of type T");
         }
         if (_sps == 0) {
             throw std::invalid_argument("Sample rate must be greater than zero.");

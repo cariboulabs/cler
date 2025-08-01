@@ -8,11 +8,13 @@ template <typename T>
 struct SinkFileBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
-    SinkFileBlock(const char* name, const char* filename, size_t buffer_size = 1024)
-        : cler::BlockBase(name), in(buffer_size), _filename(filename) { // Default 1024 for 4KB minimum
+    SinkFileBlock(const char* name, const char* filename, size_t buffer_size = 0)
+        : cler::BlockBase(name), in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size), _filename(filename) {
 
-        if (buffer_size == 0) {
-            throw std::invalid_argument("Buffer size must be greater than zero.");
+        // If user provided a non-zero buffer size, validate it's sufficient
+        if (buffer_size > 0 && buffer_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
+            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
+                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) + " elements of type T");
         }
         if (!filename || filename[0] == '\0') {
             throw std::invalid_argument("Filename must not be empty.");
@@ -23,9 +25,23 @@ struct SinkFileBlock : public cler::BlockBase {
             throw std::runtime_error("Failed to open file for writing: " + std::string(filename));
         }
 
+        // Calculate actual buffer size used
+        size_t actual_buffer_size = (buffer_size == 0) ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size;
+        
         // Optional: tune buffer to a larger size (e.g., 64 KB)
-        _internal_buffer = new char[buffer_size * sizeof(T)];
-        if (std::setvbuf(_fp, _internal_buffer, _IOFBF, buffer_size * sizeof(T)) != 0) {
+        try {
+            _internal_buffer = new char[actual_buffer_size * sizeof(T)];
+        } catch (const std::bad_alloc&) {
+            std::fclose(_fp);
+            _fp = nullptr;
+            throw std::runtime_error("Failed to allocate internal buffer");
+        }
+        
+        if (std::setvbuf(_fp, _internal_buffer, _IOFBF, actual_buffer_size * sizeof(T)) != 0) {
+            delete[] _internal_buffer;
+            _internal_buffer = nullptr;
+            std::fclose(_fp);
+            _fp = nullptr;
             throw std::runtime_error("Failed to setvbuf() on file stream.");
         }
     }

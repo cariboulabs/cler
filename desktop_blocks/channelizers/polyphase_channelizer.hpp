@@ -12,10 +12,16 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
                               size_t num_channels,
                               float kaiser_attenuation,
                               size_t kaiser_filter_semilength,
-                              size_t in_buffer_size = 512)
-        : cler::BlockBase(std::move(name)), in(in_buffer_size), _num_channels(num_channels)
+                              size_t in_buffer_size = 0)
+        : cler::BlockBase(std::move(name)), in(in_buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : in_buffer_size), _num_channels(num_channels)
     {
-         assert(kaiser_filter_semilength > 0 && kaiser_filter_semilength < 9 && 
+        // If user provided a non-zero buffer size, validate it's sufficient
+        if (in_buffer_size > 0 && in_buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
+            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
+                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>)) + " complex<float> elements");
+        }
+        
+        assert(kaiser_filter_semilength > 0 && kaiser_filter_semilength < 9 && 
                 "Filter length must be between 1 and 9, larger values ==> narrower transition band. 4 is usually a good default");
         assert(num_channels > 0 && "Number of channels must be positive");
 
@@ -25,15 +31,40 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
             num_channels,
             kaiser_filter_semilength,
             kaiser_attenuation);
+        
+        if (!_pfch) {
+            throw std::runtime_error("Failed to create polyphase channelizer filter");
+        }
 
-        _tmp_in = new std::complex<float>[num_channels];
-        _tmp_out = new std::complex<float>[num_channels];
+        try {
+            _tmp_in = new std::complex<float>[num_channels];
+        } catch (const std::bad_alloc&) {
+            firpfbch_crcf_destroy(_pfch);
+            _pfch = nullptr;
+            throw std::runtime_error("Failed to allocate input buffer");
+        }
+        
+        try {
+            _tmp_out = new std::complex<float>[num_channels];
+        } catch (const std::bad_alloc&) {
+            delete[] _tmp_in;
+            _tmp_in = nullptr;
+            firpfbch_crcf_destroy(_pfch);
+            _pfch = nullptr;
+            throw std::runtime_error("Failed to allocate output buffer");
+        }
     }
 
     ~PolyphaseChannelizerBlock() {
-        delete[] _tmp_in;
-        delete[] _tmp_out;
-        if (_pfch) firpfbch_crcf_destroy(_pfch);
+        if (_tmp_in) {
+            delete[] _tmp_in;
+        }
+        if (_tmp_out) {
+            delete[] _tmp_out;
+        }
+        if (_pfch) {
+            firpfbch_crcf_destroy(_pfch);
+        }
     }
 
     template <typename... OChannels>
@@ -80,7 +111,7 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
 
 private:
     size_t _num_channels;
-    std::complex<float>* _tmp_in;
-    std::complex<float>* _tmp_out;
+    std::complex<float>* _tmp_in = nullptr;
+    std::complex<float>* _tmp_out = nullptr;
     firpfbch_crcf _pfch = nullptr;
 };

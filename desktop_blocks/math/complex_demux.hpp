@@ -10,25 +10,56 @@ struct ComplexToMagPhaseBlock : public cler::BlockBase {
         RealImag = 1
     };
 
-    ComplexToMagPhaseBlock(const char* name, const Mode block_mode, const size_t buffer_size = 512)
-        : cler::BlockBase(name), in(buffer_size), _block_mode(block_mode) // Default 512 for complex<float> = 4KB
+    ComplexToMagPhaseBlock(const char* name, const Mode block_mode, const size_t buffer_size = 0)
+        : cler::BlockBase(name), in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size), _block_mode(block_mode)
     {
-        if (buffer_size == 0) {
-            throw std::invalid_argument("Buffer size must be greater than zero.");
+        // Calculate proper buffer size for complex<float>
+        size_t actual_buffer_size = (buffer_size == 0) ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size;
+        
+        // If user provided a non-zero buffer size, validate it's sufficient
+        if (buffer_size > 0 && buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
+            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
+                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>)) + " complex<float> elements");
         }
         if (block_mode != Mode::MagPhase && block_mode != Mode::RealImag) {
             throw std::invalid_argument("Invalid block mode. Use MagPhase or RealImag.");
         }
 
-        _tmp_c = new std::complex<float>[buffer_size];
-        _tmp_a = new float[buffer_size];
-        _tmp_b = new float[buffer_size];
-        _buffer_size = buffer_size;
+        try {
+            _tmp_c = new std::complex<float>[actual_buffer_size];
+        } catch (const std::bad_alloc&) {
+            throw std::runtime_error("Failed to allocate complex buffer");
+        }
+        
+        try {
+            _tmp_a = new float[actual_buffer_size];
+        } catch (const std::bad_alloc&) {
+            delete[] _tmp_c;
+            _tmp_c = nullptr;
+            throw std::runtime_error("Failed to allocate first output buffer");
+        }
+        
+        try {
+            _tmp_b = new float[actual_buffer_size];
+        } catch (const std::bad_alloc&) {
+            delete[] _tmp_a;
+            _tmp_a = nullptr;
+            delete[] _tmp_c;
+            _tmp_c = nullptr;
+            throw std::runtime_error("Failed to allocate second output buffer");
+        }
+        _buffer_size = actual_buffer_size;
     }
     ~ComplexToMagPhaseBlock() {
-        delete[] _tmp_c;
-        delete[] _tmp_a;
-        delete[] _tmp_b;
+        if (_tmp_c) {
+            delete[] _tmp_c;
+        }
+        if (_tmp_a) {
+            delete[] _tmp_a;
+        }
+        if (_tmp_b) {
+            delete[] _tmp_b;
+        }
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(
@@ -66,8 +97,8 @@ struct ComplexToMagPhaseBlock : public cler::BlockBase {
 private:
     Mode _block_mode;
     size_t _buffer_size;
-    std::complex<float>* _tmp_c;
-    float* _tmp_a;
-    float* _tmp_b;
+    std::complex<float>* _tmp_c = nullptr;
+    float* _tmp_a = nullptr;
+    float* _tmp_b = nullptr;
 
 };

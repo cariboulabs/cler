@@ -27,27 +27,42 @@ struct SourceHackRFBlock : public cler::BlockBase {
         }
 
         if (hackrf_set_freq(_dev, freq_hz) != HACKRF_SUCCESS) {
+            hackrf_close(_dev);
+            _dev = nullptr;
             throw std::runtime_error("Failed to set frequency.");
         }
 
         if (hackrf_set_sample_rate(_dev, samp_rate_hz) != HACKRF_SUCCESS) {
+            hackrf_close(_dev);
+            _dev = nullptr;
             throw std::runtime_error("Failed to set sample rate.");
         }
 
         if (hackrf_set_lna_gain(_dev, lna_gain_db) != HACKRF_SUCCESS) {
+            hackrf_close(_dev);
+            _dev = nullptr;
             throw std::runtime_error("Failed to set LNA gain.");
         }
 
         if (hackrf_set_vga_gain(_dev, vga_gain_db) != HACKRF_SUCCESS) {
+            hackrf_close(_dev);
+            _dev = nullptr;
             throw std::runtime_error("Failed to set VGA gain.");
         }
 
-        _tmp = new std::complex<float>[buffer_size];
-        if (!_tmp) {
+        try {
+            _tmp = new std::complex<float>[buffer_size];
+        } catch (const std::bad_alloc&) {
+            hackrf_close(_dev);
+            _dev = nullptr;
             throw std::runtime_error("Failed to allocate memory for temporary buffer.");
         }
 
         if (hackrf_start_rx(_dev, rx_callback, this) != HACKRF_SUCCESS) {
+            delete[] _tmp;
+            _tmp = nullptr;
+            hackrf_close(_dev);
+            _dev = nullptr;
             throw std::runtime_error("Failed to start RX streaming.");
         }
     }

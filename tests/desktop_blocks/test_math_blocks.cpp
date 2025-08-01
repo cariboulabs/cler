@@ -90,8 +90,8 @@ TEST_F(MathBlocksTest, AddBlockErrorConditions) {
     // Test minimum inputs requirement
     EXPECT_THROW(AddBlock<float>("test", 1, 1024), std::invalid_argument);
     
-    // Test zero buffer size
-    EXPECT_THROW(AddBlock<float>("test", 2, 0), std::invalid_argument);
+    // Test buffer size too small for doubly-mapped buffers (need at least 4096/sizeof(float) = 1024 for float)
+    EXPECT_THROW(AddBlock<float>("test", 2, 1), std::invalid_argument);
 }
 
 // Test GainBlock with float
@@ -239,8 +239,8 @@ TEST_F(MathBlocksTest, ComplexDemuxRealImag) {
 
 // Test ComplexToMagPhaseBlock error conditions
 TEST_F(MathBlocksTest, ComplexDemuxErrorConditions) {
-    // Test zero buffer size - may throw invalid_argument or logic_error depending on implementation
-    EXPECT_THROW(ComplexToMagPhaseBlock("test", ComplexToMagPhaseBlock::Mode::MagPhase, 0), std::exception);
+    // Test buffer size too small for doubly-mapped buffers (need at least 4096/sizeof(complex<float>) = 512 for complex<float>)
+    EXPECT_THROW(ComplexToMagPhaseBlock("test", ComplexToMagPhaseBlock::Mode::MagPhase, 1), std::invalid_argument);
     
     // Test invalid mode (this test might not work with current enum, but shows the pattern)
     // EXPECT_THROW(ComplexToMagPhaseBlock("test", static_cast<ComplexToMagPhaseBlock::Mode>(999), 1024), std::invalid_argument);

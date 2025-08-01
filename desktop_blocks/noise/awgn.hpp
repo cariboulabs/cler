@@ -12,8 +12,14 @@ struct NoiseAWGNBlock : public cler::BlockBase {
         std::is_same_v<T, std::complex<float>>, float,
         typename std::conditional<std::is_same_v<T, std::complex<double>>, double, T>::type>::type;
 
-    NoiseAWGNBlock(const char* name, scalar_type noise_stddev, const size_t buffer_size = 4096)
-        : cler::BlockBase(name), in(buffer_size), _noise_stddev(noise_stddev) { // Default 4096 for dbf compatibility
+    NoiseAWGNBlock(const char* name, scalar_type noise_stddev, const size_t buffer_size = 0)
+        : cler::BlockBase(name), in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size), _noise_stddev(noise_stddev) {
+        
+        // If user provided a non-zero buffer size, validate it's sufficient
+        if (buffer_size > 0 && buffer_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
+            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
+                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) + " elements of type T");
+        }
 
         std::random_device rd;
         _rng.seed(rd());

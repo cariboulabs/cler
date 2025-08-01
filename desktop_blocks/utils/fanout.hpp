@@ -8,11 +8,16 @@ template <typename T>
 struct FanoutBlock : public cler::BlockBase {
     cler::Channel<T> in;  // Single input channel
 
-    FanoutBlock(const char* name, const size_t num_outputs, const size_t buffer_size = 1024)
-        : cler::BlockBase(name), in(buffer_size), _num_outputs(num_outputs) { // Default 1024 for 4KB minimum
+    FanoutBlock(const char* name, const size_t num_outputs, const size_t buffer_size = 0)
+        : cler::BlockBase(name), in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size), _num_outputs(num_outputs) {
+        
+        // If user provided a non-zero buffer size, validate it's sufficient
+        if (buffer_size > 0 && buffer_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
+            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
+                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) + " elements of type T");
+        }
 
         assert(num_outputs > 0 && "Number of outputs must be greater than zero");
-        assert(buffer_size > 0 && "Buffer size must be greater than zero");
     }
 
     ~FanoutBlock() = default;
