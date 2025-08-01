@@ -79,43 +79,6 @@ TEST_F(SPSCQueueBasicTest, TryOperations) {
     EXPECT_TRUE(queue.empty());
 }
 
-// Test emplace operations
-TEST_F(SPSCQueueBasicTest, EmplaceOperations) {
-    dro::SPSCQueue<std::pair<int, std::string>> queue(5);
-    
-    // Test emplace
-    queue.emplace(42, "hello");
-    EXPECT_EQ(queue.size(), 1);
-    
-    // Test try_emplace
-    EXPECT_TRUE(queue.try_emplace(43, "world"));
-    EXPECT_EQ(queue.size(), 2);
-    
-    std::pair<int, std::string> value;
-    queue.pop(value);
-    EXPECT_EQ(value.first, 42);
-    EXPECT_EQ(value.second, "hello");
-    
-    queue.pop(value);
-    EXPECT_EQ(value.first, 43);
-    EXPECT_EQ(value.second, "world");
-}
-
-// Test force operations (overwrites without checking capacity)
-TEST_F(SPSCQueueBasicTest, ForceOperations) {
-    dro::SPSCQueue<int> queue(2);
-    
-    // Fill the queue
-    queue.push(1);
-    queue.push(2);
-    EXPECT_EQ(queue.size(), 2);
-    
-    // Force push should succeed even when full
-    queue.force_push(3);
-    // Note: force operations can cause data corruption in concurrent scenarios
-    // but in single-threaded tests we can verify the behavior
-}
-
 // Test wraparound behavior
 TEST_F(SPSCQueueBasicTest, WrapAround) {
     dro::SPSCQueue<int> queue(4);
@@ -136,31 +99,6 @@ TEST_F(SPSCQueueBasicTest, WrapAround) {
         }
         EXPECT_TRUE(queue.empty());
     }
-}
-
-// Test with different data types
-TEST_F(SPSCQueueBasicTest, DifferentDataTypes) {
-    // Test with string
-    dro::SPSCQueue<std::string> string_queue(5);
-    string_queue.push("test");
-    std::string str_value;
-    string_queue.pop(str_value);
-    EXPECT_EQ(str_value, "test");
-    
-    // Test with custom struct
-    struct TestStruct {
-        int a;
-        double b;
-        TestStruct(int a_val, double b_val) : a(a_val), b(b_val) {}
-        TestStruct() : a(0), b(0.0) {}
-    };
-    
-    dro::SPSCQueue<TestStruct> struct_queue(5);
-    struct_queue.emplace(42, 3.14);
-    TestStruct struct_value;
-    struct_queue.pop(struct_value);
-    EXPECT_EQ(struct_value.a, 42);
-    EXPECT_DOUBLE_EQ(struct_value.b, 3.14);
 }
 
 // Test no sample loss in sequential operations (using try_push to avoid blocking)

@@ -562,9 +562,17 @@ public:
                   return {nullptr, 0};
               }
               
-              // With doubly mapped buffer, ALL data is contiguous
+              // With doubly mapped buffer, we can read contiguously up to capacity
               const T* ptr = &base_type::buffer_[readIndex];
-              return {ptr, available};
+              
+              // CRITICAL FIX: In wraparound scenarios, limit to what's safely readable
+              // From readIndex, we can read at most (capacity - readIndex) before wrapping
+              // But with doubly mapped buffer, the wrap is handled by the second mapping
+              // However, we must not read more than what's contiguous in the logical buffer
+              std::size_t max_contiguous = capacity - readIndex;
+              std::size_t safe_read_size = std::min(available, max_contiguous);
+              
+              return {ptr, safe_read_size};
           }
           // NOT doubly mapped - throw here!
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
@@ -604,9 +612,15 @@ public:
                   return {nullptr, 0};
               }
               
-              // With doubly mapped buffer, ALL space is contiguous
+              // With doubly mapped buffer, we can write contiguously up to capacity
               T* ptr = &base_type::buffer_[writeIndex];
-              return {ptr, space};
+              
+              // CRITICAL FIX: In wraparound scenarios, limit to what's safely writable
+              // From writeIndex, we can write at most (capacity - writeIndex) before wrapping
+              std::size_t max_contiguous = capacity - writeIndex;
+              std::size_t safe_write_size = std::min(space, max_contiguous);
+              
+              return {ptr, safe_write_size};
           }
           // NOT doubly mapped - throw here!
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);

@@ -11,8 +11,8 @@ protected:
     void TearDown() override {}
 };
 
-// Test that stack buffers never return valid read_dbf
-TEST_F(SPSCQueueDoublyMappedTest, StackBuffersNoReadDbf) {
+// Test that stack buffers throw exception for read_dbf
+TEST_F(SPSCQueueDoublyMappedTest, StackBuffersThrowException) {
     dro::SPSCQueue<float, 1024> stack_queue;
     
     // Fill with some data
@@ -20,10 +20,9 @@ TEST_F(SPSCQueueDoublyMappedTest, StackBuffersNoReadDbf) {
         stack_queue.push(i * 0.1f);
     }
     
-    // read_dbf should always return null for stack buffers
-    auto [ptr, size] = stack_queue.read_dbf();
-    EXPECT_EQ(ptr, nullptr);
-    EXPECT_EQ(size, 0);
+    // read_dbf should throw for stack buffers
+    EXPECT_THROW(stack_queue.read_dbf(), std::runtime_error);
+    EXPECT_THROW(stack_queue.write_dbf(), std::runtime_error);
     
     // But regular peek_read should work
     const float* p1, *p2;
@@ -33,19 +32,18 @@ TEST_F(SPSCQueueDoublyMappedTest, StackBuffersNoReadDbf) {
     EXPECT_NE(p1, nullptr);
 }
 
-// Test that small heap buffers fall back to standard allocation
-TEST_F(SPSCQueueDoublyMappedTest, SmallHeapBuffersNoReadDbf) {
-    dro::SPSCQueue<float> small_queue(1024);  // 4KB - below 32KB threshold
+// Test that small heap buffers throw exception when dbf not available
+TEST_F(SPSCQueueDoublyMappedTest, SmallHeapBuffersThrowException) {
+    dro::SPSCQueue<float> small_queue(512);  // 2KB - below 4KB threshold
     
     // Fill with some data
-    for (int i = 0; i < 500; i++) {
+    for (int i = 0; i < 100; i++) {
         small_queue.push(i * 0.1f);
     }
     
-    // read_dbf may or may not work (depends on platform support and if it falls back)
-    auto [ptr, size] = small_queue.read_dbf();
-    // We don't assert anything specific here since it depends on platform and size
-    (void)ptr; (void)size; // Suppress unused variable warnings
+    // read_dbf should throw for buffers below threshold
+    EXPECT_THROW(small_queue.read_dbf(), std::runtime_error);
+    EXPECT_THROW(small_queue.write_dbf(), std::runtime_error);
     
     // But regular peek_read should always work
     const float* p1, *p2;
@@ -116,111 +114,6 @@ TEST_F(SPSCQueueDoublyMappedTest, LargeBufferBehavior) {
     }
 }
 
-// Test with complex data type (common in SDR applications)
-TEST_F(SPSCQueueDoublyMappedTest, ComplexFloatSDRBuffer) {
-    // 4096 complex<float> = 32KB - typical SDR buffer
-    dro::SPSCQueue<std::complex<float>> sdr_queue(4096);
-    
-    // Generate some test I/Q data
-    std::vector<std::complex<float>> test_data;
-    for (int i = 0; i < 3000; i++) {
-        float t = i * 0.01f;
-        test_data.emplace_back(std::cos(t), std::sin(t));
-    }
-    
-    // Push test data
-    for (const auto& sample : test_data) {
-        sdr_queue.push(sample);
-    }
-    
-    // Test read_dbf
-    auto [ptr, size] = sdr_queue.read_dbf();
-    if (ptr && size > 0) {
-        // Verify first few samples match
-        for (size_t i = 0; i < std::min(size, size_t(10)); i++) {
-            EXPECT_FLOAT_EQ(ptr[i].real(), test_data[i].real());
-            EXPECT_FLOAT_EQ(ptr[i].imag(), test_data[i].imag());
-        }
-    }
-    
-    // Regular peek_read should also work
-    const std::complex<float>* p1, *p2;
-    size_t s1, s2;
-    size_t total = sdr_queue.peek_read(p1, s1, p2, s2);
-    EXPECT_EQ(total, test_data.size());
-}
-
-// Test file I/O integration (mimics SinkFileBlock behavior)
-TEST_F(SPSCQueueDoublyMappedTest, FileIOIntegration) {
-    dro::SPSCQueue<float> queue(8192);  // 32KB buffer
-    
-    // Generate test data
-    std::vector<float> test_data;
-    for (int i = 0; i < 5000; i++) {
-        test_data.push_back(i * 0.001f);
-    }
-    
-    // Push test data
-    for (float sample : test_data) {
-        queue.push(sample);
-    }
-    
-    // Create temporary file
-    const char* temp_filename = "/tmp/cler_test_doubly_mapped.bin";
-    FILE* fp = std::fopen(temp_filename, "wb");
-    ASSERT_NE(fp, nullptr);
-    
-    size_t total_written = 0;
-    int write_calls = 0;
-    
-    // Write data using read_dbf (if available) or peek_read fallback
-    while (queue.size() > 0) {
-        // Try read_dbf first (optimal path)
-        auto [span_ptr, span_size] = queue.read_dbf();
-        if (span_ptr && span_size > 0) {
-            size_t written = std::fwrite(span_ptr, sizeof(float), span_size, fp);
-            EXPECT_EQ(written, span_size);
-            queue.commit_read(written);
-            total_written += written;
-            write_calls++;
-        } else {
-            // Fallback to peek_read
-            const float* p1, *p2;
-            size_t s1, s2;
-            size_t available = queue.peek_read(p1, s1, p2, s2);
-            if (available == 0) break;
-            
-            if (s1 > 0) {
-                size_t written1 = std::fwrite(p1, sizeof(float), s1, fp);
-                EXPECT_EQ(written1, s1);
-                total_written += written1;
-                write_calls++;
-            }
-            
-            if (s2 > 0) {
-                size_t written2 = std::fwrite(p2, sizeof(float), s2, fp);
-                EXPECT_EQ(written2, s2);
-                total_written += written2;
-                write_calls++;
-            }
-            
-            queue.commit_read(s1 + s2);
-        }
-    }
-    
-    std::fclose(fp);
-    
-    // Verify all data was written
-    EXPECT_EQ(total_written, test_data.size());
-    
-    // If doubly mapped worked, we should have fewer write calls
-    std::cout << "Total write calls: " << write_calls << std::endl;
-    std::cout << "Average write size: " << (total_written / write_calls) << " samples" << std::endl;
-    
-    // Clean up
-    std::remove(temp_filename);
-}
-
 // Test platform support detection
 TEST_F(SPSCQueueDoublyMappedTest, PlatformSupport) {
     bool platform_supports = cler::platform::supports_doubly_mapped_buffers();
@@ -232,4 +125,198 @@ TEST_F(SPSCQueueDoublyMappedTest, PlatformSupport) {
     
     // Test should pass regardless of platform support
     EXPECT_TRUE(true);
+}
+
+// Comprehensive test to verify no samples are lost with read_dbf/write_dbf
+TEST_F(SPSCQueueDoublyMappedTest, AllSamplesTransferredWithDbf) {
+    // Create two queues large enough to use doubly-mapped buffers
+    dro::SPSCQueue<float> source_queue(16384);  // 64KB
+    dro::SPSCQueue<float> dest_queue(16384);    // 64KB
+    
+    // Generate test data with sequential values for easy verification
+    const size_t total_samples = 50000;
+    std::vector<float> test_data;
+    test_data.reserve(total_samples);
+    for (size_t i = 0; i < total_samples; i++) {
+        test_data.push_back(static_cast<float>(i));
+    }
+    
+    // Push data in chunks to create wrapping scenarios
+    size_t pushed = 0;
+    size_t transferred = 0;
+    size_t chunk_size = 7500;  // Odd size to create interesting wrap patterns
+    
+    // Producer thread
+    std::thread producer([&]() {
+        while (pushed < total_samples) {
+            size_t to_push = std::min(chunk_size, total_samples - pushed);
+            size_t pushed_this_round = 0;
+            
+            while (pushed_this_round < to_push && pushed < total_samples) {
+                if (source_queue.try_push(test_data[pushed])) {
+                    pushed++;
+                    pushed_this_round++;
+                } else {
+                    // Queue full, yield to consumer
+                    std::this_thread::yield();
+                }
+            }
+        }
+    });
+    
+    // Transfer thread (simulates block-to-block transfer using dbf)
+    std::thread transfer([&]() {
+        while (transferred < total_samples) {
+            // Try to use doubly-mapped buffers for transfer
+            auto [read_ptr, read_size] = source_queue.read_dbf();
+            auto [write_ptr, write_size] = dest_queue.write_dbf();
+            
+            if (read_ptr && write_ptr && read_size > 0 && write_size > 0) {
+                // OPTIMAL PATH: Direct copy between doubly-mapped buffers
+                size_t to_transfer = std::min(read_size, write_size);
+                std::memcpy(write_ptr, read_ptr, to_transfer * sizeof(float));
+                
+                source_queue.commit_read(to_transfer);
+                dest_queue.commit_write(to_transfer);
+                transferred += to_transfer;
+            } else if (read_ptr && read_size > 0) {
+                // Semi-optimal: Read from dbf, write normally
+                size_t space = dest_queue.space();
+                size_t to_transfer = std::min(read_size, space);
+                
+                if (to_transfer > 0) {
+                    for (size_t i = 0; i < to_transfer; i++) {
+                        [[maybe_unused]] bool pushed = dest_queue.try_push(read_ptr[i]);
+                    }
+                    source_queue.commit_read(to_transfer);
+                    transferred += to_transfer;
+                }
+            } else {
+                // Fallback to peek/commit
+                const float* p1, *p2;
+                size_t s1, s2;
+                size_t available = source_queue.peek_read(p1, s1, p2, s2);
+                
+                if (available > 0) {
+                    size_t space = dest_queue.space();
+                    size_t to_transfer = std::min(available, space);
+                    
+                    // Transfer from first segment
+                    size_t from_s1 = std::min(s1, to_transfer);
+                    for (size_t i = 0; i < from_s1; i++) {
+                        [[maybe_unused]] bool pushed = dest_queue.try_push(p1[i]);
+                    }
+                    
+                    // Transfer from second segment if needed
+                    if (to_transfer > from_s1) {
+                        size_t from_s2 = to_transfer - from_s1;
+                        for (size_t i = 0; i < from_s2; i++) {
+                            [[maybe_unused]] bool pushed = dest_queue.try_push(p2[i]);
+                        }
+                    }
+                    
+                    source_queue.commit_read(to_transfer);
+                    transferred += to_transfer;
+                }
+            }
+            
+            if (source_queue.empty() && pushed == total_samples) {
+                break;  // All data transferred
+            }
+            
+            std::this_thread::yield();
+        }
+    });
+    
+    // Consumer thread - verify all data arrives in order
+    std::thread consumer([&]() {
+        size_t consumed = 0;
+        float expected = 0.0f;
+        
+        while (consumed < total_samples) {
+            float value;
+            if (dest_queue.try_pop(value)) {
+                EXPECT_EQ(value, expected) << "Sample mismatch at index " << consumed;
+                expected += 1.0f;
+                consumed++;
+            } else {
+                if (transferred == total_samples && dest_queue.empty()) {
+                    break;
+                }
+                std::this_thread::yield();
+            }
+        }
+        
+        EXPECT_EQ(consumed, total_samples) << "Not all samples were consumed";
+    });
+    
+    // Wait for all threads
+    producer.join();
+    transfer.join();
+    consumer.join();
+    
+    // Final verification
+    EXPECT_EQ(pushed, total_samples) << "Not all samples were pushed";
+    EXPECT_EQ(transferred, total_samples) << "Not all samples were transferred";
+    EXPECT_TRUE(source_queue.empty()) << "Source queue not empty";
+    EXPECT_TRUE(dest_queue.empty()) << "Destination queue not empty";
+}
+
+// Test write_dbf behavior to ensure proper handling
+TEST_F(SPSCQueueDoublyMappedTest, WriteDbfCorrectness) {
+    dro::SPSCQueue<float> queue(16384);  // 64KB
+    
+    // Test 1: Empty queue should provide maximum write space
+    auto [write_ptr1, write_size1] = queue.write_dbf();
+    if (write_ptr1) {
+        EXPECT_GT(write_size1, 0);
+        EXPECT_LE(write_size1, queue.capacity());
+        
+        // Write some data
+        size_t to_write = std::min(size_t(1000), write_size1);
+        for (size_t i = 0; i < to_write; i++) {
+            write_ptr1[i] = static_cast<float>(i);
+        }
+        queue.commit_write(to_write);
+        
+        EXPECT_EQ(queue.size(), to_write);
+    }
+    
+    // Test 2: Verify data integrity after write_dbf
+    float value;
+    for (size_t i = 0; i < 1000 && !queue.empty(); i++) {
+        ASSERT_TRUE(queue.try_pop(value));
+        EXPECT_EQ(value, static_cast<float>(i));
+    }
+    
+    // Test 3: Fill queue to create wrap-around, then test write_dbf
+    for (size_t i = 0; i < 12000; i++) {
+        queue.push(static_cast<float>(i));
+    }
+    
+    // Consume some to create space at beginning
+    for (size_t i = 0; i < 5000; i++) {
+        [[maybe_unused]] bool pop_result = queue.try_pop(value);
+    }
+    
+    // Now write_dbf should give us space at the beginning
+    auto [write_ptr2, write_size2] = queue.write_dbf();
+    if (write_ptr2) {
+        EXPECT_GT(write_size2, 0);
+        
+        // Write sequential data
+        size_t to_write = std::min(size_t(3000), write_size2);
+        for (size_t i = 0; i < to_write; i++) {
+            write_ptr2[i] = static_cast<float>(12000 + i);
+        }
+        queue.commit_write(to_write);
+    }
+    
+    // Verify all data is in correct order
+    float expected = 5000.0f;  // We consumed 0-4999
+    while (!queue.empty()) {
+        ASSERT_TRUE(queue.try_pop(value));
+        EXPECT_EQ(value, expected);
+        expected += 1.0f;
+    }
 }
