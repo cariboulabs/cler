@@ -14,8 +14,7 @@ struct SourceChirpBlock : public cler::BlockBase {
                     float f0_hz,
                     float f1_hz,
                     size_t sps,
-                    float chirp_duration_s,
-                    size_t buffer_size = 1024)
+                    float chirp_duration_s)
         : cler::BlockBase(name),
           _amplitude(amplitude),
           _f0_hz(f0_hz),

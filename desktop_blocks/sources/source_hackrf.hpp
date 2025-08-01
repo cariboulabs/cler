@@ -17,11 +17,16 @@ struct SourceHackRFBlock : public cler::BlockBase {
                       uint32_t samp_rate_hz,
                       int lna_gain_db = 16,  // 0-40 dB, multiple of 8
                       int vga_gain_db = 16,  // 0-62 dB, multiple of 2
-                      size_t buffer_size = 2 << 22)
+                      size_t buffer_size = 0)
         : cler::BlockBase(name),
-          _iq(buffer_size),
-          _buffer_size(buffer_size)
+          _iq(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size),
+          _buffer_size(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size)
     {
+        // If user provided a non-zero buffer size, validate it's sufficient
+        if (buffer_size > 0 && buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
+            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
+                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>)) + " complex<float> elements");
+        }
         if (hackrf_open(&_dev) != HACKRF_SUCCESS) {
             throw std::runtime_error("Failed to open HackRF device.");
         }
@@ -51,7 +56,7 @@ struct SourceHackRFBlock : public cler::BlockBase {
         }
 
         try {
-            _tmp = new std::complex<float>[buffer_size];
+            _tmp = new std::complex<float>[_buffer_size];
         } catch (const std::bad_alloc&) {
             hackrf_close(_dev);
             _dev = nullptr;

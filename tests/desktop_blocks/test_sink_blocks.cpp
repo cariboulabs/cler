@@ -137,8 +137,8 @@ TEST_F(SinkBlocksTest, SinkNullBlockPartialCallback) {
 
 // Test SinkNullBlock error conditions
 TEST_F(SinkBlocksTest, SinkNullBlockErrorConditions) {
-    // Test zero buffer size - may throw invalid_argument or logic_error depending on implementation
-    EXPECT_THROW(SinkNullBlock<float>("test", nullptr, nullptr, 0), std::exception);
+    // Test buffer size too small for doubly-mapped buffers (need at least 4096/sizeof(float) = 1024 for float)
+    EXPECT_THROW(SinkNullBlock<float>("test", nullptr, nullptr, 1), std::invalid_argument);
 }
 
 // Test SinkFileBlock basic functionality
@@ -303,8 +303,8 @@ TEST_F(SinkBlocksTest, SinkFileBlockMultipleRuns) {
 TEST_F(SinkBlocksTest, SinkFileBlockErrorConditions) {
     const size_t buffer_size = 4096; // Large enough for dbf
     
-    // Test zero buffer size - Channel throws std::logic_error for zero capacity
-    EXPECT_THROW(SinkFileBlock<float>("test", test_filename.c_str(), 0), std::logic_error);
+    // Test buffer size too small for doubly-mapped buffers (need at least 4096/sizeof(float) = 1024 for float)
+    EXPECT_THROW(SinkFileBlock<float>("test", test_filename.c_str(), 1), std::invalid_argument);
     
     // Test empty filename
     EXPECT_THROW(SinkFileBlock<float>("test", "", buffer_size), std::invalid_argument);

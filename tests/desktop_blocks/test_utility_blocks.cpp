@@ -312,6 +312,6 @@ TEST_F(UtilityBlocksTest, ThroughputBlockEmptyInput) {
 
 // Test ThroughputBlock error conditions
 TEST_F(UtilityBlocksTest, ThroughputBlockErrorConditions) {
-    // Test zero buffer size - may throw invalid_argument or logic_error depending on implementation
-    EXPECT_THROW(ThroughputBlock<float>("test", 0), std::exception);
+    // Test buffer size too small for doubly-mapped buffers (need at least 4096/sizeof(float) = 1024 for float)
+    EXPECT_THROW(ThroughputBlock<float>("test", 1), std::invalid_argument);
 }

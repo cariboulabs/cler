@@ -23,8 +23,13 @@ PlotCSpectrogramBlock::PlotCSpectrogramBlock(const char*name,
     in = static_cast<cler::Channel<std::complex<float>>*>(
         ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
     );
+    
+    // Ensure buffer size meets minimum requirements for doubly-mapped buffers
+    size_t min_buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>);
+    size_t buffer_size = std::max(_n_fft_samples, min_buffer_size);
+    
     for (size_t i = 0; i < _num_inputs; ++i) {
-        new (&in[i]) cler::Channel<std::complex<float>>(std::min(_n_fft_samples, cler::DOUBLY_MAPPED_MIN_SIZE));
+        new (&in[i]) cler::Channel<std::complex<float>>(buffer_size);
     }
 
     _liquid_inout = new std::complex<float>[_n_fft_samples];

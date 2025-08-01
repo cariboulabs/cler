@@ -255,9 +255,8 @@ TEST_F(ResamplerBlocksTest, MultiStageResamplerErrorConditions) {
     const size_t buffer_size = 4096;
     const float attenuation = 60.0f;
     
-    // Test zero buffer size - this is safe to test as it doesn't call liquid-dsp
-    // The Channel constructor throws std::logic_error for zero capacity
-    EXPECT_THROW(MultiStageResamplerBlock<float>("test", 2.0f, attenuation, 0), std::logic_error);
+    // Test buffer size too small for doubly-mapped buffers (need at least 4096/sizeof(float) = 1024 for float)
+    EXPECT_THROW(MultiStageResamplerBlock<float>("test", 2.0f, attenuation, 1), std::invalid_argument);
     
     // NOTE: Cannot safely test invalid ratio/attenuation parameters because liquid-dsp
     // library calls exit() or segfaults instead of returning error codes that we can handle.
@@ -326,18 +325,10 @@ TEST_F(ResamplerBlocksTest, MultiStageResamplerMultipleRuns) {
 
 // Test that small buffer triggers dbf exception
 TEST_F(ResamplerBlocksTest, MultiStageResamplerSmallBufferException) {
-    const size_t small_buffer = 512; // Too small for dbf (< 4KB)
+    const size_t small_buffer = 1; // Too small for dbf (need at least 1024 for float)
     const float ratio = 2.0f;
     const float attenuation = 60.0f;
     
-    MultiStageResamplerBlock<float> resampler("test_resampler_small", ratio, attenuation, small_buffer);
-    cler::Channel<float> output(small_buffer);
-    
-    // Add some input data
-    for (int i = 0; i < 10; i++) {
-        resampler.in.push(static_cast<float>(i));
-    }
-    
-    // This should throw because dbf is not available for small buffers
-    EXPECT_THROW(resampler.procedure(&output), std::runtime_error);
+    // This should throw std::invalid_argument because buffer is too small
+    EXPECT_THROW(MultiStageResamplerBlock<float>("test_resampler_small", ratio, attenuation, small_buffer), std::invalid_argument);
 }

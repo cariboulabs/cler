@@ -23,10 +23,16 @@ struct EZGmskDemodBlock : public cler::BlockBase {
                    ezgmsk::ezgmsk_demod_callback callback,
                    void* callback_context,
                    float detector_threshold = 0.9f,
-                   float detector_dphi_max = 0.1f)
+                   float detector_dphi_max = 0.1f,
+                   size_t buffer_size = 0)
     : BlockBase(name),
-      in(512) // 512 * 8 bytes (complex<float>) = 4KB
+      in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size)
     {
+        // If user provided a non-zero buffer size, validate it's sufficient
+        if (buffer_size > 0 && buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
+            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
+                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>)) + " complex<float> elements");
+        }
         _demod = ezgmsk_demod_create_set(
             k, m, BT,
             preamble_symbols_len,

@@ -20,6 +20,12 @@ PlotTimeSeriesBlock::PlotTimeSeriesBlock(const char* name,
     }
 
     _buffer_size = static_cast<size_t>(sps * duration_s);
+    
+    // Ensure buffer size meets minimum requirements for doubly-mapped buffers
+    size_t min_buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float);
+    if (_buffer_size < min_buffer_size) {
+        _buffer_size = min_buffer_size;
+    }
 
     // Input channels
     in = static_cast<cler::Channel<float>*>(

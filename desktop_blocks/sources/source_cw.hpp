@@ -12,8 +12,7 @@ struct SourceCWBlock : public cler::BlockBase {
     SourceCWBlock(const char* name,
                   float amplitude,
                   float frequency_hz,
-                  size_t sps,
-                  size_t buffer_size = 1024)
+                  size_t sps)
         : cler::BlockBase(name),
           _amplitude(amplitude),
           _frequency_hz(frequency_hz),

@@ -26,13 +26,19 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
     }
 
     _buffer_size = BUFFER_SIZE_MULTIPLIER * _n_fft_samples;
+    
+    // Ensure buffer size meets minimum requirements for doubly-mapped buffers
+    size_t min_buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>);
+    if (_buffer_size < min_buffer_size) {
+        _buffer_size = min_buffer_size;
+    }
 
     // Input channels
     in = static_cast<cler::Channel<std::complex<float>>*>(
         ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
     );
     for (size_t i = 0; i < _num_inputs; ++i) {
-        new (&in[i]) cler::Channel<std::complex<float>>(_buffer_size);
+        new (&in[i]) cler::Channel<std::complex<float>>(std::max(_buffer_size, min_buffer_size));
     }
 
     // Plot ring buffers
@@ -40,7 +46,7 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
         ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
     );
     for (size_t i = 0; i < _num_inputs; ++i) {
-        new (&_signal_channels[i]) cler::Channel<std::complex<float>>(_buffer_size);
+        new (&_signal_channels[i]) cler::Channel<std::complex<float>>(std::max(_buffer_size, min_buffer_size));
     }
 
     // Snapshot buffers

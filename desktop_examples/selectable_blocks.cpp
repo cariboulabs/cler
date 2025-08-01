@@ -56,7 +56,7 @@ struct SourceTwoBlock : public cler::BlockBase {
 struct Gain2Block : public cler::BlockBase {
     cler::Channel<float> in; // Heap allocated for dbf support
 
-    Gain2Block(const char* name) : BlockBase(name), in(1024) {} // 1024 * 4 = 4KB
+    Gain2Block(const char* name) : BlockBase(name), in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
         // Use zero-copy path
@@ -78,7 +78,7 @@ struct Gain2Block : public cler::BlockBase {
 struct Gain3Block : public cler::BlockBase {
     cler::Channel<float> in; // Heap allocated for dbf support
 
-    Gain3Block(const char* name) : BlockBase(name), in(1024) {} // 1024 * 4 = 4KB
+    Gain3Block(const char* name) : BlockBase(name), in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
         // Use zero-copy path
@@ -147,7 +147,7 @@ struct switchGainBlock : public cler::BlockBase {
 struct SinkPrintBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
-    SinkPrintBlock(const char* name) : BlockBase(name), in(1024) {} // 1024 * 4 = 4KB
+    SinkPrintBlock(const char* name) : BlockBase(name), in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) {}
 
     cler::Result<cler::Empty, cler::Error> procedure() {
         size_t transferable = in.size();

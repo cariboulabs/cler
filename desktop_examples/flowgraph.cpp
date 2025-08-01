@@ -46,7 +46,9 @@ struct AdderBlock : public cler::BlockBase {
     cler::Channel<float> in0;
     cler::Channel<double> in1;
 
-    AdderBlock(const char* name) : BlockBase(name), in0(1024), in1(512) {} // 1024*4=4KB, 512*8=4KB
+    AdderBlock(const char* name) : BlockBase(name), 
+        in0(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)), 
+        in1(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(double)) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
         // Use zero-copy path
@@ -72,7 +74,8 @@ struct GainBlock : public cler::BlockBase {
     cler::Channel<float> in; // Heap allocated for dbf support
     float gain;
 
-    GainBlock(const char* name, float gain_value) : BlockBase(name), in(1024), gain(gain_value) {} // 1024 * 4 = 4KB
+    GainBlock(const char* name, float gain_value) : BlockBase(name), 
+        in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)), gain(gain_value) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
         // Use zero-copy path
@@ -94,7 +97,8 @@ struct GainBlock : public cler::BlockBase {
 struct SinkBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
-    SinkBlock(const char* name) : BlockBase(name), in(1024) { // 1024 * 4 = 4KB
+    SinkBlock(const char* name) : BlockBase(name), 
+        in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) {
         _first_sample_time = std::chrono::steady_clock::now();
     }
 
