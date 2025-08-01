@@ -34,15 +34,10 @@ struct MultiStageResamplerBlock : public cler::BlockBase {
         }
 
 
-        _tmp_in = new T[buffer_size];
-        _tmp_out = new T[buffer_size];
         _buffer_size = buffer_size;
     }
 
     ~MultiStageResamplerBlock() {
-        delete[] _tmp_in;
-        delete[] _tmp_out;
-
         if constexpr (std::is_same_v<T, float>) {
             msresamp_rrrf_destroy(_msresamp_r);
         } else if constexpr (std::is_same_v<T, std::complex<float>>) {
@@ -62,36 +57,38 @@ struct MultiStageResamplerBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSamples;
         }
 
-        in.readN(_tmp_in, transferable);
-
+        // Use doubly-mapped buffers for optimal performance (throws if not available)
+        auto [read_ptr, read_size] = in.read_dbf();
+        auto [write_ptr, write_size] = out->write_dbf();
+        
+        size_t samples_to_process = std::min({read_size, input_limit_by_output, write_size / static_cast<size_t>(_ratio)});
         unsigned int n_resampled = 0;
-
+        
         if constexpr (std::is_same_v<T, float>) {
             msresamp_rrrf_execute(
                 _msresamp_r,
-                _tmp_in,
-                transferable,
-                _tmp_out,
+                read_ptr,
+                samples_to_process,
+                write_ptr,
                 &n_resampled
             );
         } else if constexpr (std::is_same_v<T, std::complex<float>>) {
             msresamp_crcf_execute(
                 _msresamp_c,
-                reinterpret_cast<liquid_float_complex*>(_tmp_in),
-                transferable,
-                reinterpret_cast<liquid_float_complex*>(_tmp_out),
+                reinterpret_cast<liquid_float_complex*>(const_cast<T*>(read_ptr)),
+                samples_to_process,
+                reinterpret_cast<liquid_float_complex*>(write_ptr),
                 &n_resampled
             );
         }
-
-        out->writeN(_tmp_out, n_resampled);
+        
+        in.commit_read(samples_to_process);
+        out->commit_write(n_resampled);
 
         return cler::Empty{};
     }
 
 private:
-    T* _tmp_in;
-    T* _tmp_out;
     float _ratio;
     size_t _buffer_size;
 

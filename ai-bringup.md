@@ -373,24 +373,17 @@ struct GainBlock : public cler::BlockBase {
 ```cpp
 // TECHNIQUE 1: read_dbf/write_dbf (OPTIMAL)
 // Doubly-mapped buffers: True zero-copy on supported platforms
+// NOTE: These methods throw exceptions if dbf is not available
 auto [read_ptr, read_size] = in.read_dbf();
-if (read_ptr) {
-    // Direct access to contiguous data (no wrap-around with doubly mapped)
-    auto [write_ptr, write_size] = out->write_dbf();
-    if (write_ptr) {
-        // ULTIMATE FAST PATH: Direct processing between doubly-mapped buffers
-        size_t to_process = std::min(read_size, write_size);
-        for (size_t i = 0; i < to_process; ++i) {
-            write_ptr[i] = read_ptr[i] * gain; // Process directly
-        }
-        in.commit_read(to_process);
-        out->commit_write(to_process);
-    } else {
-        // Semi-fast path: read from doubly-mapped, write normally
-        fwrite(read_ptr, sizeof(T), read_size, fp);
-        in.commit_read(read_size);
-    }
+auto [write_ptr, write_size] = out->write_dbf();
+
+// Direct processing between doubly-mapped buffers
+size_t to_process = std::min(read_size, write_size);
+for (size_t i = 0; i < to_process; ++i) {
+    write_ptr[i] = read_ptr[i] * gain; // Process directly
 }
+in.commit_read(to_process);
+out->commit_write(to_process);
 
 // TECHNIQUE 2: ReadN/WriteN (GOOD BASELINE)
 // Bulk transfer with single memory copy
@@ -433,8 +426,8 @@ out->push(sample);
 - **Memory copy reduction** is the key to performance - each eliminated copy significantly improves throughput
 
 ### Channel Implementation Notes
-- **read_dbf()/write_dbf()**: Return {nullptr, 0} when doubly-mapped buffers are not available
-- **Transparent Fallback**: Blocks should try dbf methods first, then fall back to peek/commit
+- **read_dbf()/write_dbf()**: Throw an exception when doubly-mapped buffers are not available
+- **No Fallback**: Blocks using dbf should not implement fallback - let the exception propagate
 
 ### Error Handling Pattern
 ```cpp
