@@ -35,7 +35,9 @@ struct SinkFileBlock : public cler::BlockBase {
             std::fflush(_fp);
             std::fclose(_fp);
         }
-        delete[] _internal_buffer;
+        if (_internal_buffer) {
+            delete[] _internal_buffer;
+        }
     }
 
     cler::Result<cler::Empty, cler::Error> procedure()

@@ -12,8 +12,8 @@ struct NoiseAWGNBlock : public cler::BlockBase {
         std::is_same_v<T, std::complex<float>>, float,
         typename std::conditional<std::is_same_v<T, std::complex<double>>, double, T>::type>::type;
 
-    NoiseAWGNBlock(const char* name, scalar_type noise_stddev, const size_t buffer_size = 1024)
-        : cler::BlockBase(name), in(buffer_size), _noise_stddev(noise_stddev) { // Default 1024 for 4KB minimum
+    NoiseAWGNBlock(const char* name, scalar_type noise_stddev, const size_t buffer_size = 4096)
+        : cler::BlockBase(name), in(buffer_size), _noise_stddev(noise_stddev) { // Default 4096 for dbf compatibility
 
         std::random_device rd;
         _rng.seed(rd());
@@ -27,22 +27,29 @@ struct NoiseAWGNBlock : public cler::BlockBase {
         auto [read_ptr, read_size] = in.read_dbf();
         auto [write_ptr, write_size] = out->write_dbf();
         
+        if (read_size == 0) {
+            return cler::Error::NotEnoughSamples;
+        }
+        
+        if (write_size == 0) {
+            return cler::Error::NotEnoughSpace;
+        }
+        
         size_t to_process = std::min(read_size, write_size);
         
-        if (to_process > 0) {
-            for (size_t i = 0; i < to_process; ++i) {
-                if constexpr (std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>) {
-                    auto n_re = _normal_dist(_rng);
-                    auto n_im = _normal_dist(_rng);
-                    write_ptr[i] = read_ptr[i] + T{n_re, n_im};
-                } else {
-                    write_ptr[i] = read_ptr[i] + _normal_dist(_rng);
-                }
+        for (size_t i = 0; i < to_process; ++i) {
+            if constexpr (std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>) {
+                auto n_re = _normal_dist(_rng);
+                auto n_im = _normal_dist(_rng);
+                write_ptr[i] = read_ptr[i] + T{n_re, n_im};
+            } else {
+                write_ptr[i] = read_ptr[i] + _normal_dist(_rng);
             }
-            
-            in.commit_read(to_process);
-            out->commit_write(to_process);
         }
+        
+        in.commit_read(to_process);
+        out->commit_write(to_process);
+        
         return cler::Empty{};
     }
 

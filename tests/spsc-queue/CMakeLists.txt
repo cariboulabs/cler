@@ -4,17 +4,7 @@ cmake_minimum_required(VERSION 3.16)
 # Find required packages
 find_package(Threads REQUIRED)
 
-# Download and configure Google Test
-include(FetchContent)
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG v1.14.0
-)
-
-# For Windows: Prevent overriding the parent project's compiler/linker settings
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+# GoogleTest is now provided by parent tests/CMakeLists.txt
 
 # Enable testing
 enable_testing()
@@ -42,6 +32,7 @@ set(SPSC_TEST_COMPILE_OPTIONS
     -Wno-unused-function
     -Wno-unused-parameter
     -Wno-sign-compare
+    -Wno-interference-size  # Disable hardware_destructive_interference_size warning
     -UNDEBUG  # Keep asserts enabled even in optimized builds
 )
 
@@ -108,19 +99,6 @@ message(STATUS "  Header file: ${CLER_SPSC_QUEUE_HEADER}")
 message(STATUS "  CXX Standard: C++17")
 message(STATUS "  Tests created: spsc_basic_test, spsc_batch_test, spsc_bounds_test, spsc_all_tests")
 
-# Custom target for running all SPSC queue tests
-add_custom_target(run_spsc_tests
-    COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_CURRENT_BINARY_DIR} --output-on-failure -R "spsc_"
-    DEPENDS spsc_basic_test spsc_batch_test spsc_bounds_test spsc_doubly_mapped_test
-    COMMENT "Running all SPSC Queue tests"
-)
-
-# Custom target for verbose test output
-add_custom_target(run_spsc_tests_verbose
-    COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_CURRENT_BINARY_DIR} --output-on-failure --verbose -R "spsc_"
-    DEPENDS spsc_basic_test spsc_batch_test spsc_bounds_test spsc_doubly_mapped_test
-    COMMENT "Running all SPSC Queue tests with verbose output"
-)
 
 # Performance test target (runs tests with different optimization levels)
 add_custom_target(spsc_performance_test

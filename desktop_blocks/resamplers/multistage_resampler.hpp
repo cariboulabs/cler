@@ -15,14 +15,7 @@ struct MultiStageResamplerBlock : public cler::BlockBase {
         const size_t buffer_size = 1024)
         : cler::BlockBase(name), in(buffer_size), _ratio(ratio)
     {
-        if constexpr (std::is_same_v<T, float>) {
-            _msresamp_r = msresamp_rrrf_create(ratio, attenuation);
-        } else if constexpr (std::is_same_v<T, std::complex<float>>) {
-            _msresamp_c = msresamp_crcf_create(ratio, attenuation);
-        } else {
-            static_assert(dependent_false_v<T>, "MultiStageResamplerBlock only supports float or std::complex<float>");
-        }
-
+        // Validate parameters BEFORE calling liquid-dsp functions
         if (buffer_size == 0) {
             throw std::invalid_argument("Buffer size must be greater than zero.");
         }
@@ -33,6 +26,13 @@ struct MultiStageResamplerBlock : public cler::BlockBase {
             throw std::invalid_argument("Attenuation must be non-negative.");
         }
 
+        if constexpr (std::is_same_v<T, float>) {
+            _msresamp_r = msresamp_rrrf_create(ratio, attenuation);
+        } else if constexpr (std::is_same_v<T, std::complex<float>>) {
+            _msresamp_c = msresamp_crcf_create(ratio, attenuation);
+        } else {
+            static_assert(dependent_false_v<T>, "MultiStageResamplerBlock only supports float or std::complex<float>");
+        }
 
         _buffer_size = buffer_size;
     }
@@ -47,27 +47,29 @@ struct MultiStageResamplerBlock : public cler::BlockBase {
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out)
     {
-        size_t available_samples = in.size();
-        size_t output_space = out->space();
-        size_t input_limit_by_output = output_space / _ratio;
-
-        size_t transferable = std::min({available_samples, input_limit_by_output, _buffer_size});
-
-        if (transferable == 0) {
-            return cler::Error::NotEnoughSamples;
-        }
-
         // Use doubly-mapped buffers for optimal performance (throws if not available)
         auto [read_ptr, read_size] = in.read_dbf();
         auto [write_ptr, write_size] = out->write_dbf();
         
-        size_t samples_to_process = std::min({read_size, input_limit_by_output, write_size / static_cast<size_t>(_ratio)});
+        if (read_size == 0) {
+            return cler::Error::NotEnoughSamples;
+        }
+        
+        if (write_size == 0) {
+            return cler::Error::NotEnoughSpace;
+        }
+        
+        // Calculate max input samples we can process given output space
+        // For downsample (ratio < 1), we need more input samples than output space
+        // For upsample (ratio > 1), we need fewer input samples than output space
+        size_t max_input_by_write_space = static_cast<size_t>(write_size / _ratio);
+        size_t samples_to_process = std::min(read_size, max_input_by_write_space);
         unsigned int n_resampled = 0;
         
         if constexpr (std::is_same_v<T, float>) {
             msresamp_rrrf_execute(
                 _msresamp_r,
-                read_ptr,
+                const_cast<float*>(read_ptr),
                 samples_to_process,
                 write_ptr,
                 &n_resampled
