@@ -3,7 +3,7 @@
 #include <vector>
 #include <complex>
 #include <fstream>
-#include "../../include/cler_spsc-queue.hpp"
+#include "cler_spsc-queue.hpp"
 
 class SPSCQueueDoublyMappedTest : public ::testing::Test {
 protected:

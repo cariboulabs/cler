@@ -55,17 +55,7 @@ struct SourceHackRFBlock : public cler::BlockBase {
             throw std::runtime_error("Failed to set VGA gain.");
         }
 
-        try {
-            _tmp = new std::complex<float>[_buffer_size];
-        } catch (const std::bad_alloc&) {
-            hackrf_close(_dev);
-            _dev = nullptr;
-            throw std::runtime_error("Failed to allocate memory for temporary buffer.");
-        }
-
         if (hackrf_start_rx(_dev, rx_callback, this) != HACKRF_SUCCESS) {
-            delete[] _tmp;
-            _tmp = nullptr;
             hackrf_close(_dev);
             _dev = nullptr;
             throw std::runtime_error("Failed to start RX streaming.");
@@ -77,54 +67,29 @@ struct SourceHackRFBlock : public cler::BlockBase {
             hackrf_stop_rx(_dev);
             hackrf_close(_dev);
         }
-        if (_tmp) {
-            delete[] _tmp;
-        }
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
-        size_t iq_size = _iq.size();
-        if (iq_size == 0) {
+        auto [read_ptr, read_size] = _iq.read_dbf();
+        if (read_ptr == nullptr || read_size == 0) {
             return cler::Error::NotEnoughSamples;
         }
 
-        // Try zero-copy path first (for doubly mapped buffers on both input and output)
-        auto [read_ptr, read_size] = _iq.read_dbf();
-        if (read_ptr && read_size > 0) {
-            auto [write_ptr, write_size] = out->write_dbf();
-            if (write_ptr && write_size > 0) {
-                // ULTIMATE FAST PATH: Direct copy between doubly-mapped buffers
-                size_t to_copy = std::min(read_size, write_size);
-                std::memcpy(write_ptr, read_ptr, to_copy * sizeof(std::complex<float>));
-                _iq.commit_read(to_copy);
-                out->commit_write(to_copy);
-                return cler::Empty{};
-            }
-            // Output doesn't support dbf, use standard writeN
-            size_t to_transfer = std::min(read_size, out->space());
-            if (to_transfer > 0) {
-                out->writeN(read_ptr, to_transfer);
-                _iq.commit_read(to_transfer);
-                return cler::Empty{};
-            }
-        }
-
-        // Fall back to standard approach
-        size_t out_space = out->space();
-        if (out_space == 0) {
+        auto [write_ptr, write_size] = out->write_dbf();
+        if (write_ptr == nullptr || write_size == 0) {
             return cler::Error::NotEnoughSpace;
         }
-        size_t transferable = std::min({iq_size, out_space, _buffer_size});
-
-        size_t n = _iq.readN(_tmp, transferable);
-        out->writeN(_tmp, n);
+        
+        size_t to_copy = std::min(read_size, write_size);
+        std::memcpy(write_ptr, read_ptr, to_copy * sizeof(std::complex<float>));
+        _iq.commit_read(to_copy);
+        out->commit_write(to_copy);
         return cler::Empty{};
     }
 
 private:
     hackrf_device* _dev = nullptr;
     cler::Channel<std::complex<float>> _iq;
-    std::complex<float>* _tmp = nullptr;
     size_t _buffer_size;
 
     static int rx_callback(hackrf_transfer* transfer) {

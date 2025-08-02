@@ -5,7 +5,7 @@
 #include <numeric>
 
 #include "cler.hpp"
-#include "noise/awgn.hpp"
+#include "desktop_blocks/noise/awgn.hpp"
 
 class NoiseBlocksTest : public ::testing::Test {
 protected:

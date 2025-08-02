@@ -4,9 +4,9 @@
 #include <cmath>
 
 #include "cler.hpp"
-#include "math/add.hpp"
-#include "math/gain.hpp" 
-#include "math/complex_demux.hpp"
+#include "desktop_blocks/math/add.hpp"
+#include "desktop_blocks/math/gain.hpp" 
+#include "desktop_blocks/math/complex_demux.hpp"
 
 class MathBlocksTest : public ::testing::Test {
 protected:

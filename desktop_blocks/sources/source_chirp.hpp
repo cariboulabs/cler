@@ -45,30 +45,31 @@ struct SourceChirpBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
         // Use zero-copy path
         auto [write_ptr, write_size] = out->write_dbf();
+        if (write_ptr == nullptr || write_size == 0) {
+            return cler::Error::NotEnoughSpace;
+        }
         
-        if (write_size > 0) {
-            // Generate directly into output buffer
-            for (size_t i = 0; i < write_size; ++i) {
-                std::complex<float> chirp = _phasor;
+        // Generate directly into output buffer
+        for (size_t i = 0; i < write_size; ++i) {
+            std::complex<float> chirp = _phasor;
 
-                if constexpr (std::is_same_v<T, std::complex<float>>) {
-                    write_ptr[i] = _amplitude * chirp;
-                } else {
-                    write_ptr[i] = _amplitude * chirp.real();
-                }
-
-                _phasor *= _psi;
-                _phasor /= std::abs(_phasor); // Normalize to keep phasor on the unit circle, CRUCIAL for stability
-                _psi *= _psi_inc; // Update phase increment for next sample
-
-                ++_samples_counter;
-                if (_samples_counter >= _n_samples_before_reset) {
-                    reset();
-                }
+            if constexpr (std::is_same_v<T, std::complex<float>>) {
+                write_ptr[i] = _amplitude * chirp;
+            } else {
+                write_ptr[i] = _amplitude * chirp.real();
             }
 
-            out->commit_write(write_size);
+            _phasor *= _psi;
+            _phasor /= std::abs(_phasor); // Normalize to keep phasor on the unit circle, CRUCIAL for stability
+            _psi *= _psi_inc; // Update phase increment for next sample
+
+            ++_samples_counter;
+            if (_samples_counter >= _n_samples_before_reset) {
+                reset();
+            }
         }
+
+        out->commit_write(write_size);
         return cler::Empty{};
     }
 

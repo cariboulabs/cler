@@ -5,9 +5,9 @@
 #include <thread>
 
 #include "cler.hpp"
-#include "utils/fanout.hpp"
-#include "utils/throttle.hpp"
-#include "utils/throughput.hpp"
+#include "desktop_blocks/utils/fanout.hpp"
+#include "desktop_blocks/utils/throttle.hpp"
+#include "desktop_blocks/utils/throughput.hpp"
 
 class UtilityBlocksTest : public ::testing::Test {
 protected:

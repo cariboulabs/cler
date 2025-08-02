@@ -23,7 +23,9 @@ struct GainBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
         // Use readN/writeN for simple processing (recommended pattern)
         size_t transferable = std::min({in.size(), out->space(), _buffer_size});
-        if (transferable == 0) return cler::Error::NotEnoughSamples;
+        if (transferable == 0) {
+            return cler::Error::NotEnoughSpaceOrSamples;
+        }
         
         in.readN(_buffer, transferable);
         

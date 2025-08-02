@@ -42,7 +42,9 @@ struct SourceCWBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
         // Use writeN for simple generation (recommended pattern)
         size_t to_generate = std::min(out->space(), _buffer_size);
-        if (to_generate == 0) return cler::Error::NotEnoughSpace;
+        if (to_generate == 0) {
+            return cler::Error::NotEnoughSpace;
+        }
         
         // Generate into temporary buffer
         for (size_t i = 0; i < to_generate; ++i) {

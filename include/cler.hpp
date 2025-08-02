@@ -29,6 +29,7 @@ namespace cler {
         Unknown,
         NotEnoughSamples,
         NotEnoughSpace,
+        NotEnoughSpaceOrSamples, // for lazyness
         ProcedureError,
         BadData,
         
@@ -50,6 +51,7 @@ namespace cler {
             case Error::Unknown: return "Unknown error";
             case Error::NotEnoughSpace: return "Not enough space in output buffers";
             case Error::NotEnoughSamples: return "Not enough samples in input buffers";
+            case Error::NotEnoughSpaceOrSamples: return "Not enough space or samples in buffers";
             case Error::ProcedureError: return "Procedure error";
             case Error::BadData: return "Bad data received";
             case Error::TERM_InvalidChannelIndex: return "TERM: Invalid channel index";
@@ -372,7 +374,7 @@ namespace cler {
                         return;
                     }
 
-                    if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
+                    if (err == Error::NotEnoughSpaceOrSamples || err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
                         if (config.collect_detailed_stats) {
                             total_dead_time_s += dt.count();
                         }

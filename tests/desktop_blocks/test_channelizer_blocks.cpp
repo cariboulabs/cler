@@ -5,7 +5,7 @@
 #include <algorithm>
 
 #include "cler.hpp"
-#include "channelizers/polyphase_channelizer.hpp"
+#include "desktop_blocks/channelizers/polyphase_channelizer.hpp"
 
 class ChannelizerBlocksTest : public ::testing::Test {
 protected:

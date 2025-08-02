@@ -38,6 +38,7 @@ set(SPSC_TEST_COMPILE_OPTIONS
 
 # Common link libraries for all tests
 set(SPSC_TEST_LINK_LIBRARIES
+    cler::cler
     GTest::gtest_main
     Threads::Threads
 )
@@ -47,10 +48,6 @@ function(add_spsc_test TEST_NAME SOURCE_FILE)
     add_executable(${TEST_NAME} ${SOURCE_FILE})
     
     target_compile_options(${TEST_NAME} PRIVATE ${SPSC_TEST_COMPILE_OPTIONS})
-    
-    target_include_directories(${TEST_NAME} PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
-    )
     
     target_link_libraries(${TEST_NAME} PRIVATE ${SPSC_TEST_LINK_LIBRARIES})
     

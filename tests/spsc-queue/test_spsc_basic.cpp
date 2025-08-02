@@ -4,7 +4,7 @@
 #include <numeric>
 #include <random>
 #include <chrono>
-#include "../../include/cler_spsc-queue.hpp"
+#include "cler_spsc-queue.hpp"
 
 class SPSCQueueBasicTest : public ::testing::Test {
 protected:

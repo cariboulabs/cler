@@ -4,7 +4,7 @@
 #include <cmath>
 
 #include "cler.hpp"
-#include "resamplers/multistage_resampler.hpp"
+#include "desktop_blocks/resamplers/multistage_resampler.hpp"
 
 class ResamplerBlocksTest : public ::testing::Test {
 protected:

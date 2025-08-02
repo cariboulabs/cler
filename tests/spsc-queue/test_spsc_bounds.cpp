@@ -4,7 +4,7 @@
 #include <numeric>
 #include <memory>
 #include <cstring>
-#include "../../include/cler_spsc-queue.hpp"
+#include "cler_spsc-queue.hpp"
 
 class SPSCQueueBoundsTest : public ::testing::Test {
 protected:

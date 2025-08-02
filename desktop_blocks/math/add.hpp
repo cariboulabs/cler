@@ -99,6 +99,9 @@ struct AddBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
         // Use zero-copy path
         auto [write_ptr, write_size] = out->write_dbf();
+        if (!write_ptr || write_size == 0) {
+            return cler::Error::NotEnoughSpace;
+        }
         
         // Check if all inputs have data available
         size_t min_available = write_size;
@@ -122,8 +125,12 @@ struct AddBlock : public cler::BlockBase {
             }
             
             out->commit_write(min_available);
+            return cler::Empty{};
+        } else {
+            return cler::Error::NotEnoughSamples;
         }
-        return cler::Empty{};
+
+
     }
 
     private:

@@ -38,6 +38,7 @@ private:
     SIZE_T mapping_size_ = 0;
     bool is_valid_ = false;
     bool using_large_pages_ = false;
+    bool used_placeholders_ = false;
 
 public:
     DoublyMappedAllocation() = default;
@@ -51,12 +52,14 @@ public:
         , base_address_(other.base_address_)
         , mapping_size_(other.mapping_size_)
         , is_valid_(other.is_valid_)
-        , using_large_pages_(other.using_large_pages_) {
+        , using_large_pages_(other.using_large_pages_)
+        , used_placeholders_(other.used_placeholders_) {
         other.file_mapping_ = INVALID_HANDLE_VALUE;
         other.base_address_ = nullptr;
         other.mapping_size_ = 0;
         other.is_valid_ = false;
         other.using_large_pages_ = false;
+        other.used_placeholders_ = false;
     }
     
     DoublyMappedAllocation& operator=(DoublyMappedAllocation&& other) noexcept {
@@ -67,11 +70,13 @@ public:
             mapping_size_ = other.mapping_size_;
             is_valid_ = other.is_valid_;
             using_large_pages_ = other.using_large_pages_;
+            used_placeholders_ = other.used_placeholders_;
             other.file_mapping_ = INVALID_HANDLE_VALUE;
             other.base_address_ = nullptr;
             other.mapping_size_ = 0;
             other.is_valid_ = false;
             other.using_large_pages_ = false;
+            other.used_placeholders_ = false;
         }
         return *this;
     }
@@ -156,8 +161,10 @@ private:
             UnmapViewOfFile(base_address_);
             UnmapViewOfFile(static_cast<char*>(base_address_) + mapping_size_);
             
-            // If using VirtualAlloc2 placeholders, also free the virtual allocation
-            VirtualFree(base_address_, 0, MEM_RELEASE);
+            // Only free virtual allocation if we used placeholders
+            if (used_placeholders_) {
+                VirtualFree(base_address_, 0, MEM_RELEASE);
+            }
         }
         
         if (file_mapping_ != INVALID_HANDLE_VALUE) {
@@ -169,6 +176,7 @@ private:
         file_mapping_ = INVALID_HANDLE_VALUE;
         is_valid_ = false;
         using_large_pages_ = false;
+        used_placeholders_ = false;
     }
     
     bool enable_large_page_privilege() {
@@ -239,7 +247,7 @@ private:
         }
         
         // Create file mapping
-        DWORD protect = PAGE_READWRITE;
+        DWORD protect = PAGE_READWRITE | SEC_COMMIT;
         if (use_large_pages) {
             protect |= SEC_LARGE_PAGES;
         }
@@ -302,10 +310,34 @@ private:
             return false;
         }
         
+        // Verify the double mapping actually works
+        volatile char* first_byte = static_cast<char*>(first_mapping);
+        volatile char* second_byte = static_cast<char*>(second_mapping);
+        
+        // Write to first mapping
+        *first_byte = 42;
+        
+        // Check if it appears in second mapping
+        if (*second_byte != 42) {
+            // Double mapping failed!
+            UnmapViewOfFile(first_mapping);
+            UnmapViewOfFile(second_mapping);
+            CloseHandle(file_mapping_);
+            file_mapping_ = INVALID_HANDLE_VALUE;
+            VMEM_LOG("Double mapping verification failed!");
+            return false;
+        }
+        
+        // Clean up test
+        *first_byte = 0;
+        
         base_address_ = first_mapping;
         mapping_size_ = aligned_size;
         using_large_pages_ = use_large_pages;
+        used_placeholders_ = true;  // Mark that we used the placeholder approach
         is_valid_ = true;
+        
+        VMEM_LOG("Double mapping created successfully at %p, size: %zu", base_address_, mapping_size_);
         
         return true;
     }
@@ -393,10 +425,33 @@ private:
             return false;
         }
         
+        // Verify the double mapping actually works
+        volatile char* first_byte = static_cast<char*>(first_mapping);
+        volatile char* second_byte = static_cast<char*>(second_mapping);
+        
+        // Write to first mapping
+        *first_byte = 42;
+        
+        // Check if it appears in second mapping
+        if (*second_byte != 42) {
+            // Double mapping failed!
+            UnmapViewOfFile(first_mapping);
+            UnmapViewOfFile(second_mapping);
+            CloseHandle(file_mapping_);
+            file_mapping_ = INVALID_HANDLE_VALUE;
+            VMEM_LOG("Double mapping verification failed!");
+            return false;
+        }
+        
+        // Clean up test
+        *first_byte = 0;
+        
         base_address_ = first_mapping;
         mapping_size_ = aligned_size;
         using_large_pages_ = use_large_pages;
         is_valid_ = true;
+        
+        VMEM_LOG("Double mapping created successfully at %p, size: %zu", base_address_, mapping_size_);
         
         return true;
     }

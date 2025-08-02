@@ -5,7 +5,7 @@
 #include <random>
 #include <chrono>
 #include <cstring>
-#include "../../include/cler_spsc-queue.hpp"
+#include "cler_spsc-queue.hpp"
 
 class SPSCQueueBatchTest : public ::testing::Test {
 protected:

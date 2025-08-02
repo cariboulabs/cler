@@ -27,19 +27,9 @@ struct SinkFileBlock : public cler::BlockBase {
 
         // Calculate actual buffer size used
         size_t actual_buffer_size = (buffer_size == 0) ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size;
-        
-        // Optional: tune buffer to a larger size (e.g., 64 KB)
-        try {
-            _internal_buffer = new char[actual_buffer_size * sizeof(T)];
-        } catch (const std::bad_alloc&) {
-            std::fclose(_fp);
-            _fp = nullptr;
-            throw std::runtime_error("Failed to allocate internal buffer");
-        }
-        
-        if (std::setvbuf(_fp, _internal_buffer, _IOFBF, actual_buffer_size * sizeof(T)) != 0) {
-            delete[] _internal_buffer;
-            _internal_buffer = nullptr;
+
+
+        if (std::setvbuf(_fp, nullptr, _IOFBF, actual_buffer_size * sizeof(T)) != 0) {
             std::fclose(_fp);
             _fp = nullptr;
             throw std::runtime_error("Failed to setvbuf() on file stream.");
@@ -50,9 +40,6 @@ struct SinkFileBlock : public cler::BlockBase {
         if (_fp) {
             std::fflush(_fp);
             std::fclose(_fp);
-        }
-        if (_internal_buffer) {
-            delete[] _internal_buffer;
         }
     }
 
@@ -77,5 +64,4 @@ struct SinkFileBlock : public cler::BlockBase {
 private:
     const char* _filename;
     FILE* _fp = nullptr;
-    char* _internal_buffer = nullptr;
 };

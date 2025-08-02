@@ -6,8 +6,8 @@
 #include <cstring>
 
 #include "cler.hpp"
-#include "sinks/sink_null.hpp"
-#include "sinks/sink_file.hpp"
+#include "desktop_blocks/sinks/sink_null.hpp"
+#include "desktop_blocks/sinks/sink_file.hpp"
 
 class SinkBlocksTest : public ::testing::Test {
 protected:

@@ -80,19 +80,19 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
 
         cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
             auto [ptr, space] = out->write_dbf();
-            if (ptr && space > 0) {
-                // Fast path: single ReadSamples call
-                size_t to_read = std::min(space, _max_samples_to_read);
-                int ret = _radio->ReadSamples(ptr, to_read);
-                if (ret > 0) {
-                    out->commit_write(ret);
-                }
-                if (ret < 0) {
-                    return cler::Error::ProcedureError;
-                }
-                return cler::Empty{};
+            if (ptr == nullptr || space == 0) {
+                return cler::Error::NotEnoughSpace;
             }
-            return cler::Error::NotEnoughSpace;
+
+            size_t to_read = std::min(space, _max_samples_to_read);
+            int ret = _radio->ReadSamples(ptr, to_read);
+            if (ret > 0) {
+                out->commit_write(ret);
+            }
+            if (ret < 0) {
+                return cler::Error::ProcedureError;
+            }
+            return cler::Empty{};
         }
 
         private:    

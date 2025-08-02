@@ -54,17 +54,17 @@ struct EZGmskDemodBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
-        // Use zero-copy path
         auto [read_ptr, read_size] = in.read_dbf();
-        
-        if (read_size > 0) {
-            // Process directly from doubly-mapped buffer
-            // Note: liquid DSP functions don't modify input, so const_cast is safe here
-            ezgmsk::ezgmsk_demod_execute(_demod, 
-                reinterpret_cast<liquid_float_complex*>(const_cast<std::complex<float>*>(read_ptr)), 
-                read_size);
-            in.commit_read(read_size);
+        if (!read_ptr || read_size == 0) {
+            return cler::Error::NotEnoughSamples;
         }
+        
+        // Process directly from doubly-mapped buffer
+        // Note: liquid DSP functions don't modify input, so const_cast is safe here
+        ezgmsk::ezgmsk_demod_execute(_demod, 
+            reinterpret_cast<liquid_float_complex*>(const_cast<std::complex<float>*>(read_ptr)), 
+            read_size);
+        in.commit_read(read_size);
         return cler::Empty{};
     }
 
