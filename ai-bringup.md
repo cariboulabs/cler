@@ -429,37 +429,28 @@ out->push(sample);
 - **Memory copy reduction** is the key to performance - each eliminated copy significantly improves throughput
 
 ### Channel Implementation Notes
-- **read_dbf()/write_dbf()**: Throw an exception when doubly-mapped buffers are not available (stack buffers or buffers < 4KB)
-- **Fallback Pattern**: Modern blocks should implement fallback to readN/writeN or peek/commit when DBF is not available
-- **Minimum Size**: Buffers must be at least DOUBLY_MAPPED_MIN_SIZE (4KB) for DBF support
+- **read_dbf()/write_dbf()**: Throw an exception when doubly-mapped buffers are not available
+- **Requirements**: Buffers must be heap-allocated and page-aligned (minimum DOUBLY_MAPPED_MIN_SIZE = 4KB)
+- **No Fallbacks**: Blocks should catch exceptions if they want to handle DBF unavailability (desktop_blocks do not do that as they want to enforce having dbf)
 
-### Recommended DBF Pattern with Fallback
+### DBF Usage Pattern
 ```cpp
 cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-    // Try zero-copy path first
+    // Use zero-copy doubly-mapped buffers when available
     auto [read_ptr, read_size] = in.read_dbf();
     auto [write_ptr, write_size] = out->write_dbf();
     
-    size_t to_process = std::min(read_size, write_size);
-    
-    if (to_process > 0 && read_ptr && write_ptr) {
-        // FAST PATH: Direct processing between doubly-mapped buffers
+    if (read_ptr && write_ptr) {
+        size_t to_process = std::min(read_size, write_size);
+        
+        // Direct processing between doubly-mapped buffers
         for (size_t i = 0; i < to_process; ++i) {
             write_ptr[i] = read_ptr[i] * _gain;
         }
         in.commit_read(to_process);
         out->commit_write(to_process);
-    } else {
-        // FALLBACK: Use traditional readN/writeN
-        size_t transferable = std::min({in.size(), out->space(), _buffer_size});
-        if (transferable > 0) {
-            in.readN(_buffer, transferable);
-            for (size_t i = 0; i < transferable; ++i) {
-                _buffer[i] *= _gain;
-            }
-            out->writeN(_buffer, transferable);
-        }
     }
+    // Note: No fallback - handle null pointers appropriately for your use case
     return cler::Empty{};
 }
 ```

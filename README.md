@@ -118,6 +118,7 @@ Cler supports four buffer access patterns with dramatically different performanc
 
     * **read_dbf/write_dbf (OPTIMAL)** </br>
     **Doubly-mapped buffers** provide true zero-copy access when available. Uses virtual memory tricks to present ring buffer data as a contiguous array, eliminating wrap-around handling. **Significantly faster** than other techniques due to eliminating one memory copy operation.
+    **Requirements**: Buffer must be heap-allocated and page-aligned (≥4KB). These methods will throw an exception if DBF is not available.
 
 **Performance Recommendation**: Use `read_dbf/write_dbf` for high-throughput paths, `readN/writeN` for general use, and avoid `push/pop` except for control data.
 
