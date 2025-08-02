@@ -1,0 +1,56 @@
+# Ignore build directories
+build/
+cmake-build-*/
+out/
+.build/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git files (we'll use COPY to get clean source)
+.git/
+.gitignore
+
+# Documentation builds
+docs/_build/
+*.doxygen
+
+# Test outputs
+Testing/
+test-results/
+*.log
+
+# Performance results
+perf-results/
+*.perf
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Docker files themselves (prevent recursion)
+Dockerfile*
+.dockerignore
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Python cache if any tools use it
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Coverage reports
+coverage/
+*.gcov
+*.gcda
+*.gcno
