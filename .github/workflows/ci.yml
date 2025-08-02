@@ -133,7 +133,7 @@ jobs:
         limit-access-to-actor: true
         
     - name: Cache dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           build/_deps
@@ -167,7 +167,7 @@ jobs:
         
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: test-results-${{ matrix.name }}
         path: |
@@ -176,7 +176,7 @@ jobs:
           
     - name: Upload build artifacts
       if: failure()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: build-artifacts-${{ matrix.name }}
         path: |
@@ -227,7 +227,7 @@ jobs:
         ./perf_read_write_techniques.exe
         
     - name: Upload performance results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: performance-results-${{ matrix.os }}
         path: build/performance/*.txt
