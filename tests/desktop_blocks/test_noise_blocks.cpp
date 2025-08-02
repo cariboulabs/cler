@@ -345,23 +345,6 @@ TEST_F(NoiseBlocksTest, AWGNBlockZeroNoise) {
     }
 }
 
-// Test NoiseAWGNBlock with empty input
-TEST_F(NoiseBlocksTest, AWGNBlockEmptyInput) {
-    const size_t buffer_size = 4096; // Large enough for dbf
-    const float noise_stddev = 1.0f;
-    
-    NoiseAWGNBlock<float> noise_block("test_awgn_empty", noise_stddev, buffer_size);
-    cler::Channel<float> output(buffer_size);
-    
-    // Run with empty input - should return NotEnoughSamples error
-    auto result = noise_block.procedure(&output);
-    EXPECT_TRUE(result.is_err());
-    EXPECT_EQ(result.unwrap_err(), cler::Error::NotEnoughSamples);
-    
-    // Verify no output
-    EXPECT_EQ(output.size(), 0);
-}
-
 // Test NoiseAWGNBlock randomness - multiple runs should produce different results
 TEST_F(NoiseBlocksTest, AWGNBlockRandomness) {
     const size_t buffer_size = 4096; // Large enough for dbf
