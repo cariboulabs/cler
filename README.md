@@ -112,7 +112,7 @@ Cler supports four buffer access patterns with dramatically different performanc
     * **ReadN/WriteN (Good baseline)** </br>
     Provides bulk access to buffer data with automatic pointer management. You copy data to a temporary buffer for processing. ReadN/WriteN automatically advances the ring buffer pointers — no manual commit needed. Good general-purpose pattern with single memory copy.
 
-    * **Peek/Commit (Zero-copy read)** </br>
+    * **Peek/Commit (Zero-copy read/write)** </br>
     Allows you to inspect (peek) data in the buffer without removing it, then explicitly commit the number of items you've processed.
     The downside is that you can only access data up to the physical end of the ring buffer at a time — so if your logical window wraps, you may need to handle two chunks. Similar performance to ReadN/WriteN as it still requires one memory copy for output.
 
@@ -120,48 +120,14 @@ Cler supports four buffer access patterns with dramatically different performanc
     **Doubly-mapped buffers** provide true zero-copy access when available. Uses virtual memory tricks to present ring buffer data as a contiguous array, eliminating wrap-around handling. Can be significantly faster for specific use cases.
     **Requirements**: Buffer must be heap-allocated and page-aligned (≥4KB). These methods will throw an exception if DBF is not available.
 
-**Performance Recommendations**:
-- **Default Choice**: Use `readN/writeN` for most DSP blocks - simple API, good performance, no complex error handling
-- **Use DBF for**:
-  - **Hardware interfaces (SDRs, ADCs, sensing)** - Zero-copy is critical for high-speed data acquisition
-  - Pure data movement (no processing) - 50%+ faster
-  - Small buffers with frequent wraparound - 20% faster
-  - Blocks with multiple inputs/outputs - DBF is simpler to implement than managing multiple buffers
-  - Ultra high-throughput streaming applications
-- **Avoid DBF for**: Normal DSP processing with single input/output (only ~5% gain not worth the complexity)
-- **Never use**: `push/pop` except for control data (orders of magnitude slower)
-
-**Hardware Interface Note**: DBF is particularly important for SDR and sensing applications where you need to continuously stream data from hardware at very high rates (e.g., HackRF at 20 MSPS, USRP at 200+ MSPS). The zero-copy nature of DBF prevents dropped samples and reduces latency between hardware and processing.
-
 # When to Use CLER
-
-## Memory Requirements (STM32)
-- **Minimum**: 64KB RAM (2-4 blocks)
-- **Recommended**: 128KB+ RAM (complex flowgraphs)
-- **Tight on memory?** Use streamlined mode if <32KB
-
-## Use Flowgraphs When You Have
-- Multiple async inputs (sensors at different rates)
-- Complex routing (data goes to multiple destinations)
-- Feedback loops (control systems)
-- Need to swap/test components independently
-- 6+ processing stages
-
-## Skip Flowgraphs For
-- Simple sensor → process → transmit
-- <3 blocks total
-- Hard real-time loops (<10μs deadlines)
-- Bare metal without RTOS
-- Every byte counts scenarios
-
-## Where It's Actually Used
 - Sensor fusion (IMU + GPS + barometer)
 - Audio effects processors
 - FPGA hybrid systems (software handles complex algorithms)
 - Motor controllers with multiple feedback sensors
 - Protocol bridges (UART ↔ SPI ↔ CAN)
 
-Bottom line: If you're juggling multiple data streams or your requirements keep changing, flowgraphs save time. If it's a simple pipeline, just write the loop yourself
+Bottom line: If you're juggling multiple data streams or your requirements keep changing, flowgraphs save time. If it's a simple pipeline, just write the loop yourself, and then you can use streamlined blocks if it makes things easier.
 
 # What is missing?
 Below is a wish-list for this library, sorted by importance.
