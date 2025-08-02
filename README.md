@@ -4,7 +4,7 @@
   <p><a href="https://cariboulabs.github.io/cler/" target="_blank"><strong>Open the Onboarding Page</strong></a></p>
 </div>
 
-Cler is a C++ template-based framework for constructing and executing flowgraphs of DSP processing blocks.
+CLER is a C++ template-based framework for constructing and executing flowgraphs of DSP processing blocks.
 Its goal is to keep a tiny header only core allowing maximal flexibility:
 
 * Defining blocks amounts to implementing a struct with a method
@@ -18,11 +18,11 @@ Its goal is to keep a tiny header only core allowing maximal flexibility:
 * Code first, Flowgraph GUI second. While No-code is sweet, it also constrains applications
 
 **But embedded devices dont need DSP do they?**
-Embedded Linux aside, most embedded devices traditionally relied on dedicated chips — for fusion, filtering, or modulation. But with today’s powerful SoCs and the rise of agentic AI, it’s often faster, cheaper, and more flexible to move DSP into software. Cler aims to fill that gap.
+Embedded Linux aside, most embedded devices traditionally relied on dedicated chips — for fusion, filtering, or modulation. But with today’s powerful SoCs and the rise of agentic AI, it’s often faster, cheaper, and more flexible to move DSP into software. CLER aims to fill that gap.
 
-**Why reinvent the DSP wheel?** Existing frameworks rely heavily on runtime polymorphism to manage blocks and channels. This adds overhead, limits type safety, and complicates deployment on resource-constrained systems. For example, GNU Radio uses void* buffers in its work() calls to achieve flexibility, but that sacrifices clarity and static guarantees. Cler takes a different path: using C++17 features like variadic templates and std::apply, it achieves compile-time safety, zero-cost abstraction, and minimal runtime footprint — making it practical for everything from desktop SDR to bare-metal MCUs.
+**Why reinvent the DSP wheel?** Existing frameworks rely heavily on runtime polymorphism to manage blocks and channels. This adds overhead, limits type safety, and complicates deployment on resource-constrained systems. For example, GNU Radio uses void* buffers in its work() calls to achieve flexibility, but that sacrifices clarity and static guarantees. CLER takes a different path: using C++17 features like variadic templates and std::apply, it achieves compile-time safety, zero-cost abstraction, and minimal runtime footprint — making it practical for everything from desktop SDR to bare-metal MCUs.
 
-**How does it compare to GNURadio or FutureSDR**? Cler takes a hybrid approach — combining the performance optimizations of modern frameworks with embedded-first design. On desktop systems, Cler leverages advanced techniques like doubly-mapped buffers for zero-copy performance that can match or exceed established frameworks. On embedded systems, it gracefully falls back to lightweight alternatives, maintaining deterministic behavior even without an MMU. This allows the same codebase to achieve optimal performance across platforms — from high-throughput desktop SDR to resource-constrained MCUs.
+**How does it compare to GNURadio or FutureSDR**? CLER takes a hybrid approach — combining the performance optimizations of modern frameworks with embedded-first design. On desktop systems, CLER leverages advanced techniques like doubly-mapped buffers for zero-copy performance that can match or exceed established frameworks. For embedded systems, CLER provide lightweight alternatives, maintaining deterministic behavior even without an MMU. This allows the same codebase to achieve optimal performance across platforms — from high-throughput desktop SDR to resource-constrained MCUs.
 
 Want to try out some examples on a Desktop?
 ```
@@ -34,7 +34,7 @@ cd desktop_examples
 ./hello_world #(or mass_spring_damper if you want to see something cool)
 ```
 
-⚠️ Just one thing to watch for: Cler’s template-heavy design can produce overwhelming errors, but any LLM can help with the small context window that is Cler. 
+⚠️ Just one thing to watch for: Cler’s template-heavy design can produce overwhelming errors, but any LLM can help with the small context window that is CLER. 
 
 # Okay, but how does it write?
 
@@ -81,13 +81,13 @@ int main() {
 # Things to Know
 
 * **Schedulers** </br>
-Cler includes two schedulers: **ThreadPerBlock** (default, simple, debuggable) and **FixedThreadPool** (better for constrained systems).  It also has Performance mode which eliminates stats overhead for ultra-high throughput applications,
+CLER includes two schedulers: **ThreadPerBlock** (default, simple, debuggable) and **FixedThreadPool** (better for constrained systems).  It also has Performance mode which eliminates stats overhead for ultra-high throughput applications,
 and Adaptive_sleep mode which can help mitigate chocked CPU in expensive of throughput.
 
 * **Flowgraph vs Streamlined** </br>
-Cler supports two architectural styles:
+CLER supports two architectural styles:
     * **flowgraph** </br>
-    In flowgraph mode, you manually define each block and the channels that connect them. You then pass the connection structure into a flowgraph that is incharge of running the blocks. Behind the scenees, Cler flowgraph creates an OS thread for every block which constantly calls its `procedure()`. When the call returns an error, it yeilds to other threads before trying again.
+    In flowgraph mode, you manually define each block and the channels that connect them. You then pass the connection structure into a flowgraph that is incharge of running the blocks. Behind the scenees, CLER flowgraph creates an OS thread for every block which constantly calls its `procedure()`. When the call returns an error, it yeilds to other threads before trying again.
 
     * **streamlined** </br>
     In streamlined mode, you are in charge of writing the loop, and you are in charge of passing samples from one block to the other.
@@ -98,15 +98,15 @@ Cler supports two architectural styles:
 * **Desktop Blocks**: </br>
 `desktop_blocks` is a library of useful blocks for quick "plug and play". Its soft depedencies are `liquid`, `imdeargui`(with opengl,glfw).
 To include its headers and link against it, link against `cler::cler_blocks` with CMake.
-In Cler, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
+In CLER, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
 
 * **Buffers & Performance** </br>
 Our buffers are modified version of `https://github.com/drogalis/SPSC-Queue`. They allow for static or heap allocation. See the gain block in `streamlined.cpp` for an example.</br> 
-Cler supports four buffer access patterns with dramatically different performance characteristics:
+CLER supports four buffer access patterns with dramatically different performance characteristics:
 
     * **Push/Pop (AVOID)** </br>
     For single values. there is also a try push/pop you can use if you dont inspect size() beforehand.
-    Remember though, after you have poped a value, you must not put it back! Cler channels are lock-free SPSC that *ASSUME* that one thread is a writer while another is a reader. No mixin' it up. </br>
+    Remember though, after you have poped a value, you must not put it back! CLER channels are lock-free SPSC that *ASSUME* that one thread is a writer while another is a reader. No mixin' it up. </br>
     **⚠️ This is EXTREMELY SLOW** - Orders of magnitude slower than optimal patterns. Only use for control/configuration data.
 
     * **ReadN/WriteN (Good baseline)** </br>
