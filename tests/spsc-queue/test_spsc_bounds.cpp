@@ -104,7 +104,11 @@ TEST_F(SPSCQueueBoundsTest, WriteNReadNExactCapacity) {
     std::size_t written = queue.writeN(write_data.data(), CAPACITY);
     EXPECT_EQ(written, CAPACITY);
     EXPECT_EQ(queue.size(), CAPACITY);
-    EXPECT_EQ(queue.space(), 0);  // Should be full
+    
+    // With page alignment, actual capacity may be larger
+    const std::size_t actual_capacity = queue.capacity();
+    EXPECT_GE(actual_capacity, CAPACITY);
+    EXPECT_EQ(queue.space(), actual_capacity - written);
     
     // Read exactly CAPACITY elements
     std::vector<int> read_data(CAPACITY);
@@ -271,8 +275,10 @@ TEST_F(SPSCQueueBoundsTest, LargeCapacityBounds) {
     const std::size_t LARGE_CAPACITY = 65536;  // 64K elements
     dro::SPSCQueue<int> large_queue(LARGE_CAPACITY);
     
-    EXPECT_EQ(large_queue.capacity(), LARGE_CAPACITY);
-    EXPECT_EQ(large_queue.space(), LARGE_CAPACITY);
+    // With page alignment, actual capacity may be larger
+    const std::size_t actual_capacity = large_queue.capacity();
+    EXPECT_GE(actual_capacity, LARGE_CAPACITY);
+    EXPECT_EQ(large_queue.space(), actual_capacity);
     
     // Test writing/reading in chunks to verify bounds handling
     const std::size_t CHUNK_SIZE = 4096;
@@ -290,7 +296,7 @@ TEST_F(SPSCQueueBoundsTest, LargeCapacityBounds) {
     }
     
     EXPECT_EQ(large_queue.size(), LARGE_CAPACITY);
-    EXPECT_EQ(large_queue.space(), 0);
+    EXPECT_EQ(large_queue.space(), actual_capacity - LARGE_CAPACITY);
     
     // Read back in chunks and verify
     for (std::size_t chunk_idx = 0; chunk_idx < NUM_CHUNKS; ++chunk_idx) {

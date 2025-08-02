@@ -72,25 +72,120 @@ Physical mapping:  [0,1,2,3,4,5,6,7,8,9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 - Returning `min(available, mapped_size)` → Still wrong, queue doesn't use those indices
 - Returning just `available` → Causes reading garbage past capacity_
 
-## The Real Solution
+## The Root Cause: Misaligned Boundaries
 
-To make DBF work **as intended** with **no compromises**, we have two approaches:
+**TL;DR** – The wrap boundary and the alias boundary MUST be the same address. Right now they aren't.
 
-### Approach 1: Expand Logical Capacity (Original Proposal)
-Align the circular buffer capacity with the page-aligned size by expanding capacity_ to match the physical allocation.
+### Current Misalignment
 
-### Approach 2: Separate Logical and Physical Capacities (Recommended)
+| Concept | Value | What the queue uses for % | What the MMU aliases |
+|---------|-------|---------------------------|---------------------|
+| `capacity_` (logical modulo) | 16,385 | wraps here | plain memory |
+| `capacity_dbf_` (page-aligned) | 17,408 | ignored by modulo | second mapping starts here |
 
-Keep logical capacity (`capacity_`) separate from physical capacity (`capacity_dbf_`) to maintain platform compatibility.
+Because `commit_write()`/`commit_read()` still use `% capacity_`, the queue eventually wraps to index 0 while the data just written lives at indices 16,385 through 17,407 – a region the reader never touches.
 
-#### Key Design Principles
+**This is why after the first full lap you see zeros/garbage.**
 
-1. **Platform Compatibility**: Non-DBF platforms see no change in behavior
-2. **Backward Compatibility**: Existing code continues to work unchanged
-3. **Clear Separation**: Logical operations use `capacity_`, physical DBF operations use `capacity_dbf_`
-4. **Safe Initialization**: All memory up to `capacity_dbf_` is properly initialized
+## The Real Solution: The GNU Radio/FutureSDR Approach
 
-#### Implementation Details
+After investigation, the correct approach is to **conform to what GNU Radio and FutureSDR do**. These battle-tested SDR frameworks have solved this elegantly.
+
+### Why GNU Radio/FutureSDR "Just Work"
+
+Those codebases use **ONE single capacity value**:
+
+```
+logical_capacity == physical_capacity == mmap_size/elements
+```
+
+They first round the requested "N + 1" up to the next page, then use that rounded size everywhere:
+
+```cpp
+user asks for 16384
+internal = align_up(16384 + 1, page) → 17408
+queue modulo boundary = 17408
+second mapping starts at 17408
+```
+
+**Result**: Modulo arithmetic and MMU alias are perfectly aligned. Writing past index 17407 really shows up at index 0.
+
+### The Key Invariant
+
+**Wrap boundary == Alias boundary** is the only invariant you really need.
+
+## Two Ways to Fix Our Implementation
+
+### Option 1: Single Capacity (Simplest - Recommended)
+
+Replace the two-capacity scheme with only `capacity_`:
+
+```cpp
+const std::size_t capacity_requested = user_N + 1;      // +1 for livelock
+capacity_ = align_up(capacity_requested, page_bytes) / sizeof(T);  // always page aligned
+// Delete capacity_dbf_; all modulo and MMU logic now uses the same number
+```
+
+- `capacity()` (the public method) returns `capacity_ - 1`
+- All operations use the same aligned capacity
+- Matches GNU Radio/FutureSDR exactly
+
+### Option 2: Keep Both, But Modulo With The Bigger One
+
+If you really want to preserve the "logical" vs "physical" distinction:
+
+```cpp
+const std::size_t MODULO = is_doubly_mapped_ ? capacity_dbf_ : capacity_;
+nextWriteIndex = (writeIndex + count) % MODULO;
+```
+
+- Do the same change everywhere: `nextReadIndex`, `space`, `available`, etc.
+- The public `capacity()` must still report `MODULO - 1`
+- More complex but preserves the dual-capacity concept
+
+## Implementation Details (Option 1 - Single Capacity)
+
+### Minimal Patch
+
+```diff
+-  const std::size_t buffer_bytes = capacity_ * sizeof(T);
++  const std::size_t buffer_bytes = align_up(capacity_ * sizeof(T), page_size);
+
+-  capacity_dbf_ = aligned_elements;
+-  is_doubly_mapped_ = true;
++  capacity_ = aligned_elements;  // use the aligned size *everywhere*
++  is_doubly_mapped_ = true;
+```
+
+And later:
+```diff
+-  std::size_t capacity() const noexcept { return base_type::capacity_ - 1; }
++  std::size_t capacity() const noexcept { return base_type::capacity_ - 1; }
+-  std::size_t capacity_dbf() const noexcept { ... }  // delete this method
+```
+
+All `% capacity_` expressions now implicitly match the MMU alias.
+
+### Quick Sanity Checks
+
+#### 1. Alias Probe
+```cpp
+queue.buffer()[0] = 0xdeadbeef;
+assert(queue.buffer()[queue.capacity_/*page aligned*/] == 0xdeadbeef);  // must pass
+```
+
+#### 2. Producer → Consumer Across Boundary
+```cpp
+writeIndex = queue.capacity() - 50;
+auto [ptr, n] = queue.write_dbf();      // n >= 100 if space permits
+memset(ptr, 0xa5, 100);
+queue.commit_write(100);
+
+std::uint8_t tmp[100];
+queue.readN(tmp, 100);                  // must read back 0xa5 bytes
+```
+
+If either fails, the mapping itself is wrong; otherwise the bug is in modulo math.
 
 ```cpp
 // In AdaptiveHeapBuffer:
@@ -249,25 +344,58 @@ struct AdaptiveHeapBuffer {
    - Currently allocating extra due to page alignment
    - Could we be smarter about allocation sizes?
 
-## Critical Next Steps
+## Current Status and Next Steps
 
-1. **DECIDE ON THE APPROACH**: We must choose between:
-   - Living with the current limitation (document it clearly)
-   - Implementing proper wraparound handling
-   - Redesigning the API
+### Test Failures - Now We Know Why!
 
-2. **ADD COMPREHENSIVE TESTS**: Current tests don't properly verify DBF behavior:
-   - Test reading exactly at wraparound boundary
-   - Test writing exactly at wraparound boundary  
-   - Test with capacity that's not power of 2
+Our tests are failing because of **misaligned boundaries**:
 
-3. **DOCUMENT THE BEHAVIOR**: Whatever approach we take, document:
-   - Exactly what guarantees `read_dbf()` provides
-   - When it falls back to regular behavior
-   - Performance implications
+1. **The Problem**: 
+   - Queue wraps at `capacity_` (16,385)
+   - MMU aliases at `capacity_dbf_` (17,408)
+   - Data written to indices 16,385-17,407 is never read!
 
-## Key Insight
+2. **The Solution**: Make wrap boundary == alias boundary
 
-The current implementation treats doubly-mapped buffers as an optimization detail, but they actually require a fundamental change in how the circular buffer works. You can't just "bolt on" DBF to an existing circular buffer implementation - it needs to be designed in from the ground up.
+### Immediate Action Items
 
-**The most important realization**: Just because memory is doubly-mapped doesn't mean the circular buffer logic knows how to use it correctly!
+1. **Choose Implementation Approach**:
+   - Option 1 (Recommended): Single capacity, page-aligned
+   - Option 2: Keep dual capacity but fix modulo operations
+
+2. **Implement the Fix**:
+   - Update capacity calculation in AdaptiveHeapBuffer
+   - Ensure all modulo operations use the same boundary
+   - Remove capacity_dbf() if using Option 1
+
+3. **Add Sanity Checks**:
+   - Alias probe test (buffer[0] == buffer[capacity])
+   - Cross-boundary read/write test
+   - These will quickly reveal if the fix works
+
+4. **Update Tests**:
+   - Remove references to capacity_dbf() if using Option 1
+   - Verify all tests pass with aligned boundaries
+
+## Key Insights
+
+### The Fundamental Rule
+**Wrap boundary == Alias boundary** - This is the ONLY invariant that matters.
+
+### Why Our Implementation Failed
+We had two different boundaries:
+- Modulo wrapped at `capacity_` (16,385)
+- MMU aliased at `capacity_dbf_` (17,408)
+- Result: Data written to the gap was never read
+
+### Why GNU Radio/FutureSDR Succeed
+They use ONE capacity value that's page-aligned from the start. The modulo arithmetic and MMU aliasing speak the same "language."
+
+### The Elegance
+Once boundaries are aligned:
+- No special commit functions needed
+- Regular modulo arithmetic "just works"
+- DBF becomes completely transparent
+- Writing past the end automatically appears at the beginning
+
+**The lesson**: Don't overthink it. Align the boundaries and let the existing circular buffer logic do its job. This is why GNU Radio and FutureSDR's approach has stood the test of time.
