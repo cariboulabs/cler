@@ -61,20 +61,11 @@ target_link_libraries(channelizer_blocks_test
     cler::cler_desktop_blocks
 )
 
-# Create a combined test executable like spsc_all_tests
-add_executable(desktop_blocks_all_tests
-    test_math_blocks.cpp
-    test_utility_blocks.cpp
-    test_sink_blocks.cpp
-    test_noise_blocks.cpp
-    test_resampler_blocks.cpp
-    test_channelizer_blocks.cpp
-)
-
-target_link_libraries(desktop_blocks_all_tests
-    gtest_main
-    cler::cler_desktop_blocks
-)
-
-add_dependencies(desktop_blocks_all_tests gtest)
+# Register tests with CTest for discovery
+add_test(NAME math_blocks_test COMMAND math_blocks_test)
+add_test(NAME utility_blocks_test COMMAND utility_blocks_test)
+add_test(NAME sink_blocks_test COMMAND sink_blocks_test)
+add_test(NAME noise_blocks_test COMMAND noise_blocks_test)
+add_test(NAME resampler_blocks_test COMMAND resampler_blocks_test)
+add_test(NAME channelizer_blocks_test COMMAND channelizer_blocks_test)
 

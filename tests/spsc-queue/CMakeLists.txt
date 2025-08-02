@@ -68,33 +68,12 @@ add_spsc_test(spsc_batch_test test_spsc_batch.cpp)
 add_spsc_test(spsc_bounds_test test_spsc_bounds.cpp)
 add_spsc_test(spsc_doubly_mapped_test test_spsc_doubly_mapped.cpp)
 
-# Optional: Create a combined test runner
-add_executable(spsc_all_tests 
-    test_spsc_basic.cpp
-    test_spsc_batch.cpp
-    test_spsc_bounds.cpp
-    test_spsc_doubly_mapped.cpp
-)
-
-target_compile_options(spsc_all_tests PRIVATE ${SPSC_TEST_COMPILE_OPTIONS})
-target_include_directories(spsc_all_tests PRIVATE 
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
-)
-target_link_libraries(spsc_all_tests PRIVATE ${SPSC_TEST_LINK_LIBRARIES})
-
-set_target_properties(spsc_all_tests PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-)
-
-add_test(NAME spsc_all_tests COMMAND spsc_all_tests)
 
 # Print configuration info
 message(STATUS "SPSC Queue Tests Configuration:")
 message(STATUS "  Header file: ${CLER_SPSC_QUEUE_HEADER}")
 message(STATUS "  CXX Standard: C++17")
-message(STATUS "  Tests created: spsc_basic_test, spsc_batch_test, spsc_bounds_test, spsc_all_tests")
+message(STATUS "  Tests created: spsc_basic_test, spsc_batch_test, spsc_bounds_test, spsc_doubly_mapped_test")
 
 
 # Performance test target (runs tests with different optimization levels)

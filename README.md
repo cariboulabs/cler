@@ -1,6 +1,12 @@
 <div align="center">
   <img src="misc/logo.jpeg" alt="CLER Logo" width="600"/>
   <h1>a Compile Time DSP Flowgraph for SDRs and Embedded Systems</h1>
+  <p>
+    <img src="https://img.shields.io/badge/Ubuntu-supported-brightgreen?logo=ubuntu&logoColor=white" alt="Ubuntu">
+    <img src="https://img.shields.io/badge/Windows-supported-brightgreen?logo=windows&logoColor=white" alt="Windows">
+    <img src="https://img.shields.io/badge/macOS-supported-brightgreen?logo=apple&logoColor=white" alt="macOS">
+    <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
+  </p>
   <p><a href="https://cariboulabs.github.io/cler/" target="_blank"><strong>Open the Onboarding Page</strong></a></p>
 </div>
 
