@@ -5,6 +5,7 @@
 #include <thread>
 #include <algorithm>
 #include <random>
+#include <cstring>
 
 constexpr size_t BUFFER_SIZE = 1024;
 
@@ -15,8 +16,14 @@ struct SourceBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        size_t to_write = std::min({out->space(), BUFFER_SIZE});
-        out->writeN(_buffer, to_write);
+        // Use zero-copy path for better performance
+        auto [write_ptr, write_size] = out->write_dbf();
+        size_t to_write = std::min(write_size, BUFFER_SIZE);
+        
+        if (to_write > 0) {
+            std::memcpy(write_ptr, _buffer, to_write * sizeof(float));
+            out->commit_write(to_write);
+        }
 
         return cler::Empty{};
     }
@@ -29,23 +36,30 @@ struct CopyBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
     CopyBlock(std::string name)
-        : BlockBase(std::move(name)), in(BUFFER_SIZE),
+        : BlockBase(std::move(name)), in(std::max(BUFFER_SIZE, cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float))),
           _rng(std::random_device{}()), _dist(1, 512) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
         size_t chunk = _dist(_rng);
-        size_t transferable = std::min({in.size(), out->space(), chunk});
-
+        
+        // Use zero-copy path for better performance
+        auto [read_ptr, read_size] = in.read_dbf();
+        auto [write_ptr, write_size] = out->write_dbf();
+        
+        size_t transferable = std::min({read_size, write_size, chunk});
+        
         if (transferable == 0) return cler::Error::NotEnoughSamples;
-
-        in.readN(_tmp, transferable);
-        out->writeN(_tmp, transferable);
+        
+        // Direct memory copy - no intermediate buffer needed!
+        std::memcpy(write_ptr, read_ptr, transferable * sizeof(float));
+        
+        in.commit_read(transferable);
+        out->commit_write(transferable);
 
         return cler::Empty{};
     }
 
 private:
-    float _tmp[BUFFER_SIZE];
     std::mt19937 _rng;
     std::uniform_int_distribution<size_t> _dist;
 };
@@ -54,7 +68,7 @@ struct SinkBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
     SinkBlock(std::string name, size_t expected)
-        : BlockBase(std::move(name)), in(BUFFER_SIZE), _expected_samples(expected) {
+        : BlockBase(std::move(name)), in(std::max(BUFFER_SIZE, cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float))), _expected_samples(expected) {
         _start_time = std::chrono::steady_clock::now();
     }
 

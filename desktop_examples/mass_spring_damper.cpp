@@ -27,24 +27,38 @@ struct PlantBlock : public cler::BlockBase {
 
     cler::Result<cler::Empty, cler::Error> procedure(
         cler::ChannelBase<float>* measured_position_out) {
-        if (force_in.size() == 0) {
-            return cler::Error::NotEnoughSamples;
-        }
-        if (measured_position_out->space() == 0) {
-            return cler::Error::NotEnoughSpace;
-        }
+        // Use zero-copy path when possible
+        auto [read_ptr, read_size] = force_in.read_dbf();
+        auto [write_ptr, write_size] = measured_position_out->write_dbf();
+        
+        size_t to_process = std::min(read_size, write_size);
+        
+        if (to_process > 0 && read_ptr && write_ptr) {
+            // Process directly in place
+            for (size_t i = 0; i < to_process; ++i) {
+                float force = read_ptr[i];
+                
+                // Update position and velocity using the mass-spring-damper equations
+                float acceleration = (force - K * _x - C * _v) / M;
+                _v += acceleration * DT;
+                _x += _v * DT + 0.5f * acceleration * DT * DT;
+                write_ptr[i] = _x;
+            }
+            force_in.commit_read(to_process);
+            measured_position_out->commit_write(to_process);
+        } else {
+            // Fallback to push/pop if DBF not available
+            size_t transerable = std::min(force_in.size(), measured_position_out->space());
+            for (size_t i = 0; i < transerable; ++i) {
+                float force;
+                force_in.pop(force);
 
-        size_t transerable = std::min(force_in.size(), measured_position_out->space());
-
-        for (size_t i = 0; i < transerable; ++i) {
-            float force;
-            force_in.pop(force);
-
-            // Update position and velocity using the mass-spring-damper equations
-            float acceleration = (force - K * _x - C * _v) / M;
-            _v += acceleration * DT;
-            _x += _v * DT + 0.5f * acceleration * DT * DT;
-            measured_position_out->push(_x);
+                // Update position and velocity using the mass-spring-damper equations
+                float acceleration = (force - K * _x - C * _v) / M;
+                _v += acceleration * DT;
+                _x += _v * DT + 0.5f * acceleration * DT * DT;
+                measured_position_out->push(_x);
+            }
         }
         return cler::Empty{};
     }
@@ -160,46 +174,83 @@ struct ControllerBlock : public cler::BlockBase {
 
     cler::Result<cler::Empty, cler::Error> procedure(
         cler::ChannelBase<float>* force_out) {
-        if (measured_position_in.size() == 0) {
-            return cler::Error::NotEnoughSamples;
-        }
-        if (force_out->space() == 0) {
-            return cler::Error::NotEnoughSpace;
-        }
-
-        size_t transerable = std::min(measured_position_in.size(), force_out->space());
-        for (size_t i = 0; i < transerable; ++i) {
-            float measured_position;
-            measured_position_in.pop(measured_position);
-
-            // Atomically read parameters
+        // Use zero-copy path when possible
+        auto [read_ptr, read_size] = measured_position_in.read_dbf();
+        auto [write_ptr, write_size] = force_out->write_dbf();
+        
+        size_t to_process = std::min(read_size, write_size);
+        
+        if (to_process > 0 && read_ptr && write_ptr) {
+            // Atomically read parameters once for the batch
             float target  = _target.load(std::memory_order_relaxed);
             float kp      = _kp.load(std::memory_order_relaxed);
             float ki      = _ki.load(std::memory_order_relaxed);
             float kd      = _kd.load(std::memory_order_relaxed);
+            bool feed_forward_enabled = _feed_forward.load(std::memory_order_relaxed);
+            
+            // Process directly in place
+            for (size_t i = 0; i < to_process; ++i) {
+                float measured_position = read_ptr[i];
 
-            // Calculate error
-            float ek = target - measured_position;
+                // Calculate error
+                float ek = target - measured_position;
 
-            // PID control
-            float derivative = (ek - _ekm1) / DT; // Derivative term
-            float dk = 0.95f * _dkm1 + 0.05f * derivative; // Low-pass filter for derivative term
-            _int_state += ek * DT; // Integral term
+                // PID control
+                float derivative = (ek - _ekm1) / DT; // Derivative term
+                float dk = 0.95f * _dkm1 + 0.05f * derivative; // Low-pass filter for derivative term
+                _int_state += ek * DT; // Integral term
 
-            //Feed forward control
-            float feed_forward = 0.0f;
-            if (_feed_forward.load(std::memory_order_relaxed)) {
-                feed_forward = K * target;
+                //Feed forward control
+                float feed_forward = 0.0f;
+                if (feed_forward_enabled) {
+                    feed_forward = K * target;
+                }
+
+                float force = kp * ek + ki * _int_state + kd * dk + feed_forward;
+
+                _ekm1 = ek; // Update previous error
+                _dkm1 = dk; // Update previous derivative
+
+                write_ptr[i] = force;
             }
+            measured_position_in.commit_read(to_process);
+            force_out->commit_write(to_process);
+        } else {
+            // Fallback to push/pop if DBF not available
+            size_t transerable = std::min(measured_position_in.size(), force_out->space());
+            for (size_t i = 0; i < transerable; ++i) {
+                float measured_position;
+                measured_position_in.pop(measured_position);
 
-            float force = kp * ek + ki * _int_state + kd * dk + feed_forward;
+                // Atomically read parameters
+                float target  = _target.load(std::memory_order_relaxed);
+                float kp      = _kp.load(std::memory_order_relaxed);
+                float ki      = _ki.load(std::memory_order_relaxed);
+                float kd      = _kd.load(std::memory_order_relaxed);
 
-            _ekm1 = ek; // Update previous error
-            _dkm1 = dk; // Update previous derivative
+                // Calculate error
+                float ek = target - measured_position;
 
-            force_out->push(force);
+                // PID control
+                float derivative = (ek - _ekm1) / DT; // Derivative term
+                float dk = 0.95f * _dkm1 + 0.05f * derivative; // Low-pass filter for derivative term
+                _int_state += ek * DT; // Integral term
+
+                //Feed forward control
+                float feed_forward = 0.0f;
+                if (_feed_forward.load(std::memory_order_relaxed)) {
+                    feed_forward = K * target;
+                }
+
+                float force = kp * ek + ki * _int_state + kd * dk + feed_forward;
+
+                _ekm1 = ek; // Update previous error
+                _dkm1 = dk; // Update previous derivative
+
+                force_out->push(force);
+            }
         }
-
+        
         return cler::Empty{};
     }
 
