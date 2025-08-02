@@ -154,7 +154,6 @@ void PlotCSpectrumBlock::render() {
         for (size_t i = 1; i < _num_inputs; ++i) {
             size_t a = _signal_channels[i].peek_read(ptr1, size1, ptr2, size2);
             if (a != available) {
-                fprintf(stderr, "Channel %zu: a = %zu, available = %zu\n", i, a, available);
                 available = std::min(available, a);
             }
         }
