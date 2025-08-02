@@ -15,10 +15,11 @@ struct NoiseAWGNBlock : public cler::BlockBase {
     NoiseAWGNBlock(const char* name, scalar_type noise_stddev, const size_t buffer_size = 0)
         : cler::BlockBase(name), in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size), _noise_stddev(noise_stddev) {
         
-        // If user provided a non-zero buffer size, validate it's sufficient
-        if (buffer_size > 0 && buffer_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
-            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
-                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) + " elements of type T");
+        // Allocate temporary buffer for readN/writeN operations
+        _buffer_size = buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size;
+        _buffer = new T[_buffer_size];
+        if (!_buffer) {
+            throw std::bad_alloc();
         }
 
         std::random_device rd;
@@ -26,35 +27,31 @@ struct NoiseAWGNBlock : public cler::BlockBase {
         _normal_dist = std::normal_distribution<scalar_type>(0.0, _noise_stddev);
     }
 
-    ~NoiseAWGNBlock() = default;
+    ~NoiseAWGNBlock() {
+        delete[] _buffer;
+    }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
-        // Use zero-copy path
-        auto [read_ptr, read_size] = in.read_dbf();
-        auto [write_ptr, write_size] = out->write_dbf();
+        // Use readN/writeN for simple processing (recommended pattern)
+        size_t transferable = std::min({in.size(), out->space(), _buffer_size});
+        if (transferable == 0) return cler::Error::NotEnoughSamples;
         
-        if (read_size == 0) {
-            return cler::Error::NotEnoughSamples;
-        }
+        // Read input data
+        in.readN(_buffer, transferable);
         
-        if (write_size == 0) {
-            return cler::Error::NotEnoughSpace;
-        }
-        
-        size_t to_process = std::min(read_size, write_size);
-        
-        for (size_t i = 0; i < to_process; ++i) {
+        // Add noise to buffer
+        for (size_t i = 0; i < transferable; ++i) {
             if constexpr (std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>) {
                 auto n_re = _normal_dist(_rng);
                 auto n_im = _normal_dist(_rng);
-                write_ptr[i] = read_ptr[i] + T{n_re, n_im};
+                _buffer[i] = _buffer[i] + T{n_re, n_im};
             } else {
-                write_ptr[i] = read_ptr[i] + _normal_dist(_rng);
+                _buffer[i] = _buffer[i] + _normal_dist(_rng);
             }
         }
         
-        in.commit_read(to_process);
-        out->commit_write(to_process);
+        // Write output
+        out->writeN(_buffer, transferable);
         
         return cler::Empty{};
     }
@@ -64,4 +61,8 @@ private:
 
     std::mt19937 _rng;
     std::normal_distribution<scalar_type> _normal_dist;
+    
+    // Temporary buffer for readN/writeN
+    T* _buffer;
+    size_t _buffer_size;
 };

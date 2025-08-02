@@ -122,12 +122,16 @@ Cler supports four buffer access patterns with dramatically different performanc
 
 **Performance Recommendations**:
 - **Default Choice**: Use `readN/writeN` for most DSP blocks - simple API, good performance, no complex error handling
-- **Use DBF only for**:
+- **Use DBF for**:
+  - **Hardware interfaces (SDRs, ADCs, sensing)** - Zero-copy is critical for high-speed data acquisition
   - Pure data movement (no processing) - 50%+ faster
   - Small buffers with frequent wraparound - 20% faster
-  - Ultra high-throughput with no processing
-- **Avoid DBF for**: Normal DSP processing (only ~5% gain not worth the complexity)
+  - Blocks with multiple inputs/outputs - DBF is simpler to implement than managing multiple buffers
+  - Ultra high-throughput streaming applications
+- **Avoid DBF for**: Normal DSP processing with single input/output (only ~5% gain not worth the complexity)
 - **Never use**: `push/pop` except for control data (orders of magnitude slower)
+
+**Hardware Interface Note**: DBF is particularly important for SDR and sensing applications where you need to continuously stream data from hardware at very high rates (e.g., HackRF at 20 MSPS, USRP at 200+ MSPS). The zero-copy nature of DBF prevents dropped samples and reduces latency between hardware and processing.
 
 # When to Use CLER
 

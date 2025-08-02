@@ -425,13 +425,26 @@ out->push(sample);
 
 **Performance Recommendations**:
 - **Use ReadN/WriteN as default** - Simple API, good performance, works everywhere
-- **Consider DBF only when**:
+- **Use DBF for**:
+  - **Hardware interfaces** - SDRs, ADCs, DACs, and other high-speed data acquisition
   - Pure data movement without processing (50%+ speedup)
   - Small buffers with frequent wraparound (20% speedup)
-  - Profiling shows memory copy is the bottleneck (rare)
-- **Avoid DBF for normal DSP** - Only ~5% gain over ReadN/WriteN, not worth the complexity
+  - Blocks with multiple inputs/outputs (simpler than managing multiple buffers)
+  - Real-time streaming where every microsecond counts
+- **Avoid DBF for simple DSP** - Only ~5% gain over ReadN/WriteN for single input/output blocks
 - **Never use Push/Pop** - Orders of magnitude slower due to per-sample overhead
 - **Skip Peek/Commit** - Complex to implement correctly, only ~5% faster than ReadN/WriteN
+
+**Hardware Interface Guidelines**:
+- **SDR Source Blocks**: Always use DBF - zero-copy is essential for maintaining sample rates
+- **Hardware Sinks**: Use DBF to minimize latency to output devices
+- **High-Speed Sensors**: DBF prevents buffer underruns at high data rates
+- Examples: HackRF (20 MSPS), USRP (200+ MSPS), high-speed ADCs (100+ MSPS)
+
+**Implementation Trade-offs**:
+- **ReadN/WriteN**: Requires allocating and managing temporary buffers, but provides clean separation
+- **DBF**: Simpler for multi-IO blocks and critical for hardware interfaces
+- Choose based on your use case - hardware interfaces almost always benefit from DBF
 
 ### Channel Implementation Notes
 - **read_dbf()/write_dbf()**: Throw an exception when doubly-mapped buffers are not available

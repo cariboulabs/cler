@@ -27,31 +27,38 @@ struct SourceCWBlock : public cler::BlockBase {
         _phasor = std::complex<float>(1.0f, 0.0f);
         _phasor_inc = std::polar(1.0f, phase_increment);
 
+        // Allocate temporary buffer
+        _buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T);
+        _buffer = new T[_buffer_size];
+        if (!_buffer) {
+            throw std::bad_alloc();
+        }
     }
 
-    ~SourceCWBlock() = default;
+    ~SourceCWBlock() {
+        delete[] _buffer;
+    }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
-        // Use zero-copy path
-        auto [write_ptr, write_size] = out->write_dbf();
+        // Use writeN for simple generation (recommended pattern)
+        size_t to_generate = std::min(out->space(), _buffer_size);
+        if (to_generate == 0) return cler::Error::NotEnoughSpace;
         
-        if (write_size > 0) {
-            // Generate directly into output buffer
-            for (size_t i = 0; i < write_size; ++i) {
-                std::complex<float> cw = _phasor;
+        // Generate into temporary buffer
+        for (size_t i = 0; i < to_generate; ++i) {
+            std::complex<float> cw = _phasor;
 
-                if constexpr (std::is_same_v<T, std::complex<float>>) {
-                    write_ptr[i] = _amplitude * cw;
-                } else {
-                    write_ptr[i] = _amplitude * cw.real();
-                }
-
-                _phasor *= _phasor_inc;
-                _phasor /= std::abs(_phasor); // Normalize to keep phasor on the unit circle, CRUCIAL for stability
+            if constexpr (std::is_same_v<T, std::complex<float>>) {
+                _buffer[i] = _amplitude * cw;
+            } else {
+                _buffer[i] = _amplitude * cw.real();
             }
-            
-            out->commit_write(write_size);
+
+            _phasor *= _phasor_inc;
+            _phasor /= std::abs(_phasor); // Normalize to keep phasor on the unit circle, CRUCIAL for stability
         }
+        
+        out->writeN(_buffer, to_generate);
         return cler::Empty{};
     }
 
@@ -63,5 +70,9 @@ private:
     // Recursive oscillator state
     std::complex<float> _phasor = {1.0f, 0.0f};
     std::complex<float> _phasor_inc = {1.0f, 0.0f};
+    
+    // Temporary buffer for writeN
+    T* _buffer;
+    size_t _buffer_size;
 
 };

@@ -652,9 +652,11 @@ out->push(sample * gain);</code></pre>
                         <h3>Performance Notes</h3>
                         <ul>
                             <li><strong>Use readN/writeN by default</strong> - Simple, performant, works everywhere</li>
-                            <li><strong>DBF is specialized</strong> - Only use for pure copy or wraparound-heavy scenarios</li>
+                            <li><strong>DBF is ESSENTIAL for hardware interfaces</strong> - SDRs, ADCs, DACs need zero-copy for high-speed streaming</li>
+                            <li><strong>DBF is simpler for multi-IO blocks</strong> - Avoid managing multiple temporary buffers</li>
                             <li><strong>Skip peek/commit</strong> - Complex to implement, only ~5% gain over readN/writeN</li>
-                            <li><strong>Normal DSP processing</strong> - DBF only ~5% faster, not worth the complexity</li>
+                            <li><strong>Single I/O DSP blocks</strong> - DBF only ~5% faster, use readN/writeN for cleaner code</li>
+                            <li><strong>Hardware rule of thumb</strong> - If it touches hardware at >10 MSPS, use DBF</li>
                             <li><strong>Run benchmarks</strong>: <code>cd build/performance && ./perf_read_write_techniques</code></li>
                         </ul>
                     </div>

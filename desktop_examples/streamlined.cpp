@@ -71,23 +71,36 @@ struct AdderBlock : public cler::BlockBase {
 struct GainBlock : public cler::BlockBase {
     cler::Channel<float> in; // Heap allocated for dbf support
     float gain;
+    float* _buffer;
+    size_t _buffer_size;
 
     GainBlock(const char* name, float gain_value) : BlockBase(name), 
-        in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)), gain(gain_value) {}
+        in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)), gain(gain_value) {
+        // Allocate temporary buffer for readN/writeN operations
+        _buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float);
+        _buffer = new float[_buffer_size];
+        if (!_buffer) {
+            throw std::bad_alloc();
+        }
+    }
+    
+    ~GainBlock() {
+        delete[] _buffer;
+    }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        // Use zero-copy path
-        auto [read_ptr, read_size] = in.read_dbf();
-        auto [write_ptr, write_size] = out->write_dbf();
+        // Use readN/writeN for simple processing (recommended pattern)
+        size_t transferable = std::min({in.size(), out->space(), _buffer_size});
+        if (transferable == 0) return cler::Error::NotEnoughSamples;
         
-        size_t to_process = std::min(read_size, write_size);
-        if (to_process > 0) {
-            for (size_t i = 0; i < to_process; ++i) {
-                write_ptr[i] = read_ptr[i] * gain;
-            }
-            in.commit_read(to_process);
-            out->commit_write(to_process);
+        in.readN(_buffer, transferable);
+        
+        // Process buffer
+        for (size_t i = 0; i < transferable; ++i) {
+            _buffer[i] = _buffer[i] * gain;
         }
+        
+        out->writeN(_buffer, transferable);
         return cler::Empty{};
     }
 };
