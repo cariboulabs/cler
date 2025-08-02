@@ -328,6 +328,13 @@ namespace cler {
             }
         }
         
+    public:
+        // These methods must be public because they are called from lambdas passed to 
+        // TaskPolicy::create_task(). Even though the lambdas are created within the class,
+        // they are technically separate callable objects. Different compilers interpret 
+        // lambda access to private members differently - GCC allows it while Clang doesn't.
+        // Making these public ensures portability across compilers.
+        
         // C++17 compatible member template functions replacing templated lambdas
         template<std::size_t I>
         void run_block_at_index_thread_per_block(const FlowGraphConfig& config) {
@@ -403,6 +410,7 @@ namespace cler {
             }
         }
         
+    private:  // Return to private section for internal implementation
         template<std::size_t... Is>
         void launch_tasks_impl(std::index_sequence<Is...>, const FlowGraphConfig& config) {
             // C++17 fold expression: validates all indices are within bounds at compile time
@@ -567,6 +575,7 @@ namespace cler {
             }
         }
         
+    public:  // Making run_fixed_thread_pool_worker public for lambda access (see comment above)
         void run_fixed_thread_pool_worker(size_t worker_id, const FlowGraphConfig& config) {
             while (!_stop_flag) {
                 bool did_work = false;
@@ -611,6 +620,7 @@ namespace cler {
             }
         }
         
+    private:  // Return to private section for internal implementation details
         template<size_t I>
         bool execute_block_at_index_helper(const FlowGraphConfig& config) {
             static_assert(I < _N, "Block index out of bounds");

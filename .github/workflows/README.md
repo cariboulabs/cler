@@ -4,6 +4,66 @@
 
 This directory contains GitHub Actions workflows that automate testing, building, and deployment processes for the Cler project. Workflows are designed to ensure code quality and cross-platform compatibility.
 
+## Build Environments
+
+### Linux (Docker-based)
+- **Reproducible builds** using Docker containers
+- **Base image**: Ubuntu 22.04
+- **Compilers**: GCC and Clang-14
+- **Dependencies**: Pre-installed in container for consistency
+- **Isolation**: Each build runs in a clean environment
+
+### Windows (Native)
+- **Runner**: GitHub's windows-latest
+- **Compilers**: MSVC and MinGW
+- **Dependencies**: Managed via vcpkg package manager
+- **Build system**: Native Windows builds for authentic testing
+
+### macOS (Native)
+- **Runner**: GitHub's macos-latest
+- **Compiler**: Apple Clang
+- **Dependencies**: Installed via Homebrew
+- **Architecture**: Supports both Intel and Apple Silicon
+
+## Docker Development Environment
+
+### Quick Start
+```bash
+# From the repository root:
+cd docker
+
+# Run tests with GCC
+docker compose run test-gcc
+
+# Run tests with Clang
+docker compose run test-clang
+
+# Interactive development environment
+docker compose run --rm dev
+
+# Build specific targets (from repo root)
+docker build -f docker/Dockerfile --target gcc-builder -t cler:gcc .
+docker build -f docker/Dockerfile --target clang-builder -t cler:clang .
+```
+
+### Docker Targets
+- `base`: Minimal build environment
+- `deps`: Full dependencies installed
+- `gcc-builder`: GCC release build
+- `clang-builder`: Clang release build
+- `test-runner`: Test execution environment
+- `development`: Interactive development with tools
+
+### Local Testing with Docker
+```bash
+# Run the same tests as CI (from repo root)
+docker build -f docker/Dockerfile --target test-runner -t cler:test .
+docker run --rm cler:test
+
+# Run with specific compiler
+docker run --rm -e CC=clang-14 -e CXX=clang++-14 cler:test
+```
+
 ## Workflow Files
 
 ### ci.yml
@@ -15,25 +75,18 @@ This directory contains GitHub Actions workflows that automate testing, building
 - Manual dispatch with debug options
 
 **What it does**:
-- Builds project on multiple platforms (Linux, Windows, macOS)
-- Tests with different compilers (GCC, Clang, MSVC, MinGW)
+- Builds project on multiple platforms
+- Tests with different compilers and configurations
 - Runs all automated tests including virtual memory tests
 - Performs performance benchmarks
 - Uploads test results and artifacts
 
-### Future Workflows
-Additional specialized workflows may be added for:
-- Release builds and deployment
-- Security scanning (CodeQL)
-- Documentation generation
+### Build Matrix
+- **Linux**: Docker-based builds with GCC/Clang × Debug/Release
+- **Windows**: Native builds with MSVC/MinGW × Debug/Release  
+- **macOS**: Native builds with Clang × Debug/Release
 
 ## Configuration Details
-
-### Build Matrix
-The CI uses a matrix strategy to test across:
-- **Operating Systems**: Ubuntu, Windows, macOS (latest versions)
-- **Compilers**: GCC 11+, Clang 14+, MSVC 2019+, MinGW
-- **Build Types**: Debug and Release configurations
 
 ### Environment Variables
 ```yaml
@@ -43,9 +96,10 @@ CTEST_OUTPUT_ON_FAILURE: ON      # Show output for failed tests
 ```
 
 ### Caching Strategy
-- Build dependencies are cached to speed up CI runs
+- Docker layer caching for Linux builds
+- vcpkg binary caching for Windows
+- Build dependency caching for all platforms
 - Cache keys include OS, compiler, and build type
-- CMakeLists.txt changes invalidate cache
 
 ### Artifacts
 The workflow uploads:
@@ -55,6 +109,28 @@ The workflow uploads:
 
 ## Maintenance Guidelines
 
+### Updating Dependencies
+
+#### Linux (Docker)
+Edit the `docker/Dockerfile` to add/update dependencies:
+```dockerfile
+RUN apt-get update && apt-get install -y \
+    new-package-name \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+#### Windows (vcpkg)
+Update the vcpkg install command in `ci.yml`:
+```powershell
+& "$env:VCPKG_ROOT\vcpkg" install new-package:x64-windows
+```
+
+#### macOS (Homebrew)
+Update the brew install command in `ci.yml`:
+```bash
+brew install new-package
+```
+
 ### Adding New Workflows
 1. Create new `.yml` file in this directory
 2. Follow naming convention: `purpose.yml`
@@ -62,42 +138,45 @@ The workflow uploads:
 4. Include appropriate triggers
 5. Document in this README
 
-### Updating Existing Workflows
-1. Test changes in a feature branch first
-2. Use workflow_dispatch for manual testing
-3. Monitor for deprecation warnings
-4. Keep workflows DRY using:
-   - Composite actions for repeated steps
-   - Reusable workflows for common patterns
-   - Matrix strategies for variations
-
 ### Best Practices
-- **Fail Fast**: Set `fail-fast: false` for matrix builds to see all failures
-- **Timeouts**: Add job timeouts to prevent hanging builds
+- **Reproducibility**: Use Docker for Linux builds
+- **Isolation**: Each build in clean environment
+- **Fail Fast**: Set `fail-fast: false` to see all failures
+- **Timeouts**: Add job timeouts to prevent hanging
 - **Concurrency**: Use concurrency groups to cancel outdated runs
-- **Secrets**: Never hardcode sensitive data, use GitHub secrets
-- **Debugging**: Include tmate action for interactive debugging
-
-### Performance Optimization
-- Use job dependencies to parallelize independent tasks
-- Cache expensive operations (dependencies, build artifacts)
-- Run heavy tests only on main branch or schedule
-- Use `if` conditions to skip unnecessary steps
 
 ## Debugging Workflow Failures
 
 ### Local Reproduction
-1. Check the workflow run logs in Actions tab
-2. Note the exact compiler versions and flags used
-3. Reproduce the environment locally:
-   ```bash
-   # Example for Ubuntu GCC build
-   export CC=gcc-11
-   export CXX=g++-11
-   cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
-   cmake --build build
-   ctest --output-on-failure
-   ```
+
+#### Linux (Docker)
+```bash
+# Reproduce the exact CI environment
+docker compose run test-gcc
+# Or with specific build type
+docker run --rm -e CMAKE_BUILD_TYPE=Debug cler:test
+```
+
+#### Windows
+```powershell
+# Set up vcpkg
+git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+C:\vcpkg\bootstrap-vcpkg.bat
+C:\vcpkg\vcpkg install fftw3:x64-windows glfw3:x64-windows libusb:x64-windows
+
+# Build
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="C:\vcpkg\scripts\buildsystems\vcpkg.cmake"
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+#### macOS
+```bash
+brew install libusb fftw glfw
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
 
 ### Interactive Debugging
 For difficult issues, trigger a debug session:
@@ -107,42 +186,41 @@ For difficult issues, trigger a debug session:
 4. SSH into the runner when session starts
 
 ### Common Issues
-- **Compiler not found**: Check available versions on runner images
-- **Missing dependencies**: Update apt/brew/choco install commands
+- **Docker build fails**: Check Dockerfile syntax and base image availability
+- **vcpkg fails**: Ensure packages exist for Windows platform
+- **Missing dependencies**: Update package lists in respective sections
 - **Test timeouts**: Increase timeout or optimize test
-- **Cache misses**: Review cache key strategy
+- **Clang compilation errors**: See KNOWN_ISSUES.md for plots.cpp compilation issue with Clang
+
+## Performance Optimization
+
+### Docker Optimizations
+- Multi-stage builds minimize final image size
+- Layer caching speeds up rebuilds
+- BuildKit features improve build performance
+
+### CI Optimizations
+- Parallel job execution across platforms
+- Dependency caching reduces install time
+- Matrix strategies test multiple configurations efficiently
 
 ## Security Considerations
 
-### Workflow Permissions
-- Use least privilege principle
-- Limit `GITHUB_TOKEN` permissions
-- Review third-party actions before use
-- Pin actions to specific versions/commits
+### Docker Security
+- Use official base images
+- Don't run as root in containers
+- Minimize installed packages
+- Regular security updates
 
-### Pull Request Safety
-- External PRs run with read-only permissions
-- No secrets available to PR from forks
-- Use pull_request_target carefully
-- Require approval for first-time contributors
-
-## Monitoring and Alerts
-
-### Workflow Status
-- Check Actions tab for run history
-- Enable notifications for failures
-- Use status badges in README
-- Monitor workflow run duration trends
-
-### Cost Management
-- GitHub Actions usage included in plan
-- Monitor minute usage in Settings
-- Optimize long-running workflows
-- Use self-hosted runners for heavy workloads
+### Workflow Security
+- Pin action versions to commit SHAs
+- Use least privilege for GITHUB_TOKEN
+- Review third-party actions
+- No secrets in Docker images
 
 ## Resources
 
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [Runner Images](https://github.com/actions/runner-images)
-- [Workflow Syntax](https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions)
+- [Docker Best Practices](https://docs.docker.com/develop/dev-best-practices/)
+- [vcpkg Documentation](https://vcpkg.io/)
 - [Building and Testing C++](https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-cpp)

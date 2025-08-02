@@ -22,226 +22,212 @@ env:
   CTEST_OUTPUT_ON_FAILURE: ON
 
 jobs:
-  build-and-test:
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
+  # Linux builds using Docker
+  linux-docker:
+    name: Linux ${{ matrix.compiler }} ${{ matrix.build_type }}
+    runs-on: ubuntu-latest
     
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Linux builds
-          - name: Ubuntu GCC Debug
-            os: ubuntu-latest
-            compiler: gcc
-            compiler_version: 11
-            build_type: Debug
-            
-          - name: Ubuntu GCC Release
-            os: ubuntu-latest
-            compiler: gcc
-            compiler_version: 11
-            build_type: Release
-            
-          - name: Ubuntu Clang Debug
-            os: ubuntu-latest
-            compiler: clang
-            compiler_version: 14
-            build_type: Debug
-            
-          - name: Ubuntu Clang Release
-            os: ubuntu-latest
-            compiler: clang
-            compiler_version: 14
-            build_type: Release
-            
-          # Windows builds
-          - name: Windows MSVC Debug
-            os: windows-latest
-            compiler: msvc
-            build_type: Debug
-            
-          - name: Windows MSVC Release
-            os: windows-latest
-            compiler: msvc
-            build_type: Release
-            
-          - name: Windows MinGW Debug
-            os: windows-latest
-            compiler: mingw
-            build_type: Debug
-            
-          - name: Windows MinGW Release
-            os: windows-latest
-            compiler: mingw
-            build_type: Release
-            
-          # macOS builds
-          - name: macOS Clang Debug
-            os: macos-latest
-            compiler: clang
-            build_type: Debug
-            
-          - name: macOS Clang Release
-            os: macos-latest
-            compiler: clang
-            build_type: Release
-
+        compiler: [gcc, clang]
+        build_type: [Debug, Release]
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         submodules: recursive
-        
-    - name: Setup Linux environment
-      if: runner.os == 'Linux'
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build and test
       run: |
-        sudo apt-get update
-        if [ "${{ matrix.compiler }}" = "gcc" ]; then
-          sudo apt-get install -y gcc-${{ matrix.compiler_version }} g++-${{ matrix.compiler_version }}
-          echo "CC=gcc-${{ matrix.compiler_version }}" >> $GITHUB_ENV
-          echo "CXX=g++-${{ matrix.compiler_version }}" >> $GITHUB_ENV
-        else
-          sudo apt-get install -y clang-${{ matrix.compiler_version }}
-          echo "CC=clang-${{ matrix.compiler_version }}" >> $GITHUB_ENV
-          echo "CXX=clang++-${{ matrix.compiler_version }}" >> $GITHUB_ENV
-        fi
-        # Install dependencies for desktop blocks
-        sudo apt-get install -y libusb-1.0-0-dev libfftw3-dev
+        docker build \
+          -f docker/Dockerfile \
+          --target test-runner \
+          --build-arg COMPILER=${{ matrix.compiler == 'clang' && 'clang-14' || 'gcc' }} \
+          -t cler-test:${{ matrix.compiler }}-${{ matrix.build_type }} \
+          .
         
+        # Run tests
+        docker run --rm \
+          -e CMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+          cler-test:${{ matrix.compiler }}-${{ matrix.build_type }}
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-linux-${{ matrix.compiler }}-${{ matrix.build_type }}
+        path: |
+          build/Testing/
+          build/**/*_test.xml
+
+  # Windows native builds
+  windows-native:
+    name: Windows ${{ matrix.compiler }} ${{ matrix.build_type }}
+    runs-on: windows-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [msvc, mingw]
+        build_type: [Debug, Release]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    
     - name: Setup Windows environment
-      if: runner.os == 'Windows'
+      shell: powershell
       run: |
         if ("${{ matrix.compiler }}" -eq "mingw") {
           echo "CC=gcc" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "CXX=g++" | Out-File -FilePath $env:GITHUB_ENV -Append
         }
-        # Note: Windows builds will use CMake's FetchContent for dependencies
-        
-    - name: Setup macOS environment
-      if: runner.os == 'macOS'
+    
+    - name: Install dependencies with vcpkg
+      shell: powershell
       run: |
-        echo "CC=clang" >> $GITHUB_ENV
-        echo "CXX=clang++" >> $GITHUB_ENV
+        # Install vcpkg if not available
+        if (!(Test-Path "$env:VCPKG_ROOT")) {
+          git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+          C:\vcpkg\bootstrap-vcpkg.bat
+          echo "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+        }
+        
         # Install dependencies
-        brew install libusb fftw
-        
-    - name: Setup debug session
-      if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
-      uses: mxschmitt/action-tmate@v3
-      with:
-        limit-access-to-actor: true
-        
-    - name: Cache dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          build/_deps
-          ~/.cache
-          ~/Library/Caches
-        key: ${{ runner.os }}-${{ matrix.compiler }}-${{ matrix.build_type }}-deps-${{ hashFiles('**/CMakeLists.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-${{ matrix.compiler }}-${{ matrix.build_type }}-deps-
-          ${{ runner.os }}-${{ matrix.compiler }}-
-          
+        & "$env:VCPKG_ROOT\vcpkg" install fftw3:x64-windows glfw3:x64-windows libusb:x64-windows
+    
     - name: Configure CMake
+      shell: powershell
       run: |
-        cmake -B build -S . \
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-          -DCMAKE_CXX_STANDARD=17 \
-          -DBUILD_TESTS=ON \
-          -DBUILD_EXAMPLES=ON \
-          -DBUILD_DESKTOP_BLOCKS=ON
-          
+        cmake -B build -S . `
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} `
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+          -DCLER_BUILD_TESTS=ON `
+          -DCLER_BUILD_EXAMPLES=ON `
+          -DCLER_BUILD_BLOCKS=ON `
+          -DCLER_BUILD_BLOCKS_GUI=ON `
+          -DCLER_BUILD_BLOCKS_LIQUID=ON
+    
     - name: Build
       run: cmake --build build --config ${{ matrix.build_type }}
-      
+    
     - name: Run tests
       working-directory: build
       run: ctest --build-config ${{ matrix.build_type }} --output-on-failure --parallel
-        
-    - name: Run specific virtual memory tests
-      if: runner.os == 'Windows' || runner.os == 'Linux'
+    
+    - name: Run virtual memory tests
       working-directory: build
       run: ctest --build-config ${{ matrix.build_type }} -R "vmem|doubly_mapped" -V
-        
+    
     - name: Upload test results
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: test-results-${{ matrix.name }}
+        name: test-results-windows-${{ matrix.compiler }}-${{ matrix.build_type }}
         path: |
           build/Testing/
           build/**/*_test.xml
-          
-    - name: Upload build artifacts
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-artifacts-${{ matrix.name }}
-        path: |
-          build/
-          !build/_deps/
-          
-  performance-tests:
-    name: Performance Tests - ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    if: github.event_name == 'push' || github.event_name == 'schedule'
+
+  # macOS native builds
+  macos-native:
+    name: macOS ${{ matrix.build_type }}
+    runs-on: macos-latest
     
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        
+        build_type: [Debug, Release]
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
-    - name: Setup environment
-      if: runner.os == 'Linux'
+      with:
+        submodules: recursive
+    
+    - name: Install dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y libusb-1.0-0-dev libfftw3-dev
-        # Disable CPU frequency scaling for consistent benchmarks
-        echo "performance" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor || true
-        
+        brew install libusb fftw glfw
+        echo "CC=clang" >> $GITHUB_ENV
+        echo "CXX=clang++" >> $GITHUB_ENV
+    
     - name: Configure CMake
-      run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DBUILD_PERFORMANCE=ON
-      
-    - name: Build performance tests
-      run: cmake --build build --config Release
-      
-    - name: Run performance tests (Linux)
-      if: runner.os == 'Linux'
       run: |
-        cd build/performance
-        ./perf_simple_linear_flow
-        ./perf_fanout_workloads
-        ./perf_read_write_techniques
-        
-    - name: Run performance tests (Windows)
-      if: runner.os == 'Windows'
+        cmake -B build -S . \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+          -DCLER_BUILD_TESTS=ON \
+          -DCLER_BUILD_EXAMPLES=ON \
+          -DCLER_BUILD_BLOCKS=ON \
+          -DCLER_BUILD_BLOCKS_GUI=ON \
+          -DCLER_BUILD_BLOCKS_LIQUID=ON
+    
+    - name: Build
+      run: cmake --build build --config ${{ matrix.build_type }}
+    
+    - name: Run tests
+      working-directory: build
+      run: ctest --build-config ${{ matrix.build_type }} --output-on-failure --parallel
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-macos-${{ matrix.build_type }}
+        path: |
+          build/Testing/
+          build/**/*_test.xml
+
+  # Performance tests on Linux (using Docker for consistency)
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Build performance image
       run: |
-        cd build/performance
-        ./perf_simple_linear_flow.exe
-        ./perf_fanout_workloads.exe
-        ./perf_read_write_techniques.exe
-        
+        docker build \
+          -f docker/Dockerfile \
+          --target gcc-builder \
+          -t cler-perf:latest \
+          .
+    
+    - name: Run performance tests
+      run: |
+        docker run --rm \
+          --cpuset-cpus="0" \
+          -v $PWD/perf-results:/results \
+          cler-perf:latest \
+          bash -c "cd build/performance && ./perf_simple_linear_flow && ./perf_fanout_workloads && ./perf_read_write_techniques && cp *.txt /results/" || true
+    
     - name: Upload performance results
       uses: actions/upload-artifact@v4
       with:
-        name: performance-results-${{ matrix.os }}
-        path: build/performance/*.txt
-        
+        name: performance-results
+        path: perf-results/*.txt
+
+  # All tests pass check
   all-tests-pass:
     name: All Tests Pass
-    needs: [build-and-test]
+    needs: [linux-docker, windows-native, macos-native]
     runs-on: ubuntu-latest
     if: always()
     
     steps:
     - name: Check test results
       run: |
-        if [ "${{ needs.build-and-test.result }}" != "success" ]; then
+        if [ "${{ needs.linux-docker.result }}" != "success" ] || \
+           [ "${{ needs.windows-native.result }}" != "success" ] || \
+           [ "${{ needs.macos-native.result }}" != "success" ]; then
           echo "Tests failed!"
           exit 1
         fi

@@ -1,3 +1,8 @@
 build
+build-*
 *.pyc
 .vscode/settings.json
+
+# Test artifacts
+test-docker-ci.sh
+perf-results/

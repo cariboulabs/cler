@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # Development environment
+  dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: development
+    image: cler:dev
+    volumes:
+      - ..:/workspace
+      - build-cache:/workspace/build
+    working_dir: /workspace
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+
+  # Run tests with GCC
+  test-gcc:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: test-runner
+      args:
+        COMPILER: gcc
+    image: cler:test-gcc
+    volumes:
+      - ..:/workspace
+    working_dir: /workspace
+
+  # Run tests with Clang
+  test-clang:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: test-runner
+      args:
+        COMPILER: clang-14
+    image: cler:test-clang
+    volumes:
+      - ..:/workspace
+    working_dir: /workspace
+
+  # Build only (useful for CI)
+  build-gcc:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: gcc-builder
+    image: cler:build-gcc
+
+  build-clang:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: clang-builder
+    image: cler:build-clang
+
+volumes:
+  build-cache:
