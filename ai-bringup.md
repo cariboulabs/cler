@@ -373,17 +373,20 @@ struct GainBlock : public cler::BlockBase {
 ```cpp
 // TECHNIQUE 1: read_dbf/write_dbf (OPTIMAL)
 // Doubly-mapped buffers: True zero-copy on supported platforms
-// NOTE: These methods throw exceptions if dbf is not available
+// NOTE: These methods throw exceptions if dbf is not available (buffer too small or stack-allocated)
+// Buffer must be >= 4KB (DOUBLY_MAPPED_MIN_SIZE) and heap-allocated
 auto [read_ptr, read_size] = in.read_dbf();
 auto [write_ptr, write_size] = out->write_dbf();
 
 // Direct processing between doubly-mapped buffers
 size_t to_process = std::min(read_size, write_size);
-for (size_t i = 0; i < to_process; ++i) {
-    write_ptr[i] = read_ptr[i] * gain; // Process directly
+if (to_process > 0 && read_ptr && write_ptr) {
+    for (size_t i = 0; i < to_process; ++i) {
+        write_ptr[i] = read_ptr[i] * gain; // Process directly
+    }
+    in.commit_read(to_process);
+    out->commit_write(to_process);
 }
-in.commit_read(to_process);
-out->commit_write(to_process);
 
 // TECHNIQUE 2: ReadN/WriteN (GOOD BASELINE)
 // Bulk transfer with single memory copy
@@ -426,8 +429,40 @@ out->push(sample);
 - **Memory copy reduction** is the key to performance - each eliminated copy significantly improves throughput
 
 ### Channel Implementation Notes
-- **read_dbf()/write_dbf()**: Throw an exception when doubly-mapped buffers are not available
-- **No Fallback**: Blocks using dbf should not implement fallback - let the exception propagate
+- **read_dbf()/write_dbf()**: Throw an exception when doubly-mapped buffers are not available (stack buffers or buffers < 4KB)
+- **Fallback Pattern**: Modern blocks should implement fallback to readN/writeN or peek/commit when DBF is not available
+- **Minimum Size**: Buffers must be at least DOUBLY_MAPPED_MIN_SIZE (4KB) for DBF support
+
+### Recommended DBF Pattern with Fallback
+```cpp
+cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
+    // Try zero-copy path first
+    auto [read_ptr, read_size] = in.read_dbf();
+    auto [write_ptr, write_size] = out->write_dbf();
+    
+    size_t to_process = std::min(read_size, write_size);
+    
+    if (to_process > 0 && read_ptr && write_ptr) {
+        // FAST PATH: Direct processing between doubly-mapped buffers
+        for (size_t i = 0; i < to_process; ++i) {
+            write_ptr[i] = read_ptr[i] * _gain;
+        }
+        in.commit_read(to_process);
+        out->commit_write(to_process);
+    } else {
+        // FALLBACK: Use traditional readN/writeN
+        size_t transferable = std::min({in.size(), out->space(), _buffer_size});
+        if (transferable > 0) {
+            in.readN(_buffer, transferable);
+            for (size_t i = 0; i < transferable; ++i) {
+                _buffer[i] *= _gain;
+            }
+            out->writeN(_buffer, transferable);
+        }
+    }
+    return cler::Empty{};
+}
+```
 
 ### Error Handling Pattern
 ```cpp

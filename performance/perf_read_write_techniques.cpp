@@ -1,14 +1,14 @@
 #include "cler.hpp"
 #include "cler_utils.hpp"
-#include "task_policies/cler_desktop_tpolicy.hpp"
 #include <iostream>
 #include <random>
 #include <vector>
 #include <chrono>
 #include <algorithm>
 #include <iomanip>
+#include <cstring>
 
-constexpr size_t BUFFER_SIZE = 1024;
+constexpr size_t BUFFER_SIZE = 32768;  // 32KB for fair DBF comparison
 constexpr size_t TEST_SAMPLES = 10'000'000;  // 10M samples for stable measurements
 
 struct TestResult {
@@ -30,20 +30,32 @@ struct TestResult {
 // Common source block - generates consistent data
 struct SourceBlock : public cler::BlockBase {
     SourceBlock(const std::string& name)
-        : BlockBase(name) {
-        std::fill(_buffer, _buffer + BUFFER_SIZE, 1.0f);
+        : BlockBase(name), _buffer_ptr(new float[BUFFER_SIZE]) {
+        std::fill(_buffer_ptr, _buffer_ptr + BUFFER_SIZE, 1.0f);
+    }
+    
+    ~SourceBlock() {
+        delete[] _buffer_ptr;
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        size_t to_write = std::min({out->space(), BUFFER_SIZE});
-        if (to_write == 0) return cler::Error::NotEnoughSpace;
-        
-        out->writeN(_buffer, to_write);
+        // Try DBF write first for better performance
+        auto [write_ptr, write_size] = out->write_dbf();
+        if (write_size > 0) {
+            size_t to_write = std::min(write_size, BUFFER_SIZE);
+            std::memcpy(write_ptr, _buffer_ptr, to_write * sizeof(float));
+            out->commit_write(to_write);
+        } else {
+            // Fallback to writeN if DBF not available
+            size_t to_write = std::min({out->space(), BUFFER_SIZE});
+            if (to_write == 0) return cler::Error::NotEnoughSpace;
+            out->writeN(_buffer_ptr, to_write);
+        }
         return cler::Empty{};
     }
 
 private:
-    float _buffer[BUFFER_SIZE];
+    float* _buffer_ptr;  // Heap allocation for large buffer
 };
 
 // Technique 1: Push/Pop (single sample) - SLOWEST
@@ -51,7 +63,7 @@ struct PushPopBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
     PushPopBlock(const std::string& name)
-        : BlockBase(name), in(BUFFER_SIZE) {}
+        : BlockBase(name), in(std::max(BUFFER_SIZE, cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float))) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
         size_t available = std::min({in.size(), out->space()});
@@ -75,26 +87,30 @@ struct BulkTransferBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
     BulkTransferBlock(const std::string& name)
-        : BlockBase(name), in(BUFFER_SIZE) {}
+        : BlockBase(name), in(std::max(BUFFER_SIZE, cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float))), _buffer_ptr(new float[BUFFER_SIZE]) {}
+    
+    ~BulkTransferBlock() {
+        delete[] _buffer_ptr;
+    }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
         size_t transferable = std::min({in.size(), out->space(), BUFFER_SIZE});
         if (transferable == 0) return cler::Error::NotEnoughSamples;
         
         // Bulk read, process, bulk write
-        in.readN(_buffer, transferable);
+        in.readN(_buffer_ptr, transferable);
         
         // Process buffer
         for (size_t i = 0; i < transferable; ++i) {
-            _buffer[i] *= 1.1f;
+            _buffer_ptr[i] *= 1.1f;
         }
         
-        out->writeN(_buffer, transferable);
+        out->writeN(_buffer_ptr, transferable);
         return cler::Empty{};
     }
 
 private:
-    float _buffer[BUFFER_SIZE];
+    float* _buffer_ptr;  // Heap allocation for large buffer
 };
 
 // Technique 3: Peek/Commit (TRUE zero-copy) - BETTER
@@ -102,7 +118,7 @@ struct PeekCommitBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
     PeekCommitBlock(const std::string& name)
-        : BlockBase(name), in(BUFFER_SIZE) {}
+        : BlockBase(name), in(std::max(BUFFER_SIZE, cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float))) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
         // Peek at input data
@@ -173,68 +189,29 @@ struct DoublyMappedBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
     DoublyMappedBlock(const std::string& name)
-        : BlockBase(name), in(32768) {}  // Large buffer for doubly-mapped allocation
+        : BlockBase(name), in(std::max(BUFFER_SIZE, cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)))
+        {} 
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        // Try zero-copy doubly-mapped read first
+        // Zero-copy doubly-mapped read
         auto [read_ptr, read_size] = in.read_dbf();
-        if (read_ptr && read_size > 0) {
-            // Fast path: direct processing from doubly-mapped buffer
-            size_t to_process = std::min({read_size, out->space(), BUFFER_SIZE});
-            
-            // Try zero-copy write
-            auto [write_ptr, write_size] = out->write_dbf();
-            if (write_ptr && write_size >= to_process) {
-                // Ultimate fast path: direct processing between doubly-mapped buffers
-                for (size_t i = 0; i < to_process; ++i) {
-                    write_ptr[i] = read_ptr[i] * 1.1f;
-                }
-                in.commit_read(to_process);
-                out->commit_write(to_process);
-            } else {
-                // Semi-fast path: read from doubly-mapped, write normally
-                for (size_t i = 0; i < to_process; ++i) {
-                    _buffer[i] = read_ptr[i] * 1.1f;
-                }
-                in.commit_read(to_process);
-                out->writeN(_buffer, to_process);
-            }
-            
-            return cler::Empty{};
+        if (read_size == 0) return cler::Error::NotEnoughSamples;
+        auto [write_ptr, write_size] = out->write_dbf();
+        if (write_size == 0) return cler::Error::NotEnoughSpace;
+        
+        size_t to_process = std::min({read_size, write_size, BUFFER_SIZE});
+        
+        // Zero-copy write
+        for (size_t i = 0; i < to_process; ++i) {
+            write_ptr[i] = read_ptr[i] * 1.1f;  // Simple processing
         }
-        
-        // Fallback to peek/commit if doubly-mapped not available
-        const float* ptr1, *ptr2;
-        size_t size1, size2;
-        size_t available = in.peek_read(ptr1, size1, ptr2, size2);
-        
-        if (available == 0) return cler::Error::NotEnoughSamples;
-        
-        size_t to_process = std::min({available, out->space(), BUFFER_SIZE});
-        size_t processed = 0;
-        
-        // Process first segment
-        size_t from_seg1 = std::min(size1, to_process);
-        for (size_t i = 0; i < from_seg1; ++i) {
-            _buffer[processed++] = ptr1[i] * 1.1f;
-        }
-        
-        // Process second segment if needed
-        if (processed < to_process && size2 > 0) {
-            size_t from_seg2 = std::min(size2, to_process - processed);
-            for (size_t i = 0; i < from_seg2; ++i) {
-                _buffer[processed++] = ptr2[i] * 1.1f;
-            }
-        }
-        
-        out->writeN(_buffer, processed);
-        in.commit_read(processed);
+
+        // Commit both read and write
+        in.commit_read(to_process);
+        out->commit_write(to_process);
         
         return cler::Empty{};
     }
-
-private:
-    float _buffer[BUFFER_SIZE];
 };
 
 // Common sink block - measures throughput
@@ -242,7 +219,7 @@ struct SinkBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
     SinkBlock(const std::string& name)
-        : BlockBase(name), in(BUFFER_SIZE) {
+        : BlockBase(name), in(std::max(BUFFER_SIZE, cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float))) {
         _start_time = std::chrono::steady_clock::now();
     }
 
@@ -270,6 +247,11 @@ struct SinkBlock : public cler::BlockBase {
     size_t get_samples_processed() const {
         return _received;
     }
+    
+    void reset_counters() {
+        _received = 0;
+        _start_time = std::chrono::steady_clock::now();
+    }
 
 private:
     size_t _received = 0;
@@ -284,17 +266,38 @@ TestResult run_technique_test(const std::string& technique_name) {
     ProcessingBlock processor("Processor");
     SinkBlock sink("Sink");
 
-    auto fg = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&source, &processor.in),
-        cler::BlockRunner(&processor, &sink.in),
-        cler::BlockRunner(&sink)
-    );
-
-    // Run for a fixed duration to get stable measurements
-    const auto test_duration = std::chrono::seconds(3);
-    fg.run_for(test_duration);
+    // Warm-up period to prime caches and complete any lazy initialization
+    const auto warmup_duration = std::chrono::milliseconds(500);
+    const auto warmup_end = std::chrono::steady_clock::now() + warmup_duration;
     
-    // No need to calculate CPU efficiency for this test
+    while (std::chrono::steady_clock::now() < warmup_end) {
+        // Source -> Processor
+        source.procedure(&processor.in);
+        
+        // Processor -> Sink
+        processor.procedure(&sink.in);
+        
+        // Sink consumes
+        sink.procedure();
+    }
+    
+    // Reset sink counters after warmup
+    sink.reset_counters();
+
+    // Actual measurement period
+    const auto test_duration = std::chrono::seconds(3);
+    const auto start_time = std::chrono::steady_clock::now();
+    
+    while (std::chrono::steady_clock::now() - start_time < test_duration) {
+        // Source -> Processor
+        source.procedure(&processor.in);
+        
+        // Processor -> Sink
+        processor.procedure(&sink.in);
+        
+        // Sink consumes
+        sink.procedure();
+    }
     
     std::cout << " DONE" << std::endl;
     
@@ -309,7 +312,9 @@ TestResult run_technique_test(const std::string& technique_name) {
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Cler Read/Write Techniques Performance Test" << std::endl;
+    std::cout << "Mode: STREAMLINED (no threading overhead)" << std::endl;
     std::cout << "Pipeline: Source -> Processor -> Sink (3 blocks)" << std::endl;
+    std::cout << "Warmup: 500ms before measurement" << std::endl;
     std::cout << "Test Duration: 3 seconds per technique" << std::endl;
     std::cout << "Processing: Simple gain (x1.1) per sample" << std::endl;
     std::cout << "========================================" << std::endl;
