@@ -561,22 +561,22 @@ config.adaptive_sleep_fail_threshold = 5;     // Sleep after 5 failures</code></
                             <div class="perf-row header">
                                 <div class="perf-technique">Technique</div>
                                 <div class="perf-throughput">Performance</div>
-                                <div class="perf-vs">Relative Speed</div>
-                            </div>
-                            <div class="perf-row optimal">
-                                <div class="perf-technique">read_dbf/write_dbf</div>
-                                <div class="perf-throughput">OPTIMAL</div>
-                                <div class="perf-vs">~2x faster</div>
+                                <div class="perf-vs">When to Use</div>
                             </div>
                             <div class="perf-row good">
                                 <div class="perf-technique">readN/writeN</div>
-                                <div class="perf-throughput">Good baseline</div>
-                                <div class="perf-vs">Good</div>
+                                <div class="perf-throughput">RECOMMENDED</div>
+                                <div class="perf-vs">Default for most DSP blocks</div>
+                            </div>
+                            <div class="perf-row optimal">
+                                <div class="perf-technique">read_dbf/write_dbf</div>
+                                <div class="perf-throughput">Specialized</div>
+                                <div class="perf-vs">Pure copy, wraparound scenarios</div>
                             </div>
                             <div class="perf-row good">
                                 <div class="perf-technique">peek/commit</div>
-                                <div class="perf-throughput">Similar to readN</div>
-                                <div class="perf-vs">Good</div>
+                                <div class="perf-throughput">Complex</div>
+                                <div class="perf-vs">Only ~5% faster, not worth it</div>
                             </div>
                             <div class="perf-row avoid">
                                 <div class="perf-technique">push/pop</div>
@@ -588,30 +588,10 @@ config.adaptive_sleep_fail_threshold = 5;     // Sleep after 5 failures</code></
                     
                     <div class="pattern-comparison">
                         <div class="pattern">
-                            <h3>1. read_dbf/write_dbf (OPTIMAL)</h3>
+                            <h3>1. readN/writeN (RECOMMENDED DEFAULT)</h3>
                             <div class="code-block">
-                                <pre><code class="language-cpp line-numbers">// Doubly-mapped buffers: True zero-copy when available
-auto [read_ptr, read_size] = in.read_dbf();
-if (read_ptr) {
-    auto [write_ptr, write_size] = out->write_dbf();
-    if (write_ptr) {
-        // ULTIMATE FAST PATH: Direct processing
-        size_t to_process = std::min(read_size, write_size);
-        for (size_t i = 0; i < to_process; ++i) {
-            write_ptr[i] = read_ptr[i] * gain;
-        }
-        in.commit_read(to_process);
-        out->commit_write(to_process);
-    }
-}</code></pre>
-                            </div>
-                            <p class="pattern-note optimal">🚀 <strong>Significantly faster</strong> - Eliminates one memory copy when available</p>
-                        </div>
-                        
-                        <div class="pattern">
-                            <h3>2. readN/writeN (Good Baseline)</h3>
-                            <div class="code-block">
-                                <pre><code class="language-cpp line-numbers">float buffer[256];
+                                <pre><code class="language-cpp line-numbers">// Simple and performant - use this as your default
+float buffer[256];
 size_t count = in->readN(buffer, 256);
 // Process entire buffer...
 for (size_t i = 0; i < count; ++i) {
@@ -619,11 +599,29 @@ for (size_t i = 0; i < count; ++i) {
 }
 out->writeN(buffer, count);</code></pre>
                             </div>
-                            <p class="pattern-note fast">✅ <strong>Good baseline</strong> - Single memory copy, automatic ring buffer handling</p>
+                            <p class="pattern-note fast">✅ <strong>RECOMMENDED DEFAULT</strong> - Simple API, good performance, works everywhere</p>
                         </div>
                         
                         <div class="pattern">
-                            <h3>3. peek/commit (Zero-Copy Read)</h3>
+                            <h3>2. read_dbf/write_dbf (SPECIALIZED USE ONLY)</h3>
+                            <div class="code-block">
+                                <pre><code class="language-cpp line-numbers">// Only use for: pure copy, wraparound-heavy, or ultra-high throughput
+// Note: Throws exception if DBF not available
+auto [read_ptr, read_size] = in.read_dbf();
+auto [write_ptr, write_size] = out->write_dbf();
+
+size_t to_process = std::min(read_size, write_size);
+for (size_t i = 0; i < to_process; ++i) {
+    write_ptr[i] = read_ptr[i] * gain;  // Direct processing
+}
+in.commit_read(to_process);
+out->commit_write(to_process);</code></pre>
+                            </div>
+                            <p class="pattern-note fast">⚡ <strong>Specialized technique</strong> - Only faster for pure copy (50%+) or wraparound scenarios (20%)</p>
+                        </div>
+                        
+                        <div class="pattern">
+                            <h3>3. peek/commit (COMPLEX - NOT RECOMMENDED)</h3>
                             <div class="code-block">
                                 <pre><code class="language-cpp line-numbers">const float *ptr1, *ptr2;
 size_t size1, size2;
@@ -636,7 +634,7 @@ for (size_t i = 0; i < size2; ++i) buffer[size1+i] = ptr2[i] * gain;
 in.commit_read(size1 + size2);
 out->writeN(buffer, size1 + size2);</code></pre>
                             </div>
-                            <p class="pattern-note fast">⚡ <strong>Zero-copy read</strong> - Direct access to input, still one copy for output</p>
+                            <p class="pattern-note fast">⚠️ <strong>Complex implementation</strong> - Only ~5% faster than readN/writeN, not worth the complexity</p>
                         </div>
                         
                         <div class="pattern">
@@ -653,10 +651,10 @@ out->push(sample * gain);</code></pre>
                     <div class="performance-notes">
                         <h3>Performance Notes</h3>
                         <ul>
-                            <li><strong>Memory copies are the bottleneck</strong> - Each eliminated copy significantly improves throughput</li>
-                            <li><strong>Doubly-mapped buffers</strong> use virtual memory to present ring buffers as contiguous arrays</li>
-                            <li><strong>Availability</strong>: read_dbf/write_dbf returns {nullptr, 0} when not available</li>
-                            <li><strong>Fallback strategy</strong>: Try dbf methods first, then fall back to peek/commit</li>
+                            <li><strong>Use readN/writeN by default</strong> - Simple, performant, works everywhere</li>
+                            <li><strong>DBF is specialized</strong> - Only use for pure copy or wraparound-heavy scenarios</li>
+                            <li><strong>Skip peek/commit</strong> - Complex to implement, only ~5% gain over readN/writeN</li>
+                            <li><strong>Normal DSP processing</strong> - DBF only ~5% faster, not worth the complexity</li>
                             <li><strong>Run benchmarks</strong>: <code>cd build/performance && ./perf_read_write_techniques</code></li>
                         </ul>
                     </div>

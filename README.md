@@ -116,11 +116,18 @@ Cler supports four buffer access patterns with dramatically different performanc
     Allows you to inspect (peek) data in the buffer without removing it, then explicitly commit the number of items you've processed.
     The downside is that you can only access data up to the physical end of the ring buffer at a time — so if your logical window wraps, you may need to handle two chunks. Similar performance to ReadN/WriteN as it still requires one memory copy for output.
 
-    * **read_dbf/write_dbf (OPTIMAL)** </br>
-    **Doubly-mapped buffers** provide true zero-copy access when available. Uses virtual memory tricks to present ring buffer data as a contiguous array, eliminating wrap-around handling. **Significantly faster** than other techniques due to eliminating one memory copy operation.
+    * **read_dbf/write_dbf (SPECIALIZED)** </br>
+    **Doubly-mapped buffers** provide true zero-copy access when available. Uses virtual memory tricks to present ring buffer data as a contiguous array, eliminating wrap-around handling. Can be significantly faster for specific use cases.
     **Requirements**: Buffer must be heap-allocated and page-aligned (≥4KB). These methods will throw an exception if DBF is not available.
 
-**Performance Recommendation**: Use `read_dbf/write_dbf` for high-throughput paths, `readN/writeN` for general use, and avoid `push/pop` except for control data.
+**Performance Recommendations**:
+- **Default Choice**: Use `readN/writeN` for most DSP blocks - simple API, good performance, no complex error handling
+- **Use DBF only for**:
+  - Pure data movement (no processing) - 50%+ faster
+  - Small buffers with frequent wraparound - 20% faster
+  - Ultra high-throughput with no processing
+- **Avoid DBF for**: Normal DSP processing (only ~5% gain not worth the complexity)
+- **Never use**: `push/pop` except for control data (orders of magnitude slower)
 
 # When to Use CLER
 

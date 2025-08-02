@@ -366,13 +366,24 @@ struct GainBlock : public cler::BlockBase {
 
 **Performance Characteristics**:
 - **Push/Pop**: Orders of magnitude slower (AVOID for high-throughput)
-- **ReadN/WriteN**: Good baseline performance
-- **Peek/Commit**: Similar performance to readN/writeN
-- **read_dbf/write_dbf**: OPTIMAL - Approximately 2x faster than other techniques
+- **ReadN/WriteN**: Good baseline performance - RECOMMENDED DEFAULT
+- **Peek/Commit**: ~5% faster than readN/writeN but complex to implement
+- **read_dbf/write_dbf**: Specialized technique - only faster for specific use cases
 
 ```cpp
-// TECHNIQUE 1: read_dbf/write_dbf (OPTIMAL)
+// TECHNIQUE 1: ReadN/WriteN (RECOMMENDED DEFAULT)
+// Bulk transfer with single memory copy - simple and performant
+size_t transferable = std::min({in.size(), out->space(), BUFFER_SIZE});
+in.readN(buffer, transferable);
+// Process buffer...
+for (size_t i = 0; i < transferable; ++i) {
+    buffer[i] *= gain;
+}
+out->writeN(buffer, transferable);
+
+// TECHNIQUE 2: read_dbf/write_dbf (SPECIALIZED USE ONLY)
 // Doubly-mapped buffers: True zero-copy on supported platforms
+// Only use for: pure data movement, wraparound-heavy scenarios, or ultra-high throughput
 // NOTE: These methods throw exceptions if dbf is not available (buffer too small or stack-allocated)
 // Buffer must be >= 4KB (DOUBLY_MAPPED_MIN_SIZE) and heap-allocated
 auto [read_ptr, read_size] = in.read_dbf();
@@ -387,16 +398,6 @@ if (to_process > 0 && read_ptr && write_ptr) {
     in.commit_read(to_process);
     out->commit_write(to_process);
 }
-
-// TECHNIQUE 2: ReadN/WriteN (GOOD BASELINE)
-// Bulk transfer with single memory copy
-size_t transferable = std::min({in.size(), out->space(), BUFFER_SIZE});
-in.readN(buffer, transferable);
-// Process buffer...
-for (size_t i = 0; i < transferable; ++i) {
-    buffer[i] *= gain;
-}
-out->writeN(buffer, transferable);
 
 // TECHNIQUE 3: Peek/Commit (ZERO-COPY READ)
 // Inspect before processing, still needs one copy for output
@@ -422,37 +423,41 @@ sample *= gain;
 out->push(sample);
 ```
 
-**Performance Analysis**:
-- **Doubly-mapped buffers** eliminate one memory copy operation, providing significant speedup
-- **ReadN/WriteN and Peek/Commit** have similar performance as both require one memory copy
-- **Push/Pop** is orders of magnitude slower due to function call overhead per sample
-- **Memory copy reduction** is the key to performance - each eliminated copy significantly improves throughput
+**Performance Recommendations**:
+- **Use ReadN/WriteN as default** - Simple API, good performance, works everywhere
+- **Consider DBF only when**:
+  - Pure data movement without processing (50%+ speedup)
+  - Small buffers with frequent wraparound (20% speedup)
+  - Profiling shows memory copy is the bottleneck (rare)
+- **Avoid DBF for normal DSP** - Only ~5% gain over ReadN/WriteN, not worth the complexity
+- **Never use Push/Pop** - Orders of magnitude slower due to per-sample overhead
+- **Skip Peek/Commit** - Complex to implement correctly, only ~5% faster than ReadN/WriteN
 
 ### Channel Implementation Notes
 - **read_dbf()/write_dbf()**: Throw an exception when doubly-mapped buffers are not available
 - **Requirements**: Buffers must be heap-allocated and page-aligned (minimum DOUBLY_MAPPED_MIN_SIZE = 4KB)
 - **No Fallbacks**: Blocks should catch exceptions if they want to handle DBF unavailability (desktop_blocks do not do that as they want to enforce having dbf)
 
-### DBF Usage Pattern
+### Recommended Block Pattern
 ```cpp
 cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-    // Use zero-copy doubly-mapped buffers when available
-    auto [read_ptr, read_size] = in.read_dbf();
-    auto [write_ptr, write_size] = out->write_dbf();
+    // DEFAULT PATTERN: Use ReadN/WriteN for simplicity and good performance
+    size_t transferable = std::min({in.size(), out->space(), BUFFER_SIZE});
+    if (transferable == 0) return cler::Error::NotEnoughSamples;
     
-    if (read_ptr && write_ptr) {
-        size_t to_process = std::min(read_size, write_size);
-        
-        // Direct processing between doubly-mapped buffers
-        for (size_t i = 0; i < to_process; ++i) {
-            write_ptr[i] = read_ptr[i] * _gain;
-        }
-        in.commit_read(to_process);
-        out->commit_write(to_process);
+    in.readN(_buffer, transferable);
+    
+    // Process data
+    for (size_t i = 0; i < transferable; ++i) {
+        _buffer[i] = _buffer[i] * _gain;
     }
-    // Note: No fallback - handle null pointers appropriately for your use case
+    
+    out->writeN(_buffer, transferable);
     return cler::Empty{};
 }
+
+// Only use DBF for specialized cases (pure copy, wraparound-heavy, etc.)
+// Most DSP blocks should stick with the simple ReadN/WriteN pattern above
 ```
 
 ### Error Handling Pattern
@@ -766,9 +771,9 @@ cd build/performance
 ```
 
 **Read/Write Technique Performance**:
-- **read_dbf/write_dbf**: OPTIMAL (fastest when available)
-- **readN/writeN**: Good baseline performance
-- **peek/commit**: Zero-copy read, similar to readN/writeN
+- **readN/writeN**: RECOMMENDED - Good performance, simple API
+- **read_dbf/write_dbf**: Specialized - Only faster for pure copy or wraparound scenarios
+- **peek/commit**: Complex - Only ~5% faster than readN/writeN, not worth it
 - **push/pop**: AVOID - orders of magnitude slower
 
 ### Common Performance Patterns
