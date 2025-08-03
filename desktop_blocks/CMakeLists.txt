@@ -64,7 +64,7 @@ if (CLER_BUILD_BLOCKS_GUI)
   )
 endif()
 
-if (CLER_BUILD_BLOCKS_LIQUID AND CLER_BUILD_BLOCKS_GUI)
+if (CLER_BUILD_BLOCKS_GUI)
   target_link_libraries(cler_desktop_blocks INTERFACE
     cler::blocks_plots
   )
