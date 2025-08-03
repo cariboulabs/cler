@@ -120,11 +120,13 @@ CLER supports four buffer access patterns with dramatically different performanc
 
     * **Peek/Commit (Zero-copy read/write)** </br>
     Allows you to inspect (peek) data in the buffer without removing it, then explicitly commit the number of items you've processed.
-    The downside is that you can only access data up to the physical end of the ring buffer at a time — so if your logical window wraps, you may need to handle two chunks. Similar performance to ReadN/WriteN as it still requires one memory copy for output.
+    The downside is that you can only access data up to the physical end of the ring buffer at a time — so if your logical window wraps, you may need to handle two chunks.
 
     * **read_dbf/write_dbf (SPECIALIZED)** </br>
-    **Doubly-mapped buffers** provide true zero-copy access when available. Uses virtual memory tricks to present ring buffer data as a contiguous array, eliminating wrap-around handling. Can be significantly faster for specific use cases.
+    **Doubly-mapped buffers** provide true zero-copy access when available. Uses virtual memory tricks to present ring buffer data as a contiguous array, eliminating wrap-around handling.
     **Requirements**: Buffer must be heap-allocated and page-aligned (≥4KB). These methods will throw an exception if DBF is not available.
+
+    Generally speaking, prefer dbf as a default if you can, else, go with ReadN/WriteN
 
 # When to Use CLER
 - Sensor fusion (IMU + GPS + barometer)

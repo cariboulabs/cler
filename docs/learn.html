@@ -552,72 +552,73 @@ config.adaptive_sleep_fail_threshold = 5;     // Sleep after 5 failures</code></
                 </section>
 
                 <section id="buffer-patterns">
-                    <h2>Buffer Access Performance</h2>
-                    <p>CLER supports four buffer access patterns with dramatically different performance characteristics. Choose the right pattern for optimal throughput:</p>
+                    <h2>Buffer Access Patterns</h2>
+                    <p>CLER provides three main ways to access buffer data. Here's what we recommend:</p>
                     
                     <div class="performance-results">
-                        <h3>Performance Characteristics</h3>
+                        <h3>Simple Recommendation</h3>
                         <div class="perf-table">
                             <div class="perf-row header">
                                 <div class="perf-technique">Technique</div>
                                 <div class="perf-throughput">Performance</div>
                                 <div class="perf-vs">When to Use</div>
                             </div>
-                            <div class="perf-row good">
-                                <div class="perf-technique">readN/writeN</div>
-                                <div class="perf-throughput">RECOMMENDED</div>
-                                <div class="perf-vs">Default for most DSP blocks</div>
-                            </div>
                             <div class="perf-row optimal">
                                 <div class="perf-technique">read_dbf/write_dbf</div>
-                                <div class="perf-throughput">Specialized</div>
-                                <div class="perf-vs">Pure copy, wraparound scenarios</div>
+                                <div class="perf-throughput">Best Performance</div>
+                                <div class="perf-vs">Try this first - fastest and cleanest for most cases</div>
                             </div>
                             <div class="perf-row good">
+                                <div class="perf-technique">readN/writeN</div>
+                                <div class="perf-throughput">Good Performance</div>
+                                <div class="perf-vs">Fallback if DBF not available - still very fast</div>
+                            </div>
+                            <div class="perf-row">
                                 <div class="perf-technique">peek/commit</div>
-                                <div class="perf-throughput">Complex</div>
-                                <div class="perf-vs">Only ~5% faster, not worth it</div>
+                                <div class="perf-throughput">Specialized</div>
+                                <div class="perf-vs">Only if you need fine control over buffer management</div>
                             </div>
                             <div class="perf-row avoid">
                                 <div class="perf-technique">push/pop</div>
                                 <div class="perf-throughput">AVOID</div>
-                                <div class="perf-vs">Orders of magnitude slower</div>
+                                <div class="perf-vs">Extremely slow - use only for control/config data</div>
                             </div>
                         </div>
                     </div>
                     
                     <div class="pattern-comparison">
                         <div class="pattern">
-                            <h3>1. readN/writeN (RECOMMENDED DEFAULT)</h3>
+                            <h3>1. read_dbf/write_dbf (TRY THIS FIRST)</h3>
                             <div class="code-block">
-                                <pre><code class="language-cpp line-numbers">// Simple and performant - use this as your default
-float buffer[256];
-size_t count = in->readN(buffer, 256);
-// Process entire buffer...
-for (size_t i = 0; i < count; ++i) {
-    buffer[i] *= gain;
-}
-out->writeN(buffer, count);</code></pre>
-                            </div>
-                            <p class="pattern-note fast">✅ <strong>RECOMMENDED DEFAULT</strong> - Simple API, good performance, works everywhere</p>
-                        </div>
-                        
-                        <div class="pattern">
-                            <h3>2. read_dbf/write_dbf (SPECIALIZED USE ONLY)</h3>
-                            <div class="code-block">
-                                <pre><code class="language-cpp line-numbers">// Only use for: pure copy, wraparound-heavy, or ultra-high throughput
-// Note: Throws exception if DBF not available
-auto [read_ptr, read_size] = in.read_dbf();
+                                <pre><code class="language-cpp line-numbers">// Fastest and cleanest - zero-copy direct buffer access
+auto [read_ptr, read_size] = in->read_dbf();
 auto [write_ptr, write_size] = out->write_dbf();
-
 size_t to_process = std::min(read_size, write_size);
+
 for (size_t i = 0; i < to_process; ++i) {
     write_ptr[i] = read_ptr[i] * gain;  // Direct processing
 }
-in.commit_read(to_process);
+
+in->commit_read(to_process);
 out->commit_write(to_process);</code></pre>
                             </div>
-                            <p class="pattern-note fast">⚡ <strong>Specialized technique</strong> - Only faster for pure copy (50%+) or wraparound scenarios (20%)</p>
+                            <p class="pattern-note fast">✅ <strong>RECOMMENDED</strong> - Best performance, clean code.</p>
+                        </div>
+                        
+                        <div class="pattern">
+                            <h3>2. readN/writeN (SOLID FALLBACK)</h3>
+                            <div class="code-block">
+                                <pre><code class="language-cpp line-numbers">// Simple and reliable - use when DBF not available
+float buffer[256];
+size_t count = in->readN(buffer, 256);
+
+for (size_t i = 0; i < count; ++i) {
+    buffer[i] *= gain;
+}
+
+out->writeN(buffer, count);</code></pre>
+                            </div>
+                            <p class="pattern-note fast">✅ <strong>GOOD FALLBACK</strong> - Still very fast, works everywhere, simple API</p>
                         </div>
                         
                         <div class="pattern">
@@ -649,14 +650,13 @@ out->push(sample * gain);</code></pre>
                     </div>
                     
                     <div class="performance-notes">
-                        <h3>Performance Notes</h3>
+                        <h3>Quick Summary</h3>
                         <ul>
-                            <li><strong>Use readN/writeN by default</strong> - Simple, performant, works everywhere</li>
-                            <li><strong>DBF is ESSENTIAL for hardware interfaces</strong> - SDRs, ADCs, DACs need zero-copy for high-speed streaming</li>
-                            <li><strong>DBF is simpler for multi-IO blocks</strong> - Avoid managing multiple temporary buffers</li>
-                            <li><strong>Skip peek/commit</strong> - Complex to implement, only ~5% gain over readN/writeN</li>
-                            <li><strong>Single I/O DSP blocks</strong> - DBF only ~5% faster, use readN/writeN for cleaner code</li>
-                            <li><strong>Hardware rule of thumb</strong> - If it touches hardware at >10 MSPS, use DBF</li>
+                            <li><strong>Try DBF first</strong> - It's usually the fastest and cleanest option</li>
+                            <li><strong>Use readN/writeN as fallback</strong> - Simple and still very fast</li>
+                            <li><strong>DBF requirements</strong> - Buffer must be heap-allocated and page-aligned (≥4KB)</li>
+                            <li><strong>Peek/commit is rarely needed</strong> - Only for specialized buffer management</li>
+                            <li><strong>Never use push/pop for DSP data</strong> - It's extremely slow</li>
                             <li><strong>Run benchmarks</strong>: <code>cd build/performance && ./perf_read_write_techniques</code></li>
                         </ul>
                     </div>

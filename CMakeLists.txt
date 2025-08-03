@@ -52,11 +52,16 @@ target_include_directories(cler INTERFACE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include> #allows people to just #include "cler.hpp"
 )
 
-target_compile_options(cler INTERFACE
-  $<$<COMPILE_LANGUAGE:CXX>:
-    -Wno-interference-size
-  >
-)
+# Check if compiler supports -Wno-interference-size (GCC 12+ specific)
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag(-Wno-interference-size COMPILER_SUPPORTS_WNO_INTERFERENCE_SIZE)
+if(COMPILER_SUPPORTS_WNO_INTERFERENCE_SIZE)
+  target_compile_options(cler INTERFACE
+    $<$<COMPILE_LANGUAGE:CXX>:
+      -Wno-interference-size
+    >
+  )
+endif()
 
 message(STATUS "CLER: Using CLER_DEFAULT_MAX_WORKERS=${CLER_DEFAULT_MAX_WORKERS}")
 

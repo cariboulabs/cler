@@ -175,7 +175,7 @@ TEST_F(SPSCQueueBasicTest, NoSampleLossConcurrent) {
     received.reserve(NUM_ITEMS);
     
     // Consumer thread
-    std::thread consumer([&queue, &received, NUM_ITEMS]() {
+    std::thread consumer([&queue, &received]() {
         for (int i = 0; i < NUM_ITEMS; ++i) {
             int value;
             queue.pop(value);  // Blocking pop
@@ -184,7 +184,7 @@ TEST_F(SPSCQueueBasicTest, NoSampleLossConcurrent) {
     });
     
     // Producer thread
-    std::thread producer([&queue, NUM_ITEMS]() {
+    std::thread producer([&queue]() {
         for (int i = 0; i < NUM_ITEMS; ++i) {
             queue.push(i);  // Blocking push
         }

@@ -431,7 +431,7 @@ namespace cler {
         bool execute_block_dispatch_impl(std::index_sequence<Is...>, size_t index, const FlowGraphConfig& config) {
             static_assert(((Is < _N) && ...), "All block indices must be within bounds");
             bool result = false;
-            ((index == Is ? (result = execute_block_at_index_helper<Is>(config), true) : false) || ...);
+            (void)((index == Is ? (result = execute_block_at_index_helper<Is>(config), true) : false) || ...);
             return result;
         }
         
