@@ -42,10 +42,14 @@ else()
 endif()
 add_subdirectory(sources)
 
-target_link_libraries(cler_desktop_blocks INTERFACE   
-  cler::blocks_udp
-  cler::blocks_sources
-)
+if (NOT WIN32)
+  target_link_libraries(cler_desktop_blocks INTERFACE   
+    cler::blocks_udp
+    cler::blocks_sources
+  )
+else()
+  message(STATUS "Skipping UDP blocks because this is a Windows build")
+endif()
 
 if (CLER_BUILD_BLOCKS_LIQUID)
   add_subdirectory(ezgmsk_demod)

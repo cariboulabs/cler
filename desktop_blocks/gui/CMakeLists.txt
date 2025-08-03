@@ -56,6 +56,9 @@ target_link_libraries(blocks_gui PUBLIC
   Threads::Threads
 )
 
+# Add GLFW library directories for systems like macOS
+target_link_directories(blocks_gui PUBLIC ${GLFW_LIBRARY_DIRS})
+
 if(UNIX AND NOT APPLE)
   target_link_libraries(blocks_gui PUBLIC dl)
 endif()
