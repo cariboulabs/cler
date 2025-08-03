@@ -1,6 +1,3 @@
-# SPSC Queue Tests CMakeLists.txt
-cmake_minimum_required(VERSION 3.16)
-
 # Find required packages
 find_package(Threads REQUIRED)
 

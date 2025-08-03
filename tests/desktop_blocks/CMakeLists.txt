@@ -1,6 +1,3 @@
-# Desktop Blocks Tests
-cmake_minimum_required(VERSION 3.20)
-
 # Math blocks tests
 add_executable(math_blocks_test
     test_math_blocks.cpp

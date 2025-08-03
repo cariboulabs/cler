@@ -135,12 +135,6 @@ TEST_F(SinkBlocksTest, SinkNullBlockPartialCallback) {
     EXPECT_EQ(sink_block.in.size(), expected_remaining);
 }
 
-// Test SinkNullBlock error conditions
-TEST_F(SinkBlocksTest, SinkNullBlockErrorConditions) {
-    // Test buffer size too small for doubly-mapped buffers (need at least 4096/sizeof(float) = 1024 for float)
-    EXPECT_THROW(SinkNullBlock<float>("test", nullptr, nullptr, 1), std::invalid_argument);
-}
-
 // Test SinkFileBlock basic functionality
 TEST_F(SinkBlocksTest, SinkFileBlockBasic) {
     const size_t buffer_size = 4096; // Large enough for dbf

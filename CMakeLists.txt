@@ -45,9 +45,23 @@ option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
 option(CLER_BUILD_PERFORMANCE "Build CLER performance tests" OFF)
 option(CLER_BUILD_TESTS "Build CLER unit tests" OFF)
 
-# Runtime configuration options
-set(CLER_DEFAULT_MAX_WORKERS "16" CACHE STRING "Maximum number of worker threads for thread pools (embedded=8, desktop=16, server=32+)")
-add_definitions(-DCLER_DEFAULT_MAX_WORKERS=${CLER_DEFAULT_MAX_WORKERS}) #not attaching to a library to allow includers
+# Default max workers per platform (if not overridden)
+if(NOT DEFINED CLER_DEFAULT_MAX_WORKERS)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(CLER_DEFAULT_MAX_WORKERS "16" CACHE STRING "Default: 16 for Windows")
+  elseif(APPLE)
+    set(CLER_DEFAULT_MAX_WORKERS "16" CACHE STRING "Default: 16 for macOS")
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Try to detect embedded via processor type
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|aarch64|riscv")
+      set(CLER_DEFAULT_MAX_WORKERS "8" CACHE STRING "Default: 8 for embedded Linux")
+    else()
+      set(CLER_DEFAULT_MAX_WORKERS "16" CACHE STRING "Default: 16 for desktop Linux")
+    endif()
+  else()
+    set(CLER_DEFAULT_MAX_WORKERS "8" CACHE STRING "Default: 8 (unknown system)")
+  endif()
+endif()
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
@@ -74,8 +88,15 @@ set(CLER_INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include")
 add_library(cler INTERFACE)
 add_library(cler::cler ALIAS cler)
 target_include_directories(cler INTERFACE
-  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include> #allows people to just #include "cler.hpp"
+  ${CMAKE_CURRENT_SOURCE_DIR}/include #allows people to just #include "cler.hpp"
 )
+if(UNIX AND NOT APPLE)
+    target_link_libraries(cler INTERFACE rt)
+endif()
+if(UNIX OR APPLE OR WIN32)
+  find_package(Threads REQUIRED)
+  target_link_libraries(cler INTERFACE Threads::Threads)
+endif()
 
 # Check if compiler supports -Wno-interference-size (GCC 12+ specific)
 include(CheckCXXCompilerFlag)
@@ -90,7 +111,7 @@ endif()
 
 message(STATUS "CLER: Using CLER_DEFAULT_MAX_WORKERS=${CLER_DEFAULT_MAX_WORKERS}")
 
-if (NOT WIN32)
+if((UNIX OR APPLE) AND NOT WIN32)
   add_subdirectory(logger)
 else()
   message(STATUS "Skipping logger blocks because this is a Windows build")
