@@ -24,6 +24,3 @@ enable_testing()
 # Add test subdirectories
 add_subdirectory(spsc-queue)
 add_subdirectory(desktop_blocks)
-
-
-message(STATUS "CLER Tests configured. Use 'make run_all_cler_tests' to run all tests.")
