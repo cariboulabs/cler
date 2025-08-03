@@ -473,7 +473,7 @@ namespace cler {
             // Compile-time validation
             static_assert(MaxBlocksParam >= 1, "Must support at least one block");
             static_assert(MaxWorkers >= 1, "Must support at least one worker");
-            static_assert(MaxBlocksParam <= std::numeric_limits<block_index_t>::max(), 
+            static_assert(MaxBlocksParam <= (std::numeric_limits<block_index_t>::max)(), 
                           "MaxBlocksParam exceeds block_index_t capacity");
             
             // Align to cache line to prevent false sharing

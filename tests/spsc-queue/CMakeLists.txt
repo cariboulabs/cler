@@ -17,31 +17,6 @@ if(NOT EXISTS ${CLER_SPSC_QUEUE_HEADER})
     message(FATAL_ERROR "SPSC Queue header not found at: ${CLER_SPSC_QUEUE_HEADER}")
 endif()
 
-# Common compile options for all tests
-set(SPSC_TEST_COMPILE_OPTIONS
-    -std=c++17
-    -Wall
-    -Wextra
-    -Werror
-    -O2
-    -g
-    -pthread
-    # Disable specific warnings that might come from the SPSC queue header
-    -Wno-unused-variable
-    -Wno-missing-braces
-    -Wno-unused-function
-    -Wno-unused-parameter
-    -Wno-sign-compare
-    -UNDEBUG  # Keep asserts enabled even in optimized builds
-)
-
-# Check if compiler supports -Wno-interference-size (GCC 12+ specific)
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag(-Wno-interference-size COMPILER_SUPPORTS_WNO_INTERFERENCE_SIZE)
-if(COMPILER_SUPPORTS_WNO_INTERFERENCE_SIZE)
-    list(APPEND SPSC_TEST_COMPILE_OPTIONS -Wno-interference-size)
-endif()
-
 # Common link libraries for all tests
 set(SPSC_TEST_LINK_LIBRARIES
     cler::cler

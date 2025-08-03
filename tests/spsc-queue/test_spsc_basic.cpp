@@ -140,12 +140,10 @@ TEST_F(SPSCQueueBasicTest, NoSampleLossNonBlocking) {
     // Multiple cycles of fill and drain
     for (int cycle = 0; cycle < NUM_CYCLES; ++cycle) {
         // Fill queue using try_push
-        int items_pushed = 0;
         for (int i = 0; i < QUEUE_SIZE; ++i) {
             int value = cycle * QUEUE_SIZE + i;
             if (queue.try_push(value)) {
                 all_sent.push_back(value);
-                items_pushed++;
             } else {
                 break; // Queue full
             }

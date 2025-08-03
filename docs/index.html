@@ -77,6 +77,7 @@
                 <div class="code-block">
                     <button class="copy-button" onclick="copyCode(this)">Copy</button>
                     <pre><code class="language-cpp line-numbers">#include "cler.hpp"
+#include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/sources/source_cw.hpp"
 #include "desktop_blocks/utils/throttle.hpp"
@@ -88,10 +89,10 @@ int main() {
     cler::GuiManager gui(800, 400, "Hello World Plot Example");
 
     const size_t SPS = 1000;
-    SourceCWBlock&lt;float&gt; source1("CWSource", 1.0f, 1.0f, SPS);  // amplitude, frequency
-    SourceCWBlock&lt;float&gt; source2("CWSource2", 1.0f, 20.0f, SPS);
-    ThrottleBlock&lt;float&gt; throttle("Throttle", SPS);
-    AddBlock&lt;float&gt; adder("Adder", 2); // 2 inputs
+    SourceCWBlock<float> source1("CWSource", 1.0f, 1.0f, SPS); //amplitude, frequency
+    SourceCWBlock<float> source2("CWSource2", 1.0f, 20.0f, SPS);
+    ThrottleBlock<float> throttle("Throttle", SPS);
+    AddBlock<float> adder("Adder", 2); // 2 inputs
 
     PlotTimeSeriesBlock plot(
         "Hello World Plot",
@@ -99,36 +100,28 @@ int main() {
         SPS,
         3.0f // duration in seconds
     );
+    plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f); //x,y, width, height
 
-    // Create flowgraph with variadic outputs
     auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&amp;source1, &amp;adder.in[0]),     // single output
-        cler::BlockRunner(&amp;source2, &amp;adder.in[1]),
-        cler::BlockRunner(&amp;adder, &amp;throttle.in),
-        cler::BlockRunner(&amp;throttle, &amp;plot.in[0]),
-        cler::BlockRunner(&amp;plot)                        // no outputs (sink)
+        cler::BlockRunner(&source1, &adder.in[0]),
+        cler::BlockRunner(&source2, &adder.in[1]),
+        cler::BlockRunner(&adder, &throttle.in),
+        cler::BlockRunner(&throttle, &plot.in[0]),
+        cler::BlockRunner(&plot)
     );
 
-    // Configure scheduler for optimal performance
-    cler::FlowGraphConfig config;
-    config.scheduler = cler::SchedulerType::FixedThreadPool;  // Cache-optimized (recommended)
-    config.num_workers = 4;  // Adjust for your CPU
-    // config.adaptive_sleep = true;  // Optional: for sparse/intermittent data only
-    // config.collect_detailed_stats = false;  // Ultra-high performance mode
-    flowgraph.run(config);
+    flowgraph.run();
 
-    while (!gui.should_close()) {
+    while (gui.should_close() == false) {
         gui.begin_frame();
         plot.render();
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
-    
-    flowgraph.stop();
     return 0;
 }</code></pre>
                 </div>
-                <p class="explanation">This creates a flowgraph where each block runs in its own thread with lock-free channels. The BlockRunner syntax connects blocks: first argument is the block, remaining arguments are its outputs (passed as parameters to the block's procedure() method). Framework manages threading and adaptive sleep for efficient CPU usage.</p>
+                <p class="explanation">This creates a flowgraph with lock-free channels. The BlockRunner syntax connects blocks: first argument is the block, remaining arguments are its outputs (passed as parameters to the block's procedure() method).</p>
             </div>
         </section>
 
@@ -146,7 +139,7 @@ cd desktop_examples
 ./hello_world  # Basic signal processing
 ./mass_spring_damper  # Interactive control system</code></pre>
                 </div>
-                <p>CLER is a header-only library — just include <code>cler.hpp</code> plus a platform task policy header.</p>
+                <p>CLER (core) is a header-only library — just include <code>cler.hpp</code> plus a platform task policy header and you are ready to go! Or more idiomatic, you can link against <code>cler::cler</code> or <code>cler::desktop_blocks</code>.</p>
             </div>
         </section>
     </main>

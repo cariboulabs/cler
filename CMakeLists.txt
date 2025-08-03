@@ -16,6 +16,8 @@ if(MSVC)
     /wd4244  # Disable narrowing conversion warnings
     /UNDEBUG  # Keep asserts enabled
   )
+  add_compile_definitions(NOMINMAX)  # Prevent Windows.h from defining min/max macros
+  message(STATUS "MSVC: Disabled min/max macros with NOMINMAX")
 else()
   # GCC/Clang options
   add_compile_options(-Wall -Wextra #mainly disable warnings for liquid. but need a better way of this doing
