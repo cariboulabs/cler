@@ -7,16 +7,28 @@ project(cler
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 99)
-add_compile_options(-Wall -Wextra #mainly disable warnings for liquid. but need a better way of this doing
-      -Wno-unused-variable 
-      -Wno-missing-braces 
-      -Wno-unused-function 
-      -Wno-unused-parameter
-      -Wno-deprecated-declarations
-      -Wno-sign-compare
-      -Wno-implicit-fallthrough
-      -UNDEBUG
-      )
+# Set compile options based on compiler
+if(MSVC)
+  add_compile_options(
+    /W3  # Warning level 3
+    /wd4996  # Disable deprecated warnings
+    /wd4267  # Disable size_t to int conversion warnings
+    /wd4244  # Disable narrowing conversion warnings
+    /UNDEBUG  # Keep asserts enabled
+  )
+else()
+  # GCC/Clang options
+  add_compile_options(-Wall -Wextra #mainly disable warnings for liquid. but need a better way of this doing
+        -Wno-unused-variable 
+        -Wno-missing-braces 
+        -Wno-unused-function 
+        -Wno-unused-parameter
+        -Wno-deprecated-declarations
+        -Wno-sign-compare
+        -Wno-implicit-fallthrough
+        -UNDEBUG
+        )
+endif()
 message(STATUS "Asserts are ENABLED even in Release builds")
 
 option(CLER_BUILD_BLOCKS "Build CLER blocks" ON)

@@ -167,21 +167,25 @@ jobs:
         brew install libusb fftw glfw pkg-config
         echo "CC=clang" >> $GITHUB_ENV
         echo "CXX=clang++" >> $GITHUB_ENV
-        # Help liquid-dsp find fftw3
-        echo "PKG_CONFIG_PATH=/usr/local/opt/fftw/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
-        echo "CFLAGS=-I/usr/local/opt/fftw/include" >> $GITHUB_ENV
-        echo "CXXFLAGS=-I/usr/local/opt/fftw/include" >> $GITHUB_ENV
-        echo "LDFLAGS=-L/usr/local/opt/fftw/lib" >> $GITHUB_ENV
     
     - name: Configure CMake
       run: |
+        # Help liquid-dsp find FFTW headers and libraries
+        FFTW_PREFIX=$(brew --prefix fftw)
+        export PKG_CONFIG_PATH="$FFTW_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH"
+        
+        # Pass include and library paths to CMake
         cmake -B build -S . \
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
           -DCLER_BUILD_TESTS=ON \
           -DCLER_BUILD_EXAMPLES=ON \
           -DCLER_BUILD_BLOCKS=ON \
           -DCLER_BUILD_BLOCKS_GUI=ON \
-          -DCLER_BUILD_BLOCKS_LIQUID=ON
+          -DCLER_BUILD_BLOCKS_LIQUID=ON \
+          -DCMAKE_C_FLAGS="-I$FFTW_PREFIX/include" \
+          -DCMAKE_CXX_FLAGS="-I$FFTW_PREFIX/include" \
+          -DCMAKE_EXE_LINKER_FLAGS="-L$FFTW_PREFIX/lib" \
+          -DCMAKE_SHARED_LINKER_FLAGS="-L$FFTW_PREFIX/lib"
     
     - name: Build
       run: cmake --build build --config ${{ matrix.build_type }}
