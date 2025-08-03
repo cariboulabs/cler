@@ -16,8 +16,10 @@ if(MSVC)
     /wd4244  # Disable narrowing conversion warnings
     /wd4848  # Disable [[no_unique_address]] warning in C++17
   )
-  # Keep assertions enabled without /UNDEBUG conflict
-  add_compile_definitions(_DEBUG)
+  # Keep assertions enabled
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_definitions(_DEBUG)
+  endif()
   add_compile_definitions(NOMINMAX)  # Prevent Windows.h from defining min/max macros
   message(STATUS "MSVC: Disabled min/max macros with NOMINMAX")
 else()
