@@ -6,3 +6,5 @@ build-*
 # Test artifacts
 test-docker-ci.sh
 perf-results/
+
+*.log

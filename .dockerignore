@@ -1,0 +1,47 @@
+# Build directories
+build/
+cmake-build-*/
+.cache/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Git
+.git/
+.gitignore
+
+# Documentation build
+docs/_build/
+docs/html/
+docs/latex/
+
+# Test results
+Testing/
+test-results/
+*.xml
+
+# Performance results
+perf-results/
+*.prof
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+
+# Docker-related files that shouldn't be in the build context
+.dockerignore
+docker-compose.override.yml
