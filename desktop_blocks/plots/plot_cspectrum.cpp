@@ -146,13 +146,9 @@ void PlotCSpectrumBlock::render() {
     size_t available = 0;
 
     if (_snapshot_mutex.try_lock()) {
-
-        const std::complex<float>* ptr1; const std::complex<float>* ptr2;
-        size_t size1, size2;
-
-        available = _signal_channels[0].peek_read(ptr1, size1, ptr2, size2);
+        available = _signal_channels[0].size();
         for (size_t i = 1; i < _num_inputs; ++i) {
-            size_t a = _signal_channels[i].peek_read(ptr1, size1, ptr2, size2);
+            size_t a = _signal_channels[i].size();
             if (a != available) {
                 available = std::min(available, a);
             }
@@ -163,13 +159,8 @@ void PlotCSpectrumBlock::render() {
         // Only snapshot if enough samples
         if (available >= _n_fft_samples) {
             for (size_t i = 0; i < _num_inputs; ++i) {
-                size_t dummy1, dummy2;
-                const std::complex<float>* p1;
-                const std::complex<float>* p2;
-
-                _signal_channels[i].peek_read(p1, dummy1, p2, dummy2);
-                memcpy(_snapshot_buffers[i], p1, dummy1 * sizeof(std::complex<float>));
-                memcpy(_snapshot_buffers[i] + dummy1, p2, dummy2 * sizeof(std::complex<float>));
+                auto [ptr, size] = _signal_channels[i].read_dbf();
+                memcpy(_snapshot_buffers[i], ptr, size * sizeof(std::complex<float>));
             }
         }
          _snapshot_mutex.unlock();

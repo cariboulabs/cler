@@ -24,28 +24,29 @@ if (CLER_BUILD_BLOCKS_LIQUID)
   )
 endif()
 
+add_subdirectory(sources)
+target_link_libraries(cler_desktop_blocks INTERFACE 
+  cler::blocks_sources
+)
+
 if (CLER_BUILD_BLOCKS_GUI)
   add_subdirectory(gui)
-  if (CLER_BUILD_BLOCKS_LIQUID)
-    add_subdirectory(plots)
-  else()
-    message(STATUS "Skipping plots because CLER_BUILD_BLOCKS_LIQUID is OFF")
-  endif()
+  add_subdirectory(plots)
+
+  target_link_libraries(cler_desktop_blocks INTERFACE 
+    cler::blocks_gui
+  )
+  target_link_libraries(cler_desktop_blocks INTERFACE
+    cler::blocks_plots
+  )
 else()
   message(STATUS "Skipping GUI blocks because CLER_BUILD_BLOCKS_GUI is OFF")
 endif()
 
 if (NOT WIN32)
   add_subdirectory(udp)
-else()
-  message(STATUS "Skipping UDP blocks because this is a Windows build")
-endif()
-add_subdirectory(sources)
-
-if (NOT WIN32)
   target_link_libraries(cler_desktop_blocks INTERFACE   
     cler::blocks_udp
-    cler::blocks_sources
   )
 else()
   message(STATUS "Skipping UDP blocks because this is a Windows build")
@@ -56,16 +57,4 @@ if (CLER_BUILD_BLOCKS_LIQUID)
   target_link_libraries(cler_desktop_blocks INTERFACE 
     cler::blocks_ezgmsk_demod
     )
-endif()
-
-if (CLER_BUILD_BLOCKS_GUI)
-  target_link_libraries(cler_desktop_blocks INTERFACE 
-    cler::blocks_gui
-  )
-endif()
-
-if (CLER_BUILD_BLOCKS_GUI)
-  target_link_libraries(cler_desktop_blocks INTERFACE
-    cler::blocks_plots
-  )
 endif()

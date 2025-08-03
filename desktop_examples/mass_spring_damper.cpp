@@ -7,7 +7,6 @@
 #include "desktop_blocks/plots/plot_timeseries.hpp"
 #include "desktop_blocks/utils/fanout.hpp"
 #include <atomic>
-#include <numbers>
 #include <cmath>
 
 const size_t SPS = 100; // Samples per second

@@ -62,7 +62,7 @@ RUN cmake -B build -S . \
     -DCLER_BUILD_BLOCKS=ON \
     -DCLER_BUILD_BLOCKS_GUI=ON \
     -DCLER_BUILD_BLOCKS_LIQUID=ON \
-    && cmake --build build --parallel || echo "Note: Some examples may fail with Clang due to known issues"
+    && cmake --build build --parallel
 
 # Test runner stage
 FROM deps AS test-runner
