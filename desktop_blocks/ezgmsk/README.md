@@ -5,11 +5,9 @@ The EZGMSK modulator is designed to generate GMSK-modulated frames compatible wi
 
 ## Frame Structure
 The EZGMSK frame consists of the following components:
-1. **Preamble**: Configurable symbols for synchronization (user-defined pattern)
-2. **Syncword**: User-defined symbol pattern for frame detection
-3. **Header**: Frame metadata (length in bytes, user-configurable)
-4. **Payload**: Variable-length data payload
-5. **Tail**: Filter flush symbols (2*m symbols)
+1. **Preamble**: Alternating bit pattern (0,1,0,1...) for synchronization
+2. **Data**: User-provided data blob (can include syncword, header, payload, etc.)
+3. **Tail**: Filter flush symbols (2*m symbols)
 
 ## Implementation Steps
 
@@ -96,9 +94,8 @@ The modulator automatically generates the standard alternating bit preamble patt
 ## Differences from gmskframegen
 1. **No built-in encoding**: EZGMSK uses raw data without CRC/FEC encoding
 2. **Fixed preamble pattern**: Automatically generates alternating bits (0,1,0,1...) matching demodulator expectations
-3. **Syncword support**: Additional syncword field between preamble and header
-4. **Simplified header**: No protocol version or encoding fields
-5. **Direct symbol input**: Syncword specified as symbols, not bits
+3. **Simplified structure**: Just preamble + user data + tail (no separate syncword/header/payload)
+4. **Maximum flexibility**: User can structure their data blob however they want
 
 ## Next Steps
 1. Implement _ezgmsk_mod.h with complete API

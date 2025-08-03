@@ -16,9 +16,7 @@
 // internal methods
 int ezgmsk_mod_write_zeros(ezgmsk_mod _q);
 int ezgmsk_mod_write_preamble(ezgmsk_mod _q);
-int ezgmsk_mod_write_syncword(ezgmsk_mod _q);
-int ezgmsk_mod_write_header(ezgmsk_mod _q);
-int ezgmsk_mod_write_payload(ezgmsk_mod _q);
+int ezgmsk_mod_write_data(ezgmsk_mod _q);
 int ezgmsk_mod_write_tail(ezgmsk_mod _q);
 int ezgmsk_mod_gen_symbol(ezgmsk_mod _q);
 
@@ -31,20 +29,15 @@ struct ezgmsk_mod_s {
 
     // framing lengths (symbols)
     unsigned int preamble_len;  // preamble length in symbols
-    unsigned int syncword_len;  // syncword length in symbols
-    unsigned int header_len;    // header length in symbols (8 * header_bytes)
-    unsigned int payload_len;   // payload length in symbols (8 * payload_bytes)
+    unsigned int data_len;      // data length in symbols (8 * data_bytes)
     unsigned int tail_len;      // tail length (2*m)
 
-    // preamble and syncword patterns
+    // preamble pattern
     unsigned char * preamble;   // preamble pattern (symbols)
-    unsigned char * syncword;   // syncword pattern (symbols)
 
-    // header and payload buffers
-    unsigned int header_bytes;  // header length in bytes
-    unsigned int payload_bytes; // payload length in bytes
-    unsigned char * header;     // header data
-    unsigned char * payload;    // payload data
+    // data buffer
+    unsigned int data_bytes;    // data length in bytes
+    unsigned char * data;       // frame data
 
     // framing state
     ezgmsk_mod_state_en state;
@@ -58,12 +51,10 @@ struct ezgmsk_mod_s {
 };
 
 // create GMSK frame modulator
-ezgmsk_mod ezgmsk_mod_create_set(unsigned int         _k,
-                                 unsigned int         _m,
-                                 float                _BT,
-                                 unsigned int         _preamble_symbols_len,
-                                 const unsigned char* _syncword_symbols,
-                                 unsigned int         _syncword_symbols_len)
+ezgmsk_mod ezgmsk_mod_create_set(unsigned int _k,
+                                 unsigned int _m,
+                                 float        _BT,
+                                 unsigned int _preamble_symbols_len)
 {
     ezgmsk_mod q = (ezgmsk_mod) malloc(sizeof(struct ezgmsk_mod_s));
 
@@ -77,7 +68,6 @@ ezgmsk_mod ezgmsk_mod_create_set(unsigned int         _k,
 
     // set frame parameters
     q->preamble_len = _preamble_symbols_len;
-    q->syncword_len = _syncword_symbols_len;
     q->tail_len = 2 * q->m;
 
     // allocate and generate alternating preamble pattern (like demodulator expects)
@@ -87,19 +77,10 @@ ezgmsk_mod ezgmsk_mod_create_set(unsigned int         _k,
         q->preamble[i] = i % 2;  // alternating 0,1,0,1...
     }
 
-    // allocate and copy syncword pattern
-    q->syncword = (unsigned char*) malloc(q->syncword_len * sizeof(unsigned char));
-    if (_syncword_symbols && q->syncword_len > 0) {
-        memcpy(q->syncword, _syncword_symbols, q->syncword_len * sizeof(unsigned char));
-    }
-
-    // initialize header/payload to zero
-    q->header_bytes = 0;
-    q->payload_bytes = 0;
-    q->header_len = 0;
-    q->payload_len = 0;
-    q->header = NULL;
-    q->payload = NULL;
+    // initialize data to zero
+    q->data_bytes = 0;
+    q->data_len = 0;
+    q->data = NULL;
 
     // allocate memory for output symbol buffer
     q->buf_sym = (float complex*)malloc(q->k*sizeof(float complex));
@@ -116,13 +97,11 @@ int ezgmsk_mod_destroy(ezgmsk_mod _q)
     // destroy gmsk modulator
     gmskmod_destroy(_q->mod);
 
-    // free preamble and syncword
+    // free preamble
     free(_q->preamble);
-    free(_q->syncword);
 
-    // free header and payload buffers
-    if (_q->header) free(_q->header);
-    if (_q->payload) free(_q->payload);
+    // free data buffer
+    if (_q->data) free(_q->data);
 
     // free symbol buffer
     free(_q->buf_sym);
@@ -142,9 +121,7 @@ int ezgmsk_mod_print(ezgmsk_mod _q)
     printf("    bandwidth-time  :   %-8.3f\n", _q->BT);
     printf("  framing properties\n");
     printf("    preamble        :   %-4u symbols\n", _q->preamble_len);
-    printf("    syncword        :   %-4u symbols\n", _q->syncword_len);
-    printf("    header          :   %-4u symbols (%u bytes)\n", _q->header_len, _q->header_bytes);
-    printf("    payload         :   %-4u symbols (%u bytes)\n", _q->payload_len, _q->payload_bytes);
+    printf("    data            :   %-4u symbols (%u bytes)\n", _q->data_len, _q->data_bytes);
     printf("    tail            :   %-4u symbols\n", _q->tail_len);
     printf("  total samples     :   %-4u samples\n", ezgmsk_mod_get_frame_len(_q));
     return LIQUID_OK;
@@ -173,28 +150,18 @@ int ezgmsk_mod_is_assembled(ezgmsk_mod _q)
 
 // assemble frame
 int ezgmsk_mod_assemble(ezgmsk_mod            _q,
-                        const unsigned char * _header,
-                        unsigned int          _header_len,
-                        const unsigned char * _payload,
-                        unsigned int          _payload_len)
+                        const unsigned char * _data,
+                        unsigned int          _data_len)
 {
     // reset frame generator state
     ezgmsk_mod_reset(_q);
 
-    // update header
-    _q->header_bytes = _header_len;
-    _q->header_len = 8 * _header_len;  // convert to symbols (bits)
-    _q->header = (unsigned char*) realloc(_q->header, _header_len * sizeof(unsigned char));
-    if (_header && _header_len > 0) {
-        memcpy(_q->header, _header, _header_len * sizeof(unsigned char));
-    }
-
-    // update payload
-    _q->payload_bytes = _payload_len;
-    _q->payload_len = 8 * _payload_len;  // convert to symbols (bits)
-    _q->payload = (unsigned char*) realloc(_q->payload, _payload_len * sizeof(unsigned char));
-    if (_payload && _payload_len > 0) {
-        memcpy(_q->payload, _payload, _payload_len * sizeof(unsigned char));
+    // update data
+    _q->data_bytes = _data_len;
+    _q->data_len = 8 * _data_len;  // convert to symbols (bits)
+    _q->data = (unsigned char*) realloc(_q->data, _data_len * sizeof(unsigned char));
+    if (_data && _data_len > 0) {
+        memcpy(_q->data, _data, _data_len * sizeof(unsigned char));
     }
 
     // set assembled flag and initial state
@@ -213,9 +180,7 @@ unsigned int ezgmsk_mod_get_frame_len(ezgmsk_mod _q)
 
     unsigned int num_frame_symbols = 
         _q->preamble_len +      // preamble symbols
-        _q->syncword_len +      // syncword symbols
-        _q->header_len +        // header symbols (bits)
-        _q->payload_len +       // payload symbols (bits)
+        _q->data_len +          // data symbols (bits)
         _q->tail_len;           // tail symbols
 
     return num_frame_symbols * _q->k;  // k samples/symbol
@@ -250,14 +215,8 @@ int ezgmsk_mod_gen_symbol(ezgmsk_mod _q)
     case EZGMSK_MOD_STATE_PREAMBLE:    
         ezgmsk_mod_write_preamble(_q); 
         break;
-    case EZGMSK_MOD_STATE_SYNCWORD:    
-        ezgmsk_mod_write_syncword(_q); 
-        break;
-    case EZGMSK_MOD_STATE_HEADER:      
-        ezgmsk_mod_write_header(_q); 
-        break;
-    case EZGMSK_MOD_STATE_PAYLOAD:     
-        ezgmsk_mod_write_payload(_q); 
+    case EZGMSK_MOD_STATE_DATA:      
+        ezgmsk_mod_write_data(_q); 
         break;
     case EZGMSK_MOD_STATE_TAIL:        
         ezgmsk_mod_write_tail(_q); 
@@ -294,59 +253,16 @@ int ezgmsk_mod_write_preamble(ezgmsk_mod _q)
 
     if (_q->symbol_counter == _q->preamble_len) {
         _q->symbol_counter = 0;
-        _q->state = EZGMSK_MOD_STATE_SYNCWORD;
+        _q->state = EZGMSK_MOD_STATE_DATA;
     }
     return LIQUID_OK;
 }
 
-// write syncword symbols
-int ezgmsk_mod_write_syncword(ezgmsk_mod _q)
+// write data bits
+int ezgmsk_mod_write_data(ezgmsk_mod _q)
 {
-    // get current syncword symbol
-    unsigned char bit = _q->syncword[_q->symbol_counter] & 0x01;
-    gmskmod_modulate(_q->mod, bit, _q->buf_sym);
-
-    _q->symbol_counter++;
-
-    if (_q->symbol_counter == _q->syncword_len) {
-        _q->symbol_counter = 0;
-        _q->state = EZGMSK_MOD_STATE_HEADER;
-    }
-    return LIQUID_OK;
-}
-
-// write header bits
-int ezgmsk_mod_write_header(ezgmsk_mod _q)
-{
-    if (_q->header_len == 0) {
-        // skip header if length is zero
-        _q->state = EZGMSK_MOD_STATE_PAYLOAD;
-        return LIQUID_OK;
-    }
-
-    // determine byte and bit indices
-    div_t d = div(_q->symbol_counter, 8);
-    unsigned int byte_index = d.quot;
-    unsigned int bit_index  = d.rem;
-    unsigned char byte = _q->header[byte_index];
-    unsigned char bit  = (byte >> (7 - bit_index)) & 0x01;
-
-    gmskmod_modulate(_q->mod, bit, _q->buf_sym);
-
-    _q->symbol_counter++;
-    
-    if (_q->symbol_counter == _q->header_len) {
-        _q->symbol_counter = 0;
-        _q->state = EZGMSK_MOD_STATE_PAYLOAD;
-    }
-    return LIQUID_OK;
-}
-
-// write payload bits
-int ezgmsk_mod_write_payload(ezgmsk_mod _q)
-{
-    if (_q->payload_len == 0) {
-        // skip payload if length is zero
+    if (_q->data_len == 0) {
+        // skip data if length is zero
         _q->state = EZGMSK_MOD_STATE_TAIL;
         return LIQUID_OK;
     }
@@ -355,14 +271,14 @@ int ezgmsk_mod_write_payload(ezgmsk_mod _q)
     div_t d = div(_q->symbol_counter, 8);
     unsigned int byte_index = d.quot;
     unsigned int bit_index  = d.rem;
-    unsigned char byte = _q->payload[byte_index];
+    unsigned char byte = _q->data[byte_index];
     unsigned char bit  = (byte >> (7 - bit_index)) & 0x01;
 
     gmskmod_modulate(_q->mod, bit, _q->buf_sym);
 
     _q->symbol_counter++;
     
-    if (_q->symbol_counter == _q->payload_len) {
+    if (_q->symbol_counter == _q->data_len) {
         _q->symbol_counter = 0;
         _q->state = EZGMSK_MOD_STATE_TAIL;
     }
