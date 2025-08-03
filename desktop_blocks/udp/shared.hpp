@@ -58,8 +58,6 @@ private:
     cler::Channel<size_t> _free_slots;
 };
 
-
-
 struct GenericDatagramSocket {
     static GenericDatagramSocket make_receiver(SocketType type,
                                            const std::string& bind_addr_str);

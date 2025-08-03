@@ -19,9 +19,9 @@ else()
 endif()
 
 if (CLER_BUILD_BLOCKS_LIQUID)
-    add_subdirectory(ezgmsk_demod)
+    add_subdirectory(ezgmsk)
 else()
-    message(STATUS "Skipping ezgmsk_demod example because CLER_BUILD_BLOCKS_LIQUID is OFF")
+    message(STATUS "Skipping ezgmsk example because CLER_BUILD_BLOCKS_LIQUID is OFF")
 endif()
 
 if (CLER_BUILD_BLOCKS_GUI)

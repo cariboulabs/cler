@@ -1,7 +1,7 @@
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "utils.hpp"
-#include "desktop_blocks/ezgmsk_demod/ezgmsk_demod.hpp"
+#include "desktop_blocks/ezgmsk/ezgmsk_demod.hpp"
 #include "desktop_blocks/sources/source_file.hpp"
 #include "desktop_blocks/resamplers/multistage_resampler.hpp"
 #include "desktop_blocks/utils/fanout.hpp"
