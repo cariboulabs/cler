@@ -34,10 +34,10 @@ else()
 endif()
 
 if (NOT WIN32)
-    add_executable(hello_world_udp hello_world_udp.cpp)
-    target_link_libraries(hello_world_udp PRIVATE cler::cler_desktop_blocks Threads::Threads)
+    add_executable(udp udp.cpp)
+    target_link_libraries(udp PRIVATE cler::cler_desktop_blocks Threads::Threads)
 else()
-    message(STATUS "Skipping hello_world_udp example because this is a Windows build")
+    message(STATUS "Skipping udp example because this is a Windows build")
 endif()
 
 if (CLER_BUILD_BLOCKS_GUI AND CLER_BUILD_BLOCKS_LIQUID)
