@@ -49,11 +49,17 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
 endif()
 
-# For Release, force -O3
+# For Release, force optimization
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-  add_compile_options(-O3)
+  if(MSVC)
+    add_compile_options(/O2)  # MSVC optimization for speed
+  else()
+    add_compile_options(-O3)  # GCC/Clang maximum optimization
+  endif()
 elseif (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  add_compile_options(-g)
+  if(NOT MSVC)
+    add_compile_options(-g)  # Debug symbols for GCC/Clang
+  endif()
 endif()
 message(STATUS "CLER: CMAKE_BUILD_TYPE is '${CMAKE_BUILD_TYPE}'")
 

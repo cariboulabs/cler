@@ -23,7 +23,9 @@ GuiManager::GuiManager(int width, int height, const std::string_view title) {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
+#ifndef _WIN32
     glEnable(GL_MULTISAMPLE);
+#endif
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
