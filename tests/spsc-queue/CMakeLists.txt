@@ -4,13 +4,8 @@ cmake_minimum_required(VERSION 3.16)
 # Find required packages
 find_package(Threads REQUIRED)
 
-# GoogleTest is now provided by parent tests/CMakeLists.txt
-
-# Enable testing
-enable_testing()
-
 # Set up include directories
-set(CLER_SPSC_QUEUE_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/../../include/cler_spsc-queue.hpp")
+set(CLER_SPSC_QUEUE_HEADER "${CLER_INCLUDE_DIRECTORY}/cler_spsc-queue.hpp")
 
 # Verify the header file exists
 if(NOT EXISTS ${CLER_SPSC_QUEUE_HEADER})
