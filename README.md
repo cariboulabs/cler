@@ -85,6 +85,8 @@ int main() {
 ```
 
 # Things to Know
+* **Cross-Platform** </br>
+While the core utilities are completely cross-platform, some highend features may not be. For example, the logger was only written for posix systems. The CI/CD pipline ensures that Linux/MacOS/Windows are fully supported, though windows is currently tested without liquid.
 
 * **Schedulers** </br>
 CLER includes two schedulers: **ThreadPerBlock** (default, simple, debuggable) and **FixedThreadPool** (better for constrained systems).  It also has Performance mode which eliminates stats overhead for ultra-high throughput applications,
