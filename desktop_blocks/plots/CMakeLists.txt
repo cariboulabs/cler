@@ -12,7 +12,10 @@ else()
 endif()
 
 add_library(cler::blocks_plots ALIAS blocks_plots)
-target_link_libraries(blocks_plots PUBLIC cler::cler liquid cler::blocks_gui)
+target_link_libraries(blocks_plots PUBLIC cler::cler cler::blocks_gui)
+if (CLER_BUILD_BLOCKS_LIQUID)
+    target_link_libraries(blocks_plots PUBLIC liquid)
+endif()
 target_include_directories(blocks_plots PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
