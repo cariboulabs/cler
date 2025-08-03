@@ -9,11 +9,11 @@ SourceUDPSocketBlock::SourceUDPSocketBlock(const char* name,
                         [[maybe_unused]] void* callback_context)
     : cler::BlockBase(name),
     _socket(UDPBlock::GenericDatagramSocket::make_receiver(type, bind_addr_or_path)),
-    _slab(UDPBlock::Slab(num_slab_slots, max_blob_size)),
+    _slab(Slab(num_slab_slots, max_blob_size)),
     _callback(callback)    
 {}
 
-cler::Result<cler::Empty, cler::Error> SourceUDPSocketBlock::procedure(cler::ChannelBase<UDPBlock::BlobSlice>* out) {
+cler::Result<cler::Empty, cler::Error> SourceUDPSocketBlock::procedure(cler::ChannelBase<Blob>* out) {
     if (!_socket.is_valid()) {
         return cler::Error::TERM_IOError;
     }
@@ -26,13 +26,13 @@ cler::Result<cler::Empty, cler::Error> SourceUDPSocketBlock::procedure(cler::Cha
         if (result.is_err()) {
             return result.unwrap_err();
         }
-        UDPBlock::BlobSlice slice = result.unwrap();
+        Blob blob = result.unwrap();
         // Receive data into the allocated slab slot
-        ssize_t bytes_received = _socket.recv(slice.data, slice.len);
-        
+        ssize_t bytes_received = _socket.recv(blob.data, blob.len);
+
         if (bytes_received == 0) {
             // No data received: safe to release slot and exit
-            slice.release();
+            blob.release();
             return cler::Empty{};
         }
 
@@ -46,27 +46,27 @@ cler::Result<cler::Empty, cler::Error> SourceUDPSocketBlock::procedure(cler::Cha
 #endif
                 case EINTR:
                     // Harmless transient error: try again later
-                    slice.release();
+                    blob.release();
                     return cler::Empty{};
 
                 case EMSGSIZE:
                     // Datagram was too big: drop this one
-                    slice.release();
+                    blob.release();
                     return cler::Empty{};
 
                 default:
                     // Real I/O error: propagate as terminal
-                    slice.release();
+                    blob.release();
                     return cler::Error::TERM_IOError;
             }
         }
 
-        slice.len = static_cast<size_t>(bytes_received);
+        blob.len = static_cast<size_t>(bytes_received);
 
         if (_callback) {
-            _callback(slice, _callback_context);
+            _callback(blob, _callback_context);
         }
-        out->push(slice);
+        out->push(blob);
     }
 
     return cler::Empty{};

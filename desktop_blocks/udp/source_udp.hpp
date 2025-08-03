@@ -1,10 +1,11 @@
 #pragma once
 #include "shared.hpp"
+#include "../blob.hpp"
 struct SourceUDPSocketBlock : public cler::BlockBase {
 
     //we add a callback because sometimes we want to do something with the received data
     //that is not just pushing it to the output channel
-    typedef void (*OnReceiveCallback)(const UDPBlock::BlobSlice&, void* context);
+    typedef void (*OnReceiveCallback)(const Blob&, void* context);
 
     SourceUDPSocketBlock(const char* name,
                             UDPBlock::SocketType type,
@@ -14,11 +15,11 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
                             OnReceiveCallback callback = nullptr,
                             [[maybe_unused]] void* callback_context = nullptr);
 
-    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<UDPBlock::BlobSlice>* out);
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<Blob>* out);
 
     private:
         UDPBlock::GenericDatagramSocket _socket;
-        UDPBlock::Slab _slab; 
+        Slab _slab;
         OnReceiveCallback _callback;
         void* _callback_context = nullptr; // Optional context for callback
 };

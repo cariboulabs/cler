@@ -24,6 +24,12 @@ if (CLER_BUILD_BLOCKS_LIQUID)
   )
 endif()
 
+#so any block that wants can use this..
+add_library(blocks_blob STATIC blob.cpp)
+add_library(cler::blocks_blob ALIAS blocks_blob)
+target_link_libraries(blocks_blob PUBLIC cler::cler)
+
+
 add_subdirectory(sources)
 target_link_libraries(cler_desktop_blocks INTERFACE 
   cler::blocks_sources
