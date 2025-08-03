@@ -93,22 +93,33 @@ jobs:
     - name: Install dependencies with vcpkg
       shell: powershell
       run: |
-        # Install vcpkg if not available
-        if (!(Test-Path "$env:VCPKG_ROOT")) {
-          git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
-          C:\vcpkg\bootstrap-vcpkg.bat
-          echo "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+        # Check for vcpkg in common locations
+        $vcpkgRoot = $env:VCPKG_ROOT
+        if ([string]::IsNullOrEmpty($vcpkgRoot)) {
+          # Check GitHub Actions default location
+          if (Test-Path "C:\vcpkg") {
+            $vcpkgRoot = "C:\vcpkg"
+          } elseif (Test-Path "$env:VCPKG_INSTALLATION_ROOT") {
+            $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          } else {
+            # Install vcpkg if not found
+            git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+            & C:\vcpkg\bootstrap-vcpkg.bat
+            $vcpkgRoot = "C:\vcpkg"
+          }
+          echo "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
         }
         
         # Install dependencies
-        & "$env:VCPKG_ROOT\vcpkg" install fftw3:x64-windows glfw3:x64-windows libusb:x64-windows
+        & "$vcpkgRoot\vcpkg" install fftw3:x64-windows glfw3:x64-windows libusb:x64-windows
     
     - name: Configure CMake
       shell: powershell
       run: |
+        $vcpkgRoot = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { "C:\vcpkg" }
         cmake -B build -S . `
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} `
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+          -DCMAKE_TOOLCHAIN_FILE="$vcpkgRoot\scripts\buildsystems\vcpkg.cmake" `
           -DCLER_BUILD_TESTS=ON `
           -DCLER_BUILD_EXAMPLES=ON `
           -DCLER_BUILD_BLOCKS=ON `
@@ -153,9 +164,14 @@ jobs:
     
     - name: Install dependencies
       run: |
-        brew install libusb fftw glfw
+        brew install libusb fftw glfw pkg-config
         echo "CC=clang" >> $GITHUB_ENV
         echo "CXX=clang++" >> $GITHUB_ENV
+        # Help liquid-dsp find fftw3
+        echo "PKG_CONFIG_PATH=/usr/local/opt/fftw/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+        echo "CFLAGS=-I/usr/local/opt/fftw/include" >> $GITHUB_ENV
+        echo "CXXFLAGS=-I/usr/local/opt/fftw/include" >> $GITHUB_ENV
+        echo "LDFLAGS=-L/usr/local/opt/fftw/lib" >> $GITHUB_ENV
     
     - name: Configure CMake
       run: |
