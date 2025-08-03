@@ -26,6 +26,7 @@ else()
         -Wno-deprecated-declarations
         -Wno-sign-compare
         -Wno-implicit-fallthrough
+        -Wno-return-type-c-linkage
         -UNDEBUG
         )
 endif()

@@ -596,11 +596,12 @@ public:
           }
           // NOT doubly mapped - throw here!
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
-          throw std::runtime_error(
+          char error_msg[256];
+          std::snprintf(error_msg, sizeof(error_msg),
               "read_dbf() requires doubly-mapped buffer. "
-              "Current size: " + std::to_string(buffer_bytes) + " bytes, "
-              "minimum: " + std::to_string(details::DOUBLY_MAPPED_MIN_SIZE) + " bytes."
-          );
+              "Current size: %zu bytes, minimum: %zu bytes.",
+              buffer_bytes, details::DOUBLY_MAPPED_MIN_SIZE);
+          throw std::runtime_error(error_msg);
       }
       throw std::runtime_error("read_dbf() not supported for stack-allocated buffers");
   }
@@ -640,11 +641,12 @@ public:
           }
           // NOT doubly mapped - throw here!
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
-          throw std::runtime_error(
+          char error_msg[256];
+          std::snprintf(error_msg, sizeof(error_msg),
               "write_dbf() requires doubly-mapped buffer. "
-              "Current size: " + std::to_string(buffer_bytes) + " bytes, "
-              "minimum: " + std::to_string(details::DOUBLY_MAPPED_MIN_SIZE) + " bytes."
-          );
+              "Current size: %zu bytes, minimum: %zu bytes.",
+              buffer_bytes, details::DOUBLY_MAPPED_MIN_SIZE);
+          throw std::runtime_error(error_msg);
       }
       throw std::runtime_error("write_dbf() not supported for stack-allocated buffers");
   }

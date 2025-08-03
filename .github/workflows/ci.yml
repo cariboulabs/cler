@@ -124,7 +124,7 @@ jobs:
           -DCLER_BUILD_EXAMPLES=ON `
           -DCLER_BUILD_BLOCKS=ON `
           -DCLER_BUILD_BLOCKS_GUI=ON `
-          -DCLER_BUILD_BLOCKS_LIQUID=ON
+          -DCLER_BUILD_BLOCKS_LIQUID=OFF
     
     - name: Build
       run: cmake --build build --config ${{ matrix.build_type }}

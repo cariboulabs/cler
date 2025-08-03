@@ -19,8 +19,7 @@ struct SourceHackRFBlock : public cler::BlockBase {
                       int vga_gain_db = 16,  // 0-62 dB, multiple of 2
                       size_t buffer_size = 0)
         : cler::BlockBase(name),
-          _iq(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size),
-          _buffer_size(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size)
+          _iq(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size)
     {
         // If user provided a non-zero buffer size, validate it's sufficient
         if (buffer_size > 0 && buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
@@ -90,7 +89,6 @@ struct SourceHackRFBlock : public cler::BlockBase {
 private:
     hackrf_device* _dev = nullptr;
     cler::Channel<std::complex<float>> _iq;
-    size_t _buffer_size;
 
     static int rx_callback(hackrf_transfer* transfer) {
         SourceHackRFBlock* self = static_cast<SourceHackRFBlock*>(transfer->rx_ctx);
