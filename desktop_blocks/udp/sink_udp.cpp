@@ -12,13 +12,7 @@ SinkUDPSocketBlock::SinkUDPSocketBlock(const char* name,
     _callback(callback),
     _callback_context(callback_context)
 {
-    // If user provided a non-zero buffer size, validate it's sufficient
-    if (buffer_size > 0 && buffer_size * sizeof(UDPBlock::BlobSlice) < cler::DOUBLY_MAPPED_MIN_SIZE) {
-        throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
-            std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(UDPBlock::BlobSlice)) + " BlobSlice elements");
-    }
-    
-    _buffer_size = buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(UDPBlock::BlobSlice) : buffer_size;
+    _buffer_size = (buffer_size == 0) ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(UDPBlock::BlobSlice) : buffer_size;
 }
 
 cler::Result<cler::Empty, cler::Error> SinkUDPSocketBlock::procedure() {
