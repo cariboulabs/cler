@@ -14,8 +14,10 @@ if(MSVC)
     /wd4996  # Disable deprecated warnings
     /wd4267  # Disable size_t to int conversion warnings
     /wd4244  # Disable narrowing conversion warnings
-    /UNDEBUG  # Keep asserts enabled
+    /wd4848  # Disable [[no_unique_address]] warning in C++17
   )
+  # Keep assertions enabled without /UNDEBUG conflict
+  add_compile_definitions(_DEBUG)
   add_compile_definitions(NOMINMAX)  # Prevent Windows.h from defining min/max macros
   message(STATUS "MSVC: Disabled min/max macros with NOMINMAX")
 else()
@@ -86,7 +88,11 @@ endif()
 
 message(STATUS "CLER: Using CLER_DEFAULT_MAX_WORKERS=${CLER_DEFAULT_MAX_WORKERS}")
 
-add_subdirectory(logger)
+if (NOT WIN32)
+  add_subdirectory(logger)
+else()
+  message(STATUS "Skipping logger blocks because this is a Windows build")
+endif()
 
 if (CLER_BUILD_BLOCKS)
   add_subdirectory(desktop_blocks)

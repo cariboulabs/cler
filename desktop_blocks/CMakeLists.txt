@@ -35,7 +35,11 @@ else()
   message(STATUS "Skipping GUI blocks because CLER_BUILD_BLOCKS_GUI is OFF")
 endif()
 
-add_subdirectory(udp)
+if (NOT WIN32)
+  add_subdirectory(udp)
+else()
+  message(STATUS "Skipping UDP blocks because this is a Windows build")
+endif()
 add_subdirectory(sources)
 
 target_link_libraries(cler_desktop_blocks INTERFACE   

@@ -165,8 +165,9 @@ TEST_F(SPSCQueueBasicTest, NoSampleLossNonBlocking) {
 
 // Test concurrent producer/consumer with no sample loss
 TEST_F(SPSCQueueBasicTest, NoSampleLossConcurrent) {
-    const int NUM_ITEMS = 10000;
-    const int QUEUE_SIZE = 64;
+    constexpr int NUM_ITEMS = 10000;
+    constexpr int QUEUE_SIZE = 64;
+
     dro::SPSCQueue<int> queue(QUEUE_SIZE);
     
     std::vector<int> received;
