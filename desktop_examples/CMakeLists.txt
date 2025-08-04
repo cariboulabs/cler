@@ -84,7 +84,7 @@ endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SOAPYSDR REQUIRED IMPORTED_TARGET SoapySDR)
 
-if(SOAPYSDR_FOUND AND CLER_BUILD_BLOCKS_GUI)
+if(SOAPYSDR_FOUND AND CLER_BUILD_BLOCKS_LIQUID AND CLER_BUILD_BLOCKS_GUI)
   message(STATUS "SoapySDR found - building SoapySDR example")
   add_executable(soapysdr_example soapysdr_example.cpp)
   target_link_libraries(soapysdr_example PRIVATE cler::cler_desktop_blocks PkgConfig::SOAPYSDR)

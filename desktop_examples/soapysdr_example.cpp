@@ -2,6 +2,8 @@
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/sources/source_soapysdr.hpp"
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
+#include "desktop_blocks/plots/plot_cspectrogram.hpp"
+#include "desktop_blocks/utils/fanout.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include <iostream>
 
@@ -104,19 +106,34 @@ int main(int argc, char* argv[]) {
         sdr_source.set_antenna(antenna);
     }
     
+    // Create fanout to feed both plots
+    FanoutBlock<std::complex<float>> fanout("Fanout", 2);
+    
     // Create spectrum plot
     PlotCSpectrumBlock spectrum(
-    "RF Spectrum", 
-    {"Signal"}, 
-    sample_rate, 
-    2048  // FFT size
+        "RF Spectrum", 
+        {"Signal"}, 
+        sample_rate, 
+        2048  // FFT size
     );
-    spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
+    spectrum.set_initial_window(0.0f, 0.0f, 600.0f, 600.0f);
+    
+    // Create spectrogram plot  
+    PlotCSpectrogramBlock spectrogram(
+        "RF Spectrogram",
+        {"Signal"},
+        sample_rate,
+        1024,  // FFT size
+        200    // height in pixels
+    );
+    spectrogram.set_initial_window(600.0f, 0.0f, 600.0f, 600.0f);
 
     // Create flowgraph
     auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&sdr_source, &spectrum.in[0]),
-        cler::BlockRunner(&spectrum)
+        cler::BlockRunner(&sdr_source, &fanout.in),
+        cler::BlockRunner(&fanout, &spectrum.in[0], &spectrogram.in[0]),
+        cler::BlockRunner(&spectrum),
+        cler::BlockRunner(&spectrogram)
     );
 
     // Run flowgraph
@@ -168,8 +185,9 @@ int main(int argc, char* argv[]) {
         }
         ImGui::End();
         
-        // Render spectrum
+        // Render plots
         spectrum.render();
+        spectrogram.render();
         
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(16));  // ~60 FPS
