@@ -6,5 +6,9 @@ like the CC1101, CC1310, CC1350, and similar devices.
 Easylink’s purpose is to make low-power, narrowband, 
 point-to-point or star networks simple to implement without the overhead of complex wireless stacks. .
 
---------------ezgmsk_demod------------
-This module provides software demodulation of GFSK signals sent by Easylink radios, enabling reception with an SDR.
+
+---------------EXAMPLE OF RECEIVED STREAM--------------------
+55555555 55904E     184F        AA                        3C55330F00000000FFFFFFFF3...
+PREAMBLE  SYNC      IEE HDR     ADDR SIZE = 1                   PAYLOAD ...
+
+In our mod/demod we say we decided to call HEADER =  (IEE HDR + ADDR SIZE)

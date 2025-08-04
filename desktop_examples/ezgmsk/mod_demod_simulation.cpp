@@ -75,9 +75,9 @@ struct BlobSource : public cler::BlockBase {
 
             memcpy(blob.data, SYNCWORD, sizeof(SYNCWORD));
             uint8_t* header_dst = blob.data + sizeof(SYNCWORD);
-            header_dst[0] = (header >> 16) & 0xFF;  // MSB
-            header_dst[1] = (header >> 8)  & 0xFF;
-            header_dst[2] = (header >> 0)  & 0xFF;  // LSB
+            header_dst[0] = (header >> 16);  // MSB
+            header_dst[1] = (header >> 8);
+            header_dst[2] = (header >> 0);  // LSB
             memcpy(blob.data + sizeof(SYNCWORD) + HEADER_BYTE_LEN, payload.data(), payload.size());
             blob.len = sizeof(SYNCWORD) + HEADER_BYTE_LEN + payload.size();
             out->push(blob);
