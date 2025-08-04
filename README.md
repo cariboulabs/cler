@@ -84,6 +84,24 @@ int main() {
 }
 ```
 
+# Cool, I want to use in my own project
+
+We recommend that you use Cmake's `FetchContent`, and then you can just link against `cler::cler` or `cler::desktop_blocks`. These provide the include directories aswell.
+```
+set(CLER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CLER_DEFAULT_MAX_WORKERS 8 CACHE STRING "" FORCE)
+
+include(FetchContent)
+FetchContent_Declare(
+  cler
+  GIT_REPOSITORY https://github.com/cariboulabs/cler
+  GIT_TAG main
+)
+FetchContent_MakeAvailable(cler)
+
+target_link_libraries(my_executable PRIVATE     cler::cler_desktop_blocks)
+```
+
 # Things to Know
 * **Cross-Platform** </br>
 While the core utilities are completely cross-platform, some highend features may not be. For example, the logger was only written for posix systems. The CI/CD pipline ensures that Linux/MacOS/Windows are fully supported, though windows is currently tested without liquid.
