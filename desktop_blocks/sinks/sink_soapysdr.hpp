@@ -243,8 +243,16 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
         return device->getFrequencyRange(SOAPY_SDR_TX, channel_idx);
     }
     
-    SoapySDR::RangeList get_gain_range() const {
+    SoapySDR::Range get_gain_range() const {
         return device->getGainRange(SOAPY_SDR_TX, channel_idx);
+    }
+    
+    std::vector<std::string> list_gains() const {
+        return device->listGains(SOAPY_SDR_TX, channel_idx);
+    }
+    
+    SoapySDR::Range get_gain_range(const std::string& name) const {
+        return device->getGainRange(SOAPY_SDR_TX, channel_idx, name);
     }
     
     SoapySDR::RangeList get_sample_rate_range() const {
