@@ -82,7 +82,7 @@ else()
 endif()
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(SOAPYSDR REQUIRED IMPORTED_TARGET SoapySDR)
+pkg_check_modules(SOAPYSDR IMPORTED_TARGET SoapySDR)
 
 if(SOAPYSDR_FOUND AND CLER_BUILD_BLOCKS_LIQUID AND CLER_BUILD_BLOCKS_GUI)
   message(STATUS "SoapySDR found - building SoapySDR example")
