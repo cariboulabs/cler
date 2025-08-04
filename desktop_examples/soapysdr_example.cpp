@@ -87,6 +87,23 @@ void print_help(const char* program_name) {
     std::cout << "  " << program_name << " --list\n";
 }
 
+// UI Layout constants
+constexpr float WINDOW_HEIGHT = 400.0f;
+constexpr float CONTROL_WIDTH = 400.0f;
+constexpr float CONTROL_HEIGHT = 280.0f;
+constexpr float PLOT_WIDTH = 450.0f;
+constexpr float PLOT_HEIGHT = WINDOW_HEIGHT;
+constexpr float WINDOW_WIDTH = CONTROL_WIDTH + (2 * PLOT_WIDTH);
+constexpr float SPACING = 10.0f;
+
+// Window positions
+constexpr float CONTROL_X = 0.0f;
+constexpr float CONTROL_Y = 0.0f;
+constexpr float SPECTRUM_X = CONTROL_WIDTH;
+constexpr float SPECTRUM_Y = 0.0f;
+constexpr float SPECTROGRAM_X = CONTROL_WIDTH + PLOT_WIDTH;
+constexpr float SPECTROGRAM_Y = 0.0f;
+
 int main(int argc, char* argv[]) {
     // Parse command line arguments
     std::string device_args = "driver=rtlsdr";
@@ -134,7 +151,7 @@ int main(int argc, char* argv[]) {
     std::cout << "\n";
     
     // Create GUI
-    cler::GuiManager gui(1200, 400, "CLER SoapySDR Example");
+    cler::GuiManager gui(WINDOW_WIDTH, WINDOW_HEIGHT, "CLER SoapySDR Example");
     
     // Create SDR source
     SourceSoapySDRBlock<std::complex<float>> sdr_source(
@@ -160,7 +177,7 @@ int main(int argc, char* argv[]) {
         sample_rate, 
         2048  // FFT size
     );
-    spectrum.set_initial_window(0.0f, 0.0f, 600.0f, 400.0f);
+    spectrum.set_initial_window(SPECTRUM_X, SPECTRUM_Y, PLOT_WIDTH, PLOT_HEIGHT);
     
     // Create spectrogram plot  
     PlotCSpectrogramBlock spectrogram(
@@ -168,9 +185,9 @@ int main(int argc, char* argv[]) {
         {"Signal"},
         sample_rate,
         1024,  // FFT size
-        200    // height in pixels
+        1000    // height in pixels
     );
-    spectrogram.set_initial_window(600.0f, 0.0f, 600.0f, 400.0f);
+    spectrogram.set_initial_window(SPECTROGRAM_X, SPECTROGRAM_Y, PLOT_WIDTH, PLOT_HEIGHT);
 
     // Create flowgraph
     auto flowgraph = cler::make_desktop_flowgraph(
@@ -191,8 +208,8 @@ int main(int argc, char* argv[]) {
         gui.begin_frame();
         
         // Add controls
-        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(300, 150), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(ImVec2(CONTROL_X + SPACING, CONTROL_Y + SPACING), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(CONTROL_WIDTH - (2 * SPACING), CONTROL_HEIGHT), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("SDR Controls")) {
             ImGui::Text("Device: %s", device_args.c_str());
             ImGui::Text("Sample Rate: %.1f MSPS", sample_rate/1e6);
