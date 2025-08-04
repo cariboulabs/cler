@@ -61,6 +61,5 @@ endif()
 if (CLER_BUILD_BLOCKS_LIQUID)
   add_subdirectory(ezgmsk)
   target_link_libraries(cler_desktop_blocks INTERFACE 
-    cler::blocks_ezgmsk_demod
-    )
+    cler::blocks_ezgmsk)
 endif()

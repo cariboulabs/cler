@@ -17,6 +17,11 @@
 #define EASYLINK_IEEE_HDR_GET_LENGTH(header) \
     (((header) >> EASYLINK_IEEE_HDR_LEN_S) & EASYLINK_IEEE_HDR_LEN_M)
 
+#define EASYLINK_IEEE_HDR_CREATE(crc, whitening, length) {                         \
+    ((crc << EASYLINK_IEEE_HDR_CRC_S) | (whitening << EASYLINK_IEEE_HDR_WHTNG_S) | \
+    ((length << EASYLINK_IEEE_HDR_LEN_S) & EASYLINK_IEEE_HDR_LEN_M))               \
+}
+
 
 inline void save_detections_to_file(const std::string& filename, const std::vector<unsigned int>& detections) {
     std::ofstream outfile(filename, std::ios::binary);

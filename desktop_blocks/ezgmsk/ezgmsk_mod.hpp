@@ -43,21 +43,18 @@ struct EZGmskModBlock : public cler::BlockBase {
         const Blob* ptr1, *ptr2;
         size_t size1, size2;
         size_t available = in.peek_read(ptr1, size1, ptr2, size2);
+        
         for (size_t i = 0; i < available; ++i) {
-            Blob* blob;
-            //choose which blob, and cast it to Blob* so we can release it later
-            if (i < size1) {
-                blob = const_cast<Blob*>(ptr1);
-            } else {
-                blob = const_cast<Blob*>(ptr2);
-            }
+            Blob* blob = const_cast<Blob*>(
+                (i < size1) ? (ptr1 + i) : (ptr2 + i - size1)
+            );
             ezgmsk::ezgmsk_mod_assemble(_mod, blob->data, blob->len);
 
             unsigned int frame_len = ezgmsk::ezgmsk_mod_get_frame_len(_mod);
             auto [write_ptr, write_space] = out->write_dbf();
 
             if (write_space < frame_len * sizeof(liquid_float_complex)) {
-                return cler::Error::NotEnoughSpace;
+                break;
             }
 
             ezgmsk::ezgmsk_mod_execute(
@@ -72,6 +69,7 @@ struct EZGmskModBlock : public cler::BlockBase {
             blob->release();
             in.commit_read(1); // Commit the read of the blob
         }
+        return cler::Empty{};
     }
 
 private:

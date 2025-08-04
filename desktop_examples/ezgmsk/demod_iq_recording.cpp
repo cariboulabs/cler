@@ -34,7 +34,6 @@ struct CallbackContext {
     std::vector<unsigned int> syncword_detections;
     std::vector<unsigned int> header_detections;
     std::vector<unsigned int> payload_detections;
-    std::atomic<bool> finished{false};
 };
 
 int ezgmsk_demod_cb(
@@ -52,8 +51,6 @@ int ezgmsk_demod_cb(
     static int header_counter = 0;
     static int payload_counter = 0;
     CallbackContext* callback_context = static_cast<CallbackContext*>(_context);
-
-    if (callback_context->finished == true) {return 0;};
 
     if (_state == ezgmsk::EZGMSK_DEMOD_STATE_DETECTFRAME) {
         preamble_counter ++;
@@ -83,10 +80,6 @@ int ezgmsk_demod_cb(
     else if (_state == ezgmsk::EZGMSK_DEMOD_STATE_RXPAYLOAD) {
         payload_counter++;
         callback_context->payload_detections.push_back(_sample_counter);
-    }
-
-    if (payload_counter > 20) {
-        callback_context->finished = true;
     }
 
     return 0;
@@ -134,13 +127,8 @@ int main() {
         output_runner
     );
 
-    flowgraph.run();
+    flowgraph.run_for(std::chrono::milliseconds(200));
 
-    while (callback_context.finished == false) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    flowgraph.stop();
     save_detections_to_file(PREAMBLE_DETECTIONS_OUTPUT_FILE, callback_context.preamble_detections);
     save_detections_to_file(SYNCWORD_DETECTIONS_OUTPUT_FILE, callback_context.syncword_detections);
     save_detections_to_file(HEADER_DETECTIONS_OUTPUT_FILE, callback_context.header_detections);
