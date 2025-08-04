@@ -8,6 +8,8 @@
 #include <vector>
 #include <string>
 #include <iostream>
+#include <sstream>
+#include <algorithm>
 
 // Helper to map C++ types to SoapySDR format strings
 template<typename T>
@@ -67,13 +69,55 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
             throw std::runtime_error("SinkSoapySDRBlock: Failed to create SoapySDR device with args: " + device_args);
         }
         
-        // Set sample rate
+        // Validate and set sample rate
+        auto sample_rates = device->getSampleRateRange(SOAPY_SDR_TX, channel_idx);
+        bool rate_valid = false;
+        for (const auto& range : sample_rates) {
+            if (sample_rate >= range.minimum() && sample_rate <= range.maximum()) {
+                rate_valid = true;
+                break;
+            }
+        }
+        if (!rate_valid) {
+            std::stringstream ss;
+            ss << "Sample rate " << sample_rate/1e6 << " MSPS not supported. Supported rates: ";
+            for (const auto& range : sample_rates) {
+                ss << range.minimum()/1e6 << "-" << range.maximum()/1e6 << " MSPS ";
+            }
+            SoapySDR::Device::unmake(device);
+            throw std::runtime_error(ss.str());
+        }
         device->setSampleRate(SOAPY_SDR_TX, channel_idx, sample_rate);
         
-        // Set center frequency
+        // Validate and set center frequency
+        auto freq_ranges = device->getFrequencyRange(SOAPY_SDR_TX, channel_idx);
+        bool freq_valid = false;
+        for (const auto& range : freq_ranges) {
+            if (center_freq >= range.minimum() && center_freq <= range.maximum()) {
+                freq_valid = true;
+                break;
+            }
+        }
+        if (!freq_valid) {
+            std::stringstream ss;
+            ss << "Frequency " << center_freq/1e6 << " MHz not supported. Supported ranges: ";
+            for (const auto& range : freq_ranges) {
+                ss << range.minimum()/1e6 << "-" << range.maximum()/1e6 << " MHz ";
+            }
+            SoapySDR::Device::unmake(device);
+            throw std::runtime_error(ss.str());
+        }
         device->setFrequency(SOAPY_SDR_TX, channel_idx, center_freq);
         
-        // Set gain
+        // Validate and set gain
+        auto gain_range = device->getGainRange(SOAPY_SDR_TX, channel_idx);
+        if (gain_db < gain_range.minimum() || gain_db > gain_range.maximum()) {
+            std::stringstream ss;
+            ss << "Gain " << gain_db << " dB not supported. Supported range: "
+               << gain_range.minimum() << "-" << gain_range.maximum() << " dB";
+            SoapySDR::Device::unmake(device);
+            throw std::runtime_error(ss.str());
+        }
         if (device->hasGainMode(SOAPY_SDR_TX, channel_idx)) {
             device->setGainMode(SOAPY_SDR_TX, channel_idx, false); // Manual gain mode
         }

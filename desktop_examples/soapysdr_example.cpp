@@ -18,12 +18,56 @@ void list_devices() {
     }
     
     for (size_t i = 0; i < results.size(); i++) {
-        std::cout << "  Device " << i << ":\n";
+        std::cout << "\n  Device " << i << ":\n";
         for (const auto& pair : results[i]) {
             std::cout << "    " << pair.first << " = " << pair.second << "\n";
         }
-        std::cout << "\n";
+        
+        // Try to get more info by making the device
+        try {
+            auto device = SoapySDR::Device::make(results[i]);
+            if (device) {
+                // Sample rates
+                auto rates = device->getSampleRateRange(SOAPY_SDR_RX, 0);
+                std::cout << "    Sample rates: ";
+                for (const auto& range : rates) {
+                    if (range.minimum() == range.maximum()) {
+                        std::cout << range.minimum()/1e6 << " MSPS ";
+                    } else {
+                        std::cout << range.minimum()/1e6 << "-" << range.maximum()/1e6 << " MSPS ";
+                    }
+                }
+                std::cout << "\n";
+                
+                // Frequency range
+                auto freqs = device->getFrequencyRange(SOAPY_SDR_RX, 0);
+                std::cout << "    Frequency range: ";
+                for (const auto& range : freqs) {
+                    std::cout << range.minimum()/1e6 << "-" << range.maximum()/1e6 << " MHz ";
+                }
+                std::cout << "\n";
+                
+                // Gain range
+                auto gain = device->getGainRange(SOAPY_SDR_RX, 0);
+                std::cout << "    Gain range: " << gain.minimum() << "-" << gain.maximum() << " dB\n";
+                
+                // Antennas
+                auto antennas = device->listAntennas(SOAPY_SDR_RX, 0);
+                if (!antennas.empty()) {
+                    std::cout << "    Antennas: ";
+                    for (const auto& ant : antennas) {
+                        std::cout << ant << " ";
+                    }
+                    std::cout << "\n";
+                }
+                
+                SoapySDR::Device::unmake(device);
+            }
+        } catch (const std::exception& e) {
+            std::cout << "    (Could not query device capabilities: " << e.what() << ")\n";
+        }
     }
+    std::cout << "\n";
 }
 
 void print_help(const char* program_name) {
@@ -34,8 +78,8 @@ void print_help(const char* program_name) {
     std::cout << "  --device ARGS         Device arguments (default: driver=rtlsdr)\n";
     std::cout << "  --freq MHz            Center frequency in MHz (default: 100.3)\n";
     std::cout << "  --gain dB             Gain in dB (default: 20)\n";
-    std::cout << "  --rate MSPS           Sample rate in MSPS (default: 2.048)\n";
-    std::cout << "  --antenna NAME        Select antenna\n\n";
+    std::cout << "  --rate MSPS           Sample rate in MSPS (default: 2.0)\n";
+    std::cout << "  --antenna NAME        Select antenna (default: device-specific)\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << program_name << " --device \"driver=rtlsdr\" --freq 100.3 --gain 20\n";
     std::cout << "  " << program_name << " --device \"driver=hackrf\" --freq 433.92 --gain 14\n";
@@ -47,7 +91,7 @@ int main(int argc, char* argv[]) {
     // Parse command line arguments
     std::string device_args = "driver=rtlsdr";
     double freq_mhz = 100.3;  // Default FM radio frequency
-    double sample_rate_msps = 2.048;
+    double sample_rate_msps = 2.0;
     double gain = 20.0;
     std::string antenna = "";
     
@@ -90,7 +134,7 @@ int main(int argc, char* argv[]) {
     std::cout << "\n";
     
     // Create GUI
-    cler::GuiManager gui(1200, 600, "CLER SoapySDR Example");
+    cler::GuiManager gui(1200, 400, "CLER SoapySDR Example");
     
     // Create SDR source
     SourceSoapySDRBlock<std::complex<float>> sdr_source(
@@ -116,7 +160,7 @@ int main(int argc, char* argv[]) {
         sample_rate, 
         2048  // FFT size
     );
-    spectrum.set_initial_window(0.0f, 0.0f, 600.0f, 600.0f);
+    spectrum.set_initial_window(0.0f, 0.0f, 600.0f, 400.0f);
     
     // Create spectrogram plot  
     PlotCSpectrogramBlock spectrogram(
@@ -126,7 +170,7 @@ int main(int argc, char* argv[]) {
         1024,  // FFT size
         200    // height in pixels
     );
-    spectrogram.set_initial_window(600.0f, 0.0f, 600.0f, 600.0f);
+    spectrogram.set_initial_window(600.0f, 0.0f, 600.0f, 400.0f);
 
     // Create flowgraph
     auto flowgraph = cler::make_desktop_flowgraph(
