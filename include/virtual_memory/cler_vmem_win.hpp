@@ -245,6 +245,7 @@ private:
         );
         
         if (!placeholder) {
+            VMEM_LOG("VirtualAlloc2 failed to allocate placeholder with error %lu", GetLastError());
             return false;
         }
         
@@ -264,12 +265,13 @@ private:
             INVALID_HANDLE_VALUE,
             NULL,
             protect,
-            0,
-            static_cast<DWORD>(aligned_size),
+            (aligned_size >> 32),  // High DWORD of size
+            static_cast<DWORD>(aligned_size & 0xFFFFFFFF),  // Low DWORD of size
             NULL
         );
         
         if (file_mapping_ == INVALID_HANDLE_VALUE) {
+            VMEM_LOG("CreateFileMappingW failed with error %lu", GetLastError());
             VirtualFree(placeholder, 0, MEM_RELEASE);
             VirtualFree(static_cast<char*>(placeholder) + aligned_size, 0, MEM_RELEASE);
             return false;
@@ -289,6 +291,7 @@ private:
         );
         
         if (!first_mapping) {
+            VMEM_LOG("MapViewOfFile3 failed for first mapping with error %lu", GetLastError());
             CloseHandle(file_mapping_);
             file_mapping_ = INVALID_HANDLE_VALUE;
             VirtualFree(placeholder, 0, MEM_RELEASE);
@@ -362,12 +365,13 @@ private:
             INVALID_HANDLE_VALUE,
             NULL,
             protect | SEC_COMMIT,
-            0,
-            static_cast<DWORD>(aligned_size),
+            (aligned_size >> 32),  // High DWORD of size
+            static_cast<DWORD>(aligned_size & 0xFFFFFFFF),  // Low DWORD of size
             NULL
         );
         
         if (file_mapping_ == INVALID_HANDLE_VALUE) {
+            VMEM_LOG("CreateFileMappingW (traditional) failed with error %lu", GetLastError());
             return false;
         }
         

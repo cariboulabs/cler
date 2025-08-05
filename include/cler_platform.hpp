@@ -106,36 +106,46 @@ namespace cler {
                 if (tested) return supported;
                 tested = true;
                 
-                // Check for Windows 10 1809 or later (build 17763)
-                if (IsWindows10OrGreater()) {
-                    // Get actual version to check for 1809+
-                    typedef LONG (WINAPI *RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
-                    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-                    if (ntdll) {
-                        RtlGetVersionPtr RtlGetVersion = reinterpret_cast<RtlGetVersionPtr>(GetProcAddress(ntdll, "RtlGetVersion"));
-                        if (RtlGetVersion) {
-                            RTL_OSVERSIONINFOW osvi = {};
-                            osvi.dwOSVersionInfoSize = sizeof(osvi);
-                            if (RtlGetVersion(&osvi) == 0) {
-                                // Windows 10 1809 is version 10.0.17763
-                                if (osvi.dwMajorVersion > 10 || 
-                                    (osvi.dwMajorVersion == 10 && osvi.dwBuildNumber >= 17763)) {
-                                    // Check if required APIs are available
-                                    HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
-                                    if (kernel32) {
-                                        FARPROC va2 = GetProcAddress(kernel32, "VirtualAlloc2");
-                                        FARPROC mv3 = GetProcAddress(kernel32, "MapViewOfFile3");
-                                        supported = (va2 != nullptr) && (mv3 != nullptr);
-                                        #ifdef CLER_VMEM_DEBUG
-                                        if (!supported) {
-                                            OutputDebugStringA("[CLER_PLATFORM] VirtualAlloc2 or MapViewOfFile3 not found\n");
-                                        } else {
-                                            OutputDebugStringA("[CLER_PLATFORM] VirtualAlloc2 and MapViewOfFile3 found - DBF should be supported\n");
-                                        }
-                                        #endif
+                // Use RtlGetVersion directly to avoid manifest issues
+                typedef LONG (WINAPI *RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
+                HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+                if (ntdll) {
+                    RtlGetVersionPtr RtlGetVersion = reinterpret_cast<RtlGetVersionPtr>(GetProcAddress(ntdll, "RtlGetVersion"));
+                    if (RtlGetVersion) {
+                        RTL_OSVERSIONINFOW osvi = {};
+                        osvi.dwOSVersionInfoSize = sizeof(osvi);
+                        if (RtlGetVersion(&osvi) == 0) {
+                            // Windows 10 1809 is version 10.0.17763
+                            if (osvi.dwMajorVersion > 10 || 
+                                (osvi.dwMajorVersion == 10 && osvi.dwBuildNumber >= 17763)) {
+                                // Check if required APIs are available
+                                HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+                                if (kernel32) {
+                                    FARPROC va2 = GetProcAddress(kernel32, "VirtualAlloc2");
+                                    FARPROC mv3 = GetProcAddress(kernel32, "MapViewOfFile3");
+                                    supported = (va2 != nullptr) && (mv3 != nullptr);
+                                    #ifdef CLER_VMEM_DEBUG
+                                    if (!supported) {
+                                        OutputDebugStringA("[CLER_PLATFORM] VirtualAlloc2 or MapViewOfFile3 not found\n");
+                                    } else {
+                                        OutputDebugStringA("[CLER_PLATFORM] VirtualAlloc2 and MapViewOfFile3 found - DBF should be supported\n");
                                     }
+                                    #endif
                                 }
+                                #ifdef CLER_VMEM_DEBUG
+                                else {
+                                    OutputDebugStringA("[CLER_PLATFORM] kernel32.dll not found\n");
+                                }
+                                #endif
                             }
+                            #ifdef CLER_VMEM_DEBUG
+                            else {
+                                char buf[256];
+                                snprintf(buf, sizeof(buf), "[CLER_PLATFORM] Windows version %lu.%lu.%lu does not support DBF\n", 
+                                         osvi.dwMajorVersion, osvi.dwMinorVersion, osvi.dwBuildNumber);
+                                OutputDebugStringA(buf);
+                            }
+                            #endif
                         }
                     }
                 }
