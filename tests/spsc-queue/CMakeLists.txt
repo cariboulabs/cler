@@ -26,13 +26,6 @@ function(add_spsc_test TEST_NAME SOURCE_FILE)
     
     # Register with CTest
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
-    
-    # Set test properties
-    set_target_properties(${TEST_NAME} PROPERTIES
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-    )
 endfunction()
 
 # Create test executables
