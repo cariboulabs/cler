@@ -18,6 +18,9 @@ if (CLER_BUILD_BLOCKS_LIQUID)
     GIT_TAG master
   )
   FetchContent_MakeAvailable(liquid)
+
+  target_compile_definitions(liquid INTERFACE LIQUID_SIMD_DISABLED)
+
   target_include_directories(liquid INTERFACE 
       SYSTEM ${liquid_SOURCE_DIR}/include #system ignore warnings from liquid
       SYSTEM ${liquid_SOURCE_DIR}/scripts #for config.h

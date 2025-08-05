@@ -88,7 +88,7 @@ namespace cler {
 
         template<size_t M = N, typename = std::enable_if_t<M == 0>>
         Channel(size_t size) : _queue(size) {
-            if (size == 0) throw std::invalid_argument("Channel size must be greater than zero.");
+            assert(size > 0 && "Channel size must be greater than zero");
         }
 
         size_t size() const override { return _queue.size(); }
