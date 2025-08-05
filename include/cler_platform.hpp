@@ -32,6 +32,12 @@
     #endif
 #endif
 
+// Windows headers for doubly mapped buffer support
+#ifdef _WIN32
+    #include <windows.h>
+    #include <versionhelpers.h>
+#endif
+
 namespace cler {
     
     // Platform-specific cache line size detection
@@ -66,8 +72,8 @@ namespace cler {
 
         // ============= Doubly Mapped Buffer Support =============
         // Compile-time platform support check
-        #if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)) && \
-            defined(CLER_HAS_MMAP_H) && defined(CLER_HAS_UNISTD_H)
+        #if ((defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)) && \
+            defined(CLER_HAS_MMAP_H) && defined(CLER_HAS_UNISTD_H)) || defined(_WIN32)
             constexpr bool has_doubly_mapped_support = true;
         #else
             constexpr bool has_doubly_mapped_support = false;
@@ -75,7 +81,11 @@ namespace cler {
 
         // Page size detection
         inline std::size_t get_page_size() {
-            #if defined(CLER_HAS_UNISTD_H)
+            #if defined(_WIN32)
+                SYSTEM_INFO si;
+                GetSystemInfo(&si);
+                return static_cast<std::size_t>(si.dwPageSize);
+            #elif defined(CLER_HAS_UNISTD_H)
                 #if defined(_SC_PAGESIZE)
                     return static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
                 #elif defined(__APPLE__)
@@ -88,7 +98,42 @@ namespace cler {
 
         // Runtime capability check with caching
         inline bool supports_doubly_mapped_buffers() {
-            #if !defined(__linux__) && !defined(__APPLE__) && !defined(__FreeBSD__)
+            #if defined(_WIN32)
+                // Windows 10 1809+ supports doubly-mapped buffers via VirtualAlloc2/MapViewOfFile3
+                static bool tested = false;
+                static bool supported = false;
+                
+                if (tested) return supported;
+                tested = true;
+                
+                // Check for Windows 10 1809 or later (build 17763)
+                if (IsWindows10OrGreater()) {
+                    // Get actual version to check for 1809+
+                    typedef LONG (WINAPI *RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
+                    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+                    if (ntdll) {
+                        RtlGetVersionPtr RtlGetVersion = (RtlGetVersionPtr)GetProcAddress(ntdll, "RtlGetVersion");
+                        if (RtlGetVersion) {
+                            RTL_OSVERSIONINFOW osvi = { 0 };
+                            osvi.dwOSVersionInfoSize = sizeof(osvi);
+                            if (RtlGetVersion(&osvi) == 0) {
+                                // Windows 10 1809 is version 10.0.17763
+                                if (osvi.dwMajorVersion > 10 || 
+                                    (osvi.dwMajorVersion == 10 && osvi.dwBuildNumber >= 17763)) {
+                                    // Check if required APIs are available
+                                    HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+                                    if (kernel32) {
+                                        supported = (GetProcAddress(kernel32, "VirtualAlloc2") != nullptr) &&
+                                                   (GetProcAddress(kernel32, "MapViewOfFile3") != nullptr);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                return supported;
+            #elif !defined(__linux__) && !defined(__APPLE__) && !defined(__FreeBSD__)
                 return false;
             #else
                 static bool tested = false;
