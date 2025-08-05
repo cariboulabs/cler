@@ -596,11 +596,21 @@ public:
           }
           // NOT doubly mapped - throw here!
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
-          char error_msg[256];
+          char error_msg[512];
+          if (buffer_bytes < details::DOUBLY_MAPPED_MIN_SIZE) {
           std::snprintf(error_msg, sizeof(error_msg),
               "read_dbf() requires doubly-mapped buffer. "
-              "Current size: %zu bytes, minimum: %zu bytes.",
+              "Current size: %zu bytes is below minimum: %zu bytes.",
               buffer_bytes, details::DOUBLY_MAPPED_MIN_SIZE);
+          } else {
+              std::snprintf(error_msg, sizeof(error_msg),
+                  "read_dbf() requires doubly-mapped buffer. "
+                  "Buffer size (%zu bytes) is sufficient, but doubly-mapped allocation failed. "
+                  "Possible causes: unsupported Windows version (need Windows 10 1809+), "
+                  "VirtualAlloc2/MapViewOfFile3 not available, or memory mapping failed. "
+                  "Try running with CLER_VMEM_DEBUG defined for more details.",
+                  buffer_bytes);
+          }
           throw std::runtime_error(error_msg);
       }
       throw std::runtime_error("read_dbf() not supported for stack-allocated buffers");
@@ -641,11 +651,21 @@ public:
           }
           // NOT doubly mapped - throw here!
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
-          char error_msg[256];
-          std::snprintf(error_msg, sizeof(error_msg),
-              "write_dbf() requires doubly-mapped buffer. "
-              "Current size: %zu bytes, minimum: %zu bytes.",
-              buffer_bytes, details::DOUBLY_MAPPED_MIN_SIZE);
+                 char error_msg[512];
+          if (buffer_bytes < details::DOUBLY_MAPPED_MIN_SIZE) {
+            std::snprintf(error_msg, sizeof(error_msg),
+                "write_dbf() requires doubly-mapped buffer. "
+                "Current size: %zu bytes is below minimum: %zu bytes.",
+                buffer_bytes, details::DOUBLY_MAPPED_MIN_SIZE);
+          } else {
+            std::snprintf(error_msg, sizeof(error_msg),
+                "write_dbf() requires doubly-mapped buffer. "
+                "Buffer size (%zu bytes) is sufficient, but doubly-mapped allocation failed. "
+                "Possible causes: unsupported Windows version (need Windows 10 1809+), "
+                "VirtualAlloc2/MapViewOfFile3 not available, or memory mapping failed. "
+                "Try running with CLER_VMEM_DEBUG defined for more details.",
+                buffer_bytes);
+          }
           throw std::runtime_error(error_msg);
       }
       throw std::runtime_error("write_dbf() not supported for stack-allocated buffers");
