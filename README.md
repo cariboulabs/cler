@@ -104,7 +104,8 @@ target_link_libraries(my_executable PRIVATE     cler::cler_desktop_blocks)
 
 # Things to Know
 * **Cross-Platform** </br>
-While the core utilities are completely cross-platform, some highend features may not be. For example, the logger was only written for posix systems. The CI/CD pipline ensures that Linux/MacOS/Windows are fully supported, though windows is currently tested without liquid.
+While the core utilities are completely cross-platform, some highend features may not be. For example, the logger was only written for posix systems. The CI/CD pipline ensures that Linux/MacOS/Windows are fully supported, though windows is currently tested without liquid. **On windows, We highly recommend using wsl**
+Note: Doubly-mapped buffers (DBF) require Windows 10 1809+ with specific APIs (VirtualAlloc2/MapViewOfFile3). Desktop blocks that use DBF methods will fail with an assertion if DBF allocation fails on Windows. For maximum compatibility, use WSL or ensure your Windows version supports these APIs.
 
 * **Schedulers** </br>
 CLER includes two schedulers: **ThreadPerBlock** (default, simple, debuggable) and **FixedThreadPool** (better for constrained systems).  It also has Performance mode which eliminates stats overhead for ultra-high throughput applications,
