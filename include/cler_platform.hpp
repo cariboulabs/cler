@@ -123,8 +123,8 @@ namespace cler {
                                     // Check if required APIs are available
                                     HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
                                     if (kernel32) {
-                                        void* va2 = GetProcAddress(kernel32, "VirtualAlloc2");
-                                        void* mv3 = GetProcAddress(kernel32, "MapViewOfFile3");
+                                        FARPROC va2 = GetProcAddress(kernel32, "VirtualAlloc2");
+                                        FARPROC mv3 = GetProcAddress(kernel32, "MapViewOfFile3");
                                         supported = (va2 != nullptr) && (mv3 != nullptr);
                                         #ifdef CLER_VMEM_DEBUG
                                         if (!supported) {
