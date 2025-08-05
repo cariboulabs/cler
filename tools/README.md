@@ -85,7 +85,6 @@ Ready-to-use integration examples for build systems and workflows:
 
 The tools directory is organized to accommodate additional development utilities:
 
-- **cler-flow**: Generate Cler C++ code from visual flowgraph definitions
 - **cler-bench**: Performance benchmarking utilities
 - **cler-doc**: Documentation generator for Cler blocks
 
