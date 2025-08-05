@@ -586,8 +586,13 @@ public:
               // The double mapping ensures continuity past capacity_
               return {ptr, available};
           }
-          // NOT doubly mapped - assert in debug mode
-          assert(false && "read_dbf() requires doubly-mapped buffer. Use readN() instead or ensure buffer size >= 4KB");
+          // NOT doubly mapped - assert in debug mode with specific reason
+          const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
+          if (buffer_bytes < details::DOUBLY_MAPPED_MIN_SIZE) {
+              assert(false && "read_dbf() requires buffer size >= 4KB. Current buffer too small.");
+          } else {
+              assert(false && "read_dbf() requires doubly-mapped buffer but allocation failed. Check OS support.");
+          }
           return {nullptr, 0};
       }
       assert(false && "read_dbf() not supported for stack-allocated buffers");
@@ -627,8 +632,13 @@ public:
               // The double mapping ensures continuity past capacity_
               return {ptr, space};
           }
-          // NOT doubly mapped - assert in debug mode
-          assert(false && "write_dbf() requires doubly-mapped buffer. Use writeN() instead or ensure buffer size >= 4KB");
+          // NOT doubly mapped - assert in debug mode with specific reason
+          const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
+          if (buffer_bytes < details::DOUBLY_MAPPED_MIN_SIZE) {
+              assert(false && "write_dbf() requires buffer size >= 4KB. Current buffer too small.");
+          } else {
+              assert(false && "write_dbf() requires doubly-mapped buffer but allocation failed. Check OS support.");
+          }
           return {nullptr, 0};
       }
       assert(false && "write_dbf() not supported for stack-allocated buffers");

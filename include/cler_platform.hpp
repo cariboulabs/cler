@@ -112,9 +112,9 @@ namespace cler {
                     typedef LONG (WINAPI *RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
                     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
                     if (ntdll) {
-                        RtlGetVersionPtr RtlGetVersion = (RtlGetVersionPtr)GetProcAddress(ntdll, "RtlGetVersion");
+                        RtlGetVersionPtr RtlGetVersion = reinterpret_cast<RtlGetVersionPtr>(GetProcAddress(ntdll, "RtlGetVersion"));
                         if (RtlGetVersion) {
-                            RTL_OSVERSIONINFOW osvi = { 0 };
+                            RTL_OSVERSIONINFOW osvi = {};
                             osvi.dwOSVersionInfoSize = sizeof(osvi);
                             if (RtlGetVersion(&osvi) == 0) {
                                 // Windows 10 1809 is version 10.0.17763
@@ -123,8 +123,16 @@ namespace cler {
                                     // Check if required APIs are available
                                     HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
                                     if (kernel32) {
-                                        supported = (GetProcAddress(kernel32, "VirtualAlloc2") != nullptr) &&
-                                                   (GetProcAddress(kernel32, "MapViewOfFile3") != nullptr);
+                                        void* va2 = GetProcAddress(kernel32, "VirtualAlloc2");
+                                        void* mv3 = GetProcAddress(kernel32, "MapViewOfFile3");
+                                        supported = (va2 != nullptr) && (mv3 != nullptr);
+                                        #ifdef CLER_VMEM_DEBUG
+                                        if (!supported) {
+                                            OutputDebugStringA("[CLER_PLATFORM] VirtualAlloc2 or MapViewOfFile3 not found\n");
+                                        } else {
+                                            OutputDebugStringA("[CLER_PLATFORM] VirtualAlloc2 and MapViewOfFile3 found - DBF should be supported\n");
+                                        }
+                                        #endif
                                     }
                                 }
                             }

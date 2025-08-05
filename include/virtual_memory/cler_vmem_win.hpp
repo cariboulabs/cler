@@ -91,11 +91,15 @@ public:
             cleanup();
         }
         
+        VMEM_LOG("Attempting to create doubly-mapped buffer of size %zu", size);
+        
         // Get system info
         SYSTEM_INFO si;
         GetSystemInfo(&si);
         const SIZE_T page_size = si.dwPageSize;
         SIZE_T aligned_size = ((size + page_size - 1) / page_size) * page_size;
+        
+        VMEM_LOG("Page size: %zu, aligned size: %zu", page_size, aligned_size);
         
         // Try large pages if available and size is sufficient
         SIZE_T large_page_size = GetLargePageMinimum();
@@ -111,14 +115,18 @@ public:
         }
         
         // First attempt: Try using VirtualAlloc2 with placeholders (Windows 10 RS5+)
+        VMEM_LOG("Trying VirtualAlloc2 approach (modern)");
         if (try_with_placeholders(aligned_size, try_large_pages)) {
             return true;
         }
+        VMEM_LOG("VirtualAlloc2 approach failed");
         
         // Second attempt: Traditional approach with MapViewOfFileEx
+        VMEM_LOG("Trying MapViewOfFileEx approach (traditional)");
         if (try_with_map_view(aligned_size, try_large_pages)) {
             return true;
         }
+        VMEM_LOG("MapViewOfFileEx approach failed");
         
         // If large pages were requested and failed, retry without them
         if (try_large_pages) {
@@ -217,7 +225,7 @@ private:
         HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
         if (!kernel32) return false;
         
-        PVirtualAlloc2 pVirtualAlloc2 = (PVirtualAlloc2)GetProcAddress(kernel32, "VirtualAlloc2");
+        PVirtualAlloc2 pVirtualAlloc2 = reinterpret_cast<PVirtualAlloc2>(GetProcAddress(kernel32, "VirtualAlloc2"));
         if (!pVirtualAlloc2) return false;
         
         // Reserve address space for both mappings
@@ -476,7 +484,7 @@ private:
         HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
         if (!kernel32) return nullptr;
         
-        PMapViewOfFile3 pMapViewOfFile3 = (PMapViewOfFile3)GetProcAddress(kernel32, "MapViewOfFile3");
+        PMapViewOfFile3 pMapViewOfFile3 = reinterpret_cast<PMapViewOfFile3>(GetProcAddress(kernel32, "MapViewOfFile3"));
         if (!pMapViewOfFile3) return nullptr;
         
         return pMapViewOfFile3(
