@@ -111,13 +111,8 @@ endif()
 
 message(STATUS "CLER: Using CLER_DEFAULT_MAX_WORKERS=${CLER_DEFAULT_MAX_WORKERS}")
 
-if((UNIX OR APPLE) AND NOT WIN32)
-  add_subdirectory(logger)
-else()
-  message(STATUS "Skipping logger blocks because this is a Windows build")
-endif()
-
 if (CLER_BUILD_BLOCKS)
+  add_subdirectory(logger) #mightaswell
   add_subdirectory(desktop_blocks)
 endif()
 

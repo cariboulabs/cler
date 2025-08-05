@@ -1,82 +1,118 @@
 #include "logger.h"
 #include "zf_log.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <pthread.h>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
+#include <cstring>
+#include <mutex>
 
-static FILE* _log_file = NULL;
+#ifdef _WIN32
+    #include <io.h>
+    #include <windows.h>
+    #define fileno _fileno
+    #define fsync _commit
+    // For Windows console colors
+    #ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        #define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+    #endif
+#else
+    #include <fcntl.h>
+    #include <unistd.h>
+#endif
+
+static FILE* _log_file = nullptr;
 static bool _logger_started = false;
-static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+static std::mutex log_mutex;
 
-static void _unguarded_close_log_file(void) {
+#ifdef _WIN32
+static void enable_windows_ansi_colors() {
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut == INVALID_HANDLE_VALUE) {
+        return;
+    }
+
+    DWORD dwMode = 0;
+    if (!GetConsoleMode(hOut, &dwMode)) {
+        return;
+    }
+
+    dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    SetConsoleMode(hOut, dwMode);
+}
+#endif
+
+static void _unguarded_close_log_file() {
     if (_log_file) {
         fclose(_log_file);
     }
-    _log_file = NULL;
+    _log_file = nullptr;
 }
 
-void close_log_file(void) {
-    pthread_mutex_lock(&log_mutex);
+void close_log_file() {
+    std::lock_guard<std::mutex> lock(log_mutex);
     _unguarded_close_log_file();
-    pthread_mutex_unlock(&log_mutex);
 }
 
 logger_retval_enum reset_logfile(const char *log_filepath) {
     if (!log_filepath) return LOGGER_FILEPATH_EMPTY;
     if (!_logger_started) return LOGGER_NOT_STARTED;
 
-    pthread_mutex_lock(&log_mutex);
+    std::lock_guard<std::mutex> lock(log_mutex);
     _unguarded_close_log_file();
 
     _log_file = fopen(log_filepath, "a");
     if (!_log_file) {
-        pthread_mutex_unlock(&log_mutex);
         return LOGGER_COULD_NOT_OPEN_FILE;
     }
 
-    pthread_mutex_unlock(&log_mutex);
     return LOGGER_SUCCESS;
 }
 
 logger_retval_enum verify_logfile() {
-    pthread_mutex_lock(&log_mutex);
+    std::lock_guard<std::mutex> lock(log_mutex);
 
     if (!_log_file) {
-        pthread_mutex_unlock(&log_mutex);
         return LOGGER_FILE_PTR_IS_NULL;
     }
 
     if (fflush(_log_file) != 0) {
         _unguarded_close_log_file();
-        pthread_mutex_unlock(&log_mutex);
         return LOGGER_FILE_FAILED_FLUSH;
     }
 
     int fd = fileno(_log_file);
-    if (fd < 0 || fcntl(fd, F_GETFL) == -1) {
+    if (fd < 0) {
         _unguarded_close_log_file();
-        pthread_mutex_unlock(&log_mutex);
         return LOGGER_FILE_INVALID_FD;
     }
 
+#ifdef _WIN32
+    // On Windows, we can't use fcntl, so we'll just check if the handle is valid
+    HANDLE handle = (HANDLE)_get_osfhandle(fd);
+    if (handle == INVALID_HANDLE_VALUE) {
+        _unguarded_close_log_file();
+        return LOGGER_FILE_INVALID_FD;
+    }
+#else
+    if (fcntl(fd, F_GETFL) == -1) {
+        _unguarded_close_log_file();
+        return LOGGER_FILE_INVALID_FD;
+    }
+#endif
+
     if (fsync(fd) != 0) {
         _unguarded_close_log_file();
-        pthread_mutex_unlock(&log_mutex);
         return LOGGER_FILE_NOT_SYNCED;
     }
 
-    pthread_mutex_unlock(&log_mutex);
     return LOGGER_SUCCESS;
 }
 
 static void zf_output_callback(const zf_log_message *msg, void *arg) {
     (void)arg;
 
-    time_t t = time(NULL);
+    time_t t = time(nullptr);
     struct tm *tm = localtime(&t);
     char time_str[64];
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm);
@@ -97,28 +133,36 @@ static void zf_output_callback(const zf_log_message *msg, void *arg) {
         (int)(msg->p - msg->msg_b), msg->msg_b, COLOR_RESET);
     fflush(stdout);
 
-    pthread_mutex_lock(&log_mutex);
-    if (_log_file) {
-        fprintf(_log_file, "[%s] [%s] %.*s\n",
-            time_str, lvl_char,
-            (int)(msg->p - msg->msg_b), msg->msg_b);
-        fflush(_log_file);
+    {
+        std::lock_guard<std::mutex> lock(log_mutex);
+        if (_log_file) {
+            fprintf(_log_file, "[%s] [%s] %.*s\n",
+                time_str, lvl_char,
+                (int)(msg->p - msg->msg_b), msg->msg_b);
+            fflush(_log_file);
+        }
     }
-    pthread_mutex_unlock(&log_mutex);
 }
 
+extern "C" {
+
 logger_retval_enum start_logging(const char *log_filepath) {
-    pthread_mutex_lock(&log_mutex);
-    if (_logger_started) {
-        pthread_mutex_unlock(&log_mutex);
-        return LOGGER_ALREADY_STARTED;
+    {
+        std::lock_guard<std::mutex> lock(log_mutex);
+        if (_logger_started) {
+            return LOGGER_ALREADY_STARTED;
+        }
+        
+#ifdef _WIN32
+        enable_windows_ansi_colors();
+#endif
+        
+        zf_log_set_output_v(ZF_LOG_PUT_STD, nullptr, zf_output_callback);
+        _logger_started = true;
+        atexit(_unguarded_close_log_file);
     }
-    zf_log_set_output_v(ZF_LOG_PUT_STD, NULL, zf_output_callback);
-    _logger_started = true;
-    atexit(_unguarded_close_log_file);
-
-    pthread_mutex_unlock(&log_mutex);
-
+    // Lock released here automatically
+    
     if (log_filepath) {
         return reset_logfile(log_filepath);
     } else {
@@ -143,3 +187,5 @@ void logger_enum_to_cstr(logger_retval_enum enum_val, char* out_str) {
         default: strcpy(out_str, "UNKNOWN"); break;
     }
 }
+
+} // extern "C"
