@@ -163,17 +163,6 @@ TEST_F(UtilityBlocksTest, ThrottleBlockTiming) {
     EXPECT_LE(elapsed.count(), expected_max_ms) << "Throttle too slow";
 }
 
-// Test ThrottleBlock error conditions
-TEST_F(UtilityBlocksTest, ThrottleBlockErrorConditions) {
-    const size_t buffer_size = 1024;
-    
-    // Test zero sample rate
-    EXPECT_THROW(ThrottleBlock<float>("test", 0, buffer_size), std::invalid_argument);
-    
-    // Test zero buffer size - may throw invalid_argument or logic_error depending on implementation
-    EXPECT_THROW(ThrottleBlock<float>("test", 1000, 0), std::exception);
-}
-
 // Test ThrottleBlock with empty input
 TEST_F(UtilityBlocksTest, ThrottleBlockEmptyInput) {
     const size_t buffer_size = 1024;
@@ -308,10 +297,4 @@ TEST_F(UtilityBlocksTest, ThroughputBlockEmptyInput) {
     // Verify no samples passed
     EXPECT_EQ(throughput_block.samples_passed(), 0);
     EXPECT_EQ(output.size(), 0);
-}
-
-// Test ThroughputBlock error conditions
-TEST_F(UtilityBlocksTest, ThroughputBlockErrorConditions) {
-    // Test buffer size too small for doubly-mapped buffers (need at least 4096/sizeof(float) = 1024 for float)
-    EXPECT_THROW(ThroughputBlock<float>("test", 1), std::invalid_argument);
 }

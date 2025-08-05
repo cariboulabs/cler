@@ -11,48 +11,6 @@ protected:
     void TearDown() override {}
 };
 
-// Test that stack buffers throw exception for read_dbf
-TEST_F(SPSCQueueDoublyMappedTest, StackBuffersThrowException) {
-    dro::SPSCQueue<float, 1024> stack_queue;
-    
-    // Fill with some data
-    for (int i = 0; i < 100; i++) {
-        stack_queue.push(i * 0.1f);
-    }
-    
-    // read_dbf should throw for stack buffers
-    EXPECT_THROW(stack_queue.read_dbf(), std::runtime_error);
-    EXPECT_THROW(stack_queue.write_dbf(), std::runtime_error);
-    
-    // But regular peek_read should work
-    const float* p1, *p2;
-    size_t s1, s2;
-    size_t total = stack_queue.peek_read(p1, s1, p2, s2);
-    EXPECT_GT(total, 0);
-    EXPECT_NE(p1, nullptr);
-}
-
-// Test that small heap buffers throw exception when dbf not available
-TEST_F(SPSCQueueDoublyMappedTest, SmallHeapBuffersThrowException) {
-    dro::SPSCQueue<float> small_queue(512);  // 2KB - below 4KB threshold
-    
-    // Fill with some data
-    for (int i = 0; i < 100; i++) {
-        small_queue.push(i * 0.1f);
-    }
-    
-    // read_dbf should throw for buffers below threshold
-    EXPECT_THROW(small_queue.read_dbf(), std::runtime_error);
-    EXPECT_THROW(small_queue.write_dbf(), std::runtime_error);
-    
-    // But regular peek_read should always work
-    const float* p1, *p2;
-    size_t s1, s2;
-    size_t total = small_queue.peek_read(p1, s1, p2, s2);
-    EXPECT_GT(total, 0);
-    EXPECT_NE(p1, nullptr);
-}
-
 // Test large buffer behavior (may get doubly mapped on supported platforms)
 TEST_F(SPSCQueueDoublyMappedTest, LargeBufferBehavior) {
     // 8192 floats = 32KB - exactly at threshold

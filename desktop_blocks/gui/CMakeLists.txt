@@ -1,12 +1,27 @@
-# === Dependencies (GLFW, OpenGL, ImGui, ImPlot) ===
 find_package(PkgConfig REQUIRED)
-pkg_search_module(GLFW REQUIRED glfw3)
+include(FetchContent)
+
+pkg_check_modules(GLFW glfw3)
+if (GLFW_FOUND)
+  message(STATUS "Found system GLFW: ${GLFW_LIBRARIES}")
+else()
+  message(WARNING "System GLFW not found, falling back to FetchContent")
+
+  FetchContent_Declare(
+    glfw
+    GIT_REPOSITORY https://github.com/glfw/glfw.git
+    GIT_TAG 3.3.8
+  )
+  FetchContent_MakeAvailable(glfw)
+
+  set(GLFW_LIBRARIES glfw)
+  set(GLFW_INCLUDE_DIRS ${glfw_SOURCE_DIR}/include)
+endif()
+
 find_package(Threads REQUIRED)
 cmake_policy(SET CMP0072 NEW)
 set(OpenGL_GL_PREFERENCE GLVND)
 find_package(OpenGL REQUIRED)
-
-include(FetchContent)
 
 FetchContent_Declare(
   imgui

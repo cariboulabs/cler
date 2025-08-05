@@ -45,6 +45,11 @@ option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
 option(CLER_BUILD_PERFORMANCE "Build CLER performance tests" OFF)
 option(CLER_BUILD_TESTS "Build CLER unit tests" OFF)
 
+if(WIN32 AND CLER_BUILD_BLOCKS_LIQUID)
+  set(CLER_BUILD_BLOCKS_LIQUID OFF CACHE BOOL "Liquid blocks are not supported on Windows yet" FORCE)
+  message(STATUS "CLER: liquid-dsp blocks are disabled on Windows")
+endif()
+
 # Default max workers per platform (if not overridden)
 if(NOT DEFINED CLER_DEFAULT_MAX_WORKERS)
   if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -109,12 +114,28 @@ if(COMPILER_SUPPORTS_WNO_INTERFERENCE_SIZE)
   )
 endif()
 
+if(WIN32)
+  set(PKGCONFIG_EXE ${CMAKE_CURRENT_SOURCE_DIR}/misc/pkg-config.exe)
+
+  if(NOT EXISTS "${PKGCONFIG_EXE}")
+    message(FATAL_ERROR "pkg-config.exe not found at ${PKGCONFIG_EXE}")
+  endif()
+
+  set(ENV{PKG_CONFIG} "${PKGCONFIG_EXE}")  # Helps subprocesses like pkg_search_module
+  set(PKG_CONFIG_EXECUTABLE "${PKGCONFIG_EXE}" CACHE FILEPATH "Path to pkg-config.exe")
+
+
+  message(STATUS "Using pkg-config: ${PKGCONFIG_EXE}")
+endif()
+
+find_package(PkgConfig REQUIRED)
+
 message(STATUS "CLER: Using CLER_DEFAULT_MAX_WORKERS=${CLER_DEFAULT_MAX_WORKERS}")
 
 if((UNIX OR APPLE) AND NOT WIN32)
   add_subdirectory(logger)
 else()
-  message(STATUS "Skipping logger blocks because this is a Windows build")
+  message(STATUS "Skipping logger for windows builds as it relies on pthreads")
 endif()
 
 if (CLER_BUILD_BLOCKS)
@@ -123,7 +144,11 @@ endif()
 
 if(CLER_BUILD_EXAMPLES AND CLER_BUILD_BLOCKS)
   add_subdirectory(desktop_examples)
-  add_subdirectory(embedded_examples)
+  if (NOT WIN32)
+    add_subdirectory(embedded_examples)
+  else()
+    message(STATUS "Skipping embedded examples for Windows builds as they are not supported")
+  endif()
 endif()
 
 if(CLER_BUILD_PERFORMANCE)
