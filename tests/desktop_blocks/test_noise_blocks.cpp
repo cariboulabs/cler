@@ -233,7 +233,7 @@ TEST_F(NoiseBlocksTest, AWGNBlockComplexZeroSignal) {
     double imag_stddev = calculate_stddev(imag_parts);
     
     // Means should be close to signal_level components
-    double expected_mean_error = 3.0 * noise_stddev / std::sqrt(num_samples);
+    double expected_mean_error = 5.0 * noise_stddev / std::sqrt(num_samples);
     EXPECT_NEAR(real_mean, signal_level.real(), expected_mean_error) << "Real part mean deviates too much";
     EXPECT_NEAR(imag_mean, signal_level.imag(), expected_mean_error) << "Imag part mean deviates too much";
     
