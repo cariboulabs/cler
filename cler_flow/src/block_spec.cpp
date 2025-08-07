@@ -4,7 +4,7 @@
 *                                                                                         *
 ******************************************************************************************/
 
-#include "BlockSpec.hpp"
+#include "block_spec.hpp"
 #include <sstream>
 #include <algorithm>
 #include <imgui.h>

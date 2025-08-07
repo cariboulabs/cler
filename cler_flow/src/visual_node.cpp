@@ -4,7 +4,7 @@
 *                                                                                         *
 ******************************************************************************************/
 
-#include "VisualNode.hpp"
+#include "visual_node.hpp"
 #include <algorithm>
 #include <sstream>
 #include <cmath>
@@ -100,8 +100,12 @@ void VisualNode::UpdatePortPositions()
 void VisualNode::Draw(ImDrawList* draw_list, ImVec2 scroll, float zoom)
 {
     // Calculate screen position
-    ImVec2 node_rect_min = ImVec2(position.x * zoom + scroll.x, 
-                                   position.y * zoom + scroll.y);
+    ImVec2 canvas_pos = ImGui::GetWindowPos();
+    canvas_pos.x += ImGui::GetWindowContentRegionMin().x;
+    canvas_pos.y += ImGui::GetWindowContentRegionMin().y;
+    
+    ImVec2 node_rect_min = ImVec2(canvas_pos.x + position.x * zoom + scroll.x, 
+                                   canvas_pos.y + position.y * zoom + scroll.y);
     ImVec2 node_rect_max = ImVec2(node_rect_min.x + size.x * zoom,
                                    node_rect_min.y + size.y * zoom);
     
@@ -146,8 +150,12 @@ void VisualNode::DrawTitle(ImDrawList* draw_list, ImVec2 node_screen_pos, ImVec2
     
     draw_list->AddRectFilled(node_screen_pos, title_rect_max, title_color, 4.0f, ImDrawFlags_RoundCornersTop);
     
-    // Title text
+    // Title text with shadow (like core-nodes)
     ImVec2 text_pos = ImVec2(node_screen_pos.x + 10, node_screen_pos.y + 4);
+    // Draw shadow first
+    draw_list->AddText(ImVec2(text_pos.x + 1, text_pos.y + 1), 
+                      IM_COL32(0, 0, 0, 180), spec->display_name.c_str());
+    // Draw actual text
     draw_list->AddText(text_pos, IM_COL32(255, 255, 255, 255), spec->display_name.c_str());
     
     // Category badge (if not default)

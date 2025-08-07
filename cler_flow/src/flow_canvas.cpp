@@ -4,11 +4,12 @@
 *                                                                                         *
 ******************************************************************************************/
 
-#include "FlowCanvas.hpp"
+#include "flow_canvas.hpp"
 #include <algorithm>
 #include <sstream>
 #include <cmath>
 #include <set>
+#include <cstdio>  // For printf debugging
 
 namespace clerflow {
 
@@ -25,11 +26,56 @@ void FlowCanvas::Draw()
     ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
     ImVec2 canvas_size = ImGui::GetContentRegionAvail();
     
+    // Store canvas position for conversions - must be before any uses
+    canvas_screen_pos = canvas_pos;
+    
     // Create invisible button for interaction
     ImGui::InvisibleButton("canvas", canvas_size, ImGuiButtonFlags_MouseButtonLeft | 
                            ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
     bool is_hovered = ImGui::IsItemHovered();
     bool is_active = ImGui::IsItemActive();
+    
+    // Handle drag and drop from library - MUST be right after InvisibleButton
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("BLOCK_SPEC")) {
+            // Get the block spec pointer
+            std::shared_ptr<BlockSpec>* block_ptr = (std::shared_ptr<BlockSpec>*)payload->Data;
+            if (block_ptr && *block_ptr) {
+                // Convert mouse position to canvas coordinates using stored canvas_pos
+                ImVec2 mouse_pos = ImGui::GetMousePos();
+                ImVec2 canvas_drop_pos = ImVec2(
+                    (mouse_pos.x - canvas_pos.x - scrolling.x) / zoom,
+                    (mouse_pos.y - canvas_pos.y - scrolling.y) / zoom
+                );
+                
+                // Add the node at the drop position
+                size_t new_node_id = AddNode(*block_ptr, canvas_drop_pos);
+                
+                // Log for debugging
+                printf("Dropped node '%s' at canvas pos (%.1f, %.1f), ID: %zu\n", 
+                       (*block_ptr)->display_name.c_str(), 
+                       canvas_drop_pos.x, canvas_drop_pos.y, new_node_id);
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+    
+    // Visual feedback when dragging over canvas
+    if (ImGui::IsWindowHovered() && ImGui::GetDragDropPayload()) {
+        if (const ImGuiPayload* payload = ImGui::GetDragDropPayload()) {
+            if (payload->IsDataType("BLOCK_SPEC")) {
+                // Show drop preview
+                ImVec2 mouse_pos = ImGui::GetMousePos();
+                draw_list->AddRectFilled(
+                    ImVec2(mouse_pos.x - 50, mouse_pos.y - 20),
+                    ImVec2(mouse_pos.x + 50, mouse_pos.y + 20),
+                    IM_COL32(100, 200, 100, 100), 4.0f
+                );
+                draw_list->AddText(ImVec2(mouse_pos.x - 40, mouse_pos.y - 8), 
+                                  IM_COL32(255, 255, 255, 200), "Drop here");
+            }
+        }
+    }
     
     // Clip drawing to canvas
     draw_list->PushClipRect(canvas_pos, ImVec2(canvas_pos.x + canvas_size.x, 
@@ -180,21 +226,21 @@ void FlowCanvas::DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickn
     ImVec2 cp1, cp2;
     
     if (p2.x > p1.x) {
-        // Normal left-to-right
+        // Normal left-to-right connection (like core-nodes)
         cp1 = ImVec2(p1.x + handle_distance, p1.y);
         cp2 = ImVec2(p2.x - handle_distance, p2.y);
     } else {
-        // Right-to-left (loop back)
-        float loop_size = 50.0f + std::abs(p1.x - p2.x) * 0.3f;
-        if (p1.y < p2.y) {
-            cp1 = ImVec2(p1.x + handle_distance, p1.y - loop_size);
-            cp2 = ImVec2(p2.x - handle_distance, p2.y - loop_size);
-        } else {
-            cp1 = ImVec2(p1.x + handle_distance, p1.y + loop_size);
-            cp2 = ImVec2(p2.x - handle_distance, p2.y + loop_size);
-        }
+        // Right-to-left (inverted) - improved routing like core-nodes
+        float loop_size = std::max(80.0f, (distance + std::abs(p1.y - p2.y)) * 0.4f);
+        cp1 = ImVec2(p1.x + loop_size, p1.y);
+        cp2 = ImVec2(p2.x - loop_size, p2.y);
     }
     
+    // Draw with subtle outline for better visibility (like core-nodes)
+    if (thickness > 1.5f) {
+        draw_list->AddBezierCubic(p1, cp1, cp2, p2, 
+                                  IM_COL32(0, 0, 0, 60), (thickness + 1.0f) * zoom);
+    }
     draw_list->AddBezierCubic(p1, cp1, cp2, p2, color, thickness * zoom);
 }
 
@@ -276,6 +322,7 @@ void FlowCanvas::HandleNodeInteraction()
             if (node->ContainsPoint(canvas_mouse)) {
                 SelectNode(id, ImGui::GetIO().KeyShift);
                 found = true;
+                isDraggingNode = true;  // Start dragging immediately when clicking on a node
                 break;
             }
         }
@@ -309,7 +356,7 @@ void FlowCanvas::HandleNodeInteraction()
     }
     
     // Drag selected nodes
-    if (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && !isConnecting && !isBoxSelecting) {
+    if (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && isDraggingNode && !isConnecting && !isBoxSelecting) {
         ImVec2 delta = ImGui::GetIO().MouseDelta;
         delta.x /= zoom;
         delta.y /= zoom;
@@ -321,6 +368,11 @@ void FlowCanvas::HandleNodeInteraction()
                 node->position.y += delta.y;
             }
         }
+    }
+    
+    // Reset drag flag on mouse release
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+        isDraggingNode = false;
     }
     
     // Finish box selection
@@ -481,16 +533,16 @@ VisualNode* FlowCanvas::GetNode(size_t id)
 
 ImVec2 FlowCanvas::ScreenToCanvas(ImVec2 pos) const
 {
-    ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
-    return ImVec2((pos.x - canvas_pos.x - scrolling.x) / zoom,
-                  (pos.y - canvas_pos.y - scrolling.y) / zoom);
+    // Use cached canvas_screen_pos for consistent conversion
+    return ImVec2((pos.x - canvas_screen_pos.x - scrolling.x) / zoom,
+                  (pos.y - canvas_screen_pos.y - scrolling.y) / zoom);
 }
 
 ImVec2 FlowCanvas::CanvasToScreen(ImVec2 pos) const
 {
-    ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
-    return ImVec2(pos.x * zoom + scrolling.x + canvas_pos.x,
-                  pos.y * zoom + scrolling.y + canvas_pos.y);
+    // Use cached canvas_screen_pos for consistent conversion
+    return ImVec2(pos.x * zoom + scrolling.x + canvas_screen_pos.x,
+                  pos.y * zoom + scrolling.y + canvas_screen_pos.y);
 }
 
 // Generate CLER-compatible C++ code

@@ -8,8 +8,8 @@
 
 #pragma once
 
-#include "BlockSpec.hpp"
-#include "VisualNode.hpp"
+#include "block_spec.hpp"
+#include "visual_node.hpp"
 #include <imgui.h>
 #include <memory>
 #include <vector>
@@ -63,6 +63,7 @@ private:
     // Canvas state
     ImVec2 scrolling{0.0f, 0.0f};
     float zoom = 1.0f;
+    mutable ImVec2 canvas_screen_pos{0.0f, 0.0f};  // Cached for coordinate conversion
     
     // Nodes and connections
     std::unordered_map<size_t, std::unique_ptr<VisualNode>> nodes;
@@ -72,6 +73,7 @@ private:
     // Interaction state
     bool isPanning = false;
     bool isConnecting = false;
+    bool isDraggingNode = false;
     size_t connectingFromNode = 0;
     size_t connectingFromPort = 0;
     bool connectingFromOutput = true;

@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "BlockSpec.hpp"
+#include "block_spec.hpp"
 #include <memory>
 #include <vector>
 #include <map>

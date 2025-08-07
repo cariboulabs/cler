@@ -42,12 +42,12 @@ endif()
 # All source files in src directory
 set(SOURCES
     src/main.cpp
-    src/FlowApp.cpp
-    src/GuiApp.cpp
-    src/FlowCanvas.cpp
-    src/VisualNode.cpp
-    src/BlockSpec.cpp
-    src/BlockLibrary.cpp
+    src/flow_app.cpp
+    src/gui_app.cpp
+    src/flow_canvas.cpp
+    src/visual_node.cpp
+    src/block_spec.cpp
+    src/block_library.cpp
 )
 
 # Create executable

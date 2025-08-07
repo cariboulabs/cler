@@ -4,7 +4,7 @@
 *                                                                                         *
 ******************************************************************************************/
 
-#include "FlowApp.hpp"
+#include "flow_app.hpp"
 #include <imgui_internal.h>  // For docking functions
 #include <iostream>
 #include <fstream>
@@ -306,6 +306,29 @@ void FlowApp::DrawProperties()
 void FlowApp::DrawCodePreview()
 {
     ImGui::Begin("Code Preview");
+    
+    // Show feedback if user tries to drop a block here
+    if (ImGui::IsWindowHovered() && ImGui::GetDragDropPayload()) {
+        if (const ImGuiPayload* payload = ImGui::GetDragDropPayload()) {
+            if (payload->IsDataType("BLOCK_SPEC")) {
+                // Show "not allowed" feedback
+                ImDrawList* draw_list = ImGui::GetWindowDrawList();
+                ImVec2 mouse_pos = ImGui::GetMousePos();
+                
+                // Draw red X
+                draw_list->AddLine(
+                    ImVec2(mouse_pos.x - 15, mouse_pos.y - 15),
+                    ImVec2(mouse_pos.x + 15, mouse_pos.y + 15),
+                    IM_COL32(255, 50, 50, 200), 3.0f
+                );
+                draw_list->AddLine(
+                    ImVec2(mouse_pos.x - 15, mouse_pos.y + 15),
+                    ImVec2(mouse_pos.x + 15, mouse_pos.y - 15),
+                    IM_COL32(255, 50, 50, 200), 3.0f
+                );
+            }
+        }
+    }
     
     ImGui::Text("Generated C++ Code:");
     ImGui::Separator();

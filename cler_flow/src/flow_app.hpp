@@ -8,9 +8,9 @@
 
 #pragma once
 
-#include "GuiApp.hpp"
-#include "FlowCanvas.hpp"
-#include "BlockLibrary.hpp"
+#include "gui_app.hpp"
+#include "flow_canvas.hpp"
+#include "block_library.hpp"
 #include <memory>
 #include <filesystem>
 #include <deque>

@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "BlockSpec.hpp"
+#include "block_spec.hpp"
 #include <imgui.h>
 #include <memory>
 #include <string>

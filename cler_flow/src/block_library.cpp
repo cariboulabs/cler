@@ -4,8 +4,8 @@
 *                                                                                         *
 ******************************************************************************************/
 
-#include "BlockLibrary.hpp"
-#include "FlowCanvas.hpp"
+#include "block_library.hpp"
+#include "flow_canvas.hpp"
 #include <imgui.h>
 #include <algorithm>
 
