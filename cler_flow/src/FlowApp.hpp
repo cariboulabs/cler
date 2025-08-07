@@ -37,7 +37,6 @@ private:
     // Docking state
     bool openDockspace = true;
     bool redock = false;
-    void Dockspace();
     
     // Menu handling
     void Menu();

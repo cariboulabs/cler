@@ -5,6 +5,7 @@
 ******************************************************************************************/
 
 #include "FlowApp.hpp"
+#include <imgui_internal.h>  // For docking functions
 #include <iostream>
 #include <fstream>
 
@@ -53,12 +54,11 @@ void FlowApp::Update()
         ImGuiID dock_main_id = dockspace_id;
         ImGuiID dock_id_left_top = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.20f, nullptr, &dock_main_id);
         ImGuiID dock_id_left_bottom = ImGui::DockBuilderSplitNode(dock_id_left_top, ImGuiDir_Down, 0.60f, nullptr, &dock_id_left_top);
-        ImGuiID dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.25f, nullptr, &dock_main_id);
 
         ImGui::DockBuilderDockWindow("Library", dock_id_left_top);
         ImGui::DockBuilderDockWindow("Canvas", dock_main_id);
+        ImGui::DockBuilderDockWindow("Code Preview", dock_main_id);  // Dock as tab with Canvas
         ImGui::DockBuilderDockWindow("Properties", dock_id_left_bottom);
-        ImGui::DockBuilderDockWindow("Code Preview", dock_id_right);
         ImGui::DockBuilderFinish(dockspace_id);
     }
 
@@ -92,7 +92,7 @@ void FlowApp::Menu()
         ImGui::SetCursorPosX(ImGui::GetWindowSize().x - textWidth - 10);
         ImGui::TextDisabled("%s", version.c_str());
         
-        ImGui::EndMainMenuBar();
+        ImGui::EndMenuBar();
     }
 }
 
@@ -277,7 +277,7 @@ void FlowApp::DrawCanvas()
 
 void FlowApp::DrawLibrary()
 {
-    ImGui::Begin("Block Library");
+    ImGui::Begin("Library", nullptr, ImGuiWindowFlags_None);
     
     blockLibrary->Draw(flowCanvas.get());
     
@@ -286,7 +286,7 @@ void FlowApp::DrawLibrary()
 
 void FlowApp::DrawProperties()
 {
-    ImGui::Begin("Properties");
+    ImGui::Begin("Properties", nullptr, ImGuiWindowFlags_None);
     
     auto selected = flowCanvas->GetSelectedNodes();
     if (selected.size() == 1) {
