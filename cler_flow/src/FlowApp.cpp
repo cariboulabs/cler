@@ -23,26 +23,54 @@ FlowApp::FlowApp()
 
 void FlowApp::Update()
 {
-    // Initial setup on first frame
-    if (!initialSetup) {
-        ImGui::SetWindowPos("Canvas", ImVec2(250, 50));
-        ImGui::SetWindowSize("Canvas", ImVec2(900, 600));
-        ImGui::SetWindowPos("Block Library", ImVec2(20, 50));
-        ImGui::SetWindowSize("Block Library", ImVec2(220, 600));
-        ImGui::SetWindowPos("Properties", ImVec2(1160, 50));
-        ImGui::SetWindowSize("Properties", ImVec2(220, 300));
-        initialSetup = true;
+    // Setup dockspace exactly like core-nodes
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->Pos);
+    ImGui::SetNextWindowSize(viewport->Size);
+    ImGui::SetNextWindowViewport(viewport->ID);
+    ImGui::SetNextWindowBgAlpha(0.0f);
+
+    ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
+    window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+    window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+
+    ImGui::Begin("DockSpace", &openDockspace, window_flags);
+    ImGui::PopStyleVar(3);
+
+    // Setup initial docking layout like core-nodes
+    if (ImGui::DockBuilderGetNode(ImGui::GetID("MyDockspace")) == nullptr || redock)
+    {
+        redock = false;
+        ImGuiID dockspace_id = ImGui::GetID("MyDockspace");
+        ImGui::DockBuilderRemoveNode(dockspace_id); // Clear out existing layout
+        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace); // Add empty node
+        ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
+
+        ImGuiID dock_main_id = dockspace_id;
+        ImGuiID dock_id_left_top = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.20f, nullptr, &dock_main_id);
+        ImGuiID dock_id_left_bottom = ImGui::DockBuilderSplitNode(dock_id_left_top, ImGuiDir_Down, 0.60f, nullptr, &dock_id_left_top);
+        ImGuiID dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.25f, nullptr, &dock_main_id);
+
+        ImGui::DockBuilderDockWindow("Library", dock_id_left_top);
+        ImGui::DockBuilderDockWindow("Canvas", dock_main_id);
+        ImGui::DockBuilderDockWindow("Properties", dock_id_left_bottom);
+        ImGui::DockBuilderDockWindow("Code Preview", dock_id_right);
+        ImGui::DockBuilderFinish(dockspace_id);
     }
-    
-    // Main dockspace
-    Dockspace();
-    
-    // Menu bar
+
+    ImGuiID dockspace_id = ImGui::GetID("MyDockspace");
+    ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_PassthruCentralNode;
+    ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
     Menu();
+    ImGui::End();
     
     // Main windows
-    DrawCanvas();
     DrawLibrary();
+    DrawCanvas();
     DrawProperties();
     DrawCodePreview();
     
@@ -52,40 +80,9 @@ void FlowApp::Update()
     }
 }
 
-void FlowApp::Dockspace()
-{
-    static ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
-    
-    ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking;
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(viewport->WorkPos);
-    ImGui::SetNextWindowSize(viewport->WorkSize);
-    ImGui::SetNextWindowViewport(viewport->ID);
-    
-    window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | 
-                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                    ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
-    
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    
-    ImGui::Begin("DockSpace", &openDockspace, window_flags);
-    ImGui::PopStyleVar(3);
-    
-    // Submit the DockSpace
-    ImGuiIO& io = ImGui::GetIO();
-    if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable) {
-        ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
-        ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
-    }
-    
-    ImGui::End();
-}
-
 void FlowApp::Menu()
 {
-    if (ImGui::BeginMainMenuBar()) {
+    if (ImGui::BeginMenuBar()) {
         MenuFile();
         MenuView();
         MenuHelp();

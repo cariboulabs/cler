@@ -13,11 +13,11 @@ if(CLER_FLOW_STANDALONE)
     # Fetch dependencies when building standalone
     include(FetchContent)
     
-    # Fetch ImGui
+    # Fetch ImGui - use specific docking commit like core-nodes
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG docking
+        GIT_TAG docking  # Using docking branch for docking support
     )
     FetchContent_MakeAvailable(imgui)
     
