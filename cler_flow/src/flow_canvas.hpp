@@ -24,6 +24,10 @@ struct Connection {
     size_t to_node_id;
     size_t to_port_index;
     DataType data_type;
+    
+    // Store port names for stability when specs change
+    std::string from_port_name;
+    std::string to_port_name;
 };
 
 class FlowCanvas {
@@ -114,6 +118,9 @@ private:
     VisualNode* GetNode(size_t id);
     ImVec2 ScreenToCanvas(ImVec2 pos) const;
     ImVec2 CanvasToScreen(ImVec2 pos) const;
+    
+    // Connection repair - tries to fix indices using port names
+    void RepairConnections();
 };
 
 } // namespace clerflow

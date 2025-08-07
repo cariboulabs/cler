@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <map>
+#include <unordered_map>
 
 namespace clerflow {
 
@@ -37,6 +38,7 @@ struct VisualPort {
 };
 
 class VisualNode {
+    
 public:
     // Construction
     VisualNode(size_t id, std::shared_ptr<BlockSpec> spec, ImVec2 position);
@@ -86,6 +88,9 @@ private:
     size_t id;
     std::shared_ptr<BlockSpec> spec;
     
+    // Simple cache for the most expensive calculation
+    mutable float cached_title_width = -1.0f;
+    
     // Visual constants
     static constexpr float NODE_WINDOW_PADDING = 4.0f;
     static constexpr float PORT_SIZE = 12.0f;
@@ -96,6 +101,9 @@ private:
     void DrawPorts(ImDrawList* draw_list, ImVec2 node_screen_pos, float zoom);
     void DrawPort(ImDrawList* draw_list, const VisualPort& port, ImVec2 node_screen_pos, 
                   bool is_output, float zoom);
+    void DrawPortShape(ImDrawList* draw_list, ImVec2 port_pos, const std::string& data_type, 
+                       bool is_connected, float zoom);
+    std::string GetAbbreviatedName(const std::string& name, int rotation) const;
     void DrawTitle(ImDrawList* draw_list, ImVec2 node_screen_pos, ImVec2 node_size);
     void DrawShadow(ImDrawList* draw_list, ImVec2 node_screen_pos, ImVec2 node_size);
     

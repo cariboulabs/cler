@@ -10,7 +10,6 @@
 #include <sstream>
 #include <cmath>
 #include <set>
-#include <cstdio>  // For printf debugging
 
 namespace clerflow {
 
@@ -162,6 +161,11 @@ void FlowCanvas::DrawConnections()
     for (const auto& conn : connections) {
         DrawConnection(conn);
     }
+    
+    // Draw connection preview
+    if (isConnecting) {
+        DrawConnectionPreview();
+    }
 }
 
 void FlowCanvas::DrawConnection(const Connection& conn)
@@ -169,6 +173,7 @@ void FlowCanvas::DrawConnection(const Connection& conn)
     auto* from_node = GetNode(conn.from_node_id);
     auto* to_node = GetNode(conn.to_node_id);
     
+    // Simple validation
     if (!from_node || !to_node) return;
     if (conn.from_port_index >= from_node->output_ports.size()) return;
     if (conn.to_port_index >= to_node->input_ports.size()) return;
@@ -808,9 +813,17 @@ void FlowCanvas::AddConnection(size_t from_node, size_t from_port,
     conn.to_node_id = to_node;
     conn.to_port_index = to_port;
     
+    // Store port names for stability
     auto* from = GetNode(from_node);
+    auto* to = GetNode(to_node);
+    
     if (from && from_port < from->output_ports.size()) {
         conn.data_type = from->output_ports[from_port].data_type;
+        conn.from_port_name = from->output_ports[from_port].name;
+    }
+    
+    if (to && to_port < to->input_ports.size()) {
+        conn.to_port_name = to->input_ports[to_port].name;
     }
     
     connections.push_back(conn);
@@ -934,6 +947,39 @@ std::string FlowCanvas::ToJSON() const
 void FlowCanvas::FromJSON(const std::string& json)
 {
     // TODO: Implement JSON deserialization
+    
+    // After loading, repair connections using port names
+    RepairConnections();
+}
+
+void FlowCanvas::RepairConnections()
+{
+    // Try to fix connection indices using port names
+    for (auto& conn : connections) {
+        auto* from_node = GetNode(conn.from_node_id);
+        auto* to_node = GetNode(conn.to_node_id);
+        
+        if (!from_node || !to_node) continue;
+        
+        // Try to find ports by name if names are stored
+        if (!conn.from_port_name.empty()) {
+            for (size_t i = 0; i < from_node->output_ports.size(); ++i) {
+                if (from_node->output_ports[i].name == conn.from_port_name) {
+                    conn.from_port_index = i;
+                    break;
+                }
+            }
+        }
+        
+        if (!conn.to_port_name.empty()) {
+            for (size_t i = 0; i < to_node->input_ports.size(); ++i) {
+                if (to_node->input_ports[i].name == conn.to_port_name) {
+                    conn.to_port_index = i;
+                    break;
+                }
+            }
+        }
+    }
 }
 
 } // namespace clerflow

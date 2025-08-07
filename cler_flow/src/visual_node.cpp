@@ -75,8 +75,11 @@ void VisualNode::UpdatePortPositions()
             max_output_width = std::max(max_output_width, width);
         }
         
-        // Base size (before rotation)
-        float title_width = ImGui::CalcTextSize(spec->display_name.c_str()).x;
+        // Base size (before rotation) - use cached title width
+        if (cached_title_width < 0) {
+            cached_title_width = ImGui::CalcTextSize(spec->display_name.c_str()).x;
+        }
+        float title_width = cached_title_width;
         float content_width = max_input_width + max_output_width + 60; // Padding
         float base_width = std::max({150.0f, title_width + 40, content_width});
         float port_count = std::max(input_ports.size(), output_ports.size());
@@ -268,27 +271,82 @@ void VisualNode::DrawPort(ImDrawList* draw_list, const VisualPort& port,
     ImVec2 port_pos = ImVec2(node_screen_pos.x + port.position.x * zoom,
                              node_screen_pos.y + port.position.y * zoom);
     
-    // Port circle
-    float port_radius = (PORT_SIZE / 2.0f) * zoom;
-    ImU32 port_color = dataTypeToColor(port.data_type);
+    // Draw port shape based on type
+    DrawPortShape(draw_list, port_pos, dataTypeToString(port.data_type), port.is_connected, zoom);
     
-    if (port.is_connected) {
-        draw_list->AddCircleFilled(port_pos, port_radius, port_color);
-    } else {
-        draw_list->AddCircle(port_pos, port_radius, port_color, 12, 2.0f);
-    }
+    // Get abbreviated name for rotated views
+    std::string label = (rotation == 90 || rotation == 270) ? 
+                        GetAbbreviatedName(port.display_name, rotation) : 
+                        port.display_name;
     
-    // Port label
+    // Calculate text position based on rotation
     ImVec2 text_pos;
-    if (is_output) {
-        ImVec2 text_size = ImGui::CalcTextSize(port.display_name.c_str());
-        text_pos = ImVec2(port_pos.x - text_size.x - 10 * zoom, port_pos.y - text_size.y / 2);
-    } else {
-        text_pos = ImVec2(port_pos.x + 10 * zoom, 
-                         port_pos.y - ImGui::GetTextLineHeight() / 2);
+    ImVec2 text_size = ImGui::CalcTextSize(label.c_str());
+    float text_offset = 10 * zoom;
+    
+    switch (rotation) {
+        case 0:  // Normal - inputs on left, outputs on right
+            if (is_output) {
+                text_pos = ImVec2(port_pos.x - text_size.x - text_offset, 
+                                 port_pos.y - text_size.y / 2);
+            } else {
+                text_pos = ImVec2(port_pos.x + text_offset, 
+                                 port_pos.y - text_size.y / 2);
+            }
+            break;
+            
+        case 90:  // Rotated right - inputs on top, outputs on bottom
+            if (is_output) {
+                // Output at bottom - text below port
+                text_pos = ImVec2(port_pos.x - text_size.x / 2, 
+                                 port_pos.y + text_offset);
+            } else {
+                // Input at top - text above port
+                text_pos = ImVec2(port_pos.x - text_size.x / 2, 
+                                 port_pos.y - text_size.y - text_offset);
+            }
+            break;
+            
+        case 180:  // Upside down - inputs on right, outputs on left
+            if (is_output) {
+                text_pos = ImVec2(port_pos.x + text_offset, 
+                                 port_pos.y - text_size.y / 2);
+            } else {
+                text_pos = ImVec2(port_pos.x - text_size.x - text_offset, 
+                                 port_pos.y - text_size.y / 2);
+            }
+            break;
+            
+        case 270:  // Rotated left - inputs on bottom, outputs on top
+            if (is_output) {
+                // Output at top - text above port
+                text_pos = ImVec2(port_pos.x - text_size.x / 2, 
+                                 port_pos.y - text_size.y - text_offset);
+            } else {
+                // Input at bottom - text below port
+                text_pos = ImVec2(port_pos.x - text_size.x / 2, 
+                                 port_pos.y + text_offset);
+            }
+            break;
     }
     
-    draw_list->AddText(text_pos, IM_COL32(200, 200, 200, 255), port.display_name.c_str());
+    // Draw the text
+    draw_list->AddText(text_pos, IM_COL32(200, 200, 200, 255), label.c_str());
+    
+    // Setup tooltip with full type information
+    float port_radius = (PORT_SIZE / 2.0f) * zoom;
+    if (ImGui::IsMouseHoveringRect(
+            ImVec2(port_pos.x - port_radius, port_pos.y - port_radius),
+            ImVec2(port_pos.x + port_radius, port_pos.y + port_radius))) {
+        ImGui::BeginTooltip();
+        ImGui::Text("%s: %s", port.display_name.c_str(), dataTypeToString(port.data_type).c_str());
+        if (port.is_connected) {
+            ImGui::Text("Status: Connected");
+        } else {
+            ImGui::Text("Status: Not connected");
+        }
+        ImGui::EndTooltip();
+    }
 }
 
 bool VisualNode::ContainsPoint(ImVec2 point) const
@@ -421,6 +479,146 @@ std::string VisualNode::GenerateInstantiation() const
     }
     
     return spec->generateInstantiation(instance_name, template_args, constructor_args);
+}
+
+void VisualNode::DrawPortShape(ImDrawList* draw_list, ImVec2 port_pos, 
+                               const std::string& data_type, bool is_connected, float zoom)
+{
+    float port_radius = (PORT_SIZE / 2.0f) * zoom;
+    
+    // Determine color based on data type string
+    ImU32 port_color = IM_COL32(128, 128, 128, 255);  // Default gray
+    if (data_type.find("float") != std::string::npos) {
+        port_color = IM_COL32(255, 200, 100, 255);  // Orange for float
+    } else if (data_type.find("double") != std::string::npos) {
+        port_color = IM_COL32(255, 150, 50, 255);   // Dark orange for double
+    } else if (data_type.find("complex") != std::string::npos) {
+        port_color = IM_COL32(200, 100, 255, 255);  // Purple for complex
+    } else if (data_type.find("int") != std::string::npos) {
+        port_color = IM_COL32(100, 200, 255, 255);  // Light blue for int
+    } else if (data_type.find("uint") != std::string::npos) {
+        port_color = IM_COL32(100, 255, 200, 255);  // Cyan for uint
+    } else if (data_type.find("bool") != std::string::npos) {
+        port_color = IM_COL32(255, 100, 100, 255);  // Red for bool
+    } else if (data_type.find("vector") != std::string::npos) {
+        port_color = IM_COL32(100, 255, 100, 255);  // Green for vector
+    }
+    
+    // Draw different shapes based on data type category
+    if (data_type.find("float") != std::string::npos || 
+        data_type.find("double") != std::string::npos) {
+        // Circle for floating point types
+        if (is_connected) {
+            draw_list->AddCircleFilled(port_pos, port_radius, port_color);
+        } else {
+            draw_list->AddCircle(port_pos, port_radius, port_color, 12, 2.0f * zoom);
+        }
+    } else if (data_type.find("int") != std::string::npos || 
+               data_type.find("uint") != std::string::npos ||
+               data_type.find("size_t") != std::string::npos) {
+        // Square for integer types
+        float half_size = port_radius * 0.8f;
+        if (is_connected) {
+            draw_list->AddRectFilled(
+                ImVec2(port_pos.x - half_size, port_pos.y - half_size),
+                ImVec2(port_pos.x + half_size, port_pos.y + half_size),
+                port_color);
+        } else {
+            draw_list->AddRect(
+                ImVec2(port_pos.x - half_size, port_pos.y - half_size),
+                ImVec2(port_pos.x + half_size, port_pos.y + half_size),
+                port_color, 0.0f, 0, 2.0f * zoom);
+        }
+    } else if (data_type.find("complex") != std::string::npos) {
+        // Diamond for complex types
+        float half_size = port_radius;
+        ImVec2 p1(port_pos.x, port_pos.y - half_size);
+        ImVec2 p2(port_pos.x + half_size, port_pos.y);
+        ImVec2 p3(port_pos.x, port_pos.y + half_size);
+        ImVec2 p4(port_pos.x - half_size, port_pos.y);
+        
+        if (is_connected) {
+            draw_list->AddQuadFilled(p1, p2, p3, p4, port_color);
+        } else {
+            draw_list->AddQuad(p1, p2, p3, p4, port_color, 2.0f * zoom);
+        }
+    } else if (data_type.find("vector") != std::string::npos || 
+               data_type.find("[]") != std::string::npos) {
+        // Double circle for vector/array types
+        if (is_connected) {
+            draw_list->AddCircleFilled(port_pos, port_radius, port_color);
+            draw_list->AddCircle(port_pos, port_radius * 0.6f, 
+                               IM_COL32(255, 255, 255, 100), 12, 1.0f * zoom);
+        } else {
+            draw_list->AddCircle(port_pos, port_radius, port_color, 12, 2.0f * zoom);
+            draw_list->AddCircle(port_pos, port_radius * 0.6f, port_color, 12, 1.0f * zoom);
+        }
+    } else {
+        // Default circle for unknown/custom types
+        if (is_connected) {
+            draw_list->AddCircleFilled(port_pos, port_radius, port_color);
+        } else {
+            draw_list->AddCircle(port_pos, port_radius, port_color, 12, 2.0f * zoom);
+        }
+    }
+}
+
+std::string VisualNode::GetAbbreviatedName(const std::string& name, int rotation) const
+{
+    // Common abbreviations for signal processing
+    static const std::map<std::string, std::string> abbreviations = {
+        {"signal_input", "sig"},
+        {"signal_output", "out"},
+        {"input", "in"},
+        {"output", "out"},
+        {"frequency", "freq"},
+        {"amplitude", "amp"},
+        {"phase", "ph"},
+        {"reference", "ref"},
+        {"control", "ctrl"},
+        {"enable", "en"},
+        {"disable", "dis"},
+        {"reset", "rst"},
+        {"clock", "clk"},
+        {"data", "dat"},
+        {"valid", "vld"},
+        {"ready", "rdy"}
+    };
+    
+    // Check if we have a predefined abbreviation
+    auto it = abbreviations.find(name);
+    if (it != abbreviations.end()) {
+        return it->second;
+    }
+    
+    // For rotated views (90/270), abbreviate long names
+    if (name.length() > 6) {
+        // Try to create a smart abbreviation
+        std::string abbrev;
+        
+        // If name has underscore, take first letters of each word
+        size_t pos = 0;
+        size_t prev_pos = 0;
+        while ((pos = name.find('_', prev_pos)) != std::string::npos) {
+            if (prev_pos < name.length()) {
+                abbrev += name[prev_pos];
+            }
+            prev_pos = pos + 1;
+        }
+        if (prev_pos < name.length()) {
+            abbrev += name[prev_pos];
+        }
+        
+        // If we got a reasonable abbreviation, use it
+        if (abbrev.length() >= 2 && abbrev.length() <= 4) {
+            return abbrev;
+        }
+        
+        // Otherwise, just take first 4 characters
+        return name.substr(0, 4);
+    }
+    
+    return name;
 }
 
 } // namespace clerflow
