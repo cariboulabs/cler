@@ -11,7 +11,7 @@
 
 int main()
 {
-    FlowApp app;
+    clerflow::FlowApp app;
     app.Run();
     return 0;
 }

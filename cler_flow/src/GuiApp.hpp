@@ -13,6 +13,9 @@
 #include <imgui_internal.h>
 #include <string>
 
+// Forward declaration outside namespace
+struct GLFWwindow;
+
 namespace clerflow {
 
 class GuiApp
@@ -29,7 +32,7 @@ public:
     
 protected:
     // Window management
-    struct GLFWwindow* window = nullptr;
+    ::GLFWwindow* window = nullptr;
     std::string windowTitle;
     int windowWidth;
     int windowHeight;
