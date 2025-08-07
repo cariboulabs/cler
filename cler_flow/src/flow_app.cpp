@@ -56,16 +56,10 @@ void FlowApp::Update()
         ImGuiID dock_id_left_bottom = ImGui::DockBuilderSplitNode(dock_id_left_top, ImGuiDir_Down, 0.60f, nullptr, &dock_id_left_top);
 
         ImGui::DockBuilderDockWindow("Library", dock_id_left_top);
-        ImGui::DockBuilderDockWindow("Canvas", dock_main_id);
-        ImGui::DockBuilderDockWindow("Code Preview", dock_main_id);  // Dock as tab with Canvas
+        ImGui::DockBuilderDockWindow("Code Preview", dock_main_id);  // Dock Code Preview first
+        ImGui::DockBuilderDockWindow("Canvas", dock_main_id);        // Then dock Canvas - last one docked becomes active
         ImGui::DockBuilderDockWindow("Properties", dock_id_left_bottom);
         ImGui::DockBuilderFinish(dockspace_id);
-        
-        // Set Canvas as the active tab
-        ImGuiWindow* canvas_window = ImGui::FindWindowByName("Canvas");
-        if (canvas_window && canvas_window->DockNode) {
-            canvas_window->DockNode->SelectedTabId = canvas_window->TabId;
-        }
     }
 
     ImGuiID dockspace_id = ImGui::GetID("MyDockspace");
@@ -74,11 +68,11 @@ void FlowApp::Update()
     Menu();
     ImGui::End();
     
-    // Main windows (Canvas first to be default active)
-    DrawCanvas();
+    // Main windows
     DrawLibrary();
     DrawProperties();
     DrawCodePreview();
+    DrawCanvas();  // Draw Canvas last so it's on top
     
     // Demo window for debugging
     if (showDemoWindow) {
@@ -317,6 +311,12 @@ void FlowApp::LoadFromFile(const std::string& path)
 void FlowApp::DrawCanvas()
 {
     ImGui::Begin("Canvas", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    
+    // Focus canvas on first frame
+    if (firstFrame) {
+        ImGui::SetWindowFocus();
+        firstFrame = false;
+    }
     
     flowCanvas->Draw();
     

@@ -59,34 +59,40 @@ void VisualNode::InitializePorts()
 
 void VisualNode::UpdatePortPositions()
 {
-    // Calculate node size based on content
-    float max_input_width = 0;
-    float max_output_width = 0;
-    
-    for (const auto& port : input_ports) {
-        float width = ImGui::CalcTextSize(port.display_name.c_str()).x;
-        max_input_width = std::max(max_input_width, width);
-    }
-    
-    for (const auto& port : output_ports) {
-        float width = ImGui::CalcTextSize(port.display_name.c_str()).x;
-        max_output_width = std::max(max_output_width, width);
-    }
-    
-    // Base size (before rotation)
-    float title_width = ImGui::CalcTextSize(spec->display_name.c_str()).x;
-    float content_width = max_input_width + max_output_width + 60; // Padding
-    float base_width = std::max({150.0f, title_width + 40, content_width});
-    float port_count = std::max(input_ports.size(), output_ports.size());
-    float base_height = TITLE_HEIGHT + (port_count * PORT_SPACING) + NODE_WINDOW_PADDING * 2;
-    
-    // Apply rotation to size
-    if (rotation == 90 || rotation == 270) {
-        size.x = base_height;
-        size.y = base_width;
-    } else {
-        size.x = base_width;
-        size.y = base_height;
+    // Only recalculate size if not currently resizing
+    if (!resizing) {
+        // Calculate node size based on content
+        float max_input_width = 0;
+        float max_output_width = 0;
+        
+        for (const auto& port : input_ports) {
+            float width = ImGui::CalcTextSize(port.display_name.c_str()).x;
+            max_input_width = std::max(max_input_width, width);
+        }
+        
+        for (const auto& port : output_ports) {
+            float width = ImGui::CalcTextSize(port.display_name.c_str()).x;
+            max_output_width = std::max(max_output_width, width);
+        }
+        
+        // Base size (before rotation)
+        float title_width = ImGui::CalcTextSize(spec->display_name.c_str()).x;
+        float content_width = max_input_width + max_output_width + 60; // Padding
+        float base_width = std::max({150.0f, title_width + 40, content_width});
+        float port_count = std::max(input_ports.size(), output_ports.size());
+        float base_height = TITLE_HEIGHT + (port_count * PORT_SPACING) + NODE_WINDOW_PADDING * 2;
+        
+        // Apply rotation to size
+        if (rotation == 90 || rotation == 270) {
+            size.x = base_height;
+            size.y = base_width;
+        } else {
+            size.x = base_width;
+            size.y = base_height;
+        }
+        
+        // Update min_size to current calculated size
+        min_size = ImVec2(base_width * 0.8f, base_height * 0.8f);  // Allow shrinking to 80% of calculated size
     }
     
     // Position ports based on rotation

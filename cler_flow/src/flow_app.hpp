@@ -43,6 +43,7 @@ private:
     bool showMetrics = false;
     bool showShortcuts = false;
     bool showAbout = false;
+    bool firstFrame = true;
     
     // Menu handling
     void Menu();

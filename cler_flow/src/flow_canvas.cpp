@@ -455,7 +455,7 @@ void FlowCanvas::HandleNodeInteraction()
     }
     
     // Drag selected nodes
-    else if (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && isDraggingNode && !isConnecting && !isBoxSelecting) {
+    else if (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && isDraggingNode && !isConnecting && !isBoxSelecting && !isResizingNode) {
         ImVec2 delta = ImGui::GetIO().MouseDelta;
         delta.x /= zoom;
         delta.y /= zoom;
