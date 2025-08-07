@@ -73,27 +73,75 @@ void VisualNode::UpdatePortPositions()
         max_output_width = std::max(max_output_width, width);
     }
     
-    // Node width
+    // Base size (before rotation)
     float title_width = ImGui::CalcTextSize(spec->display_name.c_str()).x;
     float content_width = max_input_width + max_output_width + 60; // Padding
-    size.x = std::max({150.0f, title_width + 40, content_width});
-    
-    // Node height
+    float base_width = std::max({150.0f, title_width + 40, content_width});
     float port_count = std::max(input_ports.size(), output_ports.size());
-    size.y = TITLE_HEIGHT + (port_count * PORT_SPACING) + NODE_WINDOW_PADDING * 2;
+    float base_height = TITLE_HEIGHT + (port_count * PORT_SPACING) + NODE_WINDOW_PADDING * 2;
     
-    // Position input ports
-    float y_offset = TITLE_HEIGHT + NODE_WINDOW_PADDING;
-    for (auto& port : input_ports) {
-        port.position = ImVec2(0, y_offset);
-        y_offset += PORT_SPACING;
+    // Apply rotation to size
+    if (rotation == 90 || rotation == 270) {
+        size.x = base_height;
+        size.y = base_width;
+    } else {
+        size.x = base_width;
+        size.y = base_height;
     }
     
-    // Position output ports
-    y_offset = TITLE_HEIGHT + NODE_WINDOW_PADDING;
-    for (auto& port : output_ports) {
-        port.position = ImVec2(size.x, y_offset);
-        y_offset += PORT_SPACING;
+    // Position ports based on rotation
+    float y_offset = TITLE_HEIGHT + NODE_WINDOW_PADDING;
+    
+    switch (rotation) {
+        case 0:  // Normal orientation
+            for (auto& port : input_ports) {
+                port.position = ImVec2(0, y_offset);
+                y_offset += PORT_SPACING;
+            }
+            y_offset = TITLE_HEIGHT + NODE_WINDOW_PADDING;
+            for (auto& port : output_ports) {
+                port.position = ImVec2(size.x, y_offset);
+                y_offset += PORT_SPACING;
+            }
+            break;
+            
+        case 90:  // Rotated right - inputs on top, outputs on bottom
+            y_offset = NODE_WINDOW_PADDING;
+            for (auto& port : input_ports) {
+                port.position = ImVec2(y_offset, 0);
+                y_offset += PORT_SPACING;
+            }
+            y_offset = NODE_WINDOW_PADDING;
+            for (auto& port : output_ports) {
+                port.position = ImVec2(y_offset, size.y);
+                y_offset += PORT_SPACING;
+            }
+            break;
+            
+        case 180:  // Upside down - inputs on right, outputs on left
+            for (auto& port : input_ports) {
+                port.position = ImVec2(size.x, y_offset);
+                y_offset += PORT_SPACING;
+            }
+            y_offset = TITLE_HEIGHT + NODE_WINDOW_PADDING;
+            for (auto& port : output_ports) {
+                port.position = ImVec2(0, y_offset);
+                y_offset += PORT_SPACING;
+            }
+            break;
+            
+        case 270:  // Rotated left - inputs on bottom, outputs on top
+            y_offset = NODE_WINDOW_PADDING;
+            for (auto& port : input_ports) {
+                port.position = ImVec2(y_offset, size.y);
+                y_offset += PORT_SPACING;
+            }
+            y_offset = NODE_WINDOW_PADDING;
+            for (auto& port : output_ports) {
+                port.position = ImVec2(y_offset, 0);
+                y_offset += PORT_SPACING;
+            }
+            break;
     }
 }
 
@@ -126,14 +174,28 @@ void VisualNode::Draw(ImDrawList* draw_list, ImVec2 scroll, float zoom)
     // Draw ports
     DrawPorts(draw_list, node_rect_min, zoom);
     
-    // Draw collapse button
-    if (!collapsed) {
-        ImVec2 collapse_pos = ImVec2(node_rect_max.x - 20 * zoom, node_rect_min.y + 5 * zoom);
-        draw_list->AddTriangleFilled(
-            collapse_pos,
-            ImVec2(collapse_pos.x + 10 * zoom, collapse_pos.y),
-            ImVec2(collapse_pos.x + 5 * zoom, collapse_pos.y + 8 * zoom),
-            IM_COL32(200, 200, 200, 150)
+    // Check if mouse is hovering over resize zone for visual feedback
+    ImVec2 mouse_pos = ImGui::GetMousePos();
+    ImVec2 canvas_mouse = ImVec2(
+        (mouse_pos.x - canvas_pos.x - scroll.x) / zoom,
+        (mouse_pos.y - canvas_pos.y - scroll.y) / zoom
+    );
+    bool hovering_resize = IsInResizeZone(canvas_mouse);
+    
+    // Draw resize handle (grip lines in corner)
+    const float grip_size = 15.0f * zoom;
+    const float grip_thickness = 2.0f * zoom;
+    ImU32 resize_color = resizing ? IM_COL32(255, 200, 100, 255) : 
+                        (hovering_resize ? IM_COL32(200, 200, 100, 255) :
+                        (selected ? IM_COL32(150, 150, 150, 200) : IM_COL32(100, 100, 100, 150)));
+    
+    // Draw three diagonal lines in corner like a standard resize grip
+    for (int i = 0; i < 3; ++i) {
+        float offset = i * 4.0f * zoom;
+        draw_list->AddLine(
+            ImVec2(node_rect_max.x - grip_size + offset, node_rect_max.y),
+            ImVec2(node_rect_max.x, node_rect_max.y - grip_size + offset),
+            resize_color, grip_thickness
         );
     }
 }
@@ -227,6 +289,15 @@ bool VisualNode::ContainsPoint(ImVec2 point) const
 {
     return point.x >= position.x && point.x <= position.x + size.x &&
            point.y >= position.y && point.y <= position.y + size.y;
+}
+
+bool VisualNode::IsInResizeZone(ImVec2 point) const
+{
+    const float resize_zone = 20.0f;  // Make it bigger for easier grabbing
+    return point.x >= position.x + size.x - resize_zone && 
+           point.x <= position.x + size.x + 5.0f &&  // Allow slight overshoot
+           point.y >= position.y + size.y - resize_zone && 
+           point.y <= position.y + size.y + 5.0f;  // Allow slight overshoot
 }
 
 int VisualNode::GetInputPortAt(ImVec2 point) const

@@ -48,9 +48,12 @@ public:
     // Visual state
     ImVec2 position;
     ImVec2 size;
+    ImVec2 min_size{100, 60};  // Minimum size for resizing
     bool selected = false;
     bool collapsed = false;
     bool moving = false;
+    bool resizing = false;
+    int rotation = 0;  // 0, 90, 180, 270 degrees
     
     // Instance configuration
     std::string instance_name;
@@ -70,6 +73,11 @@ public:
     int GetInputPortAt(ImVec2 point) const;
     int GetOutputPortAt(ImVec2 point) const;
     void UpdatePortPositions();
+    bool IsInResizeZone(ImVec2 point) const;
+    
+    // Rotation
+    void RotateRight() { rotation = (rotation + 90) % 360; UpdatePortPositions(); }
+    void RotateLeft() { rotation = (rotation - 90 + 360) % 360; UpdatePortPositions(); }
     
     // Code generation
     std::string GenerateInstantiation() const;

@@ -74,6 +74,8 @@ private:
     bool isPanning = false;
     bool isConnecting = false;
     bool isDraggingNode = false;
+    bool isResizingNode = false;
+    size_t resizingNodeId = 0;
     size_t connectingFromNode = 0;
     size_t connectingFromPort = 0;
     bool connectingFromOutput = true;
@@ -101,9 +103,12 @@ private:
     void HandleNodeInteraction();
     void HandleCanvasInteraction();
     
-    // Context menu
-    void ShowContextMenu();
+    // Context menus
+    void HandleContextMenus();
+    void ShowCanvasContextMenu();
+    void ShowNodeContextMenu(size_t node_id);
     ImVec2 contextMenuPos;
+    size_t contextNodeId = 0;
     
     // Helpers
     VisualNode* GetNode(size_t id);

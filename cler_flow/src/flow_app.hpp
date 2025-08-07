@@ -38,6 +38,12 @@ private:
     bool openDockspace = true;
     bool redock = false;
     
+    // UI state
+    bool showDemoWindow = false;
+    bool showMetrics = false;
+    bool showShortcuts = false;
+    bool showAbout = false;
+    
     // Menu handling
     void Menu();
     void MenuFile();

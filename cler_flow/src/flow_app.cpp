@@ -60,6 +60,12 @@ void FlowApp::Update()
         ImGui::DockBuilderDockWindow("Code Preview", dock_main_id);  // Dock as tab with Canvas
         ImGui::DockBuilderDockWindow("Properties", dock_id_left_bottom);
         ImGui::DockBuilderFinish(dockspace_id);
+        
+        // Set Canvas as the active tab
+        ImGuiWindow* canvas_window = ImGui::FindWindowByName("Canvas");
+        if (canvas_window && canvas_window->DockNode) {
+            canvas_window->DockNode->SelectedTabId = canvas_window->TabId;
+        }
     }
 
     ImGuiID dockspace_id = ImGui::GetID("MyDockspace");
@@ -68,9 +74,9 @@ void FlowApp::Update()
     Menu();
     ImGui::End();
     
-    // Main windows
-    DrawLibrary();
+    // Main windows (Canvas first to be default active)
     DrawCanvas();
+    DrawLibrary();
     DrawProperties();
     DrawCodePreview();
     
@@ -172,8 +178,12 @@ void FlowApp::MenuView()
 void FlowApp::MenuHelp()
 {
     if (ImGui::BeginMenu("Help")) {
+        if (ImGui::MenuItem("Keyboard Shortcuts")) {
+            showShortcuts = true;
+        }
+        
         if (ImGui::MenuItem("About")) {
-            ImGui::OpenPopup("About");
+            showAbout = true;
         }
         
         if (ImGui::MenuItem("Documentation")) {
@@ -183,7 +193,56 @@ void FlowApp::MenuHelp()
         ImGui::EndMenu();
     }
     
+    // Shortcuts popup
+    if (showShortcuts) {
+        ImGui::OpenPopup("Shortcuts");
+        showShortcuts = false;
+    }
+    
+    if (ImGui::BeginPopupModal("Shortcuts", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Keyboard Shortcuts");
+        ImGui::Separator();
+        
+        ImGui::Text("Canvas Navigation:");
+        ImGui::BulletText("Middle Mouse + Drag: Pan canvas");
+        ImGui::BulletText("Mouse Wheel: Zoom in/out");
+        ImGui::Spacing();
+        
+        ImGui::Text("Selection:");
+        ImGui::BulletText("Left Click: Select node");
+        ImGui::BulletText("Shift + Left Click: Add to selection");
+        ImGui::BulletText("Ctrl + A: Select all nodes");
+        ImGui::BulletText("Left Click + Drag (empty space): Box select");
+        ImGui::Spacing();
+        
+        ImGui::Text("Node Operations:");
+        ImGui::BulletText("Delete: Delete selected nodes");
+        ImGui::BulletText("R: Rotate selected nodes right (90°)");
+        ImGui::BulletText("Shift + R: Rotate selected nodes left (90°)");
+        ImGui::BulletText("Left Click + Drag (on node): Move selected nodes");
+        ImGui::Spacing();
+        
+        ImGui::Text("File Operations:");
+        ImGui::BulletText("Ctrl + N: New project");
+        ImGui::BulletText("Ctrl + O: Open project");
+        ImGui::BulletText("Ctrl + S: Save project");
+        ImGui::BulletText("Ctrl + Shift + S: Save as");
+        ImGui::BulletText("Ctrl + G: Generate C++ code");
+        ImGui::Spacing();
+        
+        ImGui::Separator();
+        if (ImGui::Button("OK", ImVec2(120, 0))) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    
     // About popup
+    if (showAbout) {
+        ImGui::OpenPopup("About");
+        showAbout = false;
+    }
+    
     if (ImGui::BeginPopupModal("About", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::Text("CLER Flow - Visual Flowgraph Designer");
         ImGui::Text("Version %s", version.c_str());

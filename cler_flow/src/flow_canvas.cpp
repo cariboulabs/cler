@@ -5,6 +5,7 @@
 ******************************************************************************************/
 
 #include "flow_canvas.hpp"
+#include <imgui_internal.h>  // For ImBezierCubicCalc
 #include <algorithm>
 #include <sstream>
 #include <cmath>
@@ -51,10 +52,6 @@ void FlowCanvas::Draw()
                 // Add the node at the drop position
                 size_t new_node_id = AddNode(*block_ptr, canvas_drop_pos);
                 
-                // Log for debugging
-                printf("Dropped node '%s' at canvas pos (%.1f, %.1f), ID: %zu\n", 
-                       (*block_ptr)->display_name.c_str(), 
-                       canvas_drop_pos.x, canvas_drop_pos.y, new_node_id);
             }
         }
         ImGui::EndDragDropTarget();
@@ -108,11 +105,8 @@ void FlowCanvas::Draw()
         draw_list->AddRect(box_min, box_max, IM_COL32(100, 100, 255, 100));
     }
     
-    // Context menu
-    if (ImGui::BeginPopupContextItem("canvas_context")) {
-        ShowContextMenu();
-        ImGui::EndPopup();
-    }
+    // Context menus
+    HandleContextMenus();
     
     draw_list->PopClipRect();
 }
@@ -219,29 +213,94 @@ void FlowCanvas::DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickn
 {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     
-    // Core-nodes style spline routing
-    float distance = std::abs(p2.x - p1.x);
-    float handle_distance = std::max(50.0f, distance * 0.5f);
+    // Sophisticated routing like core-nodes
+    float dx = p2.x - p1.x;
+    float dy = p2.y - p1.y;
+    float distance = std::sqrt(dx * dx + dy * dy);
+    
+    // Dynamic handle distance based on connection distance
+    float handle_distance = std::min(200.0f, std::max(50.0f, distance * 0.4f));
     
     ImVec2 cp1, cp2;
     
-    if (p2.x > p1.x) {
-        // Normal left-to-right connection (like core-nodes)
-        cp1 = ImVec2(p1.x + handle_distance, p1.y);
-        cp2 = ImVec2(p2.x - handle_distance, p2.y);
+    if (dx > 20.0f) {
+        // Normal left-to-right connection
+        // Adjust handle based on vertical distance for smoother curves
+        float vertical_factor = std::min(1.0f, std::abs(dy) / 200.0f);
+        float adjusted_handle = handle_distance * (1.0f + vertical_factor * 0.5f);
+        
+        cp1 = ImVec2(p1.x + adjusted_handle, p1.y);
+        cp2 = ImVec2(p2.x - adjusted_handle, p2.y);
+    } else if (dx > -20.0f) {
+        // Nearly vertical connection
+        float offset = 40.0f + std::abs(dy) * 0.2f;
+        if (p1.y < p2.y) {
+            // Downward - curve to the right
+            cp1 = ImVec2(p1.x + offset, p1.y + offset);
+            cp2 = ImVec2(p2.x - offset, p2.y - offset);
+        } else {
+            // Upward - curve to the left  
+            cp1 = ImVec2(p1.x + offset, p1.y - offset);
+            cp2 = ImVec2(p2.x - offset, p2.y + offset);
+        }
     } else {
-        // Right-to-left (inverted) - improved routing like core-nodes
-        float loop_size = std::max(80.0f, (distance + std::abs(p1.y - p2.y)) * 0.4f);
-        cp1 = ImVec2(p1.x + loop_size, p1.y);
-        cp2 = ImVec2(p2.x - loop_size, p2.y);
+        // Right-to-left (inverted) - sophisticated loop routing
+        float loop_size = std::max(60.0f, std::min(300.0f, (std::abs(dx) + std::abs(dy)) * 0.3f));
+        
+        // Create S-curve for inverted connections
+        if (std::abs(dy) < 50.0f) {
+            // Horizontal S-curve
+            cp1 = ImVec2(p1.x + loop_size, p1.y);
+            cp2 = ImVec2(p2.x - loop_size, p2.y);
+        } else {
+            // Vertical component - create smoother loop
+            float y_offset = dy * 0.25f;
+            cp1 = ImVec2(p1.x + loop_size, p1.y + y_offset);
+            cp2 = ImVec2(p2.x - loop_size, p2.y - y_offset);
+        }
     }
     
-    // Draw with subtle outline for better visibility (like core-nodes)
+    // Draw shadow/outline for better visibility
     if (thickness > 1.5f) {
         draw_list->AddBezierCubic(p1, cp1, cp2, p2, 
-                                  IM_COL32(0, 0, 0, 60), (thickness + 1.0f) * zoom);
+                                  IM_COL32(0, 0, 0, 80), (thickness + 2.0f) * zoom);
     }
+    
+    // Draw main connection line
     draw_list->AddBezierCubic(p1, cp1, cp2, p2, color, thickness * zoom);
+    
+    // Optional: Add flow direction indicator (small arrow)
+    if (distance > 100.0f && zoom > 0.7f) {
+        // Calculate midpoint on bezier curve
+        float t = 0.5f;
+        ImVec2 mid = ImBezierCubicCalc(p1, cp1, cp2, p2, t);
+        
+        // Calculate tangent at midpoint for arrow direction
+        ImVec2 tangent = ImVec2(
+            3.0f * (1-t)*(1-t) * (cp1.x - p1.x) + 
+            6.0f * (1-t)*t * (cp2.x - cp1.x) + 
+            3.0f * t*t * (p2.x - cp2.x),
+            3.0f * (1-t)*(1-t) * (cp1.y - p1.y) + 
+            6.0f * (1-t)*t * (cp2.y - cp1.y) + 
+            3.0f * t*t * (p2.y - cp2.y)
+        );
+        
+        // Normalize tangent
+        float len = std::sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
+        if (len > 0.01f) {
+            tangent.x /= len;
+            tangent.y /= len;
+            
+            // Draw small arrow
+            float arrow_size = 6.0f * zoom;
+            ImVec2 arrow_p1 = ImVec2(mid.x - tangent.x * arrow_size - tangent.y * arrow_size * 0.5f,
+                                     mid.y - tangent.y * arrow_size + tangent.x * arrow_size * 0.5f);
+            ImVec2 arrow_p2 = ImVec2(mid.x - tangent.x * arrow_size + tangent.y * arrow_size * 0.5f,
+                                     mid.y - tangent.y * arrow_size - tangent.x * arrow_size * 0.5f);
+            
+            draw_list->AddTriangleFilled(mid, arrow_p1, arrow_p2, color);
+        }
+    }
 }
 
 void FlowCanvas::HandleInput()
@@ -249,6 +308,19 @@ void FlowCanvas::HandleInput()
     ImGuiIO& io = ImGui::GetIO();
     ImVec2 mouse_pos = ImGui::GetMousePos();
     ImVec2 canvas_mouse = ScreenToCanvas(mouse_pos);
+    
+    // Check if hovering over resize zone and change cursor
+    bool hovering_resize = false;
+    for (auto& [id, node] : nodes) {
+        if (node->IsInResizeZone(canvas_mouse)) {
+            hovering_resize = true;
+            break;
+        }
+    }
+    
+    if (hovering_resize) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
+    }
     
     // Pan with middle mouse
     if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
@@ -316,14 +388,27 @@ void FlowCanvas::HandleNodeInteraction()
             }
         }
         
-        // Check node selection
+        // Check for resize handles first
         bool found = false;
         for (auto& [id, node] : nodes) {
-            if (node->ContainsPoint(canvas_mouse)) {
-                SelectNode(id, ImGui::GetIO().KeyShift);
+            if (node->IsInResizeZone(canvas_mouse)) {
+                isResizingNode = true;
+                resizingNodeId = id;
+                node->resizing = true;
                 found = true;
-                isDraggingNode = true;  // Start dragging immediately when clicking on a node
                 break;
+            }
+        }
+        
+        // Check node selection if not resizing
+        if (!found) {
+            for (auto& [id, node] : nodes) {
+                if (node->ContainsPoint(canvas_mouse)) {
+                    SelectNode(id, ImGui::GetIO().KeyShift);
+                    found = true;
+                    isDraggingNode = true;  // Start dragging immediately when clicking on a node
+                    break;
+                }
             }
         }
         
@@ -355,8 +440,22 @@ void FlowCanvas::HandleNodeInteraction()
         isConnecting = false;
     }
     
+    // Resize node
+    if (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && isResizingNode) {
+        ImVec2 delta = ImGui::GetIO().MouseDelta;
+        delta.x /= zoom;
+        delta.y /= zoom;
+        
+        auto* node = GetNode(resizingNodeId);
+        if (node) {
+            node->size.x = std::max(node->min_size.x, node->size.x + delta.x);
+            node->size.y = std::max(node->min_size.y, node->size.y + delta.y);
+            node->UpdatePortPositions();
+        }
+    }
+    
     // Drag selected nodes
-    if (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && isDraggingNode && !isConnecting && !isBoxSelecting) {
+    else if (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && isDraggingNode && !isConnecting && !isBoxSelecting) {
         ImVec2 delta = ImGui::GetIO().MouseDelta;
         delta.x /= zoom;
         delta.y /= zoom;
@@ -370,9 +469,18 @@ void FlowCanvas::HandleNodeInteraction()
         }
     }
     
-    // Reset drag flag on mouse release
+    // Reset flags on mouse release
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
         isDraggingNode = false;
+        
+        if (isResizingNode) {
+            isResizingNode = false;
+            auto* node = GetNode(resizingNodeId);
+            if (node) {
+                node->resizing = false;
+            }
+            resizingNodeId = 0;
+        }
     }
     
     // Finish box selection
@@ -409,16 +517,220 @@ void FlowCanvas::HandleCanvasInteraction()
             SelectNode(id, true);
         }
     }
+    
+    // Rotate selected nodes
+    if (ImGui::IsKeyPressed(ImGuiKey_R)) {
+        if (ImGui::GetIO().KeyShift) {
+            // Rotate left (counter-clockwise)
+            for (size_t id : selectedNodes) {
+                auto* node = GetNode(id);
+                if (node) {
+                    node->RotateLeft();
+                }
+            }
+        } else {
+            // Rotate right (clockwise)
+            for (size_t id : selectedNodes) {
+                auto* node = GetNode(id);
+                if (node) {
+                    node->RotateRight();
+                }
+            }
+        }
+    }
 }
 
-void FlowCanvas::ShowContextMenu()
+void FlowCanvas::HandleContextMenus()
 {
+    // Check for right-click on nodes
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+        ImVec2 mouse_pos = ImGui::GetMousePos();
+        ImVec2 canvas_mouse = ScreenToCanvas(mouse_pos);
+        
+        // Check if right-clicking on a node
+        bool found_node = false;
+        for (auto& [id, node] : nodes) {
+            if (node->ContainsPoint(canvas_mouse)) {
+                contextNodeId = id;
+                ImGui::OpenPopup("node_context");
+                found_node = true;
+                break;
+            }
+        }
+        
+        // If not on a node, open canvas context menu
+        if (!found_node) {
+            contextMenuPos = canvas_mouse;
+            ImGui::OpenPopup("canvas_context");
+        }
+    }
+    
+    // Node context menu
+    if (ImGui::BeginPopup("node_context")) {
+        ShowNodeContextMenu(contextNodeId);
+        ImGui::EndPopup();
+    }
+    
+    // Canvas context menu
+    if (ImGui::BeginPopup("canvas_context")) {
+        ShowCanvasContextMenu();
+        ImGui::EndPopup();
+    }
+}
+
+void FlowCanvas::ShowNodeContextMenu(size_t node_id)
+{
+    auto* node = GetNode(node_id);
+    if (!node) return;
+    
+    ImGui::Text("Node: %s", node->instance_name.c_str());
+    ImGui::Separator();
+    
+    if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
+        // Duplicate node
+        ImVec2 new_pos = ImVec2(node->position.x + 20, node->position.y + 20);
+        size_t new_id = AddNode(node->GetSpec(), new_pos);
+        auto* new_node = GetNode(new_id);
+        if (new_node) {
+            new_node->rotation = node->rotation;
+            new_node->size = node->size;
+            new_node->UpdatePortPositions();
+        }
+    }
+    
+    if (ImGui::MenuItem("Delete", "Delete")) {
+        RemoveNode(node_id);
+    }
+    
+    ImGui::Separator();
+    
+    if (ImGui::BeginMenu("Rotate")) {
+        if (ImGui::MenuItem("Rotate Right (90°)", "R")) {
+            node->RotateRight();
+        }
+        if (ImGui::MenuItem("Rotate Left (90°)", "Shift+R")) {
+            node->RotateLeft();
+        }
+        if (ImGui::MenuItem("Rotate 180°")) {
+            node->RotateRight();
+            node->RotateRight();
+        }
+        if (ImGui::MenuItem("Reset Rotation")) {
+            node->rotation = 0;
+            node->UpdatePortPositions();
+        }
+        ImGui::EndMenu();
+    }
+    
+    if (ImGui::BeginMenu("Alignment")) {
+        if (ImGui::MenuItem("Align Left")) {
+            // Find leftmost selected node
+            float min_x = node->position.x;
+            for (size_t id : selectedNodes) {
+                auto* n = GetNode(id);
+                if (n && n->position.x < min_x) {
+                    min_x = n->position.x;
+                }
+            }
+            // Align all selected to that position
+            for (size_t id : selectedNodes) {
+                auto* n = GetNode(id);
+                if (n) n->position.x = min_x;
+            }
+        }
+        if (ImGui::MenuItem("Align Right")) {
+            float max_x = node->position.x + node->size.x;
+            for (size_t id : selectedNodes) {
+                auto* n = GetNode(id);
+                if (n && n->position.x + n->size.x > max_x) {
+                    max_x = n->position.x + n->size.x;
+                }
+            }
+            for (size_t id : selectedNodes) {
+                auto* n = GetNode(id);
+                if (n) n->position.x = max_x - n->size.x;
+            }
+        }
+        if (ImGui::MenuItem("Align Top")) {
+            float min_y = node->position.y;
+            for (size_t id : selectedNodes) {
+                auto* n = GetNode(id);
+                if (n && n->position.y < min_y) {
+                    min_y = n->position.y;
+                }
+            }
+            for (size_t id : selectedNodes) {
+                auto* n = GetNode(id);
+                if (n) n->position.y = min_y;
+            }
+        }
+        if (ImGui::MenuItem("Align Bottom")) {
+            float max_y = node->position.y + node->size.y;
+            for (size_t id : selectedNodes) {
+                auto* n = GetNode(id);
+                if (n && n->position.y + n->size.y > max_y) {
+                    max_y = n->position.y + n->size.y;
+                }
+            }
+            for (size_t id : selectedNodes) {
+                auto* n = GetNode(id);
+                if (n) n->position.y = max_y - n->size.y;
+            }
+        }
+        ImGui::EndMenu();
+    }
+    
+    ImGui::Separator();
+    
+    if (ImGui::MenuItem("Disconnect All")) {
+        // Remove all connections to/from this node
+        connections.erase(
+            std::remove_if(connections.begin(), connections.end(),
+                [node_id](const Connection& c) {
+                    return c.from_node_id == node_id || c.to_node_id == node_id;
+                }),
+            connections.end()
+        );
+    }
+    
+    if (ImGui::MenuItem("Reset Size")) {
+        node->UpdatePortPositions();  // This recalculates default size
+    }
+}
+
+void FlowCanvas::ShowCanvasContextMenu()
+{
+    if (ImGui::MenuItem("Add Node...")) {
+        // TODO: Show node picker
+    }
+    
+    ImGui::Separator();
+    
+    if (ImGui::MenuItem("Paste", "Ctrl+V", false, false)) {
+        // TODO: Implement clipboard
+    }
+    
+    ImGui::Separator();
+    
+    if (ImGui::MenuItem("Select All", "Ctrl+A")) {
+        for (auto& [id, node] : nodes) {
+            SelectNode(id, true);
+        }
+    }
+    
     if (ImGui::MenuItem("Clear All")) {
         ClearAll();
     }
     
+    ImGui::Separator();
+    
     if (ImGui::MenuItem("Organize Layout")) {
         // TODO: Auto-layout algorithm
+    }
+    
+    if (ImGui::MenuItem("Reset View")) {
+        scrolling = ImVec2(100, 100);
+        zoom = 1.0f;
     }
 }
 
