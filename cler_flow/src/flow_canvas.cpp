@@ -1202,8 +1202,16 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
         // Use more generous threshold for horizontal alignment (2x yMargin)
         if (abs_dy < yMargin * VERTICAL_ALIGN_FACTOR) {
             // Horizontally aligned backward connection
-            // Use simple inverted bezier instead of complex routing
-            return ConnectionType::INVERTED_SIMPLE;  // Use bezier with inversion
+            // Use polyline routing - choose direction based on available space
+            // Route below if ports are aligned or output is higher
+            // This creates clean routing like in to_look4.png
+            if (dy >= 0) {
+                // Output is higher or equal - route below
+                return ConnectionType::INVERTED_UNDER;  // Will map to COMPLEX_UNDER polyline
+            } else {
+                // Output is lower - route above
+                return ConnectionType::INVERTED_OVER;   // Will map to COMPLEX_OVER polyline
+            }
         }
         
         // BINV_RIGHT cases: Backward with significant vertical separation
@@ -1353,8 +1361,8 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
     // Polyline drawing constants
     constexpr float BASE_FILLET_RADIUS = 10.0f;
     constexpr float MARGIN_FACTOR = 0.8f;  // Distance from node to first elbow as factor of fillet radius
-    constexpr float EXTEND_FACTOR = 1.5f;  // Extension factor for backward connections
-    constexpr float BACKWARD_EXTEND_FACTOR = 0.3f;  // Additional extension based on dx for backward
+    constexpr float BACKWARD_MIN_EXTEND = 7.0f;  // Fixed 7 pixels from block edge for tight routing
+    constexpr float BACKWARD_DYNAMIC_FACTOR = 0.02f;  // Very small dynamic extension (2% of dx)
     
     const float dHandle = BASE_FILLET_RADIUS * zoom;  // Radius of rounded corners
     const float xMargin = dHandle * MARGIN_FACTOR;  // Distance from node to first elbow
@@ -1372,9 +1380,14 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
     float x3 = p2.x - xMargin;
     float x4 = x3 - dHandle;
     
-    // For backward connections, extend but not as much
+    // For backward connections, keep vertical lines close to blocks
     if (dx < 0) {
-        float extend = std::max(xMargin * EXTEND_FACTOR, std::abs(dx) * BACKWARD_EXTEND_FACTOR + xMargin);
+        // Use minimal extension to keep vertical segments very close to the blocks
+        // Fixed 7 pixels from block edge
+        float minExtend = BACKWARD_MIN_EXTEND * zoom;
+        float dynamicExtend = std::abs(dx) * BACKWARD_DYNAMIC_FACTOR;
+        float extend = minExtend + dynamicExtend;
+        
         x1 = p1.x + extend;
         x2 = x1 + dHandle;
         x4 = p2.x - extend - dHandle;
@@ -1388,14 +1401,19 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
     if (type == ConnectionType::COMPLEX_OVER) {
         // Route above - handles go upward
         yHandle = -dHandle;  // Negative to go up
-        if (std::abs(dy) < xMargin * 2) {
-            yM = std::min(p1.y, p2.y) - xMargin;
+        // For backward connections, always route AROUND (above both blocks)
+        if (dx < 0 || std::abs(dy) < xMargin * 2) {
+            // Get the top of the higher block and go above it
+            yM = std::min(p1.y, p2.y) - xMargin * 2;
         }
     } else if (type == ConnectionType::COMPLEX_UNDER) {
         // Route below - handles go downward
         yHandle = dHandle;  // Positive to go down
-        if (std::abs(dy) < xMargin * 2) {
-            yM = std::max(p1.y, p2.y) + xMargin;
+        // For backward connections, always route AROUND (below both blocks)
+        if (dx < 0 || std::abs(dy) < xMargin * 2) {
+            // Get the bottom of the lower block and go below it
+            // Assuming standard node height, route well below
+            yM = std::max(p1.y, p2.y) + xMargin * 6;  // Further below for clean routing around blocks
         }
     } else if (type == ConnectionType::COMPLEX_AROUND) {
         // NINV_LEFT_MID case - route around/below when nodes overlap
