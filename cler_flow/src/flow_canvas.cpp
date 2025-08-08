@@ -1098,6 +1098,36 @@ void FlowCanvas::RepairConnections()
     }
 }
 
+/*******************************************************************************
+ * CONNECTION ROUTING STRATEGY
+ * 
+ * This flowgraph editor uses two distinct routing methods based on the 
+ * relative positions of connected ports:
+ * 
+ * 1. FORWARD CONNECTIONS (output on LEFT, input on RIGHT):
+ *    - Always use smooth Bezier curves
+ *    - Direct, flowing left-to-right connections
+ *    - Types: NORMAL, NORMAL_VERTICAL
+ * 
+ * 2. BACKWARD CONNECTIONS (output on RIGHT, input on LEFT):
+ *    - Always use polyline routing with rounded corners (fillets)
+ *    - Routes around blocks to avoid visual overlap
+ *    - Types: INVERTED_OVER, INVERTED_UNDER
+ *    - Polylines consist of 14 points forming a path that:
+ *      - Extends backward from the output port
+ *      - Routes above or below the blocks
+ *      - Approaches the input port from behind
+ * 
+ * Key Design Decisions:
+ * - 7 pixels clearance from block edges for tight, clean routing
+ * - 10 pixel fillet radius for smooth corners
+ * - Automatic shadow rendering for visual depth
+ * - All routing respects zoom level for consistent appearance
+ * 
+ * The classification happens in ClassifyConnection() and determines which
+ * drawing method to use: DrawBezierConnection() or DrawPolylineConnection()
+ ******************************************************************************/
+
 ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2, 
                                               const VisualNode* from_node, 
                                               const VisualNode* to_node) const
@@ -1107,27 +1137,16 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
     float distance = std::sqrt(dx * dx + dy * dy);
     float abs_dy = std::abs(dy);
     
-    // Connection classification constants
-    constexpr float BASE_FILLET_RADIUS = 10.0f;
-    constexpr float BASE_Y_MARGIN = 30.0f;
-    constexpr float BASE_NODE_MARGIN = 20.0f;
-    constexpr float BASE_OVERLAP_THRESHOLD = 40.0f;
-    constexpr float BASE_SHORT_DISTANCE = 30.0f;
-    constexpr float FILLET_CLEARANCE_FACTOR = 4.0f;  // How many fillet radii of clearance we need
-    constexpr float VERTICAL_ALIGN_FACTOR = 2.0f;    // Factor for horizontal alignment detection
-    constexpr float VERTICAL_SEPARATION_FACTOR = 3.0f; // Factor for vertical separation detection
-    constexpr float HANDLE_LENGTH_FACTOR = 0.7f;     // For normal connection angle detection
-    
-    // Scale thresholds by zoom
+    // Scale thresholds by zoom (using constants from header)
     const float yMargin = BASE_Y_MARGIN * zoom;      // Vertical clearance needed
     const float nodeMargin = BASE_NODE_MARGIN * zoom;   // Space between nodes
     const float overlapThreshold = BASE_OVERLAP_THRESHOLD * zoom;  // Horizontal overlap detection
     
-    // If we have node information, use their bounds for better detection
-    bool nodes_overlap_horizontally = false;
-    bool clear_vertical_space_above = false;
-    bool clear_vertical_space_below = false;
-    
+    // Node bounds calculation for future enhancements
+    // Currently we use simple port-to-port distance for routing decisions
+    // This section is preserved for potential future use when we need
+    // more sophisticated obstacle avoidance
+    /*
     if (from_node && to_node) {
         // Convert to screen space for comparison
         ImVec2 from_min = CanvasToScreen(from_node->position);
@@ -1137,21 +1156,22 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
         ImVec2 to_max = CanvasToScreen(ImVec2(to_node->position.x + to_node->size.x, 
                                               to_node->position.y + to_node->size.y));
         
-        // Check horizontal overlap: does 'to' node start before 'from' node ends?
-        nodes_overlap_horizontally = (to_min.x < from_max.x);
-        
-        // Check vertical clearance
-        clear_vertical_space_above = (from_max.y + nodeMargin < to_min.y);
-        clear_vertical_space_below = (from_min.y > to_max.y + nodeMargin);
+        // Could be used for:
+        // - Horizontal overlap detection: (to_min.x < from_max.x)
+        // - Vertical clearance above: (from_max.y + nodeMargin < to_min.y)
+        // - Vertical clearance below: (from_min.y > to_max.y + nodeMargin)
     }
+    */
     
     // Very short connection - minimal curve
     if (distance < BASE_SHORT_DISTANCE * zoom) {
         return ConnectionType::STRAIGHT;
     }
     
-    // Forward connections (output on left, input on right)
-    // ALWAYS use bezier curves for forward connections
+    // =================================================================
+    // FORWARD CONNECTIONS (output on left, input on right)
+    // Rule: ALWAYS use bezier curves for smooth, direct routing
+    // =================================================================
     if (dx > 0) {
         // Check if nearly vertical
         if (abs_dy > yMargin * 2.0f && dx < overlapThreshold) {
@@ -1162,15 +1182,16 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
     }
     
     
-    // Backward connections (inverted)
+    // =================================================================
+    // BACKWARD CONNECTIONS (output on right, input on left)  
+    // Rule: ALWAYS use polylines to route around blocks cleanly
+    // =================================================================
     if (dx < 0) {
         // Check if nodes are roughly horizontally aligned
         // Use more generous threshold for horizontal alignment (2x yMargin)
         if (abs_dy < yMargin * VERTICAL_ALIGN_FACTOR) {
-            // Horizontally aligned backward connection
-            // Use polyline routing - choose direction based on available space
-            // Route below if ports are aligned or output is higher
-            // This creates clean routing like in to_look4.png
+            // Horizontally aligned - route around the blocks
+            // Choose direction based on relative port positions
             if (dy >= 0) {
                 // Output is higher or equal - route below
                 return ConnectionType::INVERTED_UNDER;  // Will map to COMPLEX_UNDER polyline
@@ -1180,7 +1201,7 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
             }
         }
         
-        // BINV_RIGHT cases: Backward with significant vertical separation
+        // Significant vertical separation
         if (abs_dy > yMargin * VERTICAL_SEPARATION_FACTOR) {
             // Clear vertical clearance - use complex routing
             if (dy < 0) {
@@ -1199,20 +1220,16 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
         }
     }
     
-    // Nearly vertical connections - increased threshold for better fillet handling
+    // Nearly vertical connections - these should never occur in practice
+    // since we handle all dx > 0 and dx < 0 cases above
+    // This is defensive code for edge cases
     const float dHandle = BASE_FILLET_RADIUS * zoom;
-    const float verticalThreshold = dHandle * FILLET_CLEARANCE_FACTOR;  // Generous threshold
+    const float verticalThreshold = dHandle * FILLET_CLEARANCE_FACTOR;
     
     if (std::abs(dx) < verticalThreshold) {
         if (abs_dy < yMargin) {
-            // Very short vertical - straight line
             return ConnectionType::STRAIGHT;
-        } else if (abs_dy < yMargin * VERTICAL_SEPARATION_FACTOR) {
-            // Medium vertical - always use bezier for clean curves
-            return ConnectionType::NORMAL_VERTICAL;
         } else {
-            // Long vertical - still use bezier to avoid fillet issues
-            // Only use polyline if dx is larger than this threshold
             return ConnectionType::NORMAL_VERTICAL;
         }
     }
@@ -1330,13 +1347,10 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
 {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     
-    // Polyline drawing constants
-    constexpr float BASE_FILLET_RADIUS = 10.0f;
+    // Polyline drawing parameters
     constexpr float MARGIN_FACTOR = 0.8f;  // Distance from node to first elbow as factor of fillet radius
-    constexpr float BACKWARD_MIN_EXTEND = 7.0f;  // Fixed 7 pixels from block edge for tight routing
-    constexpr float BACKWARD_DYNAMIC_FACTOR = 0.02f;  // Very small dynamic extension (2% of dx)
     
-    const float dHandle = BASE_FILLET_RADIUS * zoom;  // Radius of rounded corners
+    const float dHandle = BASE_FILLET_RADIUS * zoom;  // Radius of rounded corners (from class constants)
     const float xMargin = dHandle * MARGIN_FACTOR;  // Distance from node to first elbow
     
     float dx = p2.x - p1.x;
@@ -1473,40 +1487,46 @@ void FlowCanvas::DrawPolylineSegments(ImDrawList* draw_list, const std::vector<I
         return ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
     };
     
-    // Shadow pass first
+    // Helper lambda to draw the polyline segments (reduces duplication)
+    auto drawSegments = [&](ImU32 col, float thick) {
+        // Segment 0->1: Start to first horizontal
+        draw_list->AddBezierQuadratic(points[0], midpoint(points[0], points[1]), points[1], col, thick);
+        
+        // Segment 1->3: Top-left corner (horizontal to vertical)
+        draw_list->AddBezierQuadratic(points[1], ImVec2(points[2].x, points[1].y), points[3], col, thick);
+        
+        // Segment 3->4: Vertical down
+        draw_list->AddBezierQuadratic(points[3], midpoint(points[3], points[4]), points[4], col, thick);
+        
+        // Segment 4->6: Bottom-left corner (vertical to horizontal)
+        draw_list->AddBezierQuadratic(points[4], ImVec2(points[4].x, points[5].y), points[6], col, thick);
+        
+        // Segment 6->7: Horizontal middle
+        draw_list->AddBezierQuadratic(points[6], midpoint(points[6], points[7]), points[7], col, thick);
+        
+        // Segment 7->9: Bottom-right corner (horizontal to vertical)
+        draw_list->AddBezierQuadratic(points[7], ImVec2(points[8].x, points[7].y), points[9], col, thick);
+        
+        // Segment 9->10: Vertical up
+        draw_list->AddBezierQuadratic(points[9], midpoint(points[9], points[10]), points[10], col, thick);
+        
+        // Segment 10->12: Top-right corner (vertical to horizontal)
+        // The corner control point is at point[11] for proper fillet
+        draw_list->AddBezierQuadratic(points[10], points[11], points[12], col, thick);
+        
+        // Segment 12->13: Final horizontal to destination
+        draw_list->AddBezierQuadratic(points[12], midpoint(points[12], points[13]), points[13], col, thick);
+    };
+    
+    // Shadow pass first (if thick enough)
     if (thickness > 2.0f) {
         ImU32 shadow_col = IM_COL32(0, 0, 0, 80);
         float shadow_thick = thickness + 2.0f * zoom;
-        
-        // Draw shadow with fixed control points for proper rounded corners
-        draw_list->AddBezierQuadratic(points[0], midpoint(points[0], points[1]), points[1], shadow_col, shadow_thick);
-        draw_list->AddBezierQuadratic(points[1], ImVec2(points[2].x, points[1].y), points[3], shadow_col, shadow_thick);
-        draw_list->AddBezierQuadratic(points[3], midpoint(points[3], points[4]), points[4], shadow_col, shadow_thick);
-        draw_list->AddBezierQuadratic(points[4], ImVec2(points[4].x, points[5].y), points[6], shadow_col, shadow_thick);
-        draw_list->AddBezierQuadratic(points[6], midpoint(points[6], points[7]), points[7], shadow_col, shadow_thick);
-        draw_list->AddBezierQuadratic(points[7], ImVec2(points[8].x, points[7].y), points[9], shadow_col, shadow_thick);
-        draw_list->AddBezierQuadratic(points[9], midpoint(points[9], points[10]), points[10], shadow_col, shadow_thick);
-        // Fixed: Draw from point[10] to point[12] with proper corner at point[11]
-        // The corner control point should be at point[11] position
-        draw_list->AddBezierQuadratic(points[10], points[11], points[12], shadow_col, shadow_thick);
-        draw_list->AddBezierQuadratic(points[12], midpoint(points[12], points[13]), points[13], shadow_col, shadow_thick);
+        drawSegments(shadow_col, shadow_thick);
     }
     
-    // Main drawing pass - fixed control points for proper rounded corners
-    draw_list->AddBezierQuadratic(points[0], midpoint(points[0], points[1]), points[1], color, thickness);
-    // Top-left corner: from horizontal to vertical, control at corner
-    draw_list->AddBezierQuadratic(points[1], ImVec2(points[2].x, points[1].y), points[3], color, thickness);
-    draw_list->AddBezierQuadratic(points[3], midpoint(points[3], points[4]), points[4], color, thickness);
-    // Bottom-left corner: from vertical to horizontal, control at corner  
-    draw_list->AddBezierQuadratic(points[4], ImVec2(points[4].x, points[5].y), points[6], color, thickness);
-    draw_list->AddBezierQuadratic(points[6], midpoint(points[6], points[7]), points[7], color, thickness);
-    // Bottom-right corner: from horizontal to vertical, control at corner
-    draw_list->AddBezierQuadratic(points[7], ImVec2(points[8].x, points[7].y), points[9], color, thickness);
-    draw_list->AddBezierQuadratic(points[9], midpoint(points[9], points[10]), points[10], color, thickness);
-    // Fixed: Draw from point[10] to point[12] with proper corner at point[11]
-    // The corner control point should be at point[11] position
-    draw_list->AddBezierQuadratic(points[10], points[11], points[12], color, thickness);
-    draw_list->AddBezierQuadratic(points[12], midpoint(points[12], points[13]), points[13], color, thickness);
+    // Main drawing pass
+    drawSegments(color, thickness);
 }
 
 } // namespace clerflow

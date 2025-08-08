@@ -90,6 +90,18 @@ public:
     std::string GenerateCppCode() const;
     
 private:
+    // Connection routing constants - tuned for clean visual appearance
+    static constexpr float BASE_FILLET_RADIUS = 10.0f;           // Base radius for rounded corners
+    static constexpr float BASE_Y_MARGIN = 30.0f;                // Vertical clearance threshold
+    static constexpr float BASE_NODE_MARGIN = 20.0f;             // Space between nodes
+    static constexpr float BASE_OVERLAP_THRESHOLD = 40.0f;       // Horizontal overlap detection
+    static constexpr float BASE_SHORT_DISTANCE = 30.0f;          // Threshold for straight connections
+    static constexpr float FILLET_CLEARANCE_FACTOR = 4.0f;       // Multiplier for fillet clearance
+    static constexpr float VERTICAL_ALIGN_FACTOR = 2.0f;         // Factor for horizontal alignment
+    static constexpr float VERTICAL_SEPARATION_FACTOR = 3.0f;    // Factor for vertical separation
+    static constexpr float BACKWARD_MIN_EXTEND = 7.0f;           // Min pixels from block edge for backward connections
+    static constexpr float BACKWARD_DYNAMIC_FACTOR = 0.02f;      // Dynamic extension based on distance
+    
     // Canvas state
     ImVec2 scrolling{0.0f, 0.0f};
     float zoom = 1.0f;
