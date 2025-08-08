@@ -53,14 +53,40 @@ Determines the routing type based on port positions:
 
 ## Testing
 Comprehensive test suite in `tests/connections/`:
-- `test_forward_polyline.cpp` - Verifies routing rules
-- `test_fillets.cpp` - Tests corner rendering
-- `test_horizontal_routing.cpp` - Tests horizontal alignments
+- `test_forward_polyline` - Verifies routing rules (forward=bezier, backward=polyline)
+- `test_fillets` - Tests corner rendering and fillet curvature
+- `test_horizontal_routing` - Tests horizontally-aligned connections
+- `test_all_elbows` - Verifies all elbows have correct curvature
+- `test_elbows` - Tests elbow direction in polylines
+- `test_elbows_with_nodes` - Tests routing with node information
+- `test_vertical_fillet` - Tests vertical connection fillets
+
+### Running Tests with CTest
 
 Run all tests:
 ```bash
-cd tests/connections
-make test
+cd build
+ctest
+```
+
+Run with detailed output:
+```bash
+ctest --output-on-failure
+```
+
+Run specific test:
+```bash
+ctest -R test_forward_polyline -V
+```
+
+Run all connection routing tests:
+```bash
+make test_connections
+```
+
+List all available tests:
+```bash
+ctest -N
 ```
 
 ## Visual Features

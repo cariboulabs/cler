@@ -99,3 +99,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     target_compile_options(${PROJECT_NAME} PRIVATE /W4)
 endif()
+
+# Enable testing
+enable_testing()
+
+# Add tests subdirectory
+add_subdirectory(tests/connections)
