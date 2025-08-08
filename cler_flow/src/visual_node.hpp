@@ -30,10 +30,11 @@ struct VisualPort {
     }
     
     bool ContainsPoint(ImVec2 point) const {
-        const float port_radius = 6.0f;
+        // Increased hit radius for easier connection (visual is still 6.0f)
+        const float hit_radius = 10.0f;  // Was 6.0f, now larger for easier clicking
         float dx = point.x - position.x;
         float dy = point.y - position.y;
-        return (dx * dx + dy * dy) <= (port_radius * port_radius);
+        return (dx * dx + dy * dy) <= (hit_radius * hit_radius);
     }
 };
 

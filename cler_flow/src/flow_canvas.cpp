@@ -202,22 +202,84 @@ void FlowCanvas::DrawConnectionPreview()
     
     ImVec2 p1, p2;
     DataType type = DataType::Float;
+    ImVec2 mouse_pos = ImGui::GetMousePos();
+    ImVec2 canvas_mouse = ScreenToCanvas(mouse_pos);
+    
+    // Check for nearby ports to snap to
+    const float snap_distance = 20.0f * zoom;  // Snap when within 20 pixels
+    bool snapped = false;
+    ImVec2 snap_pos = mouse_pos;
     
     if (connectingFromOutput) {
         if (connectingFromPort >= from_node->output_ports.size()) return;
         p1 = from_node->output_ports[connectingFromPort].GetScreenPos(from_node->position);
         p1 = CanvasToScreen(p1);
-        p2 = ImGui::GetMousePos();
         type = from_node->output_ports[connectingFromPort].data_type;
+        
+        // Look for nearby input ports to snap to
+        for (auto& [id, node] : nodes) {
+            if (id == connectingFromNode) continue;  // Skip self
+            
+            for (size_t i = 0; i < node->input_ports.size(); ++i) {
+                ImVec2 port_pos = node->input_ports[i].GetScreenPos(node->position);
+                float dist = std::sqrt(std::pow(port_pos.x - canvas_mouse.x, 2) + 
+                                      std::pow(port_pos.y - canvas_mouse.y, 2));
+                
+                if (dist < snap_distance) {
+                    // Check if types are compatible
+                    if (CanConnect(connectingFromNode, connectingFromPort, id, i)) {
+                        snap_pos = CanvasToScreen(port_pos);
+                        snapped = true;
+                        
+                        // Visual feedback: draw a highlight circle around the port
+                        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+                        draw_list->AddCircle(snap_pos, 8.0f * zoom, 
+                                            IM_COL32(100, 255, 100, 200), 12, 2.0f);
+                        break;
+                    }
+                }
+            }
+            if (snapped) break;
+        }
+        
+        p2 = snapped ? snap_pos : mouse_pos;
     } else {
         if (connectingFromPort >= from_node->input_ports.size()) return;
-        p1 = ImGui::GetMousePos();
         p2 = from_node->input_ports[connectingFromPort].GetScreenPos(from_node->position);
         p2 = CanvasToScreen(p2);
         type = from_node->input_ports[connectingFromPort].data_type;
+        
+        // Look for nearby output ports to snap to
+        for (auto& [id, node] : nodes) {
+            if (id == connectingFromNode) continue;  // Skip self
+            
+            for (size_t i = 0; i < node->output_ports.size(); ++i) {
+                ImVec2 port_pos = node->output_ports[i].GetScreenPos(node->position);
+                float dist = std::sqrt(std::pow(port_pos.x - canvas_mouse.x, 2) + 
+                                      std::pow(port_pos.y - canvas_mouse.y, 2));
+                
+                if (dist < snap_distance) {
+                    // Check if types are compatible
+                    if (CanConnect(id, i, connectingFromNode, connectingFromPort)) {
+                        snap_pos = CanvasToScreen(port_pos);
+                        snapped = true;
+                        
+                        // Visual feedback: draw a highlight circle around the port
+                        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+                        draw_list->AddCircle(snap_pos, 8.0f * zoom, 
+                                            IM_COL32(100, 255, 100, 200), 12, 2.0f);
+                        break;
+                    }
+                }
+            }
+            if (snapped) break;
+        }
+        
+        p1 = snapped ? snap_pos : mouse_pos;
     }
     
-    DrawBezierCurve(p1, p2, dataTypeToColor(type), 2.0f);
+    // Draw with slightly thicker line during preview for better visibility
+    DrawBezierCurve(p1, p2, dataTypeToColor(type), 3.0f);
 }
 
 void FlowCanvas::DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness)
@@ -405,18 +467,63 @@ void FlowCanvas::HandleNodeInteraction()
     
     // Finish connection
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && isConnecting) {
+        const float snap_distance = 20.0f * zoom;  // Same snap distance as preview
+        bool connected = false;
+        
         for (auto& [id, node] : nodes) {
+            if (id == connectingFromNode) continue;  // Skip self
+            
             if (connectingFromOutput) {
+                // First try exact hit
                 int input_port = node->GetInputPortAt(canvas_mouse);
-                if (input_port >= 0 && id != connectingFromNode) {
+                if (input_port >= 0) {
                     AddConnection(connectingFromNode, connectingFromPort, id, input_port);
+                    connected = true;
+                    break;
+                }
+                
+                // If no exact hit, check snap distance
+                for (size_t i = 0; i < node->input_ports.size(); ++i) {
+                    ImVec2 port_pos = node->input_ports[i].GetScreenPos(node->position);
+                    float dist = std::sqrt(std::pow(port_pos.x - canvas_mouse.x, 2) + 
+                                          std::pow(port_pos.y - canvas_mouse.y, 2));
+                    
+                    if (dist < snap_distance) {
+                        // Check if types are compatible
+                        if (CanConnect(connectingFromNode, connectingFromPort, id, i)) {
+                            AddConnection(connectingFromNode, connectingFromPort, id, i);
+                            connected = true;
+                            break;
+                        }
+                    }
                 }
             } else {
+                // First try exact hit
                 int output_port = node->GetOutputPortAt(canvas_mouse);
-                if (output_port >= 0 && id != connectingFromNode) {
+                if (output_port >= 0) {
                     AddConnection(id, output_port, connectingFromNode, connectingFromPort);
+                    connected = true;
+                    break;
+                }
+                
+                // If no exact hit, check snap distance
+                for (size_t i = 0; i < node->output_ports.size(); ++i) {
+                    ImVec2 port_pos = node->output_ports[i].GetScreenPos(node->position);
+                    float dist = std::sqrt(std::pow(port_pos.x - canvas_mouse.x, 2) + 
+                                          std::pow(port_pos.y - canvas_mouse.y, 2));
+                    
+                    if (dist < snap_distance) {
+                        // Check if types are compatible
+                        if (CanConnect(id, i, connectingFromNode, connectingFromPort)) {
+                            AddConnection(id, i, connectingFromNode, connectingFromPort);
+                            connected = true;
+                            break;
+                        }
+                    }
                 }
             }
+            
+            if (connected) break;
         }
         isConnecting = false;
     }
