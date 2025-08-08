@@ -131,6 +131,7 @@ private:
     void CalculateBezierControlPoints(ImVec2 p1, ImVec2 p2, ConnectionType type, ImVec2& cp1, ImVec2& cp2) const;
     void DrawBezierConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, float rounding, bool invert = false);
     void DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, ConnectionType type);
+    void DrawPolylineSegments(ImDrawList* draw_list, const std::vector<ImVec2>& points, ImU32 color, float thickness);
     
     // Input handling
     void HandleInput();
