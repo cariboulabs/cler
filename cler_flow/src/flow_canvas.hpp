@@ -17,6 +17,28 @@
 
 namespace clerflow {
 
+// Connection routing types inspired by core-nodes
+enum class ConnectionType {
+    // Normal connections (no inversion)
+    NORMAL,           // Standard left to right
+    NORMAL_VERTICAL,  // Nearly vertical
+    
+    // Inverted connections (right to left)
+    INVERTED_SIMPLE,  // Simple S-curve
+    INVERTED_OVER,    // Route over obstacles
+    INVERTED_UNDER,   // Route under obstacles
+    INVERTED_MID,     // Route through middle
+    
+    // Complex routing (needs polyline)
+    COMPLEX_OVER,     // Multi-segment routing over
+    COMPLEX_UNDER,    // Multi-segment routing under
+    COMPLEX_AROUND,   // Route around obstacles
+    
+    // Special cases
+    STRAIGHT,         // Very short, nearly straight
+    SELF_LOOP        // Node connecting to itself
+};
+
 // Connection between nodes
 struct Connection {
     size_t from_node_id;
@@ -28,6 +50,10 @@ struct Connection {
     // Store port names for stability when specs change
     std::string from_port_name;
     std::string to_port_name;
+    
+    // Cached routing information
+    mutable ConnectionType routing_type = ConnectionType::NORMAL;
+    mutable bool routing_cached = false;
 };
 
 class FlowCanvas {
@@ -101,6 +127,10 @@ private:
     void DrawConnection(const Connection& conn);
     void DrawConnectionPreview();
     void DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness = 3.0f);
+    ConnectionType ClassifyConnection(ImVec2 p1, ImVec2 p2) const;
+    void CalculateBezierControlPoints(ImVec2 p1, ImVec2 p2, ConnectionType type, ImVec2& cp1, ImVec2& cp2) const;
+    void DrawBezierConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, float rounding, bool invert = false);
+    void DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, ConnectionType type);
     
     // Input handling
     void HandleInput();

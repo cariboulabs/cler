@@ -184,6 +184,12 @@ void FlowCanvas::DrawConnection(const Connection& conn)
     p1 = CanvasToScreen(p1);
     p2 = CanvasToScreen(p2);
     
+    // Cache the routing type for performance
+    if (!conn.routing_cached) {
+        conn.routing_type = ClassifyConnection(p1, p2);
+        conn.routing_cached = true;
+    }
+    
     DrawBezierCurve(p1, p2, dataTypeToColor(conn.data_type));
 }
 
@@ -216,96 +222,50 @@ void FlowCanvas::DrawConnectionPreview()
 
 void FlowCanvas::DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness)
 {
-    ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    
-    // Sophisticated routing like core-nodes
+    // Calculate core-nodes style parameters
     float dx = p2.x - p1.x;
     float dy = p2.y - p1.y;
     float distance = std::sqrt(dx * dx + dy * dy);
+    float linkDistance = distance / 150.0f;
+    float rounding = 25.0f * linkDistance / zoom;
     
-    // Dynamic handle distance based on connection distance
-    float handle_distance = std::min(200.0f, std::max(50.0f, distance * 0.4f));
+    // Classify connection type
+    ConnectionType type = ClassifyConnection(p1, p2);
     
-    ImVec2 cp1, cp2;
-    
-    if (dx > 20.0f) {
-        // Normal left-to-right connection
-        // Adjust handle based on vertical distance for smoother curves
-        float vertical_factor = std::min(1.0f, std::abs(dy) / 200.0f);
-        float adjusted_handle = handle_distance * (1.0f + vertical_factor * 0.5f);
-        
-        cp1 = ImVec2(p1.x + adjusted_handle, p1.y);
-        cp2 = ImVec2(p2.x - adjusted_handle, p2.y);
-    } else if (dx > -20.0f) {
-        // Nearly vertical connection
-        float offset = 40.0f + std::abs(dy) * 0.2f;
-        if (p1.y < p2.y) {
-            // Downward - curve to the right
-            cp1 = ImVec2(p1.x + offset, p1.y + offset);
-            cp2 = ImVec2(p2.x - offset, p2.y - offset);
-        } else {
-            // Upward - curve to the left  
-            cp1 = ImVec2(p1.x + offset, p1.y - offset);
-            cp2 = ImVec2(p2.x - offset, p2.y + offset);
-        }
-    } else {
-        // Right-to-left (inverted) - sophisticated loop routing
-        float loop_size = std::max(60.0f, std::min(300.0f, (std::abs(dx) + std::abs(dy)) * 0.3f));
-        
-        // Create S-curve for inverted connections
-        if (std::abs(dy) < 50.0f) {
-            // Horizontal S-curve
-            cp1 = ImVec2(p1.x + loop_size, p1.y);
-            cp2 = ImVec2(p2.x - loop_size, p2.y);
-        } else {
-            // Vertical component - create smoother loop
-            float y_offset = dy * 0.25f;
-            cp1 = ImVec2(p1.x + loop_size, p1.y + y_offset);
-            cp2 = ImVec2(p2.x - loop_size, p2.y - y_offset);
-        }
-    }
-    
-    // Draw shadow/outline for better visibility
-    if (thickness > 1.5f) {
-        draw_list->AddBezierCubic(p1, cp1, cp2, p2, 
-                                  IM_COL32(0, 0, 0, 80), (thickness + 2.0f) * zoom);
-    }
-    
-    // Draw main connection line
-    draw_list->AddBezierCubic(p1, cp1, cp2, p2, color, thickness * zoom);
-    
-    // Optional: Add flow direction indicator (small arrow)
-    if (distance > 100.0f && zoom > 0.7f) {
-        // Calculate midpoint on bezier curve
-        float t = 0.5f;
-        ImVec2 mid = ImBezierCubicCalc(p1, cp1, cp2, p2, t);
-        
-        // Calculate tangent at midpoint for arrow direction
-        ImVec2 tangent = ImVec2(
-            3.0f * (1-t)*(1-t) * (cp1.x - p1.x) + 
-            6.0f * (1-t)*t * (cp2.x - cp1.x) + 
-            3.0f * t*t * (p2.x - cp2.x),
-            3.0f * (1-t)*(1-t) * (cp1.y - p1.y) + 
-            6.0f * (1-t)*t * (cp2.y - cp1.y) + 
-            3.0f * t*t * (p2.y - cp2.y)
-        );
-        
-        // Normalize tangent
-        float len = std::sqrt(tangent.x * tangent.x + tangent.y * tangent.y);
-        if (len > 0.01f) {
-            tangent.x /= len;
-            tangent.y /= len;
+    // Route based on type (inspired by core-nodes)
+    switch (type) {
+        case ConnectionType::NORMAL:
+        case ConnectionType::NORMAL_VERTICAL:
+            DrawBezierConnection(p1, p2, color, thickness, rounding);
+            break;
             
-            // Draw small arrow
-            float arrow_size = 6.0f * zoom;
-            ImVec2 arrow_p1 = ImVec2(mid.x - tangent.x * arrow_size - tangent.y * arrow_size * 0.5f,
-                                     mid.y - tangent.y * arrow_size + tangent.x * arrow_size * 0.5f);
-            ImVec2 arrow_p2 = ImVec2(mid.x - tangent.x * arrow_size + tangent.y * arrow_size * 0.5f,
-                                     mid.y - tangent.y * arrow_size - tangent.x * arrow_size * 0.5f);
+        case ConnectionType::INVERTED_SIMPLE:
+            DrawBezierConnection(p1, p2, color, thickness, rounding, true);
+            break;
             
-            draw_list->AddTriangleFilled(mid, arrow_p1, arrow_p2, color);
-        }
+        case ConnectionType::COMPLEX_OVER:
+        case ConnectionType::COMPLEX_UNDER:
+        case ConnectionType::COMPLEX_AROUND:
+            DrawPolylineConnection(p1, p2, color, thickness, type);
+            break;
+            
+        case ConnectionType::INVERTED_OVER:
+        case ConnectionType::INVERTED_UNDER:
+        case ConnectionType::INVERTED_MID:
+            // For now use simple bezier, could be enhanced with polyline
+            DrawBezierConnection(p1, p2, color, thickness, rounding * 2, true);
+            break;
+            
+        case ConnectionType::STRAIGHT:
+            DrawBezierConnection(p1, p2, color, thickness, 0.0f);
+            break;
+            
+        default:
+            DrawBezierConnection(p1, p2, color, thickness, rounding);
+            break;
     }
+    
+    // Arrow indicator removed for now - connection type determines routing
 }
 
 void FlowCanvas::HandleInput()
@@ -470,6 +430,13 @@ void FlowCanvas::HandleNodeInteraction()
             if (node) {
                 node->position.x += delta.x;
                 node->position.y += delta.y;
+                
+                // Invalidate routing cache for all connections involving this node
+                for (auto& conn : connections) {
+                    if (conn.from_node_id == id || conn.to_node_id == id) {
+                        conn.routing_cached = false;
+                    }
+                }
             }
         }
     }
@@ -979,6 +946,225 @@ void FlowCanvas::RepairConnections()
                 }
             }
         }
+        
+        // Clear routing cache when repairing
+        conn.routing_cached = false;
+    }
+}
+
+ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2) const
+{
+    float dx = p2.x - p1.x;
+    float dy = p2.y - p1.y;
+    float distance = std::sqrt(dx * dx + dy * dy);
+    
+    // Very short connection
+    if (distance < 30.0f) {
+        return ConnectionType::STRAIGHT;
+    }
+    
+    // Check for normal left-to-right
+    if (dx > 50.0f) {
+        // Check if mostly vertical
+        if (std::abs(dy) > std::abs(dx) * 2) {
+            return ConnectionType::NORMAL_VERTICAL;
+        }
+        return ConnectionType::NORMAL;
+    }
+    
+    // Nearly vertical but close horizontally
+    if (std::abs(dx) < 30.0f && std::abs(dy) > 50.0f) {
+        return ConnectionType::NORMAL_VERTICAL;
+    }
+    
+    // Inverted connections (right-to-left) - need complex routing
+    if (dx < -30.0f) {
+        float abs_dy = std::abs(dy);
+        
+        // Check if we need complex polyline routing
+        if (dx < -100.0f && abs_dy > 150.0f) {
+            // Significant horizontal and vertical distance - use complex routing
+            if (dy < 0) {
+                return ConnectionType::COMPLEX_OVER;
+            } else {
+                return ConnectionType::COMPLEX_UNDER;
+            }
+        }
+        
+        // Simpler inverted cases
+        if (abs_dy < 50.0f) {
+            return ConnectionType::INVERTED_SIMPLE;  // Horizontal S-curve
+        } else if (dy < -100.0f) {
+            return ConnectionType::INVERTED_OVER;    // Loop over
+        } else if (dy > 100.0f) {
+            return ConnectionType::INVERTED_UNDER;   // Loop under
+        } else {
+            return ConnectionType::INVERTED_MID;     // Medium vertical distance
+        }
+    }
+    
+    // Default to normal
+    return ConnectionType::NORMAL;
+}
+
+void FlowCanvas::CalculateBezierControlPoints(ImVec2 p1, ImVec2 p2, ConnectionType type, 
+                                              ImVec2& cp1, ImVec2& cp2) const
+{
+    float dx = p2.x - p1.x;
+    float dy = p2.y - p1.y;
+    float distance = std::sqrt(dx * dx + dy * dy);
+    
+    // Core-nodes exact formula for handle calculation
+    float link_distance = distance / 150.0f;
+    float rounding = 25.0f * link_distance / zoom;
+    float handle_length = rounding * zoom;
+    
+    // Ensure minimum handle length for very close nodes
+    if (distance < 50.0f) {
+        handle_length = distance * 0.5f;
+    }
+    
+    switch (type) {
+        case ConnectionType::STRAIGHT:
+            // Nearly straight line - minimal handles
+            handle_length = distance * 0.2f;
+            cp1 = ImVec2(p1.x + handle_length, p1.y);
+            cp2 = ImVec2(p2.x - handle_length, p2.y);
+            break;
+            
+        case ConnectionType::NORMAL:
+            // Standard left-to-right with purely horizontal handles (core-nodes style)
+            cp1 = ImVec2(p1.x + handle_length, p1.y);  // Horizontal from start
+            cp2 = ImVec2(p2.x - handle_length, p2.y);  // Horizontal to end
+            break;
+            
+        case ConnectionType::NORMAL_VERTICAL:
+            // Nearly vertical - use outward curves
+            {
+                float h = std::max(handle_length, std::abs(dy) * 0.3f);
+                cp1 = ImVec2(p1.x + h, p1.y);
+                cp2 = ImVec2(p2.x - h, p2.y);
+            }
+            break;
+            
+        case ConnectionType::INVERTED_SIMPLE:
+        case ConnectionType::INVERTED_MID:
+            // Right-to-left - large horizontal loops (core-nodes BINV_LEFT style)
+            {
+                float loop_size = std::max(std::abs(dx) * 0.5f + 50.0f, 100.0f);
+                cp1 = ImVec2(p1.x + loop_size, p1.y);  // Go right from output
+                cp2 = ImVec2(p2.x - loop_size, p2.y);  // Come left to input
+            }
+            break;
+            
+        case ConnectionType::INVERTED_OVER:
+            // Loop goes above
+            {
+                float loop_size = std::max(std::abs(dx) * 0.5f + 60.0f, 120.0f);
+                float y_offset = std::abs(dy) * 0.3f;
+                cp1 = ImVec2(p1.x + loop_size, p1.y - y_offset);
+                cp2 = ImVec2(p2.x - loop_size, p2.y + y_offset);
+            }
+            break;
+            
+        case ConnectionType::INVERTED_UNDER:
+            // Loop goes below
+            {
+                float loop_size = std::max(std::abs(dx) * 0.5f + 60.0f, 120.0f);
+                float y_offset = std::abs(dy) * 0.3f;
+                cp1 = ImVec2(p1.x + loop_size, p1.y + y_offset);
+                cp2 = ImVec2(p2.x - loop_size, p2.y - y_offset);
+            }
+            break;
+            
+        default:
+            // Fallback to normal
+            cp1 = ImVec2(p1.x + handle_length, p1.y);
+            cp2 = ImVec2(p2.x - handle_length, p2.y);
+            break;
+    }
+}
+
+void FlowCanvas::DrawBezierConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, float rounding, bool invert)
+{
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    
+    // Calculate control points like core-nodes
+    float handle_x = rounding * zoom;
+    ImVec2 cp1, cp2;
+    
+    if (invert) {
+        // For inverted connections, extend handles outward more
+        handle_x = std::max(handle_x, 50.0f * zoom);
+        cp1 = ImVec2(p1.x + handle_x, p1.y);
+        cp2 = ImVec2(p2.x - handle_x, p2.y);
+    } else {
+        // Normal connections with horizontal handles
+        cp1 = ImVec2(p1.x + handle_x, p1.y);
+        cp2 = ImVec2(p2.x - handle_x, p2.y);
+    }
+    
+    // Draw shadow for depth
+    if (thickness > 1.5f) {
+        draw_list->AddBezierCubic(p1, cp1, cp2, p2, 
+                                  IM_COL32(0, 0, 0, 80), (thickness + 2.0f) * zoom);
+    }
+    
+    // Draw main curve
+    draw_list->AddBezierCubic(p1, cp1, cp2, p2, color, thickness * zoom);
+}
+
+void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, ConnectionType type)
+{
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    
+    // Simplified polyline routing (full implementation would need more points)
+    // This demonstrates the concept - core-nodes uses 14 points and 9 bezier segments
+    
+    float margin = 30.0f * zoom;
+    
+    // Build waypoints for routing
+    std::vector<ImVec2> points;
+    points.push_back(p1);
+    
+    if (type == ConnectionType::COMPLEX_OVER) {
+        // Route over: go right, up, across, down, left
+        float x_mid = std::max(p1.x, p2.x) + margin * 2;
+        float y_top = std::min(p1.y, p2.y) - margin * 2;
+        
+        points.push_back(ImVec2(p1.x + margin, p1.y));
+        points.push_back(ImVec2(x_mid, p1.y));
+        points.push_back(ImVec2(x_mid, y_top));
+        points.push_back(ImVec2(p2.x - margin, y_top));
+        points.push_back(ImVec2(p2.x - margin, p2.y));
+    } else if (type == ConnectionType::COMPLEX_UNDER) {
+        // Route under: go right, down, across, up, left
+        float x_mid = std::max(p1.x, p2.x) + margin * 2;
+        float y_bottom = std::max(p1.y, p2.y) + margin * 2;
+        
+        points.push_back(ImVec2(p1.x + margin, p1.y));
+        points.push_back(ImVec2(x_mid, p1.y));
+        points.push_back(ImVec2(x_mid, y_bottom));
+        points.push_back(ImVec2(p2.x - margin, y_bottom));
+        points.push_back(ImVec2(p2.x - margin, p2.y));
+    } else {
+        // Simple 3-point routing
+        float x_mid = (p1.x + p2.x) * 0.5f;
+        points.push_back(ImVec2(x_mid, p1.y));
+        points.push_back(ImVec2(x_mid, p2.y));
+    }
+    
+    points.push_back(p2);
+    
+    // Draw polyline segments
+    if (points.size() >= 2) {
+        // Shadow
+        if (thickness > 1.5f) {
+            draw_list->AddPolyline(points.data(), points.size(), 
+                                  IM_COL32(0, 0, 0, 80), false, (thickness + 2.0f) * zoom);
+        }
+        // Main line
+        draw_list->AddPolyline(points.data(), points.size(), color, false, thickness * zoom);
     }
 }
 
