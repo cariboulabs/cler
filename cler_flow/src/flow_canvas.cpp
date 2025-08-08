@@ -186,7 +186,7 @@ void FlowCanvas::DrawConnection(const Connection& conn)
     
     // Cache the routing type for performance
     if (!conn.routing_cached) {
-        conn.routing_type = ClassifyConnection(p1, p2);
+        conn.routing_type = ClassifyConnection(p1, p2, from_node, to_node);
         conn.routing_cached = true;
     }
     
@@ -1075,7 +1075,9 @@ void FlowCanvas::RepairConnections()
     }
 }
 
-ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2) const
+ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2, 
+                                              const VisualNode* from_node, 
+                                              const VisualNode* to_node) const
 {
     float dx = p2.x - p1.x;
     float dy = p2.y - p1.y;
@@ -1086,6 +1088,28 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2) const
     const float yMargin = 30.0f * zoom;      // Vertical clearance needed
     const float nodeMargin = 24.0f * zoom;   // Space between nodes
     const float overlapThreshold = 50.0f * zoom;  // Horizontal overlap detection
+    
+    // If we have node information, use their bounds for better detection
+    bool nodes_overlap_horizontally = false;
+    bool clear_vertical_space_above = false;
+    bool clear_vertical_space_below = false;
+    
+    if (from_node && to_node) {
+        // Convert to screen space for comparison
+        ImVec2 from_min = CanvasToScreen(from_node->position);
+        ImVec2 from_max = CanvasToScreen(ImVec2(from_node->position.x + from_node->size.x, 
+                                                 from_node->position.y + from_node->size.y));
+        ImVec2 to_min = CanvasToScreen(to_node->position);
+        ImVec2 to_max = CanvasToScreen(ImVec2(to_node->position.x + to_node->size.x, 
+                                              to_node->position.y + to_node->size.y));
+        
+        // Check horizontal overlap: does 'to' node start before 'from' node ends?
+        nodes_overlap_horizontally = (to_min.x < from_max.x);
+        
+        // Check vertical clearance
+        clear_vertical_space_above = (from_max.y + nodeMargin < to_min.y);
+        clear_vertical_space_below = (from_min.y > to_max.y + nodeMargin);
+    }
     
     // Very short connection - minimal curve
     if (distance < 30.0f * zoom) {
@@ -1102,8 +1126,21 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2) const
         return ConnectionType::NORMAL_VERTICAL;
     }
     
-    // NINV_LEFT cases: Forward but overlapping horizontally
-    if (dx > 0 && dx < overlapThreshold) {
+    // NINV_LEFT cases: Check if nodes overlap horizontally
+    // Use node bounds if available, otherwise fall back to port-based detection
+    if (from_node && to_node && nodes_overlap_horizontally && dx > 0) {
+        // Nodes overlap horizontally - check vertical clearance
+        if (clear_vertical_space_above) {
+            return ConnectionType::COMPLEX_OVER;   // NINV_LEFT_OVER
+        } else if (clear_vertical_space_below) {
+            return ConnectionType::COMPLEX_UNDER;  // NINV_LEFT_UNDER
+        } else {
+            // Not enough vertical clearance - need mid routing
+            return ConnectionType::COMPLEX_AROUND;     // NINV_LEFT_MID
+        }
+    }
+    // Fall back to port-based detection if no node info
+    else if (dx > 0 && dx < overlapThreshold) {
         // Check vertical separation
         if (abs_dy > yMargin + nodeMargin) {
             // Enough vertical clearance - route over or under
@@ -1271,9 +1308,9 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
 {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     
-    // Core-nodes exact approach: waypoints connected with quadratic beziers
-    float dHandle = 15.0f * zoom;
-    float xMargin = dHandle * 2;
+    // Reduced margins for tighter routing closer to nodes
+    float dHandle = 10.0f * zoom;  // Was 15.0f - radius of rounded corners
+    float xMargin = dHandle * 1.5f;  // Was dHandle * 2 - distance from node to first elbow
     
     float dx = p2.x - p1.x;
     float dy = p2.y - p1.y;
@@ -1282,15 +1319,15 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
     std::vector<ImVec2> points;
     points.reserve(14);  // Core-nodes uses 14 points
     
-    // Calculate x coordinates
+    // Calculate x coordinates - closer to nodes
     float x1 = p1.x + xMargin;
     float x2 = x1 + dHandle;
     float x3 = p2.x - xMargin;
     float x4 = x3 - dHandle;
     
-    // For backward connections, extend further out
+    // For backward connections, extend but not as much
     if (dx < 0) {
-        float extend = std::max(xMargin * 2, std::abs(dx) * 0.4f + xMargin);
+        float extend = std::max(xMargin * 1.5f, std::abs(dx) * 0.3f + xMargin);  // Was * 2 and * 0.4f
         x1 = p1.x + extend;
         x2 = x1 + dHandle;
         x4 = p2.x - extend - dHandle;
@@ -1313,6 +1350,13 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
         if (std::abs(dy) < xMargin * 2) {
             yM = std::max(p1.y, p2.y) + xMargin;
         }
+    } else if (type == ConnectionType::COMPLEX_AROUND) {
+        // NINV_LEFT_MID case - route around/below when nodes overlap
+        // Always route below for consistency (like core-nodes NINV_LEFT_MID)
+        yHandle = dHandle;  // Positive to go down
+        // Push the horizontal segment well below both nodes
+        float node_bottom = std::max(p1.y, p2.y);
+        yM = node_bottom + xMargin * 2;  // Go well below to avoid overlap
     } else if (p1.y > p2.y) {
         // Input below output - adjust handles
         yHandle = -dHandle;

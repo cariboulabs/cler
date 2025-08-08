@@ -127,7 +127,9 @@ private:
     void DrawConnection(const Connection& conn);
     void DrawConnectionPreview();
     void DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness = 4.0f);  // Increased from 3.0f
-    ConnectionType ClassifyConnection(ImVec2 p1, ImVec2 p2) const;
+    ConnectionType ClassifyConnection(ImVec2 p1, ImVec2 p2, 
+                                      const VisualNode* from_node = nullptr, 
+                                      const VisualNode* to_node = nullptr) const;
     void CalculateBezierControlPoints(ImVec2 p1, ImVec2 p2, ConnectionType type, ImVec2& cp1, ImVec2& cp2) const;
     void DrawBezierConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, float rounding, bool invert = false);
     void DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, ConnectionType type);
