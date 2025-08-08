@@ -191,7 +191,7 @@ void FlowCanvas::DrawConnection(const Connection& conn)
         conn.routing_cached = true;
     }
     
-    DrawBezierCurve(p1, p2, dataTypeToColor(conn.data_type));
+    DrawBezierCurve(p1, p2, dataTypeToColor(conn.data_type), 4.0f, from_node, to_node);
 }
 
 void FlowCanvas::DrawConnectionPreview()
@@ -283,7 +283,8 @@ void FlowCanvas::DrawConnectionPreview()
     DrawBezierCurve(p1, p2, dataTypeToColor(type), 3.0f);
 }
 
-void FlowCanvas::DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness)
+void FlowCanvas::DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness,
+                                 const VisualNode* from_node, const VisualNode* to_node)
 {
     // Calculate core-nodes style parameters
     float dx = p2.x - p1.x;
@@ -294,7 +295,7 @@ void FlowCanvas::DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickn
     float rounding = 40.0f * linkDistance / zoom;  // Was 25.0f, now 40.0f for more pronounced curves
     
     // Classify connection type
-    ConnectionType type = ClassifyConnection(p1, p2);
+    ConnectionType type = ClassifyConnection(p1, p2, from_node, to_node);
     
     // Route based on type (matching core-nodes decision tree)
     switch (type) {
@@ -323,7 +324,7 @@ void FlowCanvas::DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickn
         case ConnectionType::COMPLEX_UNDER:
         case ConnectionType::COMPLEX_AROUND:
             // Use polyline for routing around obstacles
-            DrawPolylineConnection(p1, p2, color, thickness, type);
+            DrawPolylineConnection(p1, p2, color, thickness, type, from_node, to_node);
             break;
             
         case ConnectionType::INVERTED_OVER:
@@ -331,7 +332,7 @@ void FlowCanvas::DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickn
             // These map to polyline routing
             DrawPolylineConnection(p1, p2, color, thickness, 
                                  type == ConnectionType::INVERTED_OVER ? ConnectionType::COMPLEX_OVER :
-                                 ConnectionType::COMPLEX_UNDER);
+                                 ConnectionType::COMPLEX_UNDER, from_node, to_node);
             break;
             
         case ConnectionType::STRAIGHT:
@@ -1354,7 +1355,8 @@ void FlowCanvas::DrawBezierConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float t
     draw_list->AddBezierCubic(p1, cp1, cp2, p2, color, thickness * zoom);
 }
 
-void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, ConnectionType type)
+void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, ConnectionType type,
+                                        const VisualNode* from_node, const VisualNode* to_node)
 {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     
@@ -1403,17 +1405,40 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
         yHandle = -dHandle;  // Negative to go up
         // For backward connections, always route AROUND (above both blocks)
         if (dx < 0 || std::abs(dy) < xMargin * 2) {
-            // Get the top of the higher block and go above it
-            yM = std::min(p1.y, p2.y) - xMargin * 2;
+            // Use actual node bounds if available
+            float topOfBlocks;
+            if (from_node && to_node) {
+                // Convert to screen space and get actual top of blocks
+                ImVec2 from_top = CanvasToScreen(from_node->position);
+                ImVec2 to_top = CanvasToScreen(to_node->position);
+                topOfBlocks = std::min(from_top.y, to_top.y);
+            } else {
+                // Fallback: estimate based on port positions
+                float blockHalfHeight = 30.0f * zoom;
+                topOfBlocks = std::min(p1.y - blockHalfHeight, p2.y - blockHalfHeight);
+            }
+            yM = topOfBlocks - xMargin * 2;  // Route above the blocks
         }
     } else if (type == ConnectionType::COMPLEX_UNDER) {
         // Route below - handles go downward
         yHandle = dHandle;  // Positive to go down
         // For backward connections, always route AROUND (below both blocks)
         if (dx < 0 || std::abs(dy) < xMargin * 2) {
-            // Get the bottom of the lower block and go below it
-            // Assuming standard node height, route well below
-            yM = std::max(p1.y, p2.y) + xMargin * 6;  // Further below for clean routing around blocks
+            // Use actual node bounds if available
+            float bottomOfBlocks;
+            if (from_node && to_node) {
+                // Convert to screen space and get actual bottom of blocks
+                ImVec2 from_bottom = CanvasToScreen(ImVec2(from_node->position.x, 
+                                                           from_node->position.y + from_node->size.y));
+                ImVec2 to_bottom = CanvasToScreen(ImVec2(to_node->position.x, 
+                                                         to_node->position.y + to_node->size.y));
+                bottomOfBlocks = std::max(from_bottom.y, to_bottom.y);
+            } else {
+                // Fallback: estimate based on port positions
+                float blockHalfHeight = 30.0f * zoom;
+                bottomOfBlocks = std::max(p1.y + blockHalfHeight, p2.y + blockHalfHeight);
+            }
+            yM = bottomOfBlocks + xMargin * 2;  // Route below the blocks, close but clear
         }
     } else if (type == ConnectionType::COMPLEX_AROUND) {
         // NINV_LEFT_MID case - route around/below when nodes overlap
@@ -1444,13 +1469,19 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
     points.push_back(ImVec2(x4, yM));                  // 8 - middle right
     points.push_back(ImVec2(x4, yLeaveRight));         // 9 - leave middle
     
-    // Point 10: Approach to destination port - symmetrical with point 3
-    // Just as point 3 is p1.y + yHandle, point 10 should be p2.y - yHandle
-    // This creates symmetrical fillets at both ends
-    float yApproachDest = p2.y - yHandle;
-    // For COMPLEX_OVER: yHandle = -dHandle, so p2.y - (-dHandle) = p2.y + dHandle
-    // For COMPLEX_UNDER: yHandle = +dHandle, so p2.y - (+dHandle) = p2.y - dHandle  
-    // This creates proper concave fillets by keeping the approach close to the port
+    // Point 10: Approach to destination port
+    // For backward connections routing around blocks, we need to approach correctly
+    float yApproachDest;
+    if (dx < 0 && type == ConnectionType::COMPLEX_UNDER) {
+        // Backward routing below - approach from below to avoid bad fillet
+        yApproachDest = p2.y + std::abs(yHandle);
+    } else if (dx < 0 && type == ConnectionType::COMPLEX_OVER) {
+        // Backward routing above - approach from above
+        yApproachDest = p2.y - std::abs(yHandle);
+    } else {
+        // Forward connections - symmetrical with point 3
+        yApproachDest = p2.y - yHandle;
+    }
     
     points.push_back(ImVec2(x4, yApproachDest));       // 10 - approach destination
     points.push_back(ImVec2(x4, p2.y));                // 11
@@ -1485,7 +1516,9 @@ void FlowCanvas::DrawPolylineSegments(ImDrawList* draw_list, const std::vector<I
         draw_list->AddBezierQuadratic(points[6], midpoint(points[6], points[7]), points[7], shadow_col, shadow_thick);
         draw_list->AddBezierQuadratic(points[7], ImVec2(points[8].x, points[7].y), points[9], shadow_col, shadow_thick);
         draw_list->AddBezierQuadratic(points[9], midpoint(points[9], points[10]), points[10], shadow_col, shadow_thick);
-        draw_list->AddBezierQuadratic(points[10], ImVec2(points[10].x, points[11].y), points[12], shadow_col, shadow_thick);
+        // Fixed: Draw from point[10] to point[12] with proper corner at point[11]
+        // The corner control point should be at point[11] position
+        draw_list->AddBezierQuadratic(points[10], points[11], points[12], shadow_col, shadow_thick);
         draw_list->AddBezierQuadratic(points[12], midpoint(points[12], points[13]), points[13], shadow_col, shadow_thick);
     }
     
@@ -1500,8 +1533,9 @@ void FlowCanvas::DrawPolylineSegments(ImDrawList* draw_list, const std::vector<I
     // Bottom-right corner: from horizontal to vertical, control at corner
     draw_list->AddBezierQuadratic(points[7], ImVec2(points[8].x, points[7].y), points[9], color, thickness);
     draw_list->AddBezierQuadratic(points[9], midpoint(points[9], points[10]), points[10], color, thickness);
-    // Top-right corner: from vertical to horizontal, control at corner
-    draw_list->AddBezierQuadratic(points[10], ImVec2(points[10].x, points[11].y), points[12], color, thickness);
+    // Fixed: Draw from point[10] to point[12] with proper corner at point[11]
+    // The corner control point should be at point[11] position
+    draw_list->AddBezierQuadratic(points[10], points[11], points[12], color, thickness);
     draw_list->AddBezierQuadratic(points[12], midpoint(points[12], points[13]), points[13], color, thickness);
 }
 
