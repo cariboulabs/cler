@@ -4,8 +4,9 @@
 *                                                                                         *
 ******************************************************************************************/
 
+#define IMGUI_DEFINE_MATH_OPERATORS
 #include "flow_canvas.hpp"
-#include <imgui_internal.h>  // For ImBezierCubicCalc
+#include <imgui_internal.h>  // For ImBezierCubicCalc and ImRect
 #include <algorithm>
 #include <sstream>
 #include <cmath>
@@ -887,6 +888,14 @@ void FlowCanvas::AddConnection(size_t from_node, size_t from_port,
 {
     if (!CanConnect(from_node, from_port, to_node, to_port)) return;
     
+    // Check for duplicate
+    for (const auto& conn : connections) {
+        if (conn.from_node_id == from_node && conn.from_port_index == from_port &&
+            conn.to_node_id == to_node && conn.to_port_index == to_port) {
+            return; // Already exists
+        }
+    }
+    
     // Remove existing connection to input port (CLER inputs are single-connection)
     connections.erase(
         std::remove_if(connections.begin(), connections.end(),
@@ -917,6 +926,19 @@ void FlowCanvas::AddConnection(size_t from_node, size_t from_port,
     }
     
     connections.push_back(conn);
+}
+
+void FlowCanvas::RemoveConnection(size_t from_node, size_t from_port,
+                                 size_t to_node, size_t to_port)
+{
+    connections.erase(
+        std::remove_if(connections.begin(), connections.end(),
+            [=](const Connection& c) {
+                return c.from_node_id == from_node && c.from_port_index == from_port &&
+                       c.to_node_id == to_node && c.to_port_index == to_port;
+            }),
+        connections.end()
+    );
 }
 
 void FlowCanvas::SelectNode(size_t node_id, bool add_to_selection)
@@ -1086,8 +1108,8 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
     
     // Core-nodes style thresholds (scaled by zoom)
     const float yMargin = 30.0f * zoom;      // Vertical clearance needed
-    const float nodeMargin = 24.0f * zoom;   // Space between nodes
-    const float overlapThreshold = 50.0f * zoom;  // Horizontal overlap detection
+    const float nodeMargin = 20.0f * zoom;   // Space between nodes (reduced for tighter routing)
+    const float overlapThreshold = 40.0f * zoom;  // Horizontal overlap detection (reduced for earlier polyline)
     
     // If we have node information, use their bounds for better detection
     bool nodes_overlap_horizontally = false;
@@ -1289,9 +1311,10 @@ void FlowCanvas::DrawBezierConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float t
     ImVec2 cp2 = ImVec2(p2.x - handle_x, p2.y);  // Horizontal to p2
     
     if (invert) {
-        // For inverted, handles go outward
-        cp1 = ImVec2(p1.x + handle_x, p1.y);
-        cp2 = ImVec2(p2.x - handle_x, p2.y);
+        // For inverted, handles go outward more to create nice S-curve
+        float loop_size = std::max(handle_x * 2.0f, 80.0f * zoom);
+        cp1 = ImVec2(p1.x + loop_size, p1.y);
+        cp2 = ImVec2(p2.x - loop_size, p2.y);
     }
     
     // Draw shadow for depth (optional)
@@ -1309,8 +1332,8 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     
     // Reduced margins for tighter routing closer to nodes
-    float dHandle = 10.0f * zoom;  // Was 15.0f - radius of rounded corners
-    float xMargin = dHandle * 1.5f;  // Was dHandle * 2 - distance from node to first elbow
+    float dHandle = 10.0f * zoom;  // Radius of rounded corners
+    float xMargin = dHandle * 0.8f;  // Even tighter - distance from node to first elbow
     
     float dx = p2.x - p1.x;
     float dy = p2.y - p1.y;
@@ -1357,22 +1380,26 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
         // Push the horizontal segment well below both nodes
         float node_bottom = std::max(p1.y, p2.y);
         yM = node_bottom + xMargin * 2;  // Go well below to avoid overlap
-    } else if (p1.y > p2.y) {
-        // Input below output - adjust handles
-        yHandle = -dHandle;
     }
+    // REMOVED the else if (p1.y > p2.y) case - this was causing reverse elbows!
+    // The handle direction should be determined by the routing type (OVER/UNDER/AROUND),
+    // not by the relative Y positions of the ports
     
     // Build core-nodes style point sequence with correct handle directions
+    // The key insight: we need to approach yM from the correct direction
+    float yApproachLeft = (p1.y < yM) ? (yM - dHandle) : (yM + dHandle);   // Where to approach middle from left
+    float yLeaveRight = (p2.y < yM) ? (yM - dHandle) : (yM + dHandle);     // Where to leave middle to right
+    
     points.push_back(p1);                               // 0
     points.push_back(ImVec2(x1, p1.y));                // 1
     points.push_back(ImVec2(x2, p1.y));                // 2  
     points.push_back(ImVec2(x2, p1.y + yHandle));      // 3 - handle from input
-    points.push_back(ImVec2(x2, yM - yHandle));        // 4 - approach middle
+    points.push_back(ImVec2(x2, yApproachLeft));       // 4 - approach middle correctly
     points.push_back(ImVec2(x2, yM));                  // 5 - middle left
     points.push_back(ImVec2(x1, yM));                  // 6
     points.push_back(ImVec2(x3, yM));                  // 7
     points.push_back(ImVec2(x4, yM));                  // 8 - middle right
-    points.push_back(ImVec2(x4, yM + yHandle));        // 9 - leave middle
+    points.push_back(ImVec2(x4, yLeaveRight));         // 9 - leave middle correctly
     points.push_back(ImVec2(x4, p2.y - yHandle));      // 10 - approach output
     points.push_back(ImVec2(x4, p2.y));                // 11
     points.push_back(ImVec2(x3, p2.y));                // 12
