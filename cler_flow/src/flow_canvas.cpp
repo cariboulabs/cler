@@ -1106,10 +1106,21 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
     float distance = std::sqrt(dx * dx + dy * dy);
     float abs_dy = std::abs(dy);
     
-    // Core-nodes style thresholds (scaled by zoom)
-    const float yMargin = 30.0f * zoom;      // Vertical clearance needed
-    const float nodeMargin = 20.0f * zoom;   // Space between nodes (reduced for tighter routing)
-    const float overlapThreshold = 40.0f * zoom;  // Horizontal overlap detection (reduced for earlier polyline)
+    // Connection classification constants
+    constexpr float BASE_FILLET_RADIUS = 10.0f;
+    constexpr float BASE_Y_MARGIN = 30.0f;
+    constexpr float BASE_NODE_MARGIN = 20.0f;
+    constexpr float BASE_OVERLAP_THRESHOLD = 40.0f;
+    constexpr float BASE_SHORT_DISTANCE = 30.0f;
+    constexpr float FILLET_CLEARANCE_FACTOR = 4.0f;  // How many fillet radii of clearance we need
+    constexpr float VERTICAL_ALIGN_FACTOR = 2.0f;    // Factor for horizontal alignment detection
+    constexpr float VERTICAL_SEPARATION_FACTOR = 3.0f; // Factor for vertical separation detection
+    constexpr float HANDLE_LENGTH_FACTOR = 0.7f;     // For normal connection angle detection
+    
+    // Scale thresholds by zoom
+    const float yMargin = BASE_Y_MARGIN * zoom;      // Vertical clearance needed
+    const float nodeMargin = BASE_NODE_MARGIN * zoom;   // Space between nodes
+    const float overlapThreshold = BASE_OVERLAP_THRESHOLD * zoom;  // Horizontal overlap detection
     
     // If we have node information, use their bounds for better detection
     bool nodes_overlap_horizontally = false;
@@ -1134,14 +1145,14 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
     }
     
     // Very short connection - minimal curve
-    if (distance < 30.0f * zoom) {
+    if (distance < BASE_SHORT_DISTANCE * zoom) {
         return ConnectionType::STRAIGHT;
     }
     
     // NINV_RIGHT equivalent: Clean left-to-right, no overlap
     if (dx >= overlapThreshold) {
         // Nodes are clearly separated horizontally
-        if (abs_dy < dx * 0.7f) {  // Not too vertical
+        if (abs_dy < dx * HANDLE_LENGTH_FACTOR) {  // Not too vertical
             return ConnectionType::NORMAL;  // Use bezier
         }
         // Vertical but forward - still use bezier with adjusted handles
@@ -1149,6 +1160,14 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
     }
     
     // NINV_LEFT cases: Check if nodes overlap horizontally
+    // But first check if horizontal distance is too small for polyline fillets
+    const float filletRadius = BASE_FILLET_RADIUS * zoom;
+    if (dx > 0 && dx < filletRadius * FILLET_CLEARANCE_FACTOR) {
+        // Not enough horizontal room for clean polyline fillets
+        // Use smooth bezier curve instead for better appearance
+        return ConnectionType::NORMAL_VERTICAL;
+    }
+    
     // Use node bounds if available, otherwise fall back to port-based detection
     if (from_node && to_node && nodes_overlap_horizontally && dx > 0) {
         // Nodes overlap horizontally - check vertical clearance
@@ -1181,14 +1200,14 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
     if (dx < 0) {
         // Check if nodes are roughly horizontally aligned
         // Use more generous threshold for horizontal alignment (2x yMargin)
-        if (abs_dy < yMargin * 2.0f) {
+        if (abs_dy < yMargin * VERTICAL_ALIGN_FACTOR) {
             // Horizontally aligned backward connection
             // Use simple inverted bezier instead of complex routing
             return ConnectionType::INVERTED_SIMPLE;  // Use bezier with inversion
         }
         
         // BINV_RIGHT cases: Backward with significant vertical separation
-        if (abs_dy > yMargin * 3.0f) {
+        if (abs_dy > yMargin * VERTICAL_SEPARATION_FACTOR) {
             // Clear vertical clearance - use complex routing
             if (dy < 0) {
                 return ConnectionType::COMPLEX_OVER;   // BINV_RIGHT_OVER
@@ -1201,21 +1220,21 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
         }
     }
     
-    // Nearly vertical connections
-    if (std::abs(dx) < 20.0f * zoom) {
+    // Nearly vertical connections - increased threshold for better fillet handling
+    const float dHandle = BASE_FILLET_RADIUS * zoom;
+    const float verticalThreshold = dHandle * FILLET_CLEARANCE_FACTOR;  // Generous threshold
+    
+    if (std::abs(dx) < verticalThreshold) {
         if (abs_dy < yMargin) {
             // Very short vertical - straight line
             return ConnectionType::STRAIGHT;
-        } else if (abs_dy < yMargin * 3) {
-            // Medium vertical - use bezier
+        } else if (abs_dy < yMargin * VERTICAL_SEPARATION_FACTOR) {
+            // Medium vertical - always use bezier for clean curves
             return ConnectionType::NORMAL_VERTICAL;
         } else {
-            // Long vertical - use polyline for cleaner look
-            if (dy < 0) {
-                return ConnectionType::COMPLEX_OVER;
-            } else {
-                return ConnectionType::COMPLEX_UNDER;
-            }
+            // Long vertical - still use bezier to avoid fillet issues
+            // Only use polyline if dx is larger than this threshold
+            return ConnectionType::NORMAL_VERTICAL;
         }
     }
     
@@ -1331,9 +1350,14 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
 {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     
-    // Reduced margins for tighter routing closer to nodes
-    float dHandle = 10.0f * zoom;  // Radius of rounded corners
-    float xMargin = dHandle * 0.8f;  // Even tighter - distance from node to first elbow
+    // Polyline drawing constants
+    constexpr float BASE_FILLET_RADIUS = 10.0f;
+    constexpr float MARGIN_FACTOR = 0.8f;  // Distance from node to first elbow as factor of fillet radius
+    constexpr float EXTEND_FACTOR = 1.5f;  // Extension factor for backward connections
+    constexpr float BACKWARD_EXTEND_FACTOR = 0.3f;  // Additional extension based on dx for backward
+    
+    const float dHandle = BASE_FILLET_RADIUS * zoom;  // Radius of rounded corners
+    const float xMargin = dHandle * MARGIN_FACTOR;  // Distance from node to first elbow
     
     float dx = p2.x - p1.x;
     float dy = p2.y - p1.y;
@@ -1350,7 +1374,7 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
     
     // For backward connections, extend but not as much
     if (dx < 0) {
-        float extend = std::max(xMargin * 1.5f, std::abs(dx) * 0.3f + xMargin);  // Was * 2 and * 0.4f
+        float extend = std::max(xMargin * EXTEND_FACTOR, std::abs(dx) * BACKWARD_EXTEND_FACTOR + xMargin);
         x1 = p1.x + extend;
         x2 = x1 + dHandle;
         x4 = p2.x - extend - dHandle;
@@ -1390,17 +1414,27 @@ void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float
     float yApproachLeft = (p1.y < yM) ? (yM - dHandle) : (yM + dHandle);   // Where to approach middle from left
     float yLeaveRight = (p2.y < yM) ? (yM - dHandle) : (yM + dHandle);     // Where to leave middle to right
     
+    // Build the polyline points
     points.push_back(p1);                               // 0
     points.push_back(ImVec2(x1, p1.y));                // 1
     points.push_back(ImVec2(x2, p1.y));                // 2  
-    points.push_back(ImVec2(x2, p1.y + yHandle));      // 3 - handle from input
-    points.push_back(ImVec2(x2, yApproachLeft));       // 4 - approach middle correctly
+    points.push_back(ImVec2(x2, p1.y + yHandle));      // 3 - depart from output
+    points.push_back(ImVec2(x2, yApproachLeft));       // 4 - approach middle
     points.push_back(ImVec2(x2, yM));                  // 5 - middle left
     points.push_back(ImVec2(x1, yM));                  // 6
     points.push_back(ImVec2(x3, yM));                  // 7
     points.push_back(ImVec2(x4, yM));                  // 8 - middle right
-    points.push_back(ImVec2(x4, yLeaveRight));         // 9 - leave middle correctly
-    points.push_back(ImVec2(x4, p2.y - yHandle));      // 10 - approach output
+    points.push_back(ImVec2(x4, yLeaveRight));         // 9 - leave middle
+    
+    // Point 10: Approach to destination port - symmetrical with point 3
+    // Just as point 3 is p1.y + yHandle, point 10 should be p2.y - yHandle
+    // This creates symmetrical fillets at both ends
+    float yApproachDest = p2.y - yHandle;
+    // For COMPLEX_OVER: yHandle = -dHandle, so p2.y - (-dHandle) = p2.y + dHandle
+    // For COMPLEX_UNDER: yHandle = +dHandle, so p2.y - (+dHandle) = p2.y - dHandle  
+    // This creates proper concave fillets by keeping the approach close to the port
+    
+    points.push_back(ImVec2(x4, yApproachDest));       // 10 - approach destination
     points.push_back(ImVec2(x4, p2.y));                // 11
     points.push_back(ImVec2(x3, p2.y));                // 12
     points.push_back(p2);                               // 13
