@@ -1150,52 +1150,17 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
         return ConnectionType::STRAIGHT;
     }
     
-    // NINV_RIGHT equivalent: Clean left-to-right, no overlap
-    if (dx >= overlapThreshold) {
-        // Nodes are clearly separated horizontally
-        if (abs_dy < dx * HANDLE_LENGTH_FACTOR) {  // Not too vertical
-            return ConnectionType::NORMAL;  // Use bezier
+    // Forward connections (output on left, input on right)
+    // ALWAYS use bezier curves for forward connections
+    if (dx > 0) {
+        // Check if nearly vertical
+        if (abs_dy > yMargin * 2.0f && dx < overlapThreshold) {
+            return ConnectionType::NORMAL_VERTICAL;
         }
-        // Vertical but forward - still use bezier with adjusted handles
-        return ConnectionType::NORMAL_VERTICAL;
+        // Standard forward connection - use bezier
+        return ConnectionType::NORMAL;
     }
     
-    // NINV_LEFT cases: Check if nodes overlap horizontally
-    // But first check if horizontal distance is too small for polyline fillets
-    const float filletRadius = BASE_FILLET_RADIUS * zoom;
-    if (dx > 0 && dx < filletRadius * FILLET_CLEARANCE_FACTOR) {
-        // Not enough horizontal room for clean polyline fillets
-        // Use smooth bezier curve instead for better appearance
-        return ConnectionType::NORMAL_VERTICAL;
-    }
-    
-    // Use node bounds if available, otherwise fall back to port-based detection
-    if (from_node && to_node && nodes_overlap_horizontally && dx > 0) {
-        // Nodes overlap horizontally - check vertical clearance
-        if (clear_vertical_space_above) {
-            return ConnectionType::COMPLEX_OVER;   // NINV_LEFT_OVER
-        } else if (clear_vertical_space_below) {
-            return ConnectionType::COMPLEX_UNDER;  // NINV_LEFT_UNDER
-        } else {
-            // Not enough vertical clearance - need mid routing
-            return ConnectionType::COMPLEX_AROUND;     // NINV_LEFT_MID
-        }
-    }
-    // Fall back to port-based detection if no node info
-    else if (dx > 0 && dx < overlapThreshold) {
-        // Check vertical separation
-        if (abs_dy > yMargin + nodeMargin) {
-            // Enough vertical clearance - route over or under
-            if (dy < 0) {
-                return ConnectionType::COMPLEX_OVER;   // NINV_LEFT_OVER
-            } else {
-                return ConnectionType::COMPLEX_UNDER;  // NINV_LEFT_UNDER
-            }
-        } else {
-            // Not enough vertical clearance - need mid routing
-            return ConnectionType::COMPLEX_AROUND;     // NINV_LEFT_MID
-        }
-    }
     
     // Backward connections (inverted)
     if (dx < 0) {
@@ -1219,13 +1184,18 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2,
         if (abs_dy > yMargin * VERTICAL_SEPARATION_FACTOR) {
             // Clear vertical clearance - use complex routing
             if (dy < 0) {
-                return ConnectionType::COMPLEX_OVER;   // BINV_RIGHT_OVER
+                return ConnectionType::INVERTED_OVER;   // BINV_RIGHT_OVER
             } else {
-                return ConnectionType::COMPLEX_UNDER;  // BINV_RIGHT_UNDER
+                return ConnectionType::INVERTED_UNDER;  // BINV_RIGHT_UNDER
             }
         } else {
-            // Medium vertical distance - use bezier with medium inversion
-            return ConnectionType::INVERTED_MID;       // Use bezier with medium inversion
+            // Medium vertical distance - still use polyline for all backward connections
+            // Choose direction based on dy
+            if (dy < 0) {
+                return ConnectionType::INVERTED_OVER;
+            } else {
+                return ConnectionType::INVERTED_UNDER;
+            }
         }
     }
     
