@@ -158,7 +158,7 @@ void FlowCanvas::DrawNodes()
 
 void FlowCanvas::DrawConnections()
 {
-    for (auto& conn : connections) {
+    for (const auto& conn : connections) {
         DrawConnection(conn);
     }
     
@@ -168,7 +168,7 @@ void FlowCanvas::DrawConnections()
     }
 }
 
-void FlowCanvas::DrawConnection(Connection& conn)
+void FlowCanvas::DrawConnection(const Connection& conn)
 {
     auto* from_node = GetNode(conn.from_node_id);
     auto* to_node = GetNode(conn.to_node_id);
@@ -178,66 +178,19 @@ void FlowCanvas::DrawConnection(Connection& conn)
     if (conn.from_port_index >= from_node->output_ports.size()) return;
     if (conn.to_port_index >= to_node->input_ports.size()) return;
     
-    ImVec2 pOutput = from_node->output_ports[conn.from_port_index].GetScreenPos(from_node->position);
-    ImVec2 pInput = to_node->input_ports[conn.to_port_index].GetScreenPos(to_node->position);
+    ImVec2 p1 = from_node->output_ports[conn.from_port_index].GetScreenPos(from_node->position);
+    ImVec2 p2 = to_node->input_ports[conn.to_port_index].GetScreenPos(to_node->position);
     
-    pOutput = CanvasToScreen(pOutput);
-    pInput = CanvasToScreen(pInput);
+    p1 = CanvasToScreen(p1);
+    p2 = CanvasToScreen(p2);
     
-    // Set link properties using core-nodes logic
+    // Cache the routing type for performance
     if (!conn.routing_cached) {
-        SetLinkProperties(conn, from_node, to_node);
+        conn.routing_type = ClassifyConnection(p1, p2, from_node, to_node);
         conn.routing_cached = true;
     }
     
-    // Calculate distance-based rounding exactly like core-nodes
-    float linkDistance = std::sqrt((pInput.x - pOutput.x) * (pInput.x - pOutput.x) + 
-                                   (pInput.y - pOutput.y) * (pInput.y - pOutput.y)) / 150.0f;
-    float rounding = 25.0f * linkDistance / zoom;  // Note: divide by zoom (scale in core-nodes)
-    float dHandle = 15.0f * zoom;  // Note: multiply by zoom (scale in core-nodes)
-    
-    switch (conn.link_type) {
-        case LinkType::NINV_RIGHT:
-            DrawLinkBezier(conn, pInput, pOutput, rounding);
-            break;
-            
-        case LinkType::NINV_LEFT_OVER:
-        case LinkType::NINV_LEFT_UNDER:
-        case LinkType::NINV_LEFT_MID:
-            DrawLinkBNInv(conn, pInput, pOutput, dHandle);  // No invert flag for NINV
-            break;
-            
-        case LinkType::BINV_LEFT:
-            DrawLinkBezier(conn, pInput, pOutput, rounding, true);  // Use rounding, not dHandle
-            break;
-            
-        case LinkType::BINV_RIGHT_OVER:
-        case LinkType::BINV_RIGHT_UNDER:
-        case LinkType::BINV_RIGHT_MID:
-            DrawLinkBNInv(conn, pInput, pOutput, dHandle, true);
-            break;
-            
-        case LinkType::IINV_RIGHT_OVER:
-        case LinkType::IINV_LEFT_OVER:
-        case LinkType::IINV_RIGHT_UNDER:
-        case LinkType::IINV_LEFT_UNDER:
-        case LinkType::OINV_RIGHT_OVER:
-        case LinkType::OINV_LEFT_OVER:
-        case LinkType::OINV_RIGHT_UNDER:
-        case LinkType::OINV_LEFT_UNDER:
-            DrawLinkIOInv(conn, pInput, pOutput, dHandle);
-            break;
-            
-        case LinkType::IINV_MID:
-        case LinkType::OINV_MID:
-            DrawLinkBezier(conn, pInput, pOutput, 0.0f);  // Zero rounding for MID cases
-            break;
-            
-        default:
-            // This shouldn't happen if classification is correct
-            DrawLinkBezier(conn, pInput, pOutput, rounding);
-            break;
-    }
+    DrawBezierCurve(p1, p2, dataTypeToColor(conn.data_type));
 }
 
 void FlowCanvas::DrawConnectionPreview()
@@ -325,32 +278,73 @@ void FlowCanvas::DrawConnectionPreview()
         p1 = snapped ? snap_pos : mouse_pos;
     }
     
-    // Use core-nodes drawing for preview as well
-    Connection preview_conn;
-    preview_conn.data_type = type;
-    preview_conn.from_node_id = connectingFromNode;
-    preview_conn.from_port_index = connectingFromPort;
-    
-    // Draw simple bezier for preview (we don't have full node context for classification)
-    float dHandle = 50.0f * zoom;
-    ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    ImU32 color = dataTypeToColor(type);
-    float thickness = 3.0f * zoom;  // Slightly thicker for visibility
-    
-    if (connectingFromOutput) {
-        // p1 is output, p2 is input
-        ImVec2 handle = ImVec2(-dHandle, 0.0f);
-        draw_list->AddBezierCubic(p2, ImVec2(p2.x + handle.x, p2.y + handle.y), 
-                                  ImVec2(p1.x - handle.x, p1.y - handle.y), p1, color, thickness);
-    } else {
-        // p1 is input, p2 is output  
-        ImVec2 handle = ImVec2(-dHandle, 0.0f);
-        draw_list->AddBezierCubic(p1, ImVec2(p1.x + handle.x, p1.y + handle.y), 
-                                  ImVec2(p2.x - handle.x, p2.y - handle.y), p2, color, thickness);
-    }
+    // Draw with slightly thicker line during preview for better visibility
+    DrawBezierCurve(p1, p2, dataTypeToColor(type), 3.0f);
 }
 
-// Old connection drawing functions removed - using core-nodes implementation
+void FlowCanvas::DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness)
+{
+    // Calculate core-nodes style parameters
+    float dx = p2.x - p1.x;
+    float dy = p2.y - p1.y;
+    float distance = std::sqrt(dx * dx + dy * dy);
+    float linkDistance = distance / 150.0f;
+    // Increased rounding factor for smoother transition between modes
+    float rounding = 40.0f * linkDistance / zoom;  // Was 25.0f, now 40.0f for more pronounced curves
+    
+    // Classify connection type
+    ConnectionType type = ClassifyConnection(p1, p2);
+    
+    // Route based on type (matching core-nodes decision tree)
+    switch (type) {
+        // Simple bezier cases (like NINV_RIGHT, BINV_LEFT)
+        case ConnectionType::NORMAL:
+            DrawBezierConnection(p1, p2, color, thickness, rounding);
+            break;
+            
+        case ConnectionType::NORMAL_VERTICAL:
+            // Vertical forward - use bezier with adjusted handles
+            DrawBezierConnection(p1, p2, color, thickness, rounding);
+            break;
+            
+        case ConnectionType::INVERTED_SIMPLE:
+            // Backward but clear (BINV_LEFT) - use bezier with inversion
+            DrawBezierConnection(p1, p2, color, thickness, rounding, true);
+            break;
+            
+        case ConnectionType::INVERTED_MID:
+            // Medium vertical backward (IINV_MID/OINV_MID) - use bezier with no rounding
+            DrawBezierConnection(p1, p2, color, thickness, 0.0f, true);
+            break;
+            
+        // Polyline cases (like NINV_LEFT_*, BINV_RIGHT_*)
+        case ConnectionType::COMPLEX_OVER:
+        case ConnectionType::COMPLEX_UNDER:
+        case ConnectionType::COMPLEX_AROUND:
+            // Use polyline for routing around obstacles
+            DrawPolylineConnection(p1, p2, color, thickness, type);
+            break;
+            
+        case ConnectionType::INVERTED_OVER:
+        case ConnectionType::INVERTED_UNDER:
+            // These map to polyline routing
+            DrawPolylineConnection(p1, p2, color, thickness, 
+                                 type == ConnectionType::INVERTED_OVER ? ConnectionType::COMPLEX_OVER :
+                                 ConnectionType::COMPLEX_UNDER);
+            break;
+            
+        case ConnectionType::STRAIGHT:
+            // Very short - minimal curve
+            DrawBezierConnection(p1, p2, color, thickness, distance * 0.05f);
+            break;
+            
+        default:
+            DrawBezierConnection(p1, p2, color, thickness, rounding);
+            break;
+    }
+    
+    // Arrow indicator removed for now - connection type determines routing
+}
 
 void FlowCanvas::HandleInput()
 {
@@ -952,12 +946,6 @@ VisualNode* FlowCanvas::GetNode(size_t id)
     return it != nodes.end() ? it->second.get() : nullptr;
 }
 
-const VisualNode* FlowCanvas::GetNode(size_t id) const
-{
-    auto it = nodes.find(id);
-    return it != nodes.end() ? it->second.get() : nullptr;
-}
-
 ImVec2 FlowCanvas::ScreenToCanvas(ImVec2 pos) const
 {
     // Use cached canvas_screen_pos for consistent conversion
@@ -1087,6 +1075,355 @@ void FlowCanvas::RepairConnections()
     }
 }
 
-// Old connection classification and drawing functions removed
+ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2, 
+                                              const VisualNode* from_node, 
+                                              const VisualNode* to_node) const
+{
+    float dx = p2.x - p1.x;
+    float dy = p2.y - p1.y;
+    float distance = std::sqrt(dx * dx + dy * dy);
+    float abs_dy = std::abs(dy);
+    
+    // Core-nodes style thresholds (scaled by zoom)
+    const float yMargin = 30.0f * zoom;      // Vertical clearance needed
+    const float nodeMargin = 24.0f * zoom;   // Space between nodes
+    const float overlapThreshold = 50.0f * zoom;  // Horizontal overlap detection
+    
+    // If we have node information, use their bounds for better detection
+    bool nodes_overlap_horizontally = false;
+    bool clear_vertical_space_above = false;
+    bool clear_vertical_space_below = false;
+    
+    if (from_node && to_node) {
+        // Convert to screen space for comparison
+        ImVec2 from_min = CanvasToScreen(from_node->position);
+        ImVec2 from_max = CanvasToScreen(ImVec2(from_node->position.x + from_node->size.x, 
+                                                 from_node->position.y + from_node->size.y));
+        ImVec2 to_min = CanvasToScreen(to_node->position);
+        ImVec2 to_max = CanvasToScreen(ImVec2(to_node->position.x + to_node->size.x, 
+                                              to_node->position.y + to_node->size.y));
+        
+        // Check horizontal overlap: does 'to' node start before 'from' node ends?
+        nodes_overlap_horizontally = (to_min.x < from_max.x);
+        
+        // Check vertical clearance
+        clear_vertical_space_above = (from_max.y + nodeMargin < to_min.y);
+        clear_vertical_space_below = (from_min.y > to_max.y + nodeMargin);
+    }
+    
+    // Very short connection - minimal curve
+    if (distance < 30.0f * zoom) {
+        return ConnectionType::STRAIGHT;
+    }
+    
+    // NINV_RIGHT equivalent: Clean left-to-right, no overlap
+    if (dx >= overlapThreshold) {
+        // Nodes are clearly separated horizontally
+        if (abs_dy < dx * 0.7f) {  // Not too vertical
+            return ConnectionType::NORMAL;  // Use bezier
+        }
+        // Vertical but forward - still use bezier with adjusted handles
+        return ConnectionType::NORMAL_VERTICAL;
+    }
+    
+    // NINV_LEFT cases: Check if nodes overlap horizontally
+    // Use node bounds if available, otherwise fall back to port-based detection
+    if (from_node && to_node && nodes_overlap_horizontally && dx > 0) {
+        // Nodes overlap horizontally - check vertical clearance
+        if (clear_vertical_space_above) {
+            return ConnectionType::COMPLEX_OVER;   // NINV_LEFT_OVER
+        } else if (clear_vertical_space_below) {
+            return ConnectionType::COMPLEX_UNDER;  // NINV_LEFT_UNDER
+        } else {
+            // Not enough vertical clearance - need mid routing
+            return ConnectionType::COMPLEX_AROUND;     // NINV_LEFT_MID
+        }
+    }
+    // Fall back to port-based detection if no node info
+    else if (dx > 0 && dx < overlapThreshold) {
+        // Check vertical separation
+        if (abs_dy > yMargin + nodeMargin) {
+            // Enough vertical clearance - route over or under
+            if (dy < 0) {
+                return ConnectionType::COMPLEX_OVER;   // NINV_LEFT_OVER
+            } else {
+                return ConnectionType::COMPLEX_UNDER;  // NINV_LEFT_UNDER
+            }
+        } else {
+            // Not enough vertical clearance - need mid routing
+            return ConnectionType::COMPLEX_AROUND;     // NINV_LEFT_MID
+        }
+    }
+    
+    // Backward connections (inverted)
+    if (dx < 0) {
+        // Check if nodes are roughly horizontally aligned
+        // Use more generous threshold for horizontal alignment (2x yMargin)
+        if (abs_dy < yMargin * 2.0f) {
+            // Horizontally aligned backward connection
+            // Use simple inverted bezier instead of complex routing
+            return ConnectionType::INVERTED_SIMPLE;  // Use bezier with inversion
+        }
+        
+        // BINV_RIGHT cases: Backward with significant vertical separation
+        if (abs_dy > yMargin * 3.0f) {
+            // Clear vertical clearance - use complex routing
+            if (dy < 0) {
+                return ConnectionType::COMPLEX_OVER;   // BINV_RIGHT_OVER
+            } else {
+                return ConnectionType::COMPLEX_UNDER;  // BINV_RIGHT_UNDER
+            }
+        } else {
+            // Medium vertical distance - use bezier with medium inversion
+            return ConnectionType::INVERTED_MID;       // Use bezier with medium inversion
+        }
+    }
+    
+    // Nearly vertical connections
+    if (std::abs(dx) < 20.0f * zoom) {
+        if (abs_dy < yMargin) {
+            // Very short vertical - straight line
+            return ConnectionType::STRAIGHT;
+        } else if (abs_dy < yMargin * 3) {
+            // Medium vertical - use bezier
+            return ConnectionType::NORMAL_VERTICAL;
+        } else {
+            // Long vertical - use polyline for cleaner look
+            if (dy < 0) {
+                return ConnectionType::COMPLEX_OVER;
+            } else {
+                return ConnectionType::COMPLEX_UNDER;
+            }
+        }
+    }
+    
+    // Default to normal bezier
+    return ConnectionType::NORMAL;
+}
+
+void FlowCanvas::CalculateBezierControlPoints(ImVec2 p1, ImVec2 p2, ConnectionType type, 
+                                              ImVec2& cp1, ImVec2& cp2) const
+{
+    float dx = p2.x - p1.x;
+    float dy = p2.y - p1.y;
+    float distance = std::sqrt(dx * dx + dy * dy);
+    
+    // Core-nodes exact formula for handle calculation
+    float link_distance = distance / 150.0f;
+    float rounding = 25.0f * link_distance / zoom;
+    float handle_length = rounding * zoom;
+    
+    // Ensure minimum handle length for very close nodes
+    if (distance < 50.0f) {
+        handle_length = distance * 0.5f;
+    }
+    
+    switch (type) {
+        case ConnectionType::STRAIGHT:
+            // Nearly straight line - minimal handles
+            handle_length = distance * 0.2f;
+            cp1 = ImVec2(p1.x + handle_length, p1.y);
+            cp2 = ImVec2(p2.x - handle_length, p2.y);
+            break;
+            
+        case ConnectionType::NORMAL:
+            // Standard left-to-right with purely horizontal handles (core-nodes style)
+            cp1 = ImVec2(p1.x + handle_length, p1.y);  // Horizontal from start
+            cp2 = ImVec2(p2.x - handle_length, p2.y);  // Horizontal to end
+            break;
+            
+        case ConnectionType::NORMAL_VERTICAL:
+            // Nearly vertical - use outward curves
+            {
+                float h = std::max(handle_length, std::abs(dy) * 0.3f);
+                cp1 = ImVec2(p1.x + h, p1.y);
+                cp2 = ImVec2(p2.x - h, p2.y);
+            }
+            break;
+            
+        case ConnectionType::INVERTED_SIMPLE:
+        case ConnectionType::INVERTED_MID:
+            // Right-to-left - large horizontal loops (core-nodes BINV_LEFT style)
+            {
+                float loop_size = std::max(std::abs(dx) * 0.5f + 50.0f, 100.0f);
+                cp1 = ImVec2(p1.x + loop_size, p1.y);  // Go right from output
+                cp2 = ImVec2(p2.x - loop_size, p2.y);  // Come left to input
+            }
+            break;
+            
+        case ConnectionType::INVERTED_OVER:
+            // Loop goes above
+            {
+                float loop_size = std::max(std::abs(dx) * 0.5f + 60.0f, 120.0f);
+                float y_offset = std::abs(dy) * 0.3f;
+                cp1 = ImVec2(p1.x + loop_size, p1.y - y_offset);
+                cp2 = ImVec2(p2.x - loop_size, p2.y + y_offset);
+            }
+            break;
+            
+        case ConnectionType::INVERTED_UNDER:
+            // Loop goes below
+            {
+                float loop_size = std::max(std::abs(dx) * 0.5f + 60.0f, 120.0f);
+                float y_offset = std::abs(dy) * 0.3f;
+                cp1 = ImVec2(p1.x + loop_size, p1.y + y_offset);
+                cp2 = ImVec2(p2.x - loop_size, p2.y - y_offset);
+            }
+            break;
+            
+        default:
+            // Fallback to normal
+            cp1 = ImVec2(p1.x + handle_length, p1.y);
+            cp2 = ImVec2(p2.x - handle_length, p2.y);
+            break;
+    }
+}
+
+void FlowCanvas::DrawBezierConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, float rounding, bool invert)
+{
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    
+    // Calculate control points exactly like core-nodes
+    float handle_x = rounding * zoom;
+    ImVec2 cp1 = ImVec2(p1.x + handle_x, p1.y);  // Horizontal from p1
+    ImVec2 cp2 = ImVec2(p2.x - handle_x, p2.y);  // Horizontal to p2
+    
+    if (invert) {
+        // For inverted, handles go outward
+        cp1 = ImVec2(p1.x + handle_x, p1.y);
+        cp2 = ImVec2(p2.x - handle_x, p2.y);
+    }
+    
+    // Draw shadow for depth (optional)
+    if (thickness > 1.5f) {
+        draw_list->AddBezierCubic(p1, cp1, cp2, p2, 
+                                  IM_COL32(0, 0, 0, 80), (thickness + 2.0f) * zoom);
+    }
+    
+    // Draw main curve - using AddBezierCubic (equivalent to core-nodes' AddBezierCurve)
+    draw_list->AddBezierCubic(p1, cp1, cp2, p2, color, thickness * zoom);
+}
+
+void FlowCanvas::DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, ConnectionType type)
+{
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    
+    // Reduced margins for tighter routing closer to nodes
+    float dHandle = 10.0f * zoom;  // Was 15.0f - radius of rounded corners
+    float xMargin = dHandle * 1.5f;  // Was dHandle * 2 - distance from node to first elbow
+    
+    float dx = p2.x - p1.x;
+    float dy = p2.y - p1.y;
+    
+    // Build waypoints exactly like core-nodes
+    std::vector<ImVec2> points;
+    points.reserve(14);  // Core-nodes uses 14 points
+    
+    // Calculate x coordinates - closer to nodes
+    float x1 = p1.x + xMargin;
+    float x2 = x1 + dHandle;
+    float x3 = p2.x - xMargin;
+    float x4 = x3 - dHandle;
+    
+    // For backward connections, extend but not as much
+    if (dx < 0) {
+        float extend = std::max(xMargin * 1.5f, std::abs(dx) * 0.3f + xMargin);  // Was * 2 and * 0.4f
+        x1 = p1.x + extend;
+        x2 = x1 + dHandle;
+        x4 = p2.x - extend - dHandle;
+        x3 = p2.x - extend;
+    }
+    
+    // Calculate y coordinate for middle section and handle direction
+    float yM = (p1.y + p2.y) * 0.5f;  // Default to midpoint
+    float yHandle = dHandle;  // Default positive (going down from input, up to output)
+    
+    if (type == ConnectionType::COMPLEX_OVER) {
+        // Route above - handles go upward
+        yHandle = -dHandle;  // Negative to go up
+        if (std::abs(dy) < xMargin * 2) {
+            yM = std::min(p1.y, p2.y) - xMargin;
+        }
+    } else if (type == ConnectionType::COMPLEX_UNDER) {
+        // Route below - handles go downward
+        yHandle = dHandle;  // Positive to go down
+        if (std::abs(dy) < xMargin * 2) {
+            yM = std::max(p1.y, p2.y) + xMargin;
+        }
+    } else if (type == ConnectionType::COMPLEX_AROUND) {
+        // NINV_LEFT_MID case - route around/below when nodes overlap
+        // Always route below for consistency (like core-nodes NINV_LEFT_MID)
+        yHandle = dHandle;  // Positive to go down
+        // Push the horizontal segment well below both nodes
+        float node_bottom = std::max(p1.y, p2.y);
+        yM = node_bottom + xMargin * 2;  // Go well below to avoid overlap
+    } else if (p1.y > p2.y) {
+        // Input below output - adjust handles
+        yHandle = -dHandle;
+    }
+    
+    // Build core-nodes style point sequence with correct handle directions
+    points.push_back(p1);                               // 0
+    points.push_back(ImVec2(x1, p1.y));                // 1
+    points.push_back(ImVec2(x2, p1.y));                // 2  
+    points.push_back(ImVec2(x2, p1.y + yHandle));      // 3 - handle from input
+    points.push_back(ImVec2(x2, yM - yHandle));        // 4 - approach middle
+    points.push_back(ImVec2(x2, yM));                  // 5 - middle left
+    points.push_back(ImVec2(x1, yM));                  // 6
+    points.push_back(ImVec2(x3, yM));                  // 7
+    points.push_back(ImVec2(x4, yM));                  // 8 - middle right
+    points.push_back(ImVec2(x4, yM + yHandle));        // 9 - leave middle
+    points.push_back(ImVec2(x4, p2.y - yHandle));      // 10 - approach output
+    points.push_back(ImVec2(x4, p2.y));                // 11
+    points.push_back(ImVec2(x3, p2.y));                // 12
+    points.push_back(p2);                               // 13
+    
+    // Draw exactly like core-nodes with AddBezierQuadratic
+    DrawPolylineSegments(draw_list, points, color, thickness * zoom);
+}
+
+void FlowCanvas::DrawPolylineSegments(ImDrawList* draw_list, const std::vector<ImVec2>& points, 
+                                      ImU32 color, float thickness)
+{
+    // Match core-nodes exact drawing pattern
+    if (points.size() < 14) return;
+    
+    // Helper lambda to calculate midpoint
+    auto midpoint = [](const ImVec2& a, const ImVec2& b) -> ImVec2 {
+        return ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
+    };
+    
+    // Shadow pass first
+    if (thickness > 2.0f) {
+        ImU32 shadow_col = IM_COL32(0, 0, 0, 80);
+        float shadow_thick = thickness + 2.0f * zoom;
+        
+        // Draw shadow with fixed control points for proper rounded corners
+        draw_list->AddBezierQuadratic(points[0], midpoint(points[0], points[1]), points[1], shadow_col, shadow_thick);
+        draw_list->AddBezierQuadratic(points[1], ImVec2(points[2].x, points[1].y), points[3], shadow_col, shadow_thick);
+        draw_list->AddBezierQuadratic(points[3], midpoint(points[3], points[4]), points[4], shadow_col, shadow_thick);
+        draw_list->AddBezierQuadratic(points[4], ImVec2(points[4].x, points[5].y), points[6], shadow_col, shadow_thick);
+        draw_list->AddBezierQuadratic(points[6], midpoint(points[6], points[7]), points[7], shadow_col, shadow_thick);
+        draw_list->AddBezierQuadratic(points[7], ImVec2(points[8].x, points[7].y), points[9], shadow_col, shadow_thick);
+        draw_list->AddBezierQuadratic(points[9], midpoint(points[9], points[10]), points[10], shadow_col, shadow_thick);
+        draw_list->AddBezierQuadratic(points[10], ImVec2(points[10].x, points[11].y), points[12], shadow_col, shadow_thick);
+        draw_list->AddBezierQuadratic(points[12], midpoint(points[12], points[13]), points[13], shadow_col, shadow_thick);
+    }
+    
+    // Main drawing pass - fixed control points for proper rounded corners
+    draw_list->AddBezierQuadratic(points[0], midpoint(points[0], points[1]), points[1], color, thickness);
+    // Top-left corner: from horizontal to vertical, control at corner
+    draw_list->AddBezierQuadratic(points[1], ImVec2(points[2].x, points[1].y), points[3], color, thickness);
+    draw_list->AddBezierQuadratic(points[3], midpoint(points[3], points[4]), points[4], color, thickness);
+    // Bottom-left corner: from vertical to horizontal, control at corner  
+    draw_list->AddBezierQuadratic(points[4], ImVec2(points[4].x, points[5].y), points[6], color, thickness);
+    draw_list->AddBezierQuadratic(points[6], midpoint(points[6], points[7]), points[7], color, thickness);
+    // Bottom-right corner: from horizontal to vertical, control at corner
+    draw_list->AddBezierQuadratic(points[7], ImVec2(points[8].x, points[7].y), points[9], color, thickness);
+    draw_list->AddBezierQuadratic(points[9], midpoint(points[9], points[10]), points[10], color, thickness);
+    // Top-right corner: from vertical to horizontal, control at corner
+    draw_list->AddBezierQuadratic(points[10], ImVec2(points[10].x, points[11].y), points[12], color, thickness);
+    draw_list->AddBezierQuadratic(points[12], midpoint(points[12], points[13]), points[13], color, thickness);
+}
 
 } // namespace clerflow

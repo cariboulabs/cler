@@ -169,8 +169,8 @@ void VisualNode::Draw(ImDrawList* draw_list, ImVec2 scroll, float zoom)
     // Draw shadow
     DrawShadow(draw_list, node_rect_min, ImVec2(size.x * zoom, size.y * zoom));
     
-    // Node background
-    ImU32 node_bg_color = selected ? IM_COL32(75, 75, 150, 255) : IM_COL32(50, 50, 50, 255);
+    // Node background - semi-transparent so connections show through
+    ImU32 node_bg_color = selected ? IM_COL32(75, 75, 150, 180) : IM_COL32(50, 50, 50, 180);
     draw_list->AddRectFilled(node_rect_min, node_rect_max, node_bg_color, 4.0f);
     
     // Node border
@@ -215,9 +215,9 @@ void VisualNode::DrawTitle(ImDrawList* draw_list, ImVec2 node_screen_pos, ImVec2
     ImVec2 title_rect_max = ImVec2(node_screen_pos.x + title_size.x, 
                                     node_screen_pos.y + title_size.y);
     
-    ImU32 title_color = spec->is_source ? IM_COL32(60, 100, 60, 255) :
-                       spec->is_sink ? IM_COL32(100, 60, 60, 255) :
-                       IM_COL32(60, 60, 100, 255);
+    ImU32 title_color = spec->is_source ? IM_COL32(60, 100, 60, 200) :
+                       spec->is_sink ? IM_COL32(100, 60, 60, 200) :
+                       IM_COL32(60, 60, 100, 200);
     
     draw_list->AddRectFilled(node_screen_pos, title_rect_max, title_color, 4.0f, ImDrawFlags_RoundCornersTop);
     

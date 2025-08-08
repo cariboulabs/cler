@@ -48,7 +48,6 @@ set(SOURCES
     src/visual_node.cpp
     src/block_spec.cpp
     src/block_library.cpp
-    src/core_nodes_connections.cpp
 )
 
 # Create executable

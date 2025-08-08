@@ -17,31 +17,26 @@
 
 namespace clerflow {
 
-// Core-nodes exact LinkType enum
-enum class LinkType {
-    NONE,
-    // BINV: both nodes inverted.
-    BINV_LEFT,
-    BINV_RIGHT_OVER,
-    BINV_RIGHT_UNDER,
-    BINV_RIGHT_MID,
-    // IINV: only input node inverted.
-    IINV_RIGHT_OVER,
-    IINV_LEFT_OVER,
-    IINV_RIGHT_UNDER,
-    IINV_LEFT_UNDER,
-    IINV_MID,
-    // OINV: only output node inverted.
-    OINV_RIGHT_OVER,
-    OINV_LEFT_OVER,
-    OINV_RIGHT_UNDER,
-    OINV_LEFT_UNDER,
-    OINV_MID,
-    // NINV: No Inversion. Location of input node wrt output node.
-    NINV_RIGHT,
-    NINV_LEFT_OVER,
-    NINV_LEFT_UNDER,
-    NINV_LEFT_MID
+// Connection routing types inspired by core-nodes
+enum class ConnectionType {
+    // Normal connections (no inversion)
+    NORMAL,           // Standard left to right
+    NORMAL_VERTICAL,  // Nearly vertical
+    
+    // Inverted connections (right to left)
+    INVERTED_SIMPLE,  // Simple S-curve
+    INVERTED_OVER,    // Route over obstacles
+    INVERTED_UNDER,   // Route under obstacles
+    INVERTED_MID,     // Route through middle
+    
+    // Complex routing (needs polyline)
+    COMPLEX_OVER,     // Multi-segment routing over
+    COMPLEX_UNDER,    // Multi-segment routing under
+    COMPLEX_AROUND,   // Route around obstacles
+    
+    // Special cases
+    STRAIGHT,         // Very short, nearly straight
+    SELF_LOOP        // Node connecting to itself
 };
 
 // Connection between nodes
@@ -56,12 +51,9 @@ struct Connection {
     std::string from_port_name;
     std::string to_port_name;
     
-    // Cached routing information (core-nodes style)
-    mutable LinkType link_type = LinkType::NONE;
+    // Cached routing information
+    mutable ConnectionType routing_type = ConnectionType::NORMAL;
     mutable bool routing_cached = false;
-    mutable float xSepIn = 0;
-    mutable float xSepOut = 0;
-    mutable float ykSep = 0;
 };
 
 class FlowCanvas {
@@ -130,23 +122,18 @@ private:
     void DrawNodes();
     void DrawNode(VisualNode* node);
     
-    // Connection rendering (core-nodes exact implementation)
+    // Connection rendering (with core-nodes style splines)
     void DrawConnections();
-    void DrawConnection(Connection& conn);
+    void DrawConnection(const Connection& conn);
     void DrawConnectionPreview();
-    
-    // Core-nodes exact drawing functions
-    void SetLinkProperties(Connection& conn, const VisualNode* from_node, const VisualNode* to_node);
-    void DrawLinkBezier(const Connection& conn, ImVec2 pInput, ImVec2 pOutput, float rounding, bool invert = false) const;
-    void DrawLinkIOInv(const Connection& conn, ImVec2 pInput, ImVec2 pOutput, float dHandle) const;
-    void DrawLinkBNInv(const Connection& conn, ImVec2 pInput, ImVec2 pOutput, float dHandle, bool invert = false) const;
-    
-    // Helper functions for link property calculation
-    void SetInputSepUp(Connection& conn) const;
-    void SetInputSepDown(Connection& conn) const;
-    void SetOutputSepUp(Connection& conn) const;
-    void SetOutputSepDown(Connection& conn) const;
-    void SetNodeSep(Connection& conn, const VisualNode* from_node, const VisualNode* to_node) const;
+    void DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness = 4.0f);  // Increased from 3.0f
+    ConnectionType ClassifyConnection(ImVec2 p1, ImVec2 p2, 
+                                      const VisualNode* from_node = nullptr, 
+                                      const VisualNode* to_node = nullptr) const;
+    void CalculateBezierControlPoints(ImVec2 p1, ImVec2 p2, ConnectionType type, ImVec2& cp1, ImVec2& cp2) const;
+    void DrawBezierConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, float rounding, bool invert = false);
+    void DrawPolylineConnection(ImVec2 p1, ImVec2 p2, ImU32 color, float thickness, ConnectionType type);
+    void DrawPolylineSegments(ImDrawList* draw_list, const std::vector<ImVec2>& points, ImU32 color, float thickness);
     
     // Input handling
     void HandleInput();
@@ -162,7 +149,6 @@ private:
     
     // Helpers
     VisualNode* GetNode(size_t id);
-    const VisualNode* GetNode(size_t id) const;
     ImVec2 ScreenToCanvas(ImVec2 pos) const;
     ImVec2 CanvasToScreen(ImVec2 pos) const;
     
