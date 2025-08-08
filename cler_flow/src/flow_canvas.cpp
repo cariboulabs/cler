@@ -227,7 +227,8 @@ void FlowCanvas::DrawBezierCurve(ImVec2 p1, ImVec2 p2, ImU32 color, float thickn
     float dy = p2.y - p1.y;
     float distance = std::sqrt(dx * dx + dy * dy);
     float linkDistance = distance / 150.0f;
-    float rounding = 25.0f * linkDistance / zoom;
+    // Increased rounding factor for smoother transition between modes
+    float rounding = 40.0f * linkDistance / zoom;  // Was 25.0f, now 40.0f for more pronounced curves
     
     // Classify connection type
     ConnectionType type = ClassifyConnection(p1, p2);
@@ -1012,25 +1013,24 @@ ConnectionType FlowCanvas::ClassifyConnection(ImVec2 p1, ImVec2 p2) const
     
     // Backward connections (inverted)
     if (dx < 0) {
-        // BINV_LEFT equivalent: Backward but clear
-        if (dx < -overlapThreshold && abs_dy < yMargin) {
-            // Clear horizontal separation, mostly horizontal
+        // Check if nodes are roughly horizontally aligned
+        // Use more generous threshold for horizontal alignment (2x yMargin)
+        if (abs_dy < yMargin * 2.0f) {
+            // Horizontally aligned backward connection
+            // Use simple inverted bezier instead of complex routing
             return ConnectionType::INVERTED_SIMPLE;  // Use bezier with inversion
         }
         
-        // BINV_RIGHT cases: Backward and overlapping
-        if (abs_dy > yMargin + nodeMargin) {
-            // Enough vertical clearance
+        // BINV_RIGHT cases: Backward with significant vertical separation
+        if (abs_dy > yMargin * 3.0f) {
+            // Clear vertical clearance - use complex routing
             if (dy < 0) {
                 return ConnectionType::COMPLEX_OVER;   // BINV_RIGHT_OVER
             } else {
                 return ConnectionType::COMPLEX_UNDER;  // BINV_RIGHT_UNDER
             }
-        } else if (abs_dy < yMargin) {
-            // Horizontal backward - needs wide routing
-            return ConnectionType::COMPLEX_AROUND;     // BINV_RIGHT_MID
         } else {
-            // Medium vertical distance
+            // Medium vertical distance - use bezier with medium inversion
             return ConnectionType::INVERTED_MID;       // Use bezier with medium inversion
         }
     }
@@ -1247,27 +1247,31 @@ void FlowCanvas::DrawPolylineSegments(ImDrawList* draw_list, const std::vector<I
         ImU32 shadow_col = IM_COL32(0, 0, 0, 80);
         float shadow_thick = thickness + 2.0f * zoom;
         
-        // Draw shadow using same pattern as core-nodes
+        // Draw shadow with fixed control points for proper rounded corners
         draw_list->AddBezierQuadratic(points[0], midpoint(points[0], points[1]), points[1], shadow_col, shadow_thick);
-        draw_list->AddBezierQuadratic(points[1], points[2], points[3], shadow_col, shadow_thick);
+        draw_list->AddBezierQuadratic(points[1], ImVec2(points[2].x, points[1].y), points[3], shadow_col, shadow_thick);
         draw_list->AddBezierQuadratic(points[3], midpoint(points[3], points[4]), points[4], shadow_col, shadow_thick);
-        draw_list->AddBezierQuadratic(points[4], points[5], points[6], shadow_col, shadow_thick);
+        draw_list->AddBezierQuadratic(points[4], ImVec2(points[4].x, points[5].y), points[6], shadow_col, shadow_thick);
         draw_list->AddBezierQuadratic(points[6], midpoint(points[6], points[7]), points[7], shadow_col, shadow_thick);
-        draw_list->AddBezierQuadratic(points[7], points[8], points[9], shadow_col, shadow_thick);
+        draw_list->AddBezierQuadratic(points[7], ImVec2(points[8].x, points[7].y), points[9], shadow_col, shadow_thick);
         draw_list->AddBezierQuadratic(points[9], midpoint(points[9], points[10]), points[10], shadow_col, shadow_thick);
-        draw_list->AddBezierQuadratic(points[10], points[11], points[12], shadow_col, shadow_thick);
+        draw_list->AddBezierQuadratic(points[10], ImVec2(points[10].x, points[11].y), points[12], shadow_col, shadow_thick);
         draw_list->AddBezierQuadratic(points[12], midpoint(points[12], points[13]), points[13], shadow_col, shadow_thick);
     }
     
-    // Main drawing pass - exact copy of core-nodes pattern
+    // Main drawing pass - fixed control points for proper rounded corners
     draw_list->AddBezierQuadratic(points[0], midpoint(points[0], points[1]), points[1], color, thickness);
-    draw_list->AddBezierQuadratic(points[1], points[2], points[3], color, thickness);
+    // Top-left corner: from horizontal to vertical, control at corner
+    draw_list->AddBezierQuadratic(points[1], ImVec2(points[2].x, points[1].y), points[3], color, thickness);
     draw_list->AddBezierQuadratic(points[3], midpoint(points[3], points[4]), points[4], color, thickness);
-    draw_list->AddBezierQuadratic(points[4], points[5], points[6], color, thickness);
+    // Bottom-left corner: from vertical to horizontal, control at corner  
+    draw_list->AddBezierQuadratic(points[4], ImVec2(points[4].x, points[5].y), points[6], color, thickness);
     draw_list->AddBezierQuadratic(points[6], midpoint(points[6], points[7]), points[7], color, thickness);
-    draw_list->AddBezierQuadratic(points[7], points[8], points[9], color, thickness);
+    // Bottom-right corner: from horizontal to vertical, control at corner
+    draw_list->AddBezierQuadratic(points[7], ImVec2(points[8].x, points[7].y), points[9], color, thickness);
     draw_list->AddBezierQuadratic(points[9], midpoint(points[9], points[10]), points[10], color, thickness);
-    draw_list->AddBezierQuadratic(points[10], points[11], points[12], color, thickness);
+    // Top-right corner: from vertical to horizontal, control at corner
+    draw_list->AddBezierQuadratic(points[10], ImVec2(points[10].x, points[11].y), points[12], color, thickness);
     draw_list->AddBezierQuadratic(points[12], midpoint(points[12], points[13]), points[13], color, thickness);
 }
 
