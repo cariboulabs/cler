@@ -372,7 +372,7 @@ void FlowApp::DrawImportProgress()
 #ifdef HAS_LIBCLANG
     // Process blocks while loading (this is where the magic happens!)
     if (blockLibrary->IsLoading()) {
-        blockLibrary->ProcessNextBlocks(2); // Process 2 files per frame for smooth UI
+        blockLibrary->ProcessNextBlocks(1); // Process 1 file per frame for responsive UI
     }
     
     // Get the main viewport to center in the entire application window

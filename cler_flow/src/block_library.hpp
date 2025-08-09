@@ -16,6 +16,9 @@
 #include <vector>
 #include <map>
 #include <string>
+#include <thread>
+#include <atomic>
+#include <mutex>
 
 namespace clerflow {
 
@@ -24,7 +27,7 @@ class FlowCanvas;
 class BlockLibrary {
 public:
     BlockLibrary();
-    ~BlockLibrary() = default;
+    ~BlockLibrary();
     
     // Block management
     void AddBlock(std::shared_ptr<BlockSpec> spec);
@@ -52,9 +55,9 @@ public:
     bool ShouldShowImportPopup() const { return request_import_popup; }
     void ClearImportPopupRequest() { request_import_popup = false; }
     float GetLoadProgress() const { return load_progress; }
-    std::string GetLoadStatus() const { return load_status; }
-    std::string GetCurrentFile() const { return current_file; }
-    std::string GetCurrentBlock() const { return current_block_name; }
+    std::string GetLoadStatus() const;
+    std::string GetCurrentFile() const;
+    std::string GetCurrentBlock() const;
     int GetTotalFiles() const { return total_files_to_scan; }
     int GetFilesScanned() const { return files_scanned; }
     int GetBlocksFound() const { return blocks_found; }
@@ -89,23 +92,39 @@ private:
     
 #ifdef HAS_LIBCLANG
     // Loading progress state
-    bool is_loading = false;
-    bool cancel_requested = false;
+    std::atomic<bool> is_loading{false};
+    std::atomic<bool> cancel_requested{false};
     bool request_import_popup = false;
-    float load_progress = 0.0f;
+    std::atomic<float> load_progress{0.0f};
+    
+    // Thread-safe status strings
+    std::mutex status_mutex;
     std::string load_status;
     std::string current_file;
     std::string current_block_name;
     
     // Files to scan
     std::vector<std::string> files_to_scan;
-    size_t current_file_index = 0;
-    int total_files_to_scan = 0;
-    int files_scanned = 0;
-    int blocks_found = 0;
+    std::atomic<size_t> current_file_index{0};
+    std::atomic<int> total_files_to_scan{0};
+    std::atomic<int> files_scanned{0};
+    std::atomic<int> blocks_found{0};
     
     // Temporary storage during loading
+    std::mutex parsed_blocks_mutex;
     std::vector<BlockMetadata> temp_parsed_blocks;
+    
+    // Flags to defer initial scan
+    bool need_initial_scan = false;
+    bool scan_complete = false;
+    
+    // Background parsing thread
+    std::unique_ptr<std::thread> parse_thread;
+    std::atomic<bool> parsing_active{false};
+    
+    // Thread-safe queue for parsed results
+    std::mutex result_queue_mutex;
+    std::vector<BlockMetadata> result_queue;
 #endif
     
     // Create test blocks for development

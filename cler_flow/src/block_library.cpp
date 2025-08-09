@@ -22,6 +22,17 @@ BlockLibrary::BlockLibrary()
     blocks_by_category["Utility"] = {};
 }
 
+BlockLibrary::~BlockLibrary()
+{
+#ifdef HAS_LIBCLANG
+    // Stop the parsing thread if it's running
+    if (parse_thread && parse_thread->joinable()) {
+        cancel_requested = true;
+        parse_thread->join();
+    }
+#endif
+}
+
 void BlockLibrary::AddBlock(std::shared_ptr<BlockSpec> spec)
 {
     all_blocks.push_back(spec);
@@ -61,8 +72,32 @@ void BlockLibrary::SetSearchFilter(const std::string& filter)
 }
 
 #ifdef HAS_LIBCLANG
+std::string BlockLibrary::GetLoadStatus() const 
+{
+    std::lock_guard<std::mutex> lock(const_cast<BlockLibrary*>(this)->status_mutex);
+    return load_status;
+}
+
+std::string BlockLibrary::GetCurrentFile() const 
+{
+    std::lock_guard<std::mutex> lock(const_cast<BlockLibrary*>(this)->status_mutex);
+    return current_file;
+}
+
+std::string BlockLibrary::GetCurrentBlock() const 
+{
+    std::lock_guard<std::mutex> lock(const_cast<BlockLibrary*>(this)->status_mutex);
+    return current_block_name;
+}
+
 void BlockLibrary::StartLoadingDesktopBlocks()
 {
+    // Stop any existing parsing thread
+    if (parse_thread && parse_thread->joinable()) {
+        cancel_requested = true;
+        parse_thread->join();
+    }
+    
     // Reset state
     is_loading = true;
     cancel_requested = false;
@@ -72,98 +107,196 @@ void BlockLibrary::StartLoadingDesktopBlocks()
     current_file_index = 0;
     files_to_scan.clear();
     temp_parsed_blocks.clear();
-    current_block_name.clear();
     
-    load_status = "Scanning for block files...";
-    
-    // Collect all .hpp files from desktop_blocks
-    namespace fs = std::filesystem;
-    std::string desktop_blocks_path = "/home/alon/repos/cler/desktop_blocks";
-    
-    try {
-        for (const auto& entry : fs::recursive_directory_iterator(desktop_blocks_path)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".hpp") {
-                files_to_scan.push_back(entry.path().string());
-            }
-        }
-    } catch (const std::exception& e) {
-        load_status = std::string("Error: ") + e.what();
-        is_loading = false;
-        return;
+    {
+        std::lock_guard<std::mutex> lock(status_mutex);
+        current_block_name.clear();
+        load_status = "Initializing...";
     }
     
-    total_files_to_scan = files_to_scan.size();
-    load_status = "Found " + std::to_string(total_files_to_scan) + " header files";
+    {
+        std::lock_guard<std::mutex> lock(result_queue_mutex);
+        result_queue.clear();
+    }
+    
+    need_initial_scan = true;  // Flag to do the scan on first ProcessNextBlocks
+    scan_complete = false;  // Reset scan flag
+    parsing_active = false;
+    
+    total_files_to_scan = 0;
 }
 
 void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
 {
-    if (!is_loading || cancel_requested) {
-        if (cancel_requested) {
-            is_loading = false;
-            cancel_requested = false;
-            load_status = "Import cancelled";
-            current_block_name.clear();
-        }
+    (void)blocks_per_frame; // Not used with threading approach
+    
+    if (!is_loading) {
         return;
     }
     
-    // Process files for this frame
-    for (int i = 0; i < blocks_per_frame && current_file_index < files_to_scan.size() && !cancel_requested; ++i) {
-        const std::string& file_path = files_to_scan[current_file_index];
+    // Do the initial file scan on first call (after popup is shown)
+    if (need_initial_scan) {
+        need_initial_scan = false;
+        // Just show initial status, don't scan yet
+        {
+            std::lock_guard<std::mutex> lock(status_mutex);
+            load_status = "Preparing to scan...";
+        }
+        return;  // Return to show 0% progress first
+    }
+    
+    // Do the actual scanning on the second call
+    if (!scan_complete && files_to_scan.empty()) {
+        scan_complete = true;
+        {
+            std::lock_guard<std::mutex> lock(status_mutex);
+            load_status = "Scanning for block files...";
+        }
         
-        // Extract just the filename for display
+        // Collect all .hpp files from desktop_blocks
         namespace fs = std::filesystem;
-        current_file = fs::path(file_path).filename().string();
-        load_status = "Processing: " + current_file;
+        std::string desktop_blocks_path = "/home/alon/repos/cler/desktop_blocks";
         
-        // Quick check if it's a block header
-        BlockParser parser;
-        if (parser.isBlockHeader(file_path)) {
-            // Parse the header
-            BlockMetadata metadata = parser.parseHeader(file_path);
-            if (metadata.is_valid) {
-                // Track current block being processed
-                current_block_name = metadata.class_name;
-                blocks_found++;
-                // Extract category from path
-                fs::path file(file_path);
-                fs::path root("/home/alon/repos/cler/desktop_blocks");
-                fs::path relative = fs::relative(file.parent_path(), root);
+        try {
+            for (const auto& entry : fs::recursive_directory_iterator(desktop_blocks_path)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".hpp") {
+                    files_to_scan.push_back(entry.path().string());
+                }
+            }
+        } catch (const std::exception& e) {
+            std::lock_guard<std::mutex> lock(status_mutex);
+            load_status = std::string("Error: ") + e.what();
+            is_loading = false;
+            return;
+        }
+        
+        total_files_to_scan = files_to_scan.size();
+        {
+            std::lock_guard<std::mutex> lock(status_mutex);
+            load_status = "Found " + std::to_string(total_files_to_scan.load()) + " header files";
+        }
+        
+        // Start the background parsing thread
+        if (!files_to_scan.empty() && !parsing_active) {
+            parsing_active = true;
+            parse_thread = std::make_unique<std::thread>([this]() {
+                BlockParser parser;
                 
-                if (relative == ".") {
-                    metadata.category = "Uncategorized";
-                } else {
-                    // Convert path to category string
-                    std::string category;
-                    for (const auto& part : relative) {
-                        if (!category.empty()) {
-                            category += "/";
-                        }
-                        std::string part_str = part.string();
-                        if (!part_str.empty()) {
-                            // Capitalize first letter
-                            part_str[0] = std::toupper(part_str[0]);
-                        }
-                        category += part_str;
+                while (current_file_index < files_to_scan.size() && !cancel_requested) {
+                    size_t idx = current_file_index++;
+                    if (idx >= files_to_scan.size()) break;
+                    
+                    const std::string& file_path = files_to_scan[idx];
+                    
+                    // Update current file being processed
+                    {
+                        namespace fs = std::filesystem;
+                        std::lock_guard<std::mutex> lock(status_mutex);
+                        current_file = fs::path(file_path).filename().string();
                     }
-                    metadata.category = category;
+                    
+                    // Quick check if it's a block header
+                    if (parser.isBlockHeader(file_path)) {
+                        // Parse the header (this is the slow operation)
+                        BlockMetadata metadata = parser.parseHeader(file_path);
+                        if (metadata.is_valid) {
+                            // Extract category from path
+                            namespace fs = std::filesystem;
+                            fs::path file(file_path);
+                            fs::path root("/home/alon/repos/cler/desktop_blocks");
+                            fs::path relative = fs::relative(file.parent_path(), root);
+                            
+                            if (relative == ".") {
+                                metadata.category = "Uncategorized";
+                            } else {
+                                // Convert path to category string
+                                std::string category;
+                                for (const auto& part : relative) {
+                                    if (!category.empty()) {
+                                        category += "/";
+                                    }
+                                    std::string part_str = part.string();
+                                    if (!part_str.empty()) {
+                                        // Capitalize first letter
+                                        part_str[0] = std::toupper(part_str[0]);
+                                    }
+                                    category += part_str;
+                                }
+                                metadata.category = category;
+                            }
+                            
+                            metadata.library_name = "Desktop Blocks";
+                            
+                            // Add to result queue
+                            {
+                                std::lock_guard<std::mutex> lock(result_queue_mutex);
+                                result_queue.push_back(metadata);
+                            }
+                            
+                            // Update current block name
+                            {
+                                std::lock_guard<std::mutex> lock(status_mutex);
+                                current_block_name = metadata.class_name;
+                            }
+                            
+                            blocks_found++;
+                        }
+                    }
+                    
+                    files_scanned++;
+                    load_progress = static_cast<float>(files_scanned.load()) / static_cast<float>(total_files_to_scan.load());
                 }
                 
-                metadata.library_name = "Desktop Blocks";
-                temp_parsed_blocks.push_back(metadata);
+                parsing_active = false;
+            });
+        }
+        
+        return;
+    }
+    
+    // Process results from the background thread
+    {
+        std::lock_guard<std::mutex> lock(result_queue_mutex);
+        if (!result_queue.empty()) {
+            // Move results to temp storage
+            temp_parsed_blocks.insert(temp_parsed_blocks.end(), 
+                                     result_queue.begin(), 
+                                     result_queue.end());
+            result_queue.clear();
+        }
+    }
+    
+    // Update status
+    {
+        std::lock_guard<std::mutex> lock(status_mutex);
+        if (!current_file.empty()) {
+            load_status = "Processing: " + current_file;
+        }
+    }
+    
+    // Check if we're done
+    if (!parsing_active && current_file_index >= files_to_scan.size()) {
+        // Wait for the thread to finish
+        if (parse_thread && parse_thread->joinable()) {
+            parse_thread->join();
+        }
+        
+        // Process any remaining results
+        {
+            std::lock_guard<std::mutex> lock(result_queue_mutex);
+            if (!result_queue.empty()) {
+                temp_parsed_blocks.insert(temp_parsed_blocks.end(), 
+                                         result_queue.begin(), 
+                                         result_queue.end());
+                result_queue.clear();
             }
         }
         
-        current_file_index++;
-        files_scanned++;
-        load_progress = static_cast<float>(files_scanned) / static_cast<float>(total_files_to_scan);
-    }
-    
-    // Check if we're done scanning
-    if (current_file_index >= files_to_scan.size()) {
         // Convert all parsed blocks to BlockSpec
-        load_status = "Finalizing...";
+        {
+            std::lock_guard<std::mutex> lock(status_mutex);
+            load_status = "Finalizing...";
+        }
         parsed_blocks = std::move(temp_parsed_blocks);
         
         for (const auto& metadata : parsed_blocks) {
@@ -263,14 +396,31 @@ void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
         }
         
         is_loading = false;
-        load_status = "Import complete! Found " + std::to_string(parsed_blocks.size()) + " blocks";
-        current_block_name.clear();
+        {
+            std::lock_guard<std::mutex> lock(status_mutex);
+            load_status = "Import complete! Found " + std::to_string(parsed_blocks.size()) + " blocks";
+            current_block_name.clear();
+        }
     }
 }
 
 void BlockLibrary::CancelLoading()
 {
     cancel_requested = true;
+    
+    // Wait for the parsing thread to stop
+    if (parse_thread && parse_thread->joinable()) {
+        parse_thread->join();
+    }
+    
+    // Clear loading state immediately for responsive UI
+    is_loading = false;
+    {
+        std::lock_guard<std::mutex> lock(status_mutex);
+        load_status = "Import cancelled";
+        current_block_name.clear();
+        current_file.clear();
+    }
 }
 
 void BlockLibrary::RefreshLibrary()
@@ -294,6 +444,10 @@ void BlockLibrary::RefreshLibrary()
             blocks.end()
         );
     }
+    
+    // Reset the flags
+    need_initial_scan = false;
+    scan_complete = false;
     
     // Reload
     StartLoadingDesktopBlocks();
