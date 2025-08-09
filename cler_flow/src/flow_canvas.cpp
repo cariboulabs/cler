@@ -219,7 +219,7 @@ void FlowCanvas::DrawConnectionPreview()
         
         // Look for nearby input ports to snap to
         for (auto& [id, node] : nodes) {
-            if (id == connectingFromNode) continue;  // Skip self
+            // Allow self-connections for feedback loops
             
             for (size_t i = 0; i < node->input_ports.size(); ++i) {
                 ImVec2 port_pos = node->input_ports[i].GetScreenPos(node->position);
@@ -252,7 +252,7 @@ void FlowCanvas::DrawConnectionPreview()
         
         // Look for nearby output ports to snap to
         for (auto& [id, node] : nodes) {
-            if (id == connectingFromNode) continue;  // Skip self
+            // Allow self-connections for feedback loops
             
             for (size_t i = 0; i < node->output_ports.size(); ++i) {
                 ImVec2 port_pos = node->output_ports[i].GetScreenPos(node->position);
@@ -473,7 +473,7 @@ void FlowCanvas::HandleNodeInteraction()
         bool connected = false;
         
         for (auto& [id, node] : nodes) {
-            if (id == connectingFromNode) continue;  // Skip self
+            // Allow self-connections for feedback loops
             
             if (connectingFromOutput) {
                 // First try exact hit
@@ -870,8 +870,13 @@ void FlowCanvas::ClearAll()
 bool FlowCanvas::CanConnect(size_t from_node, size_t from_port, 
                            size_t to_node, size_t to_port) const
 {
-    auto* from = nodes.find(from_node)->second.get();
-    auto* to = nodes.find(to_node)->second.get();
+    auto from_it = nodes.find(from_node);
+    auto to_it = nodes.find(to_node);
+    
+    if (from_it == nodes.end() || to_it == nodes.end()) return false;
+    
+    auto* from = from_it->second.get();
+    auto* to = to_it->second.get();
     
     if (!from || !to) return false;
     if (from_port >= from->output_ports.size()) return false;
@@ -1017,10 +1022,17 @@ std::string FlowCanvas::GenerateCppCode() const
     
     // Generate connections (CLER uses >> operator)
     for (const auto& conn : connections) {
-        auto* from = nodes.find(conn.from_node_id)->second.get();
-        auto* to = nodes.find(conn.to_node_id)->second.get();
+        auto from_it = nodes.find(conn.from_node_id);
+        auto to_it = nodes.find(conn.to_node_id);
         
-        if (from && to) {
+        if (from_it == nodes.end() || to_it == nodes.end()) continue;
+        
+        auto* from = from_it->second.get();
+        auto* to = to_it->second.get();
+        
+        if (from && to && 
+            conn.from_port_index < from->output_ports.size() &&
+            conn.to_port_index < to->input_ports.size()) {
             std::string from_port = from->output_ports[conn.from_port_index].name;
             std::string to_port = to->input_ports[conn.to_port_index].name;
             
