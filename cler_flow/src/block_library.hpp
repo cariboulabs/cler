@@ -74,6 +74,10 @@ public:
     
     // UI
     void Draw(FlowCanvas* canvas);
+    void DrawUpdateProgress();  // Draw progress popup for library updates
+    
+    // Check if update popup should be shown
+    bool ShouldShowUpdatePopup() const { return show_update_popup; }
     
     // Search/filter
     void SetSearchFilter(const std::string& filter);
@@ -147,6 +151,10 @@ private:
     // Thread-safe queue for parsed results
     std::mutex result_queue_mutex;
     std::vector<BlockMetadata> result_queue;
+    
+    // Flag to show update progress popup
+    bool show_update_popup = false;
+    std::string updating_library_name;
 #endif
     
     // Create test blocks for development

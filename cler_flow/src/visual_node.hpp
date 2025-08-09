@@ -56,7 +56,6 @@ public:
     bool collapsed = false;
     bool moving = false;
     bool resizing = false;
-    int rotation = 0;  // 0, 90, 180, 270 degrees
     
     // Instance configuration
     std::string instance_name;
@@ -78,9 +77,6 @@ public:
     void UpdatePortPositions();
     bool IsInResizeZone(ImVec2 point) const;
     
-    // Rotation
-    void RotateRight() { rotation = (rotation + 90) % 360; UpdatePortPositions(); }
-    void RotateLeft() { rotation = (rotation - 90 + 360) % 360; UpdatePortPositions(); }
     
     // Code generation
     std::string GenerateInstantiation() const;
@@ -104,7 +100,7 @@ private:
                   bool is_output, float zoom);
     void DrawPortShape(ImDrawList* draw_list, ImVec2 port_pos, const std::string& data_type, 
                        bool is_connected, float zoom);
-    std::string GetAbbreviatedName(const std::string& name, int rotation) const;
+    std::string GetAbbreviatedName(const std::string& name) const;
     void DrawTitle(ImDrawList* draw_list, ImVec2 node_screen_pos, ImVec2 node_size);
     void DrawShadow(ImDrawList* draw_list, ImVec2 node_screen_pos, ImVec2 node_size);
     

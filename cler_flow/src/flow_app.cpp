@@ -98,6 +98,13 @@ void FlowApp::Update()
     // Draw popups last so they appear on top of everything
     DrawImportProgress();
     
+    // Also draw library update progress if needed
+#ifdef HAS_LIBCLANG
+    if (blockLibrary->ShouldShowUpdatePopup()) {
+        blockLibrary->DrawUpdateProgress();
+    }
+#endif
+    
     // Demo window for debugging
     if (showDemoWindow) {
         ImGui::ShowDemoWindow(&showDemoWindow);

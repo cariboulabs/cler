@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <iostream>
 #include <filesystem>
+#include <cstring>
 
 namespace clerflow {
 
@@ -189,22 +190,116 @@ void BlockLibrary::LoadLibrary(const std::string& path, const std::string& libra
         
         auto cached_blocks = cache->loadFromCache();
         if (!cached_blocks.empty()) {
-            // Successfully loaded from cache
-            temp_parsed_blocks = std::move(cached_blocks);
-            loaded_from_cache = true;
-            need_initial_scan = false;
-            scan_complete = true;
+            // Successfully loaded from cache - finalize immediately
+            parsed_blocks = std::move(cached_blocks);
             
-            // Set progress to almost complete
-            load_progress = 0.99f;
-            blocks_found = temp_parsed_blocks.size();
-            
-            {
-                std::lock_guard<std::mutex> lock(status_mutex);
-                load_status = "Loaded " + std::to_string(blocks_found.load()) + " blocks from cache";
+            // Convert to BlockSpec and add to library
+            for (const auto& metadata : parsed_blocks) {
+                if (!metadata.is_valid) continue;
+                
+                // Create BlockSpec from metadata
+                auto spec = std::make_shared<BlockSpec>();
+                spec->class_name = metadata.class_name;
+                spec->display_name = metadata.class_name;  // Could be improved with better name parsing
+                spec->category = metadata.category;
+                spec->header_file = metadata.header_path;
+                spec->library_name = current_library_name;
+                spec->library_path = current_library_path;
+                
+                // Convert template params
+                for (const auto& tparam : metadata.template_params) {
+                    ParamSpec param;
+                    param.name = tparam.name;
+                    param.display_name = tparam.name;
+                    param.type = ParamType::String;  // Default for templates
+                    param.default_value = tparam.default_value;
+                    spec->template_params.push_back(param);
+                }
+                
+                // Convert constructor params
+                for (const auto& cparam : metadata.constructor_params) {
+                    ParamSpec param;
+                    param.name = cparam.name;
+                    param.display_name = cparam.name;
+                    // Detect type from string
+                    if (cparam.type.find("int") != std::string::npos) {
+                        param.type = ParamType::Int;
+                    } else if (cparam.type.find("float") != std::string::npos || 
+                             cparam.type.find("double") != std::string::npos) {
+                        param.type = ParamType::Float;
+                    } else if (cparam.type.find("bool") != std::string::npos) {
+                        param.type = ParamType::Bool;
+                    } else {
+                        param.type = ParamType::String;
+                    }
+                    param.default_value = cparam.default_value;
+                    spec->constructor_params.push_back(param);
+                }
+                
+                // Convert input ports
+                for (const auto& channel : metadata.input_channels) {
+                    PortSpec port;
+                    port.name = channel.name;
+                    port.display_name = channel.name;
+                    port.cpp_type = channel.type;
+                    // Detect data type from string
+                    if (channel.type.find("float") != std::string::npos) {
+                        port.data_type = DataType::Float;
+                    } else if (channel.type.find("double") != std::string::npos) {
+                        port.data_type = DataType::Double;
+                    } else if (channel.type.find("complex") != std::string::npos) {
+                        if (channel.type.find("float") != std::string::npos) {
+                            port.data_type = DataType::ComplexFloat;
+                        } else {
+                            port.data_type = DataType::ComplexDouble;
+                        }
+                    } else if (channel.type.find("int") != std::string::npos) {
+                        port.data_type = DataType::Int;
+                    } else {
+                        port.data_type = DataType::Custom;
+                    }
+                    spec->input_ports.push_back(port);
+                }
+                
+                // Convert output ports
+                for (const auto& channel : metadata.output_channels) {
+                    PortSpec port;
+                    port.name = channel.name;
+                    port.display_name = channel.name;
+                    port.cpp_type = channel.type;
+                    // Detect data type from string
+                    if (channel.type.find("float") != std::string::npos) {
+                        port.data_type = DataType::Float;
+                    } else if (channel.type.find("double") != std::string::npos) {
+                        port.data_type = DataType::Double;
+                    } else if (channel.type.find("complex") != std::string::npos) {
+                        if (channel.type.find("float") != std::string::npos) {
+                            port.data_type = DataType::ComplexFloat;
+                        } else {
+                            port.data_type = DataType::ComplexDouble;
+                        }
+                    } else if (channel.type.find("int") != std::string::npos) {
+                        port.data_type = DataType::Int;
+                    } else {
+                        port.data_type = DataType::Custom;
+                    }
+                    spec->output_ports.push_back(port);
+                }
+                
+                // Detect if source or sink
+                spec->is_source = spec->input_ports.empty() && !spec->output_ports.empty();
+                spec->is_sink = !spec->input_ports.empty() && spec->output_ports.empty();
+                
+                AddBlock(spec);
             }
             
-            // We'll finalize in ProcessNextBlocks
+            is_loading = false;  // Not loading anymore - we're done!
+            {
+                std::lock_guard<std::mutex> lock(status_mutex);
+                load_status = "Loaded " + std::to_string(parsed_blocks.size()) + " blocks from cache";
+            }
+            
+            std::cout << "Loaded " << parsed_blocks.size() << " blocks from cache." << std::endl;
             return;
         }
     }
@@ -225,13 +320,8 @@ void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
         return;
     }
     
-    // If we loaded from cache, skip straight to finalization
-    if (loaded_from_cache) {
-        // Jump straight to the finalization code
-        // This will happen on the first call after loading from cache
-    }
     // Do the initial file scan on first call (after popup is shown)
-    else if (need_initial_scan) {
+    if (need_initial_scan) {
         need_initial_scan = false;
         // Just show initial status, don't scan yet
         {
@@ -641,37 +731,24 @@ void BlockLibrary::UpdateBlock(std::shared_ptr<BlockSpec> block)
 
 void BlockLibrary::UpdateLibrary(const std::string& library_name)
 {
-    if (libraries.find(library_name) == libraries.end()) return;
+    auto it = libraries.find(library_name);
+    if (it == libraries.end()) return;
     
-    // Get all blocks in this library
-    auto& lib_blocks = libraries[library_name].blocks;
+    // Store the library path before clearing
+    std::string lib_path = it->second.path;
     
-    // Update each block
-    for (auto& block : lib_blocks) {
-        UpdateBlock(block);
-    }
+    // Clear the existing blocks for this library
+    it->second.blocks.clear();
+    it->second.blocks_by_category.clear();
     
-    // If it's desktop_blocks, update the cache
-    if (library_name == "desktop_blocks" && cache) {
-        // Convert blocks to metadata for cache
-        std::vector<BlockMetadata> metadata_list;
-        for (const auto& block : lib_blocks) {
-            BlockMetadata metadata;
-            metadata.class_name = block->class_name;
-            metadata.header_path = block->header_file;
-            metadata.category = block->category;
-            metadata.library_name = block->library_name;
-            metadata.library_path = block->library_path;
-            metadata.is_valid = true;
-            
-            // Convert params back to metadata format...
-            // (simplified for now)
-            
-            metadata_list.push_back(metadata);
-        }
-        
-        cache->saveToCache(metadata_list, libraries[library_name].path);
-    }
+    // Set flags to show update progress popup
+    show_update_popup = true;
+    updating_library_name = library_name;
+    
+    // Re-scan the library path
+    LoadLibrary(lib_path, library_name);
+    
+    // Cache update is handled automatically by LoadLibrary
 }
 
 #endif
@@ -802,14 +879,24 @@ void BlockLibrary::Draw(FlowCanvas* canvas)
 {
     if (!canvas) return;
     
+    // Static variables for load blocks dialog
+    static bool show_load_dialog = false;
+    static char path_buffer[512] = "";
+    static std::vector<std::string> recent_paths;
+    static bool first_open = true;
+    
     ImGui::BeginChild("BlockList", ImVec2(0, 0), true);
     
 #ifdef HAS_LIBCLANG
-    // Load Library button
-    if (ImGui::Button("Load Library")) {
-        // For now, show a simple input dialog
-        // In the future, this could open a file dialog
-        ImGui::OpenPopup("Load Library Dialog");
+    // Load Blocks button
+    if (ImGui::Button("Load Blocks")) {
+        show_load_dialog = true;
+        if (first_open) {
+            // Initialize with current directory
+            std::string current = std::filesystem::current_path().string();
+            strncpy(path_buffer, current.c_str(), sizeof(path_buffer) - 1);
+            first_open = false;
+        }
     }
     ImGui::Separator();
 #endif
@@ -938,39 +1025,298 @@ void BlockLibrary::Draw(FlowCanvas* canvas)
         ImGui::PopID();
     }
     
-    // Load Library Dialog
-#ifdef HAS_LIBCLANG
-    static char lib_path[512] = "";
-    static char lib_name[128] = "";
+    ImGui::EndChild();
     
-    if (ImGui::BeginPopupModal("Load Library Dialog", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Load a library from a directory or .hpp file");
+    // Simple Load Blocks Dialog using native ImGui
+#ifdef HAS_LIBCLANG
+    if (show_load_dialog) {
+        ImGui::OpenPopup("Load Block Library");
+    }
+    
+    ImGui::SetNextWindowSize(ImVec2(600, 450), ImGuiCond_FirstUseEver);
+    if (ImGui::BeginPopupModal("Load Block Library", &show_load_dialog)) {
+        // Static variables for navigation state
+        static std::string current_browse_path = std::filesystem::current_path().string();
+        static std::string last_path_buffer = "";
+        
+        // Update browse path if user changed the text input
+        if (std::string(path_buffer) != last_path_buffer) {
+            std::filesystem::path test_path(path_buffer);
+            if (std::filesystem::exists(test_path) && std::filesystem::is_directory(test_path)) {
+                current_browse_path = path_buffer;
+            }
+            last_path_buffer = path_buffer;
+        }
+        
+        ImGui::Text("Select a directory containing CLER blocks:");
         ImGui::Separator();
         
-        ImGui::InputText("Path", lib_path, sizeof(lib_path));
-        ImGui::InputText("Library Name", lib_name, sizeof(lib_name));
-        
-        ImGui::Separator();
-        
-        if (ImGui::Button("Load", ImVec2(120, 0))) {
-            if (strlen(lib_path) > 0 && strlen(lib_name) > 0) {
-                LoadLibrary(lib_path, lib_name);
-                // Clear inputs
-                lib_path[0] = '\0';
-                lib_name[0] = '\0';
-                ImGui::CloseCurrentPopup();
+        // Path input with paste support
+        ImGui::Text("Path:");
+        ImGui::SameLine();
+        ImGui::PushItemWidth(-1);
+        if (ImGui::InputText("##Path", path_buffer, sizeof(path_buffer), ImGuiInputTextFlags_EnterReturnsTrue)) {
+            // Enter pressed - try to load this path
+            std::filesystem::path test_path(path_buffer);
+            if (std::filesystem::exists(test_path) && std::filesystem::is_directory(test_path)) {
+                current_browse_path = path_buffer;
             }
         }
+        ImGui::PopItemWidth();
+        
+        // Quick access buttons
+        if (ImGui::Button("Home")) {
+            current_browse_path = std::getenv("HOME") ? std::getenv("HOME") : "/";
+            strncpy(path_buffer, current_browse_path.c_str(), sizeof(path_buffer) - 1);
+        }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-            ImGui::CloseCurrentPopup();
+        if (ImGui::Button("Desktop Blocks")) {
+            current_browse_path = "/home/alon/repos/cler/desktop_blocks";
+            strncpy(path_buffer, current_browse_path.c_str(), sizeof(path_buffer) - 1);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Current Dir")) {
+            current_browse_path = std::filesystem::current_path().string();
+            strncpy(path_buffer, current_browse_path.c_str(), sizeof(path_buffer) - 1);
+        }
+        
+        ImGui::Separator();
+        
+        // Directory browser
+        ImGui::Text("Browse: %s", current_browse_path.c_str());
+        ImGui::BeginChild("DirBrowser", ImVec2(0, 250), true);
+        
+        try {
+            std::filesystem::path browse_path(current_browse_path);
+            
+            // Parent directory
+            if (browse_path.has_parent_path() && browse_path != browse_path.root_path()) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 1.0f, 1.0f));
+                if (ImGui::Selectable(".. (parent)", false, ImGuiSelectableFlags_AllowDoubleClick)) {
+                    if (ImGui::IsMouseDoubleClicked(0)) {
+                        current_browse_path = browse_path.parent_path().string();
+                        strncpy(path_buffer, current_browse_path.c_str(), sizeof(path_buffer) - 1);
+                    }
+                }
+                ImGui::PopStyleColor();
+            }
+            
+            // List directories
+            std::vector<std::filesystem::directory_entry> dirs;
+            for (const auto& entry : std::filesystem::directory_iterator(browse_path)) {
+                if (entry.is_directory()) {
+                    dirs.push_back(entry);
+                }
+            }
+            
+            // Sort directories alphabetically
+            std::sort(dirs.begin(), dirs.end(), 
+                [](const auto& a, const auto& b) {
+                    return a.path().filename() < b.path().filename();
+                });
+            
+            for (const auto& entry : dirs) {
+                std::string dir_name = "[DIR] " + entry.path().filename().string();
+                bool is_selected = (entry.path().string() == std::string(path_buffer));
+                
+                if (ImGui::Selectable(dir_name.c_str(), is_selected, ImGuiSelectableFlags_AllowDoubleClick)) {
+                    // Single click - select this directory
+                    strncpy(path_buffer, entry.path().string().c_str(), sizeof(path_buffer) - 1);
+                    
+                    // Double click - navigate into it
+                    if (ImGui::IsMouseDoubleClicked(0)) {
+                        current_browse_path = entry.path().string();
+                        strncpy(path_buffer, current_browse_path.c_str(), sizeof(path_buffer) - 1);
+                    }
+                }
+                
+                // Tooltip with full path
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", entry.path().string().c_str());
+                }
+            }
+            
+        } catch (const std::exception& e) {
+            ImGui::TextDisabled("Error reading directory: %s", e.what());
+        }
+        
+        ImGui::EndChild();
+        
+        // Recent paths
+        if (!recent_paths.empty()) {
+            ImGui::Separator();
+            ImGui::Text("Recent:");
+            for (size_t i = 0; i < recent_paths.size() && i < 3; ++i) {
+                std::filesystem::path recent_path(recent_paths[i]);
+                std::string display = recent_path.filename().string();
+                if (display.empty()) display = recent_paths[i];
+                
+                ImGui::PushID(i);
+                if (ImGui::SmallButton(display.c_str())) {
+                    strncpy(path_buffer, recent_paths[i].c_str(), sizeof(path_buffer) - 1);
+                    current_browse_path = recent_paths[i];
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", recent_paths[i].c_str());
+                }
+                ImGui::PopID();
+                
+                if (i < recent_paths.size() - 1 && i < 2) {
+                    ImGui::SameLine();
+                }
+            }
+        }
+        
+        ImGui::Separator();
+        
+        // Status and buttons
+        std::filesystem::path selected_path(path_buffer);
+        bool path_valid = std::filesystem::exists(selected_path) && std::filesystem::is_directory(selected_path);
+        
+        if (!path_valid && strlen(path_buffer) > 0) {
+            if (!std::filesystem::exists(selected_path)) {
+                ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "Path does not exist");
+            } else if (!std::filesystem::is_directory(selected_path)) {
+                ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "Path is not a directory");
+            }
+        } else if (path_valid) {
+            ImGui::TextColored(ImVec4(0.3f, 1, 0.3f, 1), "Valid directory selected");
+        }
+        
+        ImGui::BeginDisabled(!path_valid);
+        if (ImGui::Button("Load This Directory", ImVec2(150, 0))) {
+            // Add to recent paths
+            auto it = std::find(recent_paths.begin(), recent_paths.end(), selected_path.string());
+            if (it != recent_paths.end()) {
+                recent_paths.erase(it);
+            }
+            recent_paths.insert(recent_paths.begin(), selected_path.string());
+            if (recent_paths.size() > 5) {
+                recent_paths.resize(5);
+            }
+            
+            // Use directory name as library name
+            std::string library_name = selected_path.filename().string();
+            if (library_name.empty() || library_name == "/") {
+                library_name = "Custom Library";
+            }
+            
+            LoadLibrary(selected_path.string(), library_name);
+            show_load_dialog = false;
+        }
+        ImGui::EndDisabled();
+        
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(100, 0))) {
+            show_load_dialog = false;
         }
         
         ImGui::EndPopup();
     }
 #endif
+}
+
+void BlockLibrary::DrawUpdateProgress()
+{
+#ifdef HAS_LIBCLANG
+    // Process blocks while loading (this is where the work happens!)
+    if (is_loading) {
+        ProcessNextBlocks(1); // Process 1 file per frame for responsive UI
+    }
     
-    ImGui::EndChild();
+    // Check if we should show the popup
+    if (!show_update_popup) return;
+    
+    // Open popup if not already open
+    if (!ImGui::IsPopupOpen("Update Progress")) {
+        ImGui::OpenPopup("Update Progress");
+    }
+    
+    // Get the main viewport to center in the entire application window
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImVec2 center = viewport->GetCenter();
+    ImVec2 popup_size(450, 220);
+    
+    // Center the popup in the main application window
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(popup_size, ImGuiCond_Always);
+    
+    // Use a modal popup with a dark background
+    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0f, 0.0f, 0.0f, 0.6f));
+    
+    if (ImGui::BeginPopupModal("Update Progress", nullptr, 
+                               ImGuiWindowFlags_NoResize | 
+                               ImGuiWindowFlags_NoMove | 
+                               ImGuiWindowFlags_NoTitleBar)) {
+        
+        // Title
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Updating Library").x) * 0.5f);
+        ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f), "Updating Library");
+        ImGui::Separator();
+        ImGui::Spacing();
+        
+        // Library name
+        ImGui::Text("Library: %s", updating_library_name.c_str());
+        ImGui::Spacing();
+        
+        // Progress information
+        if (is_loading) {
+            ImGui::Text("Status: %s", GetLoadStatus().c_str());
+            
+            // Progress bar
+            float progress = GetLoadProgress();
+            ImGui::ProgressBar(progress, ImVec2(-1, 0));
+            
+            // Stats
+            ImGui::Text("Files scanned: %d / %d", GetFilesScanned(), GetTotalFiles());
+            ImGui::Text("Blocks found: %d", GetBlocksFound());
+            
+            // Current file being processed
+            if (!GetCurrentFile().empty()) {
+                ImGui::Spacing();
+                ImGui::TextWrapped("File: %s", GetCurrentFile().c_str());
+            }
+            
+            // Cancel button
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            
+            if (ImGui::Button("Cancel", ImVec2(100, 0))) {
+                CancelLoading();
+                show_update_popup = false;
+                ImGui::CloseCurrentPopup();
+            }
+        } else {
+            // Loading is complete
+            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "Update Complete!");
+            ImGui::Text("Found %d blocks", GetBlocksFound());
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            
+            if (ImGui::Button("Close", ImVec2(100, 0))) {
+                show_update_popup = false;
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        
+        ImGui::EndPopup();
+    }
+    
+    ImGui::PopStyleColor();
+    
+    // Auto-close when loading is done
+    if (!is_loading && show_update_popup) {
+        // Keep the popup open for a moment to show completion
+        static int completion_frames = 0;
+        completion_frames++;
+        if (completion_frames > 60) {  // Show for 1 second at 60fps
+            show_update_popup = false;
+            completion_frames = 0;
+        }
+    }
+#endif
 }
 
 } // namespace clerflow
