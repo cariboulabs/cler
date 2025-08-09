@@ -652,8 +652,8 @@ void FlowCanvas::HandleCanvasInteraction()
 
 void FlowCanvas::HandleContextMenus()
 {
-    // Check for right-click on nodes
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+    // Check for right-click on nodes - only if the canvas window is hovered
+    if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
         ImVec2 mouse_pos = ImGui::GetMousePos();
         ImVec2 canvas_mouse = ScreenToCanvas(mouse_pos);
         

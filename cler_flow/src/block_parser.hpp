@@ -43,6 +43,7 @@ struct BlockMetadata {
     
     // Library info
     std::string library_name;
+    std::string library_path;
     bool is_builtin = false;
     
     // Validation

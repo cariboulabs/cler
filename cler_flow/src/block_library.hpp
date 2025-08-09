@@ -11,6 +11,7 @@
 #include "block_spec.hpp"
 #ifdef HAS_LIBCLANG
 #include "block_parser.hpp"
+#include "block_cache.hpp"
 #endif
 #include <memory>
 #include <vector>
@@ -32,6 +33,7 @@ public:
     // Block management
     void AddBlock(std::shared_ptr<BlockSpec> spec);
     void ClearBlocks();
+    void ClearLibrary(const std::string& library_name);
     
     // Import blocks from headers
     void ImportFromHeader(const std::string& header_path);
@@ -44,16 +46,20 @@ public:
     // Start loading blocks from desktop_blocks directory
     void StartLoadingDesktopBlocks();
     
+    // Load a custom library
+    void LoadLibrary(const std::string& path, const std::string& library_name);
+    
+    // Update a single block
+    void UpdateBlock(std::shared_ptr<BlockSpec> block);
+    
+    // Update an entire library
+    void UpdateLibrary(const std::string& library_name);
+    
     // Process next batch of blocks (call each frame while loading)
     void ProcessNextBlocks(int blocks_per_frame = 1);
     
-    // Refresh library from sources
-    void RefreshLibrary();
-    
     // Progress tracking for loading
     bool IsLoading() const { return is_loading; }
-    bool ShouldShowImportPopup() const { return request_import_popup; }
-    void ClearImportPopupRequest() { request_import_popup = false; }
     float GetLoadProgress() const { return load_progress; }
     std::string GetLoadStatus() const;
     std::string GetCurrentFile() const;
@@ -73,8 +79,17 @@ public:
     void SetSearchFilter(const std::string& filter);
     
 private:
-    // Organized by category
-    std::map<std::string, std::vector<std::shared_ptr<BlockSpec>>> blocks_by_category;
+    // Structure to hold library information
+    struct LibraryInfo {
+        std::string name;
+        std::string path;
+        std::vector<std::shared_ptr<BlockSpec>> blocks;
+        std::map<std::string, std::vector<std::shared_ptr<BlockSpec>>> blocks_by_category;
+        bool expanded = true;  // For UI tree view
+    };
+    
+    // Organized by library, then by category
+    std::map<std::string, LibraryInfo> libraries;
     
     // All blocks for searching
     std::vector<std::shared_ptr<BlockSpec>> all_blocks;
@@ -83,6 +98,9 @@ private:
     // Parsed metadata from headers
     std::vector<BlockMetadata> parsed_blocks;
     BlockLibraryScanner scanner;
+    
+    // Cache management
+    std::unique_ptr<BlockCache> cache;
 #endif
     
     // UI state
@@ -94,7 +112,6 @@ private:
     // Loading progress state
     std::atomic<bool> is_loading{false};
     std::atomic<bool> cancel_requested{false};
-    bool request_import_popup = false;
     std::atomic<float> load_progress{0.0f};
     
     // Thread-safe status strings
@@ -117,6 +134,11 @@ private:
     // Flags to defer initial scan
     bool need_initial_scan = false;
     bool scan_complete = false;
+    bool loaded_from_cache = false;
+    
+    // Current loading context
+    std::string current_library_name;
+    std::string current_library_path;
     
     // Background parsing thread
     std::unique_ptr<std::thread> parse_thread;

@@ -15,11 +15,20 @@ namespace clerflow {
 
 BlockLibrary::BlockLibrary()
 {
-    blocks_by_category["Sources"] = {};
-    blocks_by_category["Sinks"] = {};
-    blocks_by_category["Processing"] = {};
-    blocks_by_category["Math"] = {};
-    blocks_by_category["Utility"] = {};
+    // Initialize with empty test library (will be populated with test blocks)
+    LibraryInfo test_lib;
+    test_lib.name = "Test Blocks";
+    test_lib.path = "";
+    test_lib.blocks_by_category["Sources"] = {};
+    test_lib.blocks_by_category["Sinks"] = {};
+    test_lib.blocks_by_category["Processing"] = {};
+    test_lib.blocks_by_category["Math"] = {};
+    test_lib.blocks_by_category["Utility"] = {};
+    libraries["Test Blocks"] = test_lib;
+    
+#ifdef HAS_LIBCLANG
+    cache = std::make_unique<BlockCache>();
+#endif
 }
 
 BlockLibrary::~BlockLibrary()
@@ -37,20 +46,60 @@ void BlockLibrary::AddBlock(std::shared_ptr<BlockSpec> spec)
 {
     all_blocks.push_back(spec);
     
-    // Add to category
-    if (blocks_by_category.find(spec->category) != blocks_by_category.end()) {
-        blocks_by_category[spec->category].push_back(spec);
+    // Determine library name (use default if not specified)
+    std::string lib_name = spec->library_name.empty() ? "Test Blocks" : spec->library_name;
+    
+    // Ensure library exists
+    if (libraries.find(lib_name) == libraries.end()) {
+        LibraryInfo new_lib;
+        new_lib.name = lib_name;
+        new_lib.path = spec->library_path;
+        libraries[lib_name] = new_lib;
     }
-    else {
-        blocks_by_category["Utility"].push_back(spec);
+    
+    // Add to library's blocks
+    libraries[lib_name].blocks.push_back(spec);
+    
+    // Add to library's category
+    auto& lib_categories = libraries[lib_name].blocks_by_category;
+    if (lib_categories.find(spec->category) == lib_categories.end()) {
+        lib_categories[spec->category] = {};
     }
+    lib_categories[spec->category].push_back(spec);
 }
 
 void BlockLibrary::ClearBlocks()
 {
     all_blocks.clear();
-    for (auto& [category, list] : blocks_by_category) {
-        list.clear();
+    libraries.clear();
+    
+    // Re-initialize empty test library
+    LibraryInfo test_lib;
+    test_lib.name = "Test Blocks";
+    test_lib.path = "";
+    test_lib.blocks_by_category["Sources"] = {};
+    test_lib.blocks_by_category["Sinks"] = {};
+    test_lib.blocks_by_category["Processing"] = {};
+    test_lib.blocks_by_category["Math"] = {};
+    test_lib.blocks_by_category["Utility"] = {};
+    libraries["Test Blocks"] = test_lib;
+}
+
+void BlockLibrary::ClearLibrary(const std::string& library_name)
+{
+    if (libraries.find(library_name) != libraries.end()) {
+        // Remove blocks from all_blocks
+        auto& lib_blocks = libraries[library_name].blocks;
+        for (const auto& block : lib_blocks) {
+            all_blocks.erase(
+                std::remove(all_blocks.begin(), all_blocks.end(), block),
+                all_blocks.end()
+            );
+        }
+        
+        // Clear the library
+        libraries[library_name].blocks.clear();
+        libraries[library_name].blocks_by_category.clear();
     }
 }
 
@@ -92,11 +141,24 @@ std::string BlockLibrary::GetCurrentBlock() const
 
 void BlockLibrary::StartLoadingDesktopBlocks()
 {
+    // Set the library context
+    current_library_name = "desktop_blocks";
+    current_library_path = "/home/alon/repos/cler/desktop_blocks";
+    
+    LoadLibrary(current_library_path, current_library_name);
+}
+
+void BlockLibrary::LoadLibrary(const std::string& path, const std::string& library_name)
+{
     // Stop any existing parsing thread
     if (parse_thread && parse_thread->joinable()) {
         cancel_requested = true;
         parse_thread->join();
     }
+    
+    // Set library context
+    current_library_name = library_name;
+    current_library_path = path;
     
     // Reset state
     is_loading = true;
@@ -107,6 +169,7 @@ void BlockLibrary::StartLoadingDesktopBlocks()
     current_file_index = 0;
     files_to_scan.clear();
     temp_parsed_blocks.clear();
+    loaded_from_cache = false;
     
     {
         std::lock_guard<std::mutex> lock(status_mutex);
@@ -119,6 +182,34 @@ void BlockLibrary::StartLoadingDesktopBlocks()
         result_queue.clear();
     }
     
+    // Check if we can load from cache (only for desktop_blocks for now)
+    if (library_name == "desktop_blocks" && cache && cache->isCacheValid(path)) {
+        // Cache is valid! Load from it instead of scanning
+        std::cout << "Loading blocks from cache..." << std::endl;
+        
+        auto cached_blocks = cache->loadFromCache();
+        if (!cached_blocks.empty()) {
+            // Successfully loaded from cache
+            temp_parsed_blocks = std::move(cached_blocks);
+            loaded_from_cache = true;
+            need_initial_scan = false;
+            scan_complete = true;
+            
+            // Set progress to almost complete
+            load_progress = 0.99f;
+            blocks_found = temp_parsed_blocks.size();
+            
+            {
+                std::lock_guard<std::mutex> lock(status_mutex);
+                load_status = "Loaded " + std::to_string(blocks_found.load()) + " blocks from cache";
+            }
+            
+            // We'll finalize in ProcessNextBlocks
+            return;
+        }
+    }
+    
+    // No valid cache, do normal scan
     need_initial_scan = true;  // Flag to do the scan on first ProcessNextBlocks
     scan_complete = false;  // Reset scan flag
     parsing_active = false;
@@ -134,8 +225,13 @@ void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
         return;
     }
     
+    // If we loaded from cache, skip straight to finalization
+    if (loaded_from_cache) {
+        // Jump straight to the finalization code
+        // This will happen on the first call after loading from cache
+    }
     // Do the initial file scan on first call (after popup is shown)
-    if (need_initial_scan) {
+    else if (need_initial_scan) {
         need_initial_scan = false;
         // Just show initial status, don't scan yet
         {
@@ -153,14 +249,20 @@ void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
             load_status = "Scanning for block files...";
         }
         
-        // Collect all .hpp files from desktop_blocks
+        // Collect all .hpp files from the library path
         namespace fs = std::filesystem;
-        std::string desktop_blocks_path = "/home/alon/repos/cler/desktop_blocks";
         
         try {
-            for (const auto& entry : fs::recursive_directory_iterator(desktop_blocks_path)) {
-                if (entry.is_regular_file() && entry.path().extension() == ".hpp") {
-                    files_to_scan.push_back(entry.path().string());
+            // Check if it's a single file or directory
+            if (fs::is_regular_file(current_library_path) && fs::path(current_library_path).extension() == ".hpp") {
+                // Single header file
+                files_to_scan.push_back(current_library_path);
+            } else if (fs::is_directory(current_library_path)) {
+                // Directory - scan recursively
+                for (const auto& entry : fs::recursive_directory_iterator(current_library_path)) {
+                    if (entry.is_regular_file() && entry.path().extension() == ".hpp") {
+                        files_to_scan.push_back(entry.path().string());
+                    }
                 }
             }
         } catch (const std::exception& e) {
@@ -203,7 +305,7 @@ void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
                             // Extract category from path
                             namespace fs = std::filesystem;
                             fs::path file(file_path);
-                            fs::path root("/home/alon/repos/cler/desktop_blocks");
+                            fs::path root(current_library_path);
                             fs::path relative = fs::relative(file.parent_path(), root);
                             
                             if (relative == ".") {
@@ -225,7 +327,8 @@ void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
                                 metadata.category = category;
                             }
                             
-                            metadata.library_name = "Desktop Blocks";
+                            metadata.library_name = current_library_name;
+                            metadata.library_path = current_library_path;
                             
                             // Add to result queue
                             {
@@ -305,6 +408,8 @@ void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
             spec->display_name = metadata.class_name;
             spec->category = metadata.category.empty() ? "Uncategorized" : metadata.category;
             spec->header_file = metadata.header_path;
+            spec->library_name = metadata.library_name.empty() ? current_library_name : metadata.library_name;
+            spec->library_path = metadata.library_path.empty() ? current_library_path : metadata.library_path;
             
             // Convert template params
             for (const auto& tparam : metadata.template_params) {
@@ -401,6 +506,14 @@ void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
             load_status = "Import complete! Found " + std::to_string(parsed_blocks.size()) + " blocks";
             current_block_name.clear();
         }
+        
+        // Save to cache if we did a fresh scan (not loaded from cache)
+        if (!loaded_from_cache && cache && !parsed_blocks.empty()) {
+            std::string desktop_blocks_path = "/home/alon/repos/cler/desktop_blocks";
+            std::cout << "Saving cache with " << parsed_blocks.size() << " blocks..." << std::endl;
+            cache->saveToCache(parsed_blocks, desktop_blocks_path);
+            std::cout << "Cache saved to: " << cache->getCachePath() << std::endl;
+        }
     }
 }
 
@@ -423,35 +536,144 @@ void BlockLibrary::CancelLoading()
     }
 }
 
-void BlockLibrary::RefreshLibrary()
+void BlockLibrary::UpdateBlock(std::shared_ptr<BlockSpec> block)
 {
-    // Clear existing parsed blocks
-    for (auto it = all_blocks.begin(); it != all_blocks.end(); ) {
-        if ((*it)->header_file.find("desktop_blocks") != std::string::npos) {
-            it = all_blocks.erase(it);
-        } else {
-            ++it;
+    if (!block || block->header_file.empty()) return;
+    
+    // Parse the header file again
+    BlockParser parser;
+    BlockMetadata metadata = parser.parseHeader(block->header_file);
+    
+    if (metadata.is_valid) {
+        // Update the block spec with new metadata
+        block->class_name = metadata.class_name;
+        block->display_name = metadata.class_name;
+        
+        // Clear and rebuild parameters
+        block->template_params.clear();
+        for (const auto& tparam : metadata.template_params) {
+            ParamSpec param;
+            param.name = tparam.name;
+            param.display_name = tparam.name;
+            param.type = ParamType::String;
+            param.default_value = tparam.default_value;
+            block->template_params.push_back(param);
         }
+        
+        block->constructor_params.clear();
+        for (const auto& cparam : metadata.constructor_params) {
+            ParamSpec param;
+            param.name = cparam.name;
+            param.display_name = cparam.name;
+            // Detect type from string
+            if (cparam.type.find("float") != std::string::npos) {
+                param.type = ParamType::Float;
+            } else if (cparam.type.find("int") != std::string::npos) {
+                param.type = ParamType::Int;
+            } else if (cparam.type.find("bool") != std::string::npos) {
+                param.type = ParamType::Bool;
+            } else if (cparam.type.find("string") != std::string::npos || 
+                      cparam.type.find("char") != std::string::npos) {
+                param.type = ParamType::String;
+            } else {
+                param.type = ParamType::String;
+            }
+            param.default_value = cparam.default_value;
+            block->constructor_params.push_back(param);
+        }
+        
+        // Update ports...
+        block->input_ports.clear();
+        for (const auto& channel : metadata.input_channels) {
+            PortSpec port;
+            port.name = channel.name;
+            port.display_name = channel.name;
+            port.cpp_type = channel.type;
+            // Detect data type from string
+            if (channel.type.find("float") != std::string::npos) {
+                port.data_type = DataType::Float;
+            } else if (channel.type.find("double") != std::string::npos) {
+                port.data_type = DataType::Double;
+            } else if (channel.type.find("complex") != std::string::npos) {
+                if (channel.type.find("float") != std::string::npos) {
+                    port.data_type = DataType::ComplexFloat;
+                } else {
+                    port.data_type = DataType::ComplexDouble;
+                }
+            } else if (channel.type.find("int") != std::string::npos) {
+                port.data_type = DataType::Int;
+            } else {
+                port.data_type = DataType::Custom;
+            }
+            block->input_ports.push_back(port);
+        }
+        
+        block->output_ports.clear();
+        for (const auto& channel : metadata.output_channels) {
+            PortSpec port;
+            port.name = channel.name;
+            port.display_name = channel.name;
+            port.cpp_type = channel.type;
+            // Detect data type from string
+            if (channel.type.find("float") != std::string::npos) {
+                port.data_type = DataType::Float;
+            } else if (channel.type.find("double") != std::string::npos) {
+                port.data_type = DataType::Double;
+            } else if (channel.type.find("complex") != std::string::npos) {
+                if (channel.type.find("float") != std::string::npos) {
+                    port.data_type = DataType::ComplexFloat;
+                } else {
+                    port.data_type = DataType::ComplexDouble;
+                }
+            } else if (channel.type.find("int") != std::string::npos) {
+                port.data_type = DataType::Int;
+            } else {
+                port.data_type = DataType::Custom;
+            }
+            block->output_ports.push_back(port);
+        }
+        
+        // Update source/sink flags
+        block->is_source = block->input_ports.empty() && !block->output_ports.empty();
+        block->is_sink = !block->input_ports.empty() && block->output_ports.empty();
     }
-    
-    // Clear from categories
-    for (auto& [category, blocks] : blocks_by_category) {
-        blocks.erase(
-            std::remove_if(blocks.begin(), blocks.end(),
-                [](const auto& block) {
-                    return block->header_file.find("desktop_blocks") != std::string::npos;
-                }),
-            blocks.end()
-        );
-    }
-    
-    // Reset the flags
-    need_initial_scan = false;
-    scan_complete = false;
-    
-    // Reload
-    StartLoadingDesktopBlocks();
 }
+
+void BlockLibrary::UpdateLibrary(const std::string& library_name)
+{
+    if (libraries.find(library_name) == libraries.end()) return;
+    
+    // Get all blocks in this library
+    auto& lib_blocks = libraries[library_name].blocks;
+    
+    // Update each block
+    for (auto& block : lib_blocks) {
+        UpdateBlock(block);
+    }
+    
+    // If it's desktop_blocks, update the cache
+    if (library_name == "desktop_blocks" && cache) {
+        // Convert blocks to metadata for cache
+        std::vector<BlockMetadata> metadata_list;
+        for (const auto& block : lib_blocks) {
+            BlockMetadata metadata;
+            metadata.class_name = block->class_name;
+            metadata.header_path = block->header_file;
+            metadata.category = block->category;
+            metadata.library_name = block->library_name;
+            metadata.library_path = block->library_path;
+            metadata.is_valid = true;
+            
+            // Convert params back to metadata format...
+            // (simplified for now)
+            
+            metadata_list.push_back(metadata);
+        }
+        
+        cache->saveToCache(metadata_list, libraries[library_name].path);
+    }
+}
+
 #endif
 
 void BlockLibrary::LoadTestBlocks()
@@ -583,21 +805,11 @@ void BlockLibrary::Draw(FlowCanvas* canvas)
     ImGui::BeginChild("BlockList", ImVec2(0, 0), true);
     
 #ifdef HAS_LIBCLANG
-    // Controls for parsed blocks
-    if (ImGui::Button("Load Desktop Blocks")) {
-        StartLoadingDesktopBlocks();
-        show_parsed_blocks = true;
-        request_import_popup = true; // Just set the flag
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Refresh")) {
-        RefreshLibrary();
-        request_import_popup = true; // Also show popup for refresh
-    }
-    
-    // Just show block count if we have parsed blocks
-    if (show_parsed_blocks && !parsed_blocks.empty()) {
-        ImGui::Text("Found %zu blocks", parsed_blocks.size());
+    // Load Library button
+    if (ImGui::Button("Load Library")) {
+        // For now, show a simple input dialog
+        // In the future, this could open a file dialog
+        ImGui::OpenPopup("Load Library Dialog");
     }
     ImGui::Separator();
 #endif
@@ -610,67 +822,153 @@ void BlockLibrary::Draw(FlowCanvas* canvas)
     std::string search(searchBuffer);
     std::transform(search.begin(), search.end(), search.begin(), ::tolower);
     
-    // Draw categories
-    for (const auto& [category, blocks] : blocks_by_category) {
-        if (blocks.empty()) continue;
+    // Draw libraries with their categories
+    for (auto& [lib_name, lib_info] : libraries) {
+        // Skip empty libraries
+        if (lib_info.blocks.empty()) continue;
         
-        if (ImGui::CollapsingHeader(category.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-            for (const auto& block : blocks) {
-                // Filter by search
-                if (!search.empty()) {
-                    std::string name = block->display_name;
-                    std::transform(name.begin(), name.end(), name.begin(), ::tolower);
-                    if (name.find(search) == std::string::npos) {
-                        continue;
-                    }
-                }
+        // Library header with right-click menu
+        ImGui::PushID(lib_name.c_str());
+        bool lib_open = ImGui::TreeNodeEx(lib_name.c_str(), 
+            ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth,
+            "%s (%zu blocks)", lib_name.c_str(), lib_info.blocks.size());
+        
+        // Right-click context menu for library
+        if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+            ImGui::OpenPopup("LibraryHeaderContextMenu");
+        }
+        
+        if (ImGui::BeginPopup("LibraryHeaderContextMenu")) {
+#ifdef HAS_LIBCLANG
+            if (ImGui::MenuItem("Update Library")) {
+                UpdateLibrary(lib_name);
+            }
+            ImGui::Separator();
+#endif
+            if (ImGui::MenuItem("Remove Library")) {
+                ClearLibrary(lib_name);
+            }
+            ImGui::EndPopup();
+        }
+        
+        if (lib_open) {
+            // Draw categories within this library
+            for (const auto& [category, blocks] : lib_info.blocks_by_category) {
+                if (blocks.empty()) continue;
                 
-                // Draw block entry
-                ImGui::PushID(block.get());
-                
-                bool selected = false;
-                if (ImGui::Selectable(block->display_name.c_str(), &selected)) {
-                    // Double-click to add
-                    if (ImGui::IsMouseDoubleClicked(0)) {
-                        // Add at center of canvas view
-                        ImVec2 canvas_center = ImGui::GetWindowPos();
-                        canvas_center.x += ImGui::GetWindowWidth() / 2;
-                        canvas_center.y += ImGui::GetWindowHeight() / 2;
-                        canvas->AddNode(block, canvas_center);
-                    }
-                }
-                
-                // Drag to add
-                if (ImGui::BeginDragDropSource()) {
-                    ImGui::SetDragDropPayload("BLOCK_SPEC", &block, sizeof(block));
-                    ImGui::Text("Add %s", block->display_name.c_str());
-                    ImGui::EndDragDropSource();
-                }
-                
-                // Tooltip with details
-                if (ImGui::IsItemHovered()) {
-                    ImGui::BeginTooltip();
-                    ImGui::Text("%s", block->class_name.c_str());
-                    if (!block->template_params.empty()) {
-                        ImGui::Text("Template: ");
-                        for (const auto& param : block->template_params) {
-                            ImGui::Text("  %s = %s", 
-                                       param.name.c_str(), param.default_value.c_str());
+                ImGui::PushID(category.c_str());
+                if (ImGui::TreeNode(category.c_str())) {
+                    for (const auto& block : blocks) {
+                        // Filter by search
+                        if (!search.empty()) {
+                            std::string name = block->display_name;
+                            std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+                            if (name.find(search) == std::string::npos) {
+                                continue;
+                            }
                         }
-                    }
-                    if (!block->constructor_params.empty()) {
-                        ImGui::Text("Parameters:");
-                        for (const auto& param : block->constructor_params) {
-                            ImGui::Text("  %s: %s", param.name.c_str(), param.display_name.c_str());
+                        
+                        // Draw block entry
+                        ImGui::PushID(block.get());
+                        
+                        bool selected = false;
+                        if (ImGui::Selectable(block->display_name.c_str(), &selected, ImGuiSelectableFlags_AllowItemOverlap)) {
+                            // Double-click to add
+                            if (ImGui::IsMouseDoubleClicked(0)) {
+                                // Add at center of canvas view
+                                ImVec2 canvas_center = ImGui::GetWindowPos();
+                                canvas_center.x += ImGui::GetWindowWidth() / 2;
+                                canvas_center.y += ImGui::GetWindowHeight() / 2;
+                                canvas->AddNode(block, canvas_center);
+                            }
                         }
+                        
+                        // Handle right-click context menu for block
+                        if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                            ImGui::OpenPopup("LibraryBlockContextMenu");
+                        }
+                        
+                        if (ImGui::BeginPopup("LibraryBlockContextMenu")) {
+#ifdef HAS_LIBCLANG
+                            if (ImGui::MenuItem("Update Block")) {
+                                UpdateBlock(block);
+                            }
+#endif
+                            ImGui::EndPopup();
+                        }
+                        
+                        // Drag to add
+                        if (ImGui::BeginDragDropSource()) {
+                            ImGui::SetDragDropPayload("BLOCK_SPEC", &block, sizeof(block));
+                            ImGui::Text("Add %s", block->display_name.c_str());
+                            ImGui::EndDragDropSource();
+                        }
+                        
+                        // Tooltip with details
+                        if (ImGui::IsItemHovered()) {
+                            ImGui::BeginTooltip();
+                            ImGui::Text("%s", block->class_name.c_str());
+                            if (!block->header_file.empty()) {
+                                ImGui::Text("Header: %s", block->header_file.c_str());
+                            }
+                            if (!block->template_params.empty()) {
+                                ImGui::Text("Template: ");
+                                for (const auto& param : block->template_params) {
+                                    ImGui::Text("  %s = %s", 
+                                               param.name.c_str(), param.default_value.c_str());
+                                }
+                            }
+                            if (!block->constructor_params.empty()) {
+                                ImGui::Text("Parameters:");
+                                for (const auto& param : block->constructor_params) {
+                                    ImGui::Text("  %s: %s", param.name.c_str(), param.display_name.c_str());
+                                }
+                            }
+                            ImGui::EndTooltip();
+                        }
+                        
+                        ImGui::PopID();
                     }
-                    ImGui::EndTooltip();
+                    ImGui::TreePop();
                 }
-                
                 ImGui::PopID();
             }
+            ImGui::TreePop();
         }
+        ImGui::PopID();
     }
+    
+    // Load Library Dialog
+#ifdef HAS_LIBCLANG
+    static char lib_path[512] = "";
+    static char lib_name[128] = "";
+    
+    if (ImGui::BeginPopupModal("Load Library Dialog", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Load a library from a directory or .hpp file");
+        ImGui::Separator();
+        
+        ImGui::InputText("Path", lib_path, sizeof(lib_path));
+        ImGui::InputText("Library Name", lib_name, sizeof(lib_name));
+        
+        ImGui::Separator();
+        
+        if (ImGui::Button("Load", ImVec2(120, 0))) {
+            if (strlen(lib_path) > 0 && strlen(lib_name) > 0) {
+                LoadLibrary(lib_path, lib_name);
+                // Clear inputs
+                lib_path[0] = '\0';
+                lib_name[0] = '\0';
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            ImGui::CloseCurrentPopup();
+        }
+        
+        ImGui::EndPopup();
+    }
+#endif
     
     ImGui::EndChild();
 }

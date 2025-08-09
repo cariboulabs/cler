@@ -71,9 +71,11 @@ public:
     // Identity
     std::string class_name;       // C++ class name
     std::string display_name;     // User-friendly name
-    std::string category;         // For library organization
+    std::string category;         // For library organization (e.g., "Sources/Oscillators")
     std::string tooltip;          // Help text
     std::string header_file;      // Source .hpp file
+    std::string library_name;     // Library name (e.g., "desktop_blocks")
+    std::string library_path;     // Path to the library root directory
     
     // Parameters
     std::vector<ParamSpec> template_params;

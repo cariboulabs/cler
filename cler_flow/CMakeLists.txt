@@ -122,9 +122,10 @@ set(SOURCES
     src/block_library.cpp
 )
 
-# Add block parser if libclang is available
+# Add block parser and cache if libclang is available
 if(LIBCLANG_FOUND)
     list(APPEND SOURCES src/block_parser.cpp)
+    list(APPEND SOURCES src/block_cache.cpp)
     add_compile_definitions(HAS_LIBCLANG)
 endif()
 
