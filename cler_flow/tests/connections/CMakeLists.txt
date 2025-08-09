@@ -1,5 +1,13 @@
-# Connection routing tests
+# Standalone CMakeLists.txt for connection routing tests
 cmake_minimum_required(VERSION 3.14)
+project(connection_routing_tests)
+
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Enable testing
+enable_testing()
 
 # List of test executables
 set(CONNECTION_TESTS
@@ -14,30 +22,7 @@ set(CONNECTION_TESTS
 
 # Create test executables and add to CTest
 foreach(test_name ${CONNECTION_TESTS})
-    # Create executable for each test
     add_executable(${test_name} ${test_name}.cpp)
-    
-    # Set C++ standard
-    target_compile_features(${test_name} PRIVATE cxx_std_17)
-    
-    # Add compiler warnings
-    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(${test_name} PRIVATE -Wall -Wextra)
-    endif()
-    
-    # Add the test to CTest
+    target_compile_options(${test_name} PRIVATE -Wall -Wextra)
     add_test(NAME ${test_name} COMMAND ${test_name})
-    
-    # Set test properties - these tests should all pass
-    set_tests_properties(${test_name} PROPERTIES
-        TIMEOUT 10
-        LABELS "connection_routing"
-    )
 endforeach()
-
-# Add a custom target to run all connection tests
-add_custom_target(test_connections
-    COMMAND ${CMAKE_CTEST_COMMAND} -L connection_routing --output-on-failure
-    COMMENT "Running connection routing tests"
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-)

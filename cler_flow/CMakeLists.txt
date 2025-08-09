@@ -100,8 +100,10 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     target_compile_options(${PROJECT_NAME} PRIVATE /W4)
 endif()
 
-# Enable testing
-enable_testing()
+# Optional testing
+option(CLER_FLOW_BUILD_TESTS "Build the test suite" OFF)
 
-# Add tests subdirectory
-add_subdirectory(tests/connections)
+if(CLER_FLOW_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests/connections)
+endif()
