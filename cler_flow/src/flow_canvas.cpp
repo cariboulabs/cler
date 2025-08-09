@@ -449,7 +449,20 @@ void FlowCanvas::HandleNodeInteraction()
         if (!found) {
             for (auto& [id, node] : nodes) {
                 if (node->ContainsPoint(canvas_mouse)) {
-                    SelectNode(id, ImGui::GetIO().KeyShift);
+                    // Check if this node is already selected
+                    bool already_selected = std::find(selectedNodes.begin(), selectedNodes.end(), id) != selectedNodes.end();
+                    
+                    if (!already_selected) {
+                        // Select the node (with shift for multi-select)
+                        SelectNode(id, ImGui::GetIO().KeyShift);
+                    } else if (!ImGui::GetIO().KeyShift && selectedNodes.size() == 1) {
+                        // If clicking on the only selected node without shift, keep it selected
+                        // This is already the case, do nothing
+                    } else if (!ImGui::GetIO().KeyShift && selectedNodes.size() > 1) {
+                        // If clicking on a selected node without shift when multiple are selected,
+                        // keep all selected for group dragging
+                    }
+                    
                     found = true;
                     isDraggingNode = true;  // Start dragging immediately when clicking on a node
                     break;

@@ -38,22 +38,22 @@ Rebuild core-nodes incrementally, keeping its excellent UI/UX while fixing funda
 ### Phase 1: Foundation (Week 1)
 Start with core-nodes structure but modernize the foundation:
 
-- [ ] Copy core-nodes project structure
-- [ ] Set up CMake with conditional ImGui (standalone or from CLER)
-- [ ] Port `GuiApp` base class for window management
-- [ ] Create `BlockSpec` - Modern block metadata (not CoreNode)
-- [ ] Implement `VisualNode` - Rendering based on BlockSpec
-- [ ] **Checkpoint**: Basic window with modern block representation
+- [V] Copy core-nodes project structure
+- [V] Set up CMake with conditional ImGui (standalone or from CLER)
+- [V] Port `GuiApp` base class for window management
+- [V] Create `BlockSpec` - Modern block metadata (not CoreNode)
+- [V] Implement `VisualNode` - Rendering based on BlockSpec
+- [V] **Checkpoint**: Basic window with modern block representation
 
 ### Phase 2: Diagram System (Week 2)
 Port CoreDiagram but with improvements:
 
-- [ ] Port `CoreDiagram` → `FlowCanvas` with cleaner separation
-- [ ] Copy connection routing algorithms (the good spline math)
-- [ ] Port node rendering (shadows, titles)
-- [ ] Fix: Use type-safe connections instead of void* links
-- [ ] Fix: Support variable number of ports (CLER arrays)
-- [ ] **Checkpoint**: Can create and connect nodes visually
+- [V] Port `CoreDiagram` → `FlowCanvas` with cleaner separation
+- [V] Copy connection routing algorithms (the good spline math)
+- [V] Port node rendering (shadows, titles)
+- [V] Fix: Use type-safe connections instead of void* links
+- [V] Fix: Support variable number of ports (CLER arrays)
+- [V] **Checkpoint**: Can create and connect nodes visually
 
 ### Phase 3: Interaction & UI (Week 3)
 Port the polish that makes core-nodes good:
