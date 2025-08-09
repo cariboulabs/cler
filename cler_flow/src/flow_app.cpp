@@ -78,6 +78,7 @@ void FlowApp::Update()
     DrawProperties();
     DrawCodePreview();
     DrawCanvas();  // Draw Canvas last so it's on top
+    DrawImportProgress();  // Draw popups
     
     // Demo window for debugging
     if (showDemoWindow) {
@@ -343,13 +344,91 @@ void FlowApp::ImportBlocks()
     // For now, just import the desktop_blocks directory
     // In the future, this could open a file dialog
 #ifdef HAS_LIBCLANG
-    blockLibrary->LoadDesktopBlocks();
+    // Start the incremental import process
+    blockLibrary->StartLoadingDesktopBlocks();
     
-    // Show a message
-    ImGui::OpenPopup("Import Status");
+    // Open the progress popup
+    ImGui::OpenPopup("Import Progress");
 #else
     // Show message that libclang is not available
     ImGui::OpenPopup("Import Not Available");
+#endif
+}
+
+void FlowApp::DrawImportProgress()
+{
+#ifdef HAS_LIBCLANG
+    // Process blocks while loading (this is where the magic happens!)
+    if (blockLibrary->IsLoading()) {
+        blockLibrary->ProcessNextBlocks(2); // Process 2 files per frame for smooth UI
+    }
+    
+    // Center the popup
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(450, 180), ImGuiCond_Appearing);
+    
+    if (ImGui::BeginPopupModal("Import Progress", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (blockLibrary->IsLoading()) {
+            ImGui::Text("Importing blocks from desktop_blocks directory");
+            ImGui::Spacing();
+            
+            // Show current file being processed
+            if (!blockLibrary->GetCurrentFile().empty()) {
+                ImGui::TextColored(ImVec4(0.7f, 0.7f, 1.0f, 1.0f), "Scanning: %s", 
+                                  blockLibrary->GetCurrentFile().c_str());
+            } else {
+                ImGui::Text("%s", blockLibrary->GetLoadStatus().c_str());
+            }
+            ImGui::Spacing();
+            
+            // Progress bar with percentage
+            float progress = blockLibrary->GetLoadProgress();
+            char overlay[32];
+            snprintf(overlay, sizeof(overlay), "%.0f%%", progress * 100.0f);
+            ImGui::ProgressBar(progress, ImVec2(-1, 0), overlay);
+            
+            // Show count
+            ImGui::Text("Files processed: %d / %d", 
+                       blockLibrary->GetFilesScanned(), 
+                       blockLibrary->GetTotalFiles());
+            
+            ImGui::Spacing();
+            ImGui::TextDisabled("Please wait...");
+        } else {
+            // Loading complete - show final status
+            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "✓ Import Complete!");
+            ImGui::Spacing();
+            ImGui::Text("%s", blockLibrary->GetLoadStatus().c_str());
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            
+            if (ImGui::Button("OK", ImVec2(120, 0))) {
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SetItemDefaultFocus();
+        }
+        
+        ImGui::EndPopup();
+    }
+#else
+    // Show message when libclang is not available
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    
+    if (ImGui::BeginPopupModal("Import Not Available", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Block import requires libclang to parse C++ headers.");
+        ImGui::Text("Please rebuild with libclang support enabled.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        
+        if (ImGui::Button("OK", ImVec2(120, 0))) {
+            ImGui::CloseCurrentPopup();
+        }
+        
+        ImGui::EndPopup();
+    }
 #endif
 }
 

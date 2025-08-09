@@ -38,11 +38,22 @@ public:
     void LoadTestBlocks();
     
 #ifdef HAS_LIBCLANG
-    // Load blocks from desktop_blocks directory
-    void LoadDesktopBlocks();
+    // Start loading blocks from desktop_blocks directory
+    void StartLoadingDesktopBlocks();
+    
+    // Process next batch of blocks (call each frame while loading)
+    void ProcessNextBlocks(int blocks_per_frame = 1);
     
     // Refresh library from sources
     void RefreshLibrary();
+    
+    // Progress tracking for loading
+    bool IsLoading() const { return is_loading; }
+    float GetLoadProgress() const { return load_progress; }
+    std::string GetLoadStatus() const { return load_status; }
+    std::string GetCurrentFile() const { return current_file; }
+    int GetTotalFiles() const { return total_files_to_scan; }
+    int GetFilesScanned() const { return files_scanned; }
 #endif
     
     // UI
@@ -68,6 +79,23 @@ private:
     std::string search_filter;
     std::string selected_category;
     bool show_parsed_blocks = false;
+    
+#ifdef HAS_LIBCLANG
+    // Loading progress state
+    bool is_loading = false;
+    float load_progress = 0.0f;
+    std::string load_status;
+    std::string current_file;
+    
+    // Files to scan
+    std::vector<std::string> files_to_scan;
+    size_t current_file_index = 0;
+    int total_files_to_scan = 0;
+    int files_scanned = 0;
+    
+    // Temporary storage during loading
+    std::vector<BlockMetadata> temp_parsed_blocks;
+#endif
     
     // Create test blocks for development
     std::shared_ptr<BlockSpec> CreateCWSourceBlock();

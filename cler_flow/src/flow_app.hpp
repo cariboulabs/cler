@@ -69,6 +69,7 @@ private:
     
     // Utility
     void SelectTab(const char* windowName) const;
+    void DrawImportProgress();
 };
 
 } // namespace clerflow

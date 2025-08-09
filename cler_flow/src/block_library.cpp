@@ -9,6 +9,7 @@
 #include <imgui.h>
 #include <algorithm>
 #include <iostream>
+#include <filesystem>
 
 namespace clerflow {
 
@@ -60,109 +61,195 @@ void BlockLibrary::SetSearchFilter(const std::string& filter)
 }
 
 #ifdef HAS_LIBCLANG
-void BlockLibrary::LoadDesktopBlocks()
+void BlockLibrary::StartLoadingDesktopBlocks()
 {
-    // Load blocks from desktop_blocks directory
-    auto library = scanner.scanDesktopBlocks();
+    // Reset state
+    is_loading = true;
+    load_progress = 0.0f;
+    files_scanned = 0;
+    current_file_index = 0;
+    files_to_scan.clear();
+    temp_parsed_blocks.clear();
     
-    // Store parsed metadata
-    parsed_blocks = std::move(library.blocks);
+    load_status = "Scanning for block files...";
     
-    // Convert to BlockSpec for UI (simplified for now)
-    for (const auto& metadata : parsed_blocks) {
-        auto spec = std::make_shared<BlockSpec>();
-        spec->class_name = metadata.class_name;
-        spec->display_name = metadata.class_name; // TODO: make more user-friendly
-        spec->category = metadata.category.empty() ? "Uncategorized" : metadata.category;
-        spec->header_file = metadata.header_path;
+    // Collect all .hpp files from desktop_blocks
+    namespace fs = std::filesystem;
+    std::string desktop_blocks_path = "/home/alon/repos/cler/desktop_blocks";
+    
+    try {
+        for (const auto& entry : fs::recursive_directory_iterator(desktop_blocks_path)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".hpp") {
+                files_to_scan.push_back(entry.path().string());
+            }
+        }
+    } catch (const std::exception& e) {
+        load_status = std::string("Error: ") + e.what();
+        is_loading = false;
+        return;
+    }
+    
+    total_files_to_scan = files_to_scan.size();
+    load_status = "Found " + std::to_string(total_files_to_scan) + " header files";
+}
+
+void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
+{
+    if (!is_loading) return;
+    
+    // Process files for this frame
+    for (int i = 0; i < blocks_per_frame && current_file_index < files_to_scan.size(); ++i) {
+        const std::string& file_path = files_to_scan[current_file_index];
         
-        // Convert template params
-        for (const auto& tparam : metadata.template_params) {
-            ParamSpec param;
-            param.name = tparam.name;
-            param.display_name = tparam.name;
-            param.type = ParamType::String; // Simplified for now
-            param.default_value = tparam.default_value;
-            spec->template_params.push_back(param);
+        // Extract just the filename for display
+        namespace fs = std::filesystem;
+        current_file = fs::path(file_path).filename().string();
+        load_status = "Processing: " + current_file;
+        
+        // Quick check if it's a block header
+        BlockParser parser;
+        if (parser.isBlockHeader(file_path)) {
+            // Parse the header
+            BlockMetadata metadata = parser.parseHeader(file_path);
+            if (metadata.is_valid) {
+                // Extract category from path
+                fs::path file(file_path);
+                fs::path root("/home/alon/repos/cler/desktop_blocks");
+                fs::path relative = fs::relative(file.parent_path(), root);
+                
+                if (relative == ".") {
+                    metadata.category = "Uncategorized";
+                } else {
+                    // Convert path to category string
+                    std::string category;
+                    for (const auto& part : relative) {
+                        if (!category.empty()) {
+                            category += "/";
+                        }
+                        std::string part_str = part.string();
+                        if (!part_str.empty()) {
+                            // Capitalize first letter
+                            part_str[0] = std::toupper(part_str[0]);
+                        }
+                        category += part_str;
+                    }
+                    metadata.category = category;
+                }
+                
+                metadata.library_name = "Desktop Blocks";
+                temp_parsed_blocks.push_back(metadata);
+            }
         }
         
-        // Convert constructor params
-        for (const auto& cparam : metadata.constructor_params) {
-            ParamSpec param;
-            param.name = cparam.name;
-            param.display_name = cparam.name;
-            // Detect type from string
-            if (cparam.type.find("float") != std::string::npos) {
-                param.type = ParamType::Float;
-            } else if (cparam.type.find("int") != std::string::npos) {
-                param.type = ParamType::Int;
-            } else if (cparam.type.find("bool") != std::string::npos) {
-                param.type = ParamType::Bool;
-            } else if (cparam.type.find("string") != std::string::npos || 
-                      cparam.type.find("char") != std::string::npos) {
+        current_file_index++;
+        files_scanned++;
+        load_progress = static_cast<float>(files_scanned) / static_cast<float>(total_files_to_scan);
+    }
+    
+    // Check if we're done scanning
+    if (current_file_index >= files_to_scan.size()) {
+        // Convert all parsed blocks to BlockSpec
+        load_status = "Finalizing...";
+        parsed_blocks = std::move(temp_parsed_blocks);
+        
+        for (const auto& metadata : parsed_blocks) {
+            auto spec = std::make_shared<BlockSpec>();
+            spec->class_name = metadata.class_name;
+            spec->display_name = metadata.class_name;
+            spec->category = metadata.category.empty() ? "Uncategorized" : metadata.category;
+            spec->header_file = metadata.header_path;
+            
+            // Convert template params
+            for (const auto& tparam : metadata.template_params) {
+                ParamSpec param;
+                param.name = tparam.name;
+                param.display_name = tparam.name;
                 param.type = ParamType::String;
-            } else {
-                param.type = ParamType::String; // Default to string
+                param.default_value = tparam.default_value;
+                spec->template_params.push_back(param);
             }
-            param.default_value = cparam.default_value;
-            spec->constructor_params.push_back(param);
-        }
-        
-        // Convert input ports
-        for (const auto& channel : metadata.input_channels) {
-            PortSpec port;
-            port.name = channel.name;
-            port.display_name = channel.name;
-            port.cpp_type = channel.type;
-            // Detect data type from string
-            if (channel.type.find("float") != std::string::npos) {
-                port.data_type = DataType::Float;
-            } else if (channel.type.find("double") != std::string::npos) {
-                port.data_type = DataType::Double;
-            } else if (channel.type.find("complex") != std::string::npos) {
-                if (channel.type.find("float") != std::string::npos) {
-                    port.data_type = DataType::ComplexFloat;
+            
+            // Convert constructor params
+            for (const auto& cparam : metadata.constructor_params) {
+                ParamSpec param;
+                param.name = cparam.name;
+                param.display_name = cparam.name;
+                // Detect type from string
+                if (cparam.type.find("float") != std::string::npos) {
+                    param.type = ParamType::Float;
+                } else if (cparam.type.find("int") != std::string::npos) {
+                    param.type = ParamType::Int;
+                } else if (cparam.type.find("bool") != std::string::npos) {
+                    param.type = ParamType::Bool;
+                } else if (cparam.type.find("string") != std::string::npos || 
+                          cparam.type.find("char") != std::string::npos) {
+                    param.type = ParamType::String;
                 } else {
-                    port.data_type = DataType::ComplexDouble;
+                    param.type = ParamType::String;
                 }
-            } else if (channel.type.find("int") != std::string::npos) {
-                port.data_type = DataType::Int;
-            } else {
-                port.data_type = DataType::Custom;
+                param.default_value = cparam.default_value;
+                spec->constructor_params.push_back(param);
             }
-            spec->input_ports.push_back(port);
-        }
-        
-        // Convert output ports
-        for (const auto& channel : metadata.output_channels) {
-            PortSpec port;
-            port.name = channel.name;
-            port.display_name = channel.name;
-            port.cpp_type = channel.type;
-            // Detect data type from string
-            if (channel.type.find("float") != std::string::npos) {
-                port.data_type = DataType::Float;
-            } else if (channel.type.find("double") != std::string::npos) {
-                port.data_type = DataType::Double;
-            } else if (channel.type.find("complex") != std::string::npos) {
+            
+            // Convert input ports
+            for (const auto& channel : metadata.input_channels) {
+                PortSpec port;
+                port.name = channel.name;
+                port.display_name = channel.name;
+                port.cpp_type = channel.type;
+                // Detect data type from string
                 if (channel.type.find("float") != std::string::npos) {
-                    port.data_type = DataType::ComplexFloat;
+                    port.data_type = DataType::Float;
+                } else if (channel.type.find("double") != std::string::npos) {
+                    port.data_type = DataType::Double;
+                } else if (channel.type.find("complex") != std::string::npos) {
+                    if (channel.type.find("float") != std::string::npos) {
+                        port.data_type = DataType::ComplexFloat;
+                    } else {
+                        port.data_type = DataType::ComplexDouble;
+                    }
+                } else if (channel.type.find("int") != std::string::npos) {
+                    port.data_type = DataType::Int;
                 } else {
-                    port.data_type = DataType::ComplexDouble;
+                    port.data_type = DataType::Custom;
                 }
-            } else if (channel.type.find("int") != std::string::npos) {
-                port.data_type = DataType::Int;
-            } else {
-                port.data_type = DataType::Custom;
+                spec->input_ports.push_back(port);
             }
-            spec->output_ports.push_back(port);
+            
+            // Convert output ports
+            for (const auto& channel : metadata.output_channels) {
+                PortSpec port;
+                port.name = channel.name;
+                port.display_name = channel.name;
+                port.cpp_type = channel.type;
+                // Detect data type from string
+                if (channel.type.find("float") != std::string::npos) {
+                    port.data_type = DataType::Float;
+                } else if (channel.type.find("double") != std::string::npos) {
+                    port.data_type = DataType::Double;
+                } else if (channel.type.find("complex") != std::string::npos) {
+                    if (channel.type.find("float") != std::string::npos) {
+                        port.data_type = DataType::ComplexFloat;
+                    } else {
+                        port.data_type = DataType::ComplexDouble;
+                    }
+                } else if (channel.type.find("int") != std::string::npos) {
+                    port.data_type = DataType::Int;
+                } else {
+                    port.data_type = DataType::Custom;
+                }
+                spec->output_ports.push_back(port);
+            }
+            
+            // Detect if source or sink
+            spec->is_source = spec->input_ports.empty() && !spec->output_ports.empty();
+            spec->is_sink = !spec->input_ports.empty() && spec->output_ports.empty();
+            
+            AddBlock(spec);
         }
         
-        // Detect if source or sink
-        spec->is_source = spec->input_ports.empty() && !spec->output_ports.empty();
-        spec->is_sink = !spec->input_ports.empty() && spec->output_ports.empty();
-        
-        AddBlock(spec);
+        is_loading = false;
+        load_status = "Import complete! Found " + std::to_string(parsed_blocks.size()) + " blocks";
     }
 }
 
@@ -189,7 +276,7 @@ void BlockLibrary::RefreshLibrary()
     }
     
     // Reload
-    LoadDesktopBlocks();
+    StartLoadingDesktopBlocks();
 }
 #endif
 
@@ -324,15 +411,25 @@ void BlockLibrary::Draw(FlowCanvas* canvas)
 #ifdef HAS_LIBCLANG
     // Controls for parsed blocks
     if (ImGui::Button("Load Desktop Blocks")) {
-        LoadDesktopBlocks();
+        StartLoadingDesktopBlocks();
         show_parsed_blocks = true;
+        ImGui::OpenPopup("Import Progress");
     }
     ImGui::SameLine();
     if (ImGui::Button("Refresh")) {
         RefreshLibrary();
     }
     
-    if (show_parsed_blocks && !parsed_blocks.empty()) {
+    // Process loading and show progress
+    if (is_loading) {
+        ProcessNextBlocks(1); // Process 1 file per frame in library view
+        
+        // Show inline progress
+        ImGui::Text("Loading: %.0f%% (%d/%d files)", 
+                   load_progress * 100.0f, files_scanned, total_files_to_scan);
+        ImGui::SameLine();
+        ImGui::ProgressBar(load_progress, ImVec2(100, 0));
+    } else if (show_parsed_blocks && !parsed_blocks.empty()) {
         ImGui::Text("Found %zu blocks", parsed_blocks.size());
     }
     ImGui::Separator();
