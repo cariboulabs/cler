@@ -18,8 +18,8 @@ std::string BlockSpec::generateInstantiation(const std::string& instance_name,
 {
     std::stringstream ss;
     
-    // Generate the instantiation
-    ss << "    auto " << instance_name << " = std::make_shared<" << class_name;
+    // Generate the instantiation (stack object, not pointer)
+    ss << class_name;
     
     // Add template arguments if any
     if (!template_args.empty()) {
@@ -32,7 +32,7 @@ std::string BlockSpec::generateInstantiation(const std::string& instance_name,
     }
     
     // Add constructor arguments
-    ss << ">(";
+    ss << "> " << instance_name << "(";
     for (size_t i = 0; i < constructor_args.size(); ++i) {
         if (i > 0) ss << ", ";
         

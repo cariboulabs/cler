@@ -50,7 +50,7 @@ Port CoreDiagram but with improvements:
 
 - [ ] Port `CoreDiagram` → `FlowCanvas` with cleaner separation
 - [ ] Copy connection routing algorithms (the good spline math)
-- [ ] Port node rendering (shadows, collapse, titles)
+- [ ] Port node rendering (shadows, titles)
 - [ ] Fix: Use type-safe connections instead of void* links
 - [ ] Fix: Support variable number of ports (CLER arrays)
 - [ ] **Checkpoint**: Can create and connect nodes visually
