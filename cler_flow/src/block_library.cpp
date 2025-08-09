@@ -65,11 +65,14 @@ void BlockLibrary::StartLoadingDesktopBlocks()
 {
     // Reset state
     is_loading = true;
+    cancel_requested = false;
     load_progress = 0.0f;
     files_scanned = 0;
+    blocks_found = 0;
     current_file_index = 0;
     files_to_scan.clear();
     temp_parsed_blocks.clear();
+    current_block_name.clear();
     
     load_status = "Scanning for block files...";
     
@@ -95,10 +98,18 @@ void BlockLibrary::StartLoadingDesktopBlocks()
 
 void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
 {
-    if (!is_loading) return;
+    if (!is_loading || cancel_requested) {
+        if (cancel_requested) {
+            is_loading = false;
+            cancel_requested = false;
+            load_status = "Import cancelled";
+            current_block_name.clear();
+        }
+        return;
+    }
     
     // Process files for this frame
-    for (int i = 0; i < blocks_per_frame && current_file_index < files_to_scan.size(); ++i) {
+    for (int i = 0; i < blocks_per_frame && current_file_index < files_to_scan.size() && !cancel_requested; ++i) {
         const std::string& file_path = files_to_scan[current_file_index];
         
         // Extract just the filename for display
@@ -112,6 +123,9 @@ void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
             // Parse the header
             BlockMetadata metadata = parser.parseHeader(file_path);
             if (metadata.is_valid) {
+                // Track current block being processed
+                current_block_name = metadata.class_name;
+                blocks_found++;
                 // Extract category from path
                 fs::path file(file_path);
                 fs::path root("/home/alon/repos/cler/desktop_blocks");
@@ -250,7 +264,13 @@ void BlockLibrary::ProcessNextBlocks(int blocks_per_frame)
         
         is_loading = false;
         load_status = "Import complete! Found " + std::to_string(parsed_blocks.size()) + " blocks";
+        current_block_name.clear();
     }
+}
+
+void BlockLibrary::CancelLoading()
+{
+    cancel_requested = true;
 }
 
 void BlockLibrary::RefreshLibrary()
@@ -413,23 +433,16 @@ void BlockLibrary::Draw(FlowCanvas* canvas)
     if (ImGui::Button("Load Desktop Blocks")) {
         StartLoadingDesktopBlocks();
         show_parsed_blocks = true;
-        ImGui::OpenPopup("Import Progress");
+        request_import_popup = true; // Just set the flag
     }
     ImGui::SameLine();
     if (ImGui::Button("Refresh")) {
         RefreshLibrary();
+        request_import_popup = true; // Also show popup for refresh
     }
     
-    // Process loading and show progress
-    if (is_loading) {
-        ProcessNextBlocks(1); // Process 1 file per frame in library view
-        
-        // Show inline progress
-        ImGui::Text("Loading: %.0f%% (%d/%d files)", 
-                   load_progress * 100.0f, files_scanned, total_files_to_scan);
-        ImGui::SameLine();
-        ImGui::ProgressBar(load_progress, ImVec2(100, 0));
-    } else if (show_parsed_blocks && !parsed_blocks.empty()) {
+    // Just show block count if we have parsed blocks
+    if (show_parsed_blocks && !parsed_blocks.empty()) {
         ImGui::Text("Found %zu blocks", parsed_blocks.size());
     }
     ImGui::Separator();

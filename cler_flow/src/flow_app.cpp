@@ -78,7 +78,18 @@ void FlowApp::Update()
     DrawProperties();
     DrawCodePreview();
     DrawCanvas();  // Draw Canvas last so it's on top
-    DrawImportProgress();  // Draw popups
+    
+    // Check if we need to show import popup
+#ifdef HAS_LIBCLANG
+    if (blockLibrary->ShouldShowImportPopup() || show_import_popup) {
+        blockLibrary->ClearImportPopupRequest();
+        show_import_popup = false;
+        ImGui::OpenPopup("Import Progress");
+    }
+#endif
+    
+    // Draw popups last so they appear on top of everything
+    DrawImportProgress();
     
     // Demo window for debugging
     if (showDemoWindow) {
@@ -147,6 +158,7 @@ void FlowApp::MenuFile()
         
         if (ImGui::MenuItem("Import Blocks...")) {
             ImportBlocks();
+            show_import_popup = true;
         }
         
         ImGui::Separator();
@@ -347,8 +359,8 @@ void FlowApp::ImportBlocks()
     // Start the incremental import process
     blockLibrary->StartLoadingDesktopBlocks();
     
-    // Open the progress popup
-    ImGui::OpenPopup("Import Progress");
+    // The popup will be opened in the main draw loop
+    // Just let it know we want the popup
 #else
     // Show message that libclang is not available
     ImGui::OpenPopup("Import Not Available");
@@ -363,48 +375,95 @@ void FlowApp::DrawImportProgress()
         blockLibrary->ProcessNextBlocks(2); // Process 2 files per frame for smooth UI
     }
     
-    // Center the popup
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(450, 180), ImGuiCond_Appearing);
+    // Get the main viewport to center in the entire application window
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImVec2 center = viewport->GetCenter();
+    ImVec2 popup_size(450, 220);
     
-    if (ImGui::BeginPopupModal("Import Progress", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    // Center the popup in the main application window
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(popup_size, ImGuiCond_Always);
+    
+    // Style the popup
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20, 20));
+    
+    // Set dimming of background
+    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.0f, 0.0f, 0.0f, 0.6f));
+    
+    if (ImGui::BeginPopupModal("Import Progress", nullptr, 
+                               ImGuiWindowFlags_NoResize | 
+                               ImGuiWindowFlags_NoMove | 
+                               ImGuiWindowFlags_NoTitleBar | 
+                               ImGuiWindowFlags_NoScrollbar)) {
+        
+        // Title - clean and centered
+        const char* title = "Importing Blocks";
+        float title_width = ImGui::CalcTextSize(title).x;
+        ImGui::SetCursorPosX((popup_size.x - title_width) * 0.5f - 20);
+        ImGui::Text("%s", title);
+        
+        ImGui::Separator();
+        ImGui::Spacing();
+        
         if (blockLibrary->IsLoading()) {
-            ImGui::Text("Importing blocks from desktop_blocks directory");
-            ImGui::Spacing();
-            
-            // Show current file being processed
-            if (!blockLibrary->GetCurrentFile().empty()) {
-                ImGui::TextColored(ImVec4(0.7f, 0.7f, 1.0f, 1.0f), "Scanning: %s", 
-                                  blockLibrary->GetCurrentFile().c_str());
+            // Current block being processed
+            if (!blockLibrary->GetCurrentBlock().empty()) {
+                ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), 
+                                  "Importing: %s", blockLibrary->GetCurrentBlock().c_str());
+            } else if (!blockLibrary->GetCurrentFile().empty()) {
+                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.7f, 1.0f),
+                                  "Scanning: %s", blockLibrary->GetCurrentFile().c_str());
             } else {
-                ImGui::Text("%s", blockLibrary->GetLoadStatus().c_str());
+                ImGui::Text("Scanning for blocks...");
             }
+            
             ImGui::Spacing();
             
-            // Progress bar with percentage
+            // Progress bar
             float progress = blockLibrary->GetLoadProgress();
             char overlay[32];
             snprintf(overlay, sizeof(overlay), "%.0f%%", progress * 100.0f);
-            ImGui::ProgressBar(progress, ImVec2(-1, 0), overlay);
+            ImGui::ProgressBar(progress, ImVec2(-1, 20), overlay);
             
-            // Show count
-            ImGui::Text("Files processed: %d / %d", 
+            ImGui::Spacing();
+            
+            // Statistics
+            ImGui::Text("Files: %d / %d   Blocks found: %d", 
                        blockLibrary->GetFilesScanned(), 
-                       blockLibrary->GetTotalFiles());
+                       blockLibrary->GetTotalFiles(),
+                       blockLibrary->GetBlocksFound());
             
             ImGui::Spacing();
-            ImGui::TextDisabled("Please wait...");
+            ImGui::Spacing();
+            
+            // Cancel button (right-aligned)
+            float button_width = 80;
+            ImGui::SetCursorPosX(popup_size.x - button_width - 20);
+            
+            if (ImGui::Button("Cancel", ImVec2(button_width, 0))) {
+                blockLibrary->CancelLoading();
+                ImGui::CloseCurrentPopup();
+            }
+            
         } else {
-            // Loading complete - show final status
-            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "✓ Import Complete!");
-            ImGui::Spacing();
-            ImGui::Text("%s", blockLibrary->GetLoadStatus().c_str());
-            ImGui::Spacing();
-            ImGui::Separator();
+            // Loading complete
             ImGui::Spacing();
             
-            if (ImGui::Button("OK", ImVec2(120, 0))) {
+            ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "Import Complete!");
+            
+            ImGui::Spacing();
+            
+            ImGui::Text("%s", blockLibrary->GetLoadStatus().c_str());
+            
+            ImGui::Spacing();
+            ImGui::Spacing();
+            
+            // OK button (centered)
+            float button_width = 80;
+            ImGui::SetCursorPosX((popup_size.x - button_width) * 0.5f - 20);
+            
+            if (ImGui::Button("OK", ImVec2(button_width, 0))) {
                 ImGui::CloseCurrentPopup();
             }
             ImGui::SetItemDefaultFocus();
@@ -412,6 +471,9 @@ void FlowApp::DrawImportProgress()
         
         ImGui::EndPopup();
     }
+    
+    ImGui::PopStyleColor(); // ModalWindowDimBg
+    ImGui::PopStyleVar(2); // WindowRounding and WindowPadding
 #else
     // Show message when libclang is not available
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();

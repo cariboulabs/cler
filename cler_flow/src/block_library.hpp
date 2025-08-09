@@ -49,11 +49,18 @@ public:
     
     // Progress tracking for loading
     bool IsLoading() const { return is_loading; }
+    bool ShouldShowImportPopup() const { return request_import_popup; }
+    void ClearImportPopupRequest() { request_import_popup = false; }
     float GetLoadProgress() const { return load_progress; }
     std::string GetLoadStatus() const { return load_status; }
     std::string GetCurrentFile() const { return current_file; }
+    std::string GetCurrentBlock() const { return current_block_name; }
     int GetTotalFiles() const { return total_files_to_scan; }
     int GetFilesScanned() const { return files_scanned; }
+    int GetBlocksFound() const { return blocks_found; }
+    
+    // Cancel loading
+    void CancelLoading();
 #endif
     
     // UI
@@ -83,15 +90,19 @@ private:
 #ifdef HAS_LIBCLANG
     // Loading progress state
     bool is_loading = false;
+    bool cancel_requested = false;
+    bool request_import_popup = false;
     float load_progress = 0.0f;
     std::string load_status;
     std::string current_file;
+    std::string current_block_name;
     
     // Files to scan
     std::vector<std::string> files_to_scan;
     size_t current_file_index = 0;
     int total_files_to_scan = 0;
     int files_scanned = 0;
+    int blocks_found = 0;
     
     // Temporary storage during loading
     std::vector<BlockMetadata> temp_parsed_blocks;

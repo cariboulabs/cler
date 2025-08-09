@@ -93,7 +93,7 @@ void GuiApp::Run()
         return;
     }
     
-    // Main loop
+    // Main loop - normal FPS with vsync
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         

@@ -70,6 +70,9 @@ private:
     // Utility
     void SelectTab(const char* windowName) const;
     void DrawImportProgress();
+    
+    // Import state
+    bool show_import_popup = false;
 };
 
 } // namespace clerflow
