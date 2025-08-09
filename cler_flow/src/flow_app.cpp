@@ -20,6 +20,11 @@ FlowApp::FlowApp()
     
     // Load test blocks for development
     blockLibrary->LoadTestBlocks();
+    
+#ifdef HAS_LIBCLANG
+    // Auto-load desktop blocks if available
+    // blockLibrary->LoadDesktopBlocks(); // Commented out - let user load via UI
+#endif
 }
 
 void FlowApp::Update()
@@ -78,6 +83,31 @@ void FlowApp::Update()
     if (showDemoWindow) {
         ImGui::ShowDemoWindow(&showDemoWindow);
     }
+    
+    // Import status popup
+    if (ImGui::BeginPopupModal("Import Status", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Blocks imported successfully!");
+        ImGui::Text("Check the Library panel to see available blocks.");
+        ImGui::Separator();
+        if (ImGui::Button("OK", ImVec2(120, 0))) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    
+    // Import not available popup
+    if (ImGui::BeginPopupModal("Import Not Available", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Block import requires libclang to be installed.");
+        ImGui::Text("Please install libclang development packages:");
+        ImGui::BulletText("Ubuntu/Debian: apt install libclang-dev");
+        ImGui::BulletText("Fedora: dnf install clang-devel");
+        ImGui::BulletText("macOS: brew install llvm");
+        ImGui::Separator();
+        if (ImGui::Button("OK", ImVec2(120, 0))) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }
 
 void FlowApp::Menu()
@@ -114,8 +144,8 @@ void FlowApp::MenuFile()
         
         ImGui::Separator();
         
-        if (ImGui::MenuItem("Import Block from Header...")) {
-            // TODO: Open file dialog to select .hpp file
+        if (ImGui::MenuItem("Import Blocks...")) {
+            ImportBlocks();
         }
         
         ImGui::Separator();
@@ -306,6 +336,21 @@ void FlowApp::LoadFromFile(const std::string& path)
         hasFile = true;
         filePath = path;
     }
+}
+
+void FlowApp::ImportBlocks()
+{
+    // For now, just import the desktop_blocks directory
+    // In the future, this could open a file dialog
+#ifdef HAS_LIBCLANG
+    blockLibrary->LoadDesktopBlocks();
+    
+    // Show a message
+    ImGui::OpenPopup("Import Status");
+#else
+    // Show message that libclang is not available
+    ImGui::OpenPopup("Import Not Available");
+#endif
 }
 
 void FlowApp::DrawCanvas()

@@ -6,6 +6,78 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Find libclang for parsing C++ headers
+# First try to find llvm-config
+find_program(LLVM_CONFIG_EXECUTABLE NAMES llvm-config-18 llvm-config-17 llvm-config-16 llvm-config-15 llvm-config-14 llvm-config)
+
+if(LLVM_CONFIG_EXECUTABLE)
+    execute_process(
+        COMMAND ${LLVM_CONFIG_EXECUTABLE} --libdir
+        OUTPUT_VARIABLE LLVM_LIBRARY_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    execute_process(
+        COMMAND ${LLVM_CONFIG_EXECUTABLE} --includedir
+        OUTPUT_VARIABLE LLVM_INCLUDE_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    
+    find_path(LIBCLANG_INCLUDE_DIR clang-c/Index.h
+        HINTS ${LLVM_INCLUDE_DIR}
+        NO_DEFAULT_PATH
+    )
+    
+    find_library(LIBCLANG_LIBRARY
+        NAMES clang
+        HINTS ${LLVM_LIBRARY_DIR}
+        NO_DEFAULT_PATH
+    )
+    
+    if(LIBCLANG_INCLUDE_DIR AND LIBCLANG_LIBRARY)
+        set(LIBCLANG_FOUND TRUE)
+        message(STATUS "Found libclang via llvm-config")
+        message(STATUS "  Library: ${LIBCLANG_LIBRARY}")
+        message(STATUS "  Include: ${LIBCLANG_INCLUDE_DIR}")
+    endif()
+endif()
+
+# Fallback to manual search if llvm-config didn't work
+if(NOT LIBCLANG_FOUND)
+    find_path(LIBCLANG_INCLUDE_DIR clang-c/Index.h
+        HINTS
+        /usr/lib/llvm-18/include
+        /usr/lib/llvm-17/include
+        /usr/lib/llvm-16/include
+        /usr/lib/llvm-15/include
+        /usr/lib/llvm-14/include
+        /usr/include/clang-c
+        /usr/local/include
+    )
+    
+    find_library(LIBCLANG_LIBRARY
+        NAMES clang libclang
+        HINTS
+        /usr/lib/llvm-18/lib
+        /usr/lib/llvm-17/lib
+        /usr/lib/llvm-16/lib
+        /usr/lib/llvm-15/lib
+        /usr/lib/llvm-14/lib
+        /usr/lib/x86_64-linux-gnu
+        /usr/lib
+        /usr/local/lib
+    )
+    
+    if(LIBCLANG_INCLUDE_DIR AND LIBCLANG_LIBRARY)
+        set(LIBCLANG_FOUND TRUE)
+        message(STATUS "Found libclang manually")
+        message(STATUS "  Library: ${LIBCLANG_LIBRARY}")
+        message(STATUS "  Include: ${LIBCLANG_INCLUDE_DIR}")
+    else()
+        message(WARNING "libclang not found - block import feature will be disabled")
+        set(LIBCLANG_FOUND FALSE)
+    endif()
+endif()
+
 # Option to build standalone or use CLER's ImGui
 option(CLER_FLOW_STANDALONE "Build as standalone application" ON)
 
@@ -50,6 +122,12 @@ set(SOURCES
     src/block_library.cpp
 )
 
+# Add block parser if libclang is available
+if(LIBCLANG_FOUND)
+    list(APPEND SOURCES src/block_parser.cpp)
+    add_compile_definitions(HAS_LIBCLANG)
+endif()
+
 # Create executable
 if(CLER_FLOW_STANDALONE)
     add_executable(${PROJECT_NAME} ${SOURCES} ${IMGUI_SOURCES})
@@ -65,6 +143,12 @@ if(CLER_FLOW_STANDALONE)
         glfw
         Threads::Threads
     )
+    
+    # Link libclang if found
+    if(LIBCLANG_FOUND)
+        target_include_directories(${PROJECT_NAME} PRIVATE ${LIBCLANG_INCLUDE_DIR})
+        target_link_libraries(${PROJECT_NAME} PRIVATE ${LIBCLANG_LIBRARY})
+    endif()
     
     # Platform-specific settings
     if(APPLE)

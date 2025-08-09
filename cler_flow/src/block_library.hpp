@@ -9,6 +9,9 @@
 #pragma once
 
 #include "block_spec.hpp"
+#ifdef HAS_LIBCLANG
+#include "block_parser.hpp"
+#endif
 #include <memory>
 #include <vector>
 #include <map>
@@ -34,6 +37,14 @@ public:
     // Load built-in test blocks
     void LoadTestBlocks();
     
+#ifdef HAS_LIBCLANG
+    // Load blocks from desktop_blocks directory
+    void LoadDesktopBlocks();
+    
+    // Refresh library from sources
+    void RefreshLibrary();
+#endif
+    
     // UI
     void Draw(FlowCanvas* canvas);
     
@@ -47,9 +58,16 @@ private:
     // All blocks for searching
     std::vector<std::shared_ptr<BlockSpec>> all_blocks;
     
+#ifdef HAS_LIBCLANG
+    // Parsed metadata from headers
+    std::vector<BlockMetadata> parsed_blocks;
+    BlockLibraryScanner scanner;
+#endif
+    
     // UI state
     std::string search_filter;
     std::string selected_category;
+    bool show_parsed_blocks = false;
     
     // Create test blocks for development
     std::shared_ptr<BlockSpec> CreateCWSourceBlock();

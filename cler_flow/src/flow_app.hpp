@@ -59,6 +59,7 @@ private:
     void SaveProject(bool saveAs = false);
     void SaveToFile(const std::string& name, const std::string& path);
     void LoadFromFile(const std::string& path);
+    void ImportBlocks();
     
     // Windows
     void DrawCanvas();
