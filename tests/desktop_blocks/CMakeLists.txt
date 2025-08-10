@@ -5,7 +5,7 @@ add_executable(math_blocks_test
 
 target_link_libraries(math_blocks_test
     gtest_main
-    cler::cler_desktop_blocks
+    cler::desktop_blocks
 )
 
 # Utility blocks tests
@@ -15,7 +15,7 @@ add_executable(utility_blocks_test
 
 target_link_libraries(utility_blocks_test
     gtest_main
-    cler::cler_desktop_blocks
+    cler::desktop_blocks
 )
 
 # Sink blocks tests
@@ -25,7 +25,7 @@ add_executable(sink_blocks_test
 
 target_link_libraries(sink_blocks_test
     gtest_main
-    cler::cler_desktop_blocks
+    cler::desktop_blocks
 )
 
 # Noise blocks tests
@@ -35,7 +35,7 @@ add_executable(noise_blocks_test
 
 target_link_libraries(noise_blocks_test
     gtest_main
-    cler::cler_desktop_blocks
+    cler::desktop_blocks
 )
 
 if (CLER_BUILD_BLOCKS_LIQUID)
@@ -46,7 +46,7 @@ if (CLER_BUILD_BLOCKS_LIQUID)
 
     target_link_libraries(resampler_blocks_test
         gtest_main
-        cler::cler_desktop_blocks
+        cler::desktop_blocks
     )
 
     # Channelizer blocks tests
@@ -56,7 +56,7 @@ if (CLER_BUILD_BLOCKS_LIQUID)
 
     target_link_libraries(channelizer_blocks_test
         gtest_main
-        cler::cler_desktop_blocks
+        cler::desktop_blocks
     )
 endif()
 
