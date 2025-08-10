@@ -133,7 +133,7 @@ find_package(PkgConfig REQUIRED)
 message(STATUS "CLER: Using CLER_DEFAULT_MAX_WORKERS=${CLER_DEFAULT_MAX_WORKERS}")
 
 if (CLER_BUILD_BLOCKS)
-  add_subdirectory(logger) #mightaswell
+  add_subdirectory(desktop_logger) #mightaswell
   add_subdirectory(desktop_blocks)
 endif()
 

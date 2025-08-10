@@ -1,5 +1,5 @@
 add_library(cler_desktop_blocks INTERFACE)
-add_library(cler::cler_desktop_blocks ALIAS cler_desktop_blocks)
+add_library(cler::desktop_blocks ALIAS cler_desktop_blocks)
 
 target_link_libraries(cler_desktop_blocks INTERFACE cler::cler)
 
