@@ -627,51 +627,38 @@ void FlowCanvas::HandleCanvasInteraction()
             SelectNode(id, true);
         }
     }
-    
-    // Rotate selected nodes
-    if (ImGui::IsKeyPressed(ImGuiKey_R)) {
-        if (ImGui::GetIO().KeyShift) {
-            // Rotate left (counter-clockwise)
-            for (size_t id : selectedNodes) {
-                auto* node = GetNode(id);
-                if (node) {
-                    node->RotateLeft();
-                }
-            }
-        } else {
-            // Rotate right (clockwise)
-            for (size_t id : selectedNodes) {
-                auto* node = GetNode(id);
-                if (node) {
-                    node->RotateRight();
-                }
-            }
-        }
-    }
 }
 
 void FlowCanvas::HandleContextMenus()
 {
-    // Check for right-click on nodes - only if the canvas window is hovered
-    if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+    // Check for right-click on nodes - only if we clicked within the canvas content area
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
         ImVec2 mouse_pos = ImGui::GetMousePos();
-        ImVec2 canvas_mouse = ScreenToCanvas(mouse_pos);
+        ImVec2 canvas_pos = ImGui::GetWindowPos();
+        ImVec2 canvas_size = ImGui::GetWindowSize();
         
-        // Check if right-clicking on a node
-        bool found_node = false;
-        for (auto& [id, node] : nodes) {
-            if (node->ContainsPoint(canvas_mouse)) {
-                contextNodeId = id;
-                ImGui::OpenPopup("node_context");
-                found_node = true;
-                break;
+        // Check if mouse is within the canvas window bounds
+        if (mouse_pos.x >= canvas_pos.x && mouse_pos.x <= canvas_pos.x + canvas_size.x &&
+            mouse_pos.y >= canvas_pos.y && mouse_pos.y <= canvas_pos.y + canvas_size.y) {
+            
+            ImVec2 canvas_mouse = ScreenToCanvas(mouse_pos);
+            
+            // Check if right-clicking on a node
+            bool found_node = false;
+            for (auto& [id, node] : nodes) {
+                if (node->ContainsPoint(canvas_mouse)) {
+                    contextNodeId = id;
+                    ImGui::OpenPopup("node_context");
+                    found_node = true;
+                    break;
+                }
             }
-        }
-        
-        // If not on a node, open canvas context menu
-        if (!found_node) {
-            contextMenuPos = canvas_mouse;
-            ImGui::OpenPopup("canvas_context");
+            
+            // If not on a node, open canvas context menu
+            if (!found_node) {
+                contextMenuPos = canvas_mouse;
+                ImGui::OpenPopup("canvas_context");
+            }
         }
     }
     
@@ -702,7 +689,6 @@ void FlowCanvas::ShowNodeContextMenu(size_t node_id)
         size_t new_id = AddNode(node->GetSpec(), new_pos);
         auto* new_node = GetNode(new_id);
         if (new_node) {
-            new_node->rotation = node->rotation;
             new_node->size = node->size;
             new_node->UpdatePortPositions();
         }
@@ -710,26 +696,6 @@ void FlowCanvas::ShowNodeContextMenu(size_t node_id)
     
     if (ImGui::MenuItem("Delete", "Delete")) {
         RemoveNode(node_id);
-    }
-    
-    ImGui::Separator();
-    
-    if (ImGui::BeginMenu("Rotate")) {
-        if (ImGui::MenuItem("Rotate Right (90°)", "R")) {
-            node->RotateRight();
-        }
-        if (ImGui::MenuItem("Rotate Left (90°)", "Shift+R")) {
-            node->RotateLeft();
-        }
-        if (ImGui::MenuItem("Rotate 180°")) {
-            node->RotateRight();
-            node->RotateRight();
-        }
-        if (ImGui::MenuItem("Reset Rotation")) {
-            node->rotation = 0;
-            node->UpdatePortPositions();
-        }
-        ImGui::EndMenu();
     }
     
     ImGui::Separator();

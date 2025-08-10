@@ -75,7 +75,7 @@ void VisualNode::UpdatePortPositions()
             max_output_width = std::max(max_output_width, width);
         }
         
-        // Base size (before rotation) - use cached title width
+        // Base size - use cached title width
         if (cached_title_width < 0) {
             cached_title_width = ImGui::CalcTextSize(spec->display_name.c_str()).x;
         }
@@ -85,72 +85,26 @@ void VisualNode::UpdatePortPositions()
         float port_count = std::max(input_ports.size(), output_ports.size());
         float base_height = TITLE_HEIGHT + (port_count * PORT_SPACING) + NODE_WINDOW_PADDING * 2;
         
-        // Apply rotation to size
-        if (rotation == 90 || rotation == 270) {
-            size.x = base_height;
-            size.y = base_width;
-        } else {
-            size.x = base_width;
-            size.y = base_height;
-        }
+        // Set size
+        size.x = base_width;
+        size.y = base_height;
         
         // Update min_size to current calculated size
         min_size = ImVec2(base_width * 0.8f, base_height * 0.8f);  // Allow shrinking to 80% of calculated size
     }
     
-    // Position ports based on rotation
+    // Position ports - inputs on left, outputs on right
     float y_offset = TITLE_HEIGHT + NODE_WINDOW_PADDING;
     
-    switch (rotation) {
-        case 0:  // Normal orientation
-            for (auto& port : input_ports) {
-                port.position = ImVec2(0, y_offset);
-                y_offset += PORT_SPACING;
-            }
-            y_offset = TITLE_HEIGHT + NODE_WINDOW_PADDING;
-            for (auto& port : output_ports) {
-                port.position = ImVec2(size.x, y_offset);
-                y_offset += PORT_SPACING;
-            }
-            break;
-            
-        case 90:  // Rotated right - inputs on top, outputs on bottom
-            y_offset = NODE_WINDOW_PADDING;
-            for (auto& port : input_ports) {
-                port.position = ImVec2(y_offset, 0);
-                y_offset += PORT_SPACING;
-            }
-            y_offset = NODE_WINDOW_PADDING;
-            for (auto& port : output_ports) {
-                port.position = ImVec2(y_offset, size.y);
-                y_offset += PORT_SPACING;
-            }
-            break;
-            
-        case 180:  // Upside down - inputs on right, outputs on left
-            for (auto& port : input_ports) {
-                port.position = ImVec2(size.x, y_offset);
-                y_offset += PORT_SPACING;
-            }
-            y_offset = TITLE_HEIGHT + NODE_WINDOW_PADDING;
-            for (auto& port : output_ports) {
-                port.position = ImVec2(0, y_offset);
-                y_offset += PORT_SPACING;
-            }
-            break;
-            
-        case 270:  // Rotated left - inputs on bottom, outputs on top
-            y_offset = NODE_WINDOW_PADDING;
-            for (auto& port : input_ports) {
-                port.position = ImVec2(y_offset, size.y);
-                y_offset += PORT_SPACING;
-            }
-            y_offset = NODE_WINDOW_PADDING;
-            for (auto& port : output_ports) {
-                port.position = ImVec2(y_offset, 0);
-                y_offset += PORT_SPACING;
-            }
-            break;
+    for (auto& port : input_ports) {
+        port.position = ImVec2(0, y_offset);
+        y_offset += PORT_SPACING;
+    }
+    
+    y_offset = TITLE_HEIGHT + NODE_WINDOW_PADDING;
+    for (auto& port : output_ports) {
+        port.position = ImVec2(size.x, y_offset);
+        y_offset += PORT_SPACING;
     }
 }
 
@@ -274,60 +228,20 @@ void VisualNode::DrawPort(ImDrawList* draw_list, const VisualPort& port,
     // Draw port shape based on type
     DrawPortShape(draw_list, port_pos, dataTypeToString(port.data_type), port.is_connected, zoom);
     
-    // Get abbreviated name for rotated views
-    std::string label = (rotation == 90 || rotation == 270) ? 
-                        GetAbbreviatedName(port.display_name, rotation) : 
-                        port.display_name;
+    // Use display name directly
+    std::string label = port.display_name;
     
-    // Calculate text position based on rotation
+    // Calculate text position - inputs on left, outputs on right
     ImVec2 text_pos;
     ImVec2 text_size = ImGui::CalcTextSize(label.c_str());
     float text_offset = 10 * zoom;
     
-    switch (rotation) {
-        case 0:  // Normal - inputs on left, outputs on right
-            if (is_output) {
-                text_pos = ImVec2(port_pos.x - text_size.x - text_offset, 
-                                 port_pos.y - text_size.y / 2);
-            } else {
-                text_pos = ImVec2(port_pos.x + text_offset, 
-                                 port_pos.y - text_size.y / 2);
-            }
-            break;
-            
-        case 90:  // Rotated right - inputs on top, outputs on bottom
-            if (is_output) {
-                // Output at bottom - text below port
-                text_pos = ImVec2(port_pos.x - text_size.x / 2, 
-                                 port_pos.y + text_offset);
-            } else {
-                // Input at top - text above port
-                text_pos = ImVec2(port_pos.x - text_size.x / 2, 
-                                 port_pos.y - text_size.y - text_offset);
-            }
-            break;
-            
-        case 180:  // Upside down - inputs on right, outputs on left
-            if (is_output) {
-                text_pos = ImVec2(port_pos.x + text_offset, 
-                                 port_pos.y - text_size.y / 2);
-            } else {
-                text_pos = ImVec2(port_pos.x - text_size.x - text_offset, 
-                                 port_pos.y - text_size.y / 2);
-            }
-            break;
-            
-        case 270:  // Rotated left - inputs on bottom, outputs on top
-            if (is_output) {
-                // Output at top - text above port
-                text_pos = ImVec2(port_pos.x - text_size.x / 2, 
-                                 port_pos.y - text_size.y - text_offset);
-            } else {
-                // Input at bottom - text below port
-                text_pos = ImVec2(port_pos.x - text_size.x / 2, 
-                                 port_pos.y + text_offset);
-            }
-            break;
+    if (is_output) {
+        text_pos = ImVec2(port_pos.x - text_size.x - text_offset, 
+                         port_pos.y - text_size.y / 2);
+    } else {
+        text_pos = ImVec2(port_pos.x + text_offset, 
+                         port_pos.y - text_size.y / 2);
     }
     
     // Draw the text
@@ -563,7 +477,7 @@ void VisualNode::DrawPortShape(ImDrawList* draw_list, ImVec2 port_pos,
     }
 }
 
-std::string VisualNode::GetAbbreviatedName(const std::string& name, int rotation) const
+std::string VisualNode::GetAbbreviatedName(const std::string& name) const
 {
     // Common abbreviations for signal processing
     static const std::map<std::string, std::string> abbreviations = {
