@@ -3,7 +3,10 @@
 #include <memory>
 #include <complex>
 #include <cassert>
-#include <cstring>
+#include <vector>
+#include <algorithm>
+#include <array>
+#include <limits>
 
 struct PolyphaseChannelizerBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
@@ -13,58 +16,52 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
                               float kaiser_attenuation,
                               size_t kaiser_filter_semilength,
                               size_t in_buffer_size = 0)
-        : cler::BlockBase(std::move(name)), in(in_buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : in_buffer_size), _num_channels(num_channels)
+        : cler::BlockBase(std::move(name)),
+          in(in_buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>)
+                                 : in_buffer_size),
+          _num_channels(num_channels)
     {
-        // If user provided a non-zero buffer size, validate it's sufficient
-        if (in_buffer_size > 0 && in_buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
-            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
-                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>)) + " complex<float> elements");
+        // Validate buffer size if provided
+        if (in_buffer_size > 0) {
+            const size_t min_elems = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>);
+            if (in_buffer_size < min_elems || (in_buffer_size % _num_channels) != 0) {
+                throw std::invalid_argument("Buffer size must be ≥ " + 
+                    std::to_string(min_elems) + 
+                    " and a multiple of " + std::to_string(_num_channels));
+            }
         }
-        
-        assert(kaiser_filter_semilength > 0 && kaiser_filter_semilength < 9 && 
-                "Filter length must be between 1 and 9, larger values ==> narrower transition band. 4 is usually a good default");
-        assert(num_channels > 0 && "Number of channels must be positive");
 
-        // Use critically sampled channelizer!
+        assert(_num_channels > 0 && "Number of channels must be positive");
+        assert(kaiser_filter_semilength > 0 && "Filter semilength must be positive");
+
         _pfch = firpfbch_crcf_create_kaiser(
             LIQUID_ANALYZER,
-            num_channels,
+            _num_channels,
             kaiser_filter_semilength,
             kaiser_attenuation);
-        
+
         if (!_pfch) {
-            throw std::runtime_error("Failed to create polyphase channelizer filter");
+            throw std::runtime_error("Failed to create polyphase channelizer");
         }
 
-        try {
-            _tmp_in = new std::complex<float>[num_channels];
-        } catch (const std::bad_alloc&) {
-            firpfbch_crcf_destroy(_pfch);
-            _pfch = nullptr;
-            throw std::runtime_error("Failed to allocate input buffer");
-        }
-        
-        try {
-            _tmp_out = new std::complex<float>[num_channels];
-        } catch (const std::bad_alloc&) {
-            delete[] _tmp_in;
-            _tmp_in = nullptr;
-            firpfbch_crcf_destroy(_pfch);
-            _pfch = nullptr;
-            throw std::runtime_error("Failed to allocate output buffer");
-        }
+        // Pre-allocate temporary output buffer
+        _tmp_out.resize(_num_channels);
     }
 
     ~PolyphaseChannelizerBlock() {
-        if (_tmp_in) {
-            delete[] _tmp_in;
-        }
-        if (_tmp_out) {
-            delete[] _tmp_out;
-        }
         if (_pfch) {
             firpfbch_crcf_destroy(_pfch);
         }
+    }
+
+    // Helper: Convert std::complex<float>* to liquid_float_complex* 
+    static inline liquid_float_complex* as_liq(std::complex<float>* p) {
+        return reinterpret_cast<liquid_float_complex*>(p);
+    }
+    
+    // Const cast version - Liquid's API doesn't use const even for read-only params
+    static inline liquid_float_complex* as_liq_nonconst(const std::complex<float>* p) {
+        return reinterpret_cast<liquid_float_complex*>(const_cast<std::complex<float>*>(p));
     }
 
     template <typename... OChannels>
@@ -73,45 +70,67 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
         assert(num_outs == _num_channels &&
                "Number of output channels must match the number of polyphase channels");
 
-        if (in.size() < _num_channels) {
+        // Get the contiguous region from doubly-mapped input buffer
+        auto [read_ptr, read_size] = in.read_dbf();
+        
+        if (read_size < _num_channels) {
             return cler::Error::NotEnoughSamples;
         }
 
-        size_t n_frames_by_samples = in.size() / _num_channels;
-        size_t n_frames_by_space = std::min({outs->space()...});
-        size_t num_frames = std::min(n_frames_by_samples, n_frames_by_space);
-
+        // Frames available contiguously
+        const size_t frames_by_contig = read_size / _num_channels;
+        
+        // Get write_dbf pointers for all outputs
+        std::array<std::pair<std::complex<float>*, size_t>, num_outs> write_ptrs;
+        size_t min_write_space = std::numeric_limits<size_t>::max();
+        
+        size_t idx = 0;
+        auto get_write_ptrs = [&](auto*... chs) {
+            ((write_ptrs[idx] = chs->write_dbf(),
+              min_write_space = std::min(min_write_space, write_ptrs[idx].second),
+              idx++), ...);
+        };
+        get_write_ptrs(outs...);
+        
+        // How many frames can we process?
+        size_t num_frames = std::min(frames_by_contig, min_write_space);
+        
         if (num_frames == 0) {
+            // Return NotEnoughSpace if CLER handles backpressure cleanly
+            // Otherwise use: return cler::Empty{}; to avoid spin
             return cler::Error::NotEnoughSpace;
         }
-
-        // Use zero-copy path
-        auto [read_ptr, read_size] = in.read_dbf();
         
-        // Process frames directly from doubly-mapped buffer
+        // Process frames and write DIRECTLY to output buffers - no intermediate storage!
         for (size_t i = 0; i < num_frames; ++i) {
-            std::memcpy(_tmp_in, read_ptr + i * _num_channels, _num_channels * sizeof(std::complex<float>));
-
+            const std::complex<float>* frame = read_ptr + i * _num_channels;
+            
+            // Zero-copy input processing
             firpfbch_crcf_analyzer_execute(
                 _pfch,
-                reinterpret_cast<liquid_float_complex*>(_tmp_in),
-                reinterpret_cast<liquid_float_complex*>(_tmp_out)
+                as_liq_nonconst(frame),
+                as_liq(_tmp_out.data())
             );
-
-            size_t idx = 0;
-            auto push_outputs = [&](auto*... chs) {
-                ((chs->push(_tmp_out[idx++])), ...);
-            };
-            push_outputs(outs...);
+            
+            // Scatter one sample per channel directly into its contiguous write span
+            for (size_t ch = 0; ch < _num_channels; ++ch) {
+                write_ptrs[ch].first[i] = _tmp_out[ch];
+            }
         }
+        
+        // Commit all writes
+        idx = 0;
+        auto commit_writes = [&](auto*... chs) {
+            ((chs->commit_write(num_frames)), ...);
+        };
+        commit_writes(outs...);
+        
         in.commit_read(num_frames * _num_channels);
-
         return cler::Empty{};
     }
 
 private:
-    size_t _num_channels;
-    std::complex<float>* _tmp_in = nullptr;
-    std::complex<float>* _tmp_out = nullptr;
+    size_t _num_channels = 0;
+    std::vector<std::complex<float>> _tmp_out;  // Temporary for single frame output
     firpfbch_crcf _pfch = nullptr;
 };
