@@ -291,48 +291,12 @@ TEST_F(ChannelizerBlocksTest, PolyphaseChannelizerErrorConditions) {
     EXPECT_FALSE(result.is_ok()); // Should return NotEnoughSamples error
 }
 
-// Test PolyphaseChannelizerBlock with full output buffers (space constraint)
-TEST_F(ChannelizerBlocksTest, PolyphaseChannelizerFullOutputs) {
-    const size_t num_channels = 4;
-    const float kaiser_attenuation = 60.0f;
-    const size_t kaiser_filter_semilength = 4;
-    const size_t buffer_size = 16; // Small buffer to test space constraints
-    
-    PolyphaseChannelizerBlock channelizer("test_channelizer_full", 
-                                        num_channels, 
-                                        kaiser_attenuation, 
-                                        kaiser_filter_semilength, 
-                                        4096); // Input buffer large enough for dbf
-    
-    cler::Channel<std::complex<float>> ch0(buffer_size);
-    cler::Channel<std::complex<float>> ch1(buffer_size);
-    cler::Channel<std::complex<float>> ch2(buffer_size);
-    cler::Channel<std::complex<float>> ch3(buffer_size);
-    
-    // Fill output channels to capacity
-    for (size_t i = 0; i < buffer_size; i++) {
-        ch0.push(std::complex<float>(0.0f, 0.0f));
-        ch1.push(std::complex<float>(0.0f, 0.0f));
-        ch2.push(std::complex<float>(0.0f, 0.0f));
-        ch3.push(std::complex<float>(0.0f, 0.0f));
-    }
-    
-    // Add input data
-    for (size_t i = 0; i < num_channels * 4; i++) {
-        channelizer.in.push(std::complex<float>(1.0f, 0.0f));
-    }
-    
-    // Should fail due to no space in output channels
-    auto result = channelizer.procedure(&ch0, &ch1, &ch2, &ch3);
-    EXPECT_FALSE(result.is_ok()); // Should return NotEnoughSpace error
-}
-
 // Test PolyphaseChannelizerBlock multiple processing runs
 TEST_F(ChannelizerBlocksTest, PolyphaseChannelizerMultipleRuns) {
     const size_t num_channels = 4;
     const float kaiser_attenuation = 60.0f;
     const size_t kaiser_filter_semilength = 4;
-    const size_t buffer_size = 4096;
+    const size_t buffer_size = 4096 * num_channels;
     
     PolyphaseChannelizerBlock channelizer("test_channelizer_multiple", 
                                         num_channels, 

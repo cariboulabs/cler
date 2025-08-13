@@ -17,7 +17,7 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
                               size_t kaiser_filter_semilength,
                               size_t in_buffer_size = 0)
         : cler::BlockBase(std::move(name)),
-          in(in_buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>)
+          in(in_buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) * num_channels
                                  : in_buffer_size),
           _num_channels(num_channels)
     {
