@@ -196,11 +196,12 @@ void PlotCSpectrumBlock::render() {
             for (size_t n = 0; n < _n_fft_samples; ++n) {
                 float w = spectral_window_function(_window_type, n / static_cast<float>(_n_fft_samples - 1));
                 coherent_gain += w;
-                _liquid_inout[n] *= w * ((n % 2 == 0) ? 1.0f : -1.0f);
+                _liquid_inout[n] *= w;
             }
             coherent_gain /= static_cast<float>(_n_fft_samples);
 
             fft_execute(_fftplan);
+            fft_shift(_liquid_inout, _n_fft_samples);
 
             float scale = static_cast<float>(_n_fft_samples) * coherent_gain;
             float scale2 = scale * scale;
