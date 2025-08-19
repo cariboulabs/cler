@@ -25,6 +25,22 @@ struct TaskPolicyBase {
     // Static assertions to ensure derived class implements required interface
     // These will be checked when the derived class is instantiated
     
+    // Default implementations for optional optimizations
+    // Derived classes can override these for platform-specific behavior
+    
+    // Efficient pause that reduces CPU contention
+    // Default: just calls yield() followed by a tiny sleep
+    static inline void relax() {
+        Derived::yield();
+        Derived::sleep_us(1);
+    }
+    
+    // Pin worker thread to specific CPU core
+    // Default: no-op (no pinning)
+    static inline void pin_to_core(size_t worker_id) {
+        (void)worker_id;  // Suppress unused parameter warning
+    }
+    
 protected:
     // Prevent instantiation of base class
     TaskPolicyBase() = default;

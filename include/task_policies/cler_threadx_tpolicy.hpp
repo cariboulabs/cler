@@ -23,6 +23,10 @@ namespace cler {
 #endif
 
 struct ThreadXTaskPolicy : TaskPolicyBase<ThreadXTaskPolicy> {
+    // Import default implementations from base
+    using TaskPolicyBase<ThreadXTaskPolicy>::relax;
+    using TaskPolicyBase<ThreadXTaskPolicy>::pin_to_core;
+    
     // Structure to hold task data
     struct TaskData {
         void* callable;

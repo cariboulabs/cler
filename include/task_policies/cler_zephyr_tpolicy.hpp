@@ -15,6 +15,10 @@ namespace cler {
 #endif
 
 struct ZephyrTaskPolicy : TaskPolicyBase<ZephyrTaskPolicy> {
+    // Import default implementations from base
+    using TaskPolicyBase<ZephyrTaskPolicy>::relax;
+    using TaskPolicyBase<ZephyrTaskPolicy>::pin_to_core;
+    
     struct TaskData {
         void* callable;
         void (*invoke)(void*);
