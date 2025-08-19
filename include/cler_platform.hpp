@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <thread>  // For hardware_concurrency
 
 // Platform-specific includes for feature detection
 #ifdef __has_include
@@ -29,6 +30,8 @@
     #ifdef __linux__
         #include <sys/syscall.h>
         #include <sys/types.h>
+        #include <pthread.h>
+        #include <sched.h>
     #endif
 #endif
 
@@ -36,6 +39,15 @@
 #ifdef _WIN32
     #include <windows.h>
     #include <versionhelpers.h>
+#endif
+
+// x86 intrinsics for pause instruction
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    #ifdef _MSC_VER
+        #include <intrin.h>
+    #else
+        #include <immintrin.h>
+    #endif
 #endif
 
 namespace cler {
@@ -210,6 +222,62 @@ namespace cler {
                 #endif
                 
                 return supported;
+            #endif
+        }
+        
+        // ============= Platform-Specific Performance Helpers =============
+        
+        // Efficient pause instruction for spin-wait loops
+        // Reduces CPU contention and power consumption
+        inline void cpu_pause() {
+            #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+                // x86: PAUSE instruction - alerts CPU we're in a spin loop
+                #ifdef _MSC_VER
+                    _mm_pause();
+                #else
+                    __builtin_ia32_pause();
+                #endif
+            #elif defined(__aarch64__) || defined(__ARM_ARCH)
+                // ARM: YIELD instruction - hint to release resources
+                asm volatile("yield" ::: "memory");
+            #elif defined(__powerpc__) || defined(__ppc__) || defined(__PPC__)
+                // PowerPC: hint that we're in a spin loop
+                asm volatile("or 27,27,27" ::: "memory");
+            #elif defined(__riscv)
+                // RISC-V: PAUSE instruction (Zihintpause extension)
+                asm volatile(".insn i 0x0F, 0, x0, x0, 0x010" ::: "memory");
+            #else
+                // Fallback: compiler barrier to prevent optimization
+                asm volatile("" ::: "memory");
+            #endif
+        }
+        
+        // Spin-wait with exponential backoff
+        // Spins briefly with CPU hints, useful for short waits
+        inline void spin_wait(size_t iterations = 64) {
+            for (size_t i = 0; i < iterations; ++i) {
+                cpu_pause();
+            }
+        }
+        
+        // Set thread affinity to a specific CPU core
+        inline bool set_thread_affinity(size_t core_id) {
+            #ifdef __linux__
+                cpu_set_t cpuset;
+                CPU_ZERO(&cpuset);
+                CPU_SET(core_id % sysconf(_SC_NPROCESSORS_ONLN), &cpuset);
+                return pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset) == 0;
+            #elif defined(_WIN32)
+                DWORD_PTR mask = 1ULL << (core_id % std::thread::hardware_concurrency());
+                return SetThreadAffinityMask(GetCurrentThread(), mask) != 0;
+            #elif defined(__APPLE__)
+                // macOS doesn't support thread affinity in the same way
+                // Could use thread_policy_set() but it's more complex
+                (void)core_id;
+                return false;
+            #else
+                (void)core_id;
+                return false;
             #endif
         }
     }

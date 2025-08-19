@@ -17,6 +17,10 @@ namespace cler {
 #endif
 
 struct FreeRTOSTaskPolicy : TaskPolicyBase<FreeRTOSTaskPolicy> {
+    // Import default implementations from base
+    using TaskPolicyBase<FreeRTOSTaskPolicy>::relax;
+    using TaskPolicyBase<FreeRTOSTaskPolicy>::pin_to_core;
+    
     // Structure to hold task data
     struct TaskData {
         void* callable;

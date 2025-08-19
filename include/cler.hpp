@@ -146,7 +146,7 @@ namespace cler {
     template<typename Block, typename... Channels>
     BlockRunner(Block*, Channels*...) -> BlockRunner<Block, channel_to_base_t<Channels>...>;
 
-    struct BlockExecutionStats {
+    struct alignas(platform::cache_line_size) BlockExecutionStats {
         EmbeddableString<64> name;
         size_t successful_procedures = 0;
         size_t failed_procedures = 0;
@@ -194,6 +194,15 @@ namespace cler {
         // When false: saves ~200 bytes per block, eliminates procedure counting and timing
         // When true: full diagnostics available (successful_procedures, timing, etc.)
         bool collect_detailed_stats = false;
+        
+        // Micro-batching: run block procedure multiple times per scheduling tick
+        // Reduces context switches and queue crossing overhead
+        // Typical values: 1-16, with 4-8 being sweet spot for most workloads
+        size_t max_calls_per_tick = 4;  // Conservative default to prevent runaway hot stages
+        
+        // Optional: pin worker threads to specific CPU cores
+        // Can improve cache locality and reduce migration overhead
+        bool pin_workers = false;
 
     };
 
@@ -256,9 +265,9 @@ namespace cler {
                 TaskPolicy::sleep_us(total_us - PRECISE_TIMING_BUFFER_US);
             }
             
-            // Use yield for the remaining time for precise timing
+            // Use relax for the remaining time for precise timing
             while (std::chrono::high_resolution_clock::now() - start_time < duration) {
-                TaskPolicy::yield();
+                TaskPolicy::relax();
             }
             
             // Stop the flowgraph
@@ -322,8 +331,8 @@ namespace cler {
                         TaskPolicy::sleep_us(static_cast<size_t>(new_sleep));
                     }
                 } else {
-                    // Not enough failures yet, just yield
-                    TaskPolicy::yield();
+                    // Not enough failures yet, use relax instead of pure yield
+                    TaskPolicy::relax();
                 }
             }
         }
@@ -356,44 +365,56 @@ namespace cler {
             }
 
             while (!_stop_flag) {
-                std::chrono::duration<double> dt{};
-                if (config.collect_detailed_stats) {
-                    auto t_now = std::chrono::high_resolution_clock::now();
-                    dt = t_now - t_last;
-                    t_last = t_now;
-                }
-
-                Result<Empty, Error> result = std::apply([&](auto*... outs) {
-                    return runner.block->procedure(outs...);
-                }, runner.outputs);
-
-                if (result.is_err()) {
+                bool did_work_in_batch = false;
+                
+                // Micro-batching: run block multiple times per tick
+                for (size_t c = 0; c < config.max_calls_per_tick && !_stop_flag; ++c) {
+                    std::chrono::duration<double> dt{};
                     if (config.collect_detailed_stats) {
-                        failed++;
-                    }
-                    auto err = result.unwrap_err();
-
-                    if (is_fatal(err)) {
-                        _stop_flag.store(true, std::memory_order_release);
-                        if (_on_err_terminate_cb) {
-                            _on_err_terminate_cb(_on_err_terminate_context);
-                        }
-                        return;
+                        auto t_now = std::chrono::high_resolution_clock::now();
+                        dt = t_now - t_last;
+                        t_last = t_now;
                     }
 
-                    if (err == Error::NotEnoughSpaceOrSamples || err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
+                    Result<Empty, Error> result = std::apply([&](auto*... outs) {
+                        return runner.block->procedure(outs...);
+                    }, runner.outputs);
+
+                    if (result.is_err()) {
                         if (config.collect_detailed_stats) {
-                            total_dead_time_s += dt.count();
+                            failed++;
                         }
-                        handle_adaptive_sleep(I, false);
-                    } else {
-                        TaskPolicy::yield();
-                    }
+                        auto err = result.unwrap_err();
 
-                } else {
-                    if (config.collect_detailed_stats) {
-                        successful++;
+                        if (is_fatal(err)) {
+                            _stop_flag.store(true, std::memory_order_release);
+                            if (_on_err_terminate_cb) {
+                                _on_err_terminate_cb(_on_err_terminate_context);
+                            }
+                            return;
+                        }
+
+                        if (err == Error::NotEnoughSpaceOrSamples || err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
+                            if (config.collect_detailed_stats) {
+                                total_dead_time_s += dt.count();
+                            }
+                            handle_adaptive_sleep(I, false);
+                            break;  // Exit micro-batch loop
+                        } else {
+                            TaskPolicy::relax();
+                            break;  // Exit micro-batch loop on soft error
+                        }
+
+                    } else {
+                        if (config.collect_detailed_stats) {
+                            successful++;
+                        }
+                        did_work_in_batch = true;
+                        // Keep looping up to max_calls_per_tick
                     }
+                }
+                
+                if (did_work_in_batch) {
                     handle_adaptive_sleep(I, true);
                 }
             }
@@ -509,11 +530,22 @@ namespace cler {
                 num_blocks = blocks;
                 num_workers = workers;
                 
-                // Pre-distribute all blocks round-robin across workers
-                for (size_t i = 0; i < blocks; ++i) {
-                    size_t worker = i % workers;
-                    queues[worker].blocks[queues[worker].count++] = static_cast<block_index_t>(i);
-                    block_owner[i] = worker;  // Track ownership for stats finalization
+                // NEW: Contiguous grouping instead of round-robin
+                // This keeps producer->consumer chains on the same core,
+                // dramatically reducing SPSC queue cache coherency traffic
+                for (auto& q : queues) { 
+                    q.count = 0; 
+                    q.current = 0; 
+                }
+                
+                const size_t per = (blocks + workers - 1) / workers;  // ceil(blocks/workers)
+                size_t idx = 0;
+                for (size_t w = 0; w < workers && idx < blocks; ++w) {
+                    auto& q = queues[w];
+                    for (size_t k = 0; k < per && idx < blocks; ++k, ++idx) {
+                        q.blocks[q.count++] = static_cast<block_index_t>(idx);
+                        block_owner[idx] = w;  // Track ownership for stats finalization
+                    }
                 }
             }
             
@@ -553,7 +585,7 @@ namespace cler {
                 run_thread_per_block(config);
             } else {
                 // Fewer workers than blocks - use fixed thread pool scheduler
-                // Initialize fixed thread pool scheduler with round-robin block distribution
+                // Initialize with contiguous block grouping (keeps producer->consumer chains together)
                 fixed_thread_pool_scheduler.initialize(_N, num_workers);
                 
                 // Record start time for all blocks (only if detailed stats enabled)
@@ -577,6 +609,11 @@ namespace cler {
         
     public:  // Making run_fixed_thread_pool_worker public for lambda access (see comment above)
         void run_fixed_thread_pool_worker(size_t worker_id, const FlowGraphConfig& config) {
+            // Optional: pin worker to specific CPU core
+            if (config.pin_workers) {
+                TaskPolicy::pin_to_core(worker_id);
+            }
+            
             while (!_stop_flag) {
                 bool did_work = false;
                 size_t block_idx;
@@ -601,15 +638,17 @@ namespace cler {
                 }
                 
                 if (!did_work) {
-                    // No work available, yield to other workers
-                    TaskPolicy::yield();
+                    // No work available, use relax instead of pure yield
+                    TaskPolicy::relax();
                 }
             }
             
             // Finalize stats when worker exits (only if detailed stats enabled)
             if (config.collect_detailed_stats) {
                 auto end_time = std::chrono::high_resolution_clock::now();
-                // Update stats only for blocks owned by this worker (fixes race condition)
+                // IMPORTANT: In this scheduler each block is executed only by its owning worker.
+                // Stats writes are safe because there's no work-stealing or migration.
+                // If work-stealing is added later, _stats writes must be made thread-safe or owner-only.
                 for (size_t i = 0; i < _N; ++i) {
                     if (fixed_thread_pool_scheduler.is_block_owner(worker_id, i)) {
                         std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
@@ -628,41 +667,53 @@ namespace cler {
             auto& runner = std::get<I>(_runners);
             auto& stats = _stats[I];
             
-            // Execute procedure and handle errors
-            auto result = std::apply([&](auto*... outs) {
-                return runner.block->procedure(outs...);
-            }, runner.outputs);
+            bool did_work = false;
             
-            if (result.is_err()) {
-                if (config.collect_detailed_stats) {
-                    stats.failed_procedures++;
-                }
-                auto err = result.unwrap_err();
-                if (is_fatal(err)) {
-                    _stop_flag.store(true, std::memory_order_release);
-                    if (_on_err_terminate_cb) {
-                        _on_err_terminate_cb(_on_err_terminate_context);
+            // Micro-batching: run block multiple times if it's making progress
+            for (size_t c = 0; c < config.max_calls_per_tick && !_stop_flag; ++c) {
+                // Execute procedure and handle errors
+                auto result = std::apply([&](auto*... outs) {
+                    return runner.block->procedure(outs...);
+                }, runner.outputs);
+                
+                if (result.is_err()) {
+                    if (config.collect_detailed_stats) {
+                        stats.failed_procedures++;
                     }
-                }
-                
-                // Handle adaptive sleep for failed procedure
-                if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace) {
-                    handle_adaptive_sleep(I, false);
+                    auto err = result.unwrap_err();
+                    
+                    if (is_fatal(err)) {
+                        _stop_flag.store(true, std::memory_order_release);
+                        if (_on_err_terminate_cb) {
+                            _on_err_terminate_cb(_on_err_terminate_context);
+                        }
+                        break;
+                    }
+                    
+                    // No progress - leave the burst early to let others run
+                    if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace ||
+                        err == Error::NotEnoughSpaceOrSamples) {
+                        handle_adaptive_sleep(I, false);
+                        break;  // Exit micro-batch loop
+                    } else {
+                        // Soft error, brief relax and stop bursting
+                        TaskPolicy::relax();
+                        break;
+                    }
                 } else {
-                    TaskPolicy::yield();
+                    if (config.collect_detailed_stats) {
+                        stats.successful_procedures++;
+                    }
+                    did_work = true;
+                    // Keep looping up to max_calls_per_tick
                 }
-                
-                return false;
-            } else {
-                if (config.collect_detailed_stats) {
-                    stats.successful_procedures++;
-                }
-                
-                // Handle adaptive sleep for successful procedure
-                handle_adaptive_sleep(I, true);
-                
-                return true;
             }
+            
+            if (did_work) {
+                handle_adaptive_sleep(I, true);
+            }
+            
+            return did_work;
         }
         
         bool execute_block_at_index(size_t index, const FlowGraphConfig& config) {

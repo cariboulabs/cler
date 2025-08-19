@@ -26,6 +26,18 @@ struct DesktopTaskPolicy : TaskPolicyBase<DesktopTaskPolicy> {
     static void sleep_us(size_t us) {
         std::this_thread::sleep_for(std::chrono::microseconds(us));
     }
+    
+    // Efficient pause that reduces CPU contention
+    // Uses platform-specific spin hints, then backs off with a tiny sleep
+    static inline void relax() {
+        platform::spin_wait(64);  // Spin briefly with CPU-specific hints
+        sleep_us(1);              // Then back off to reduce contention
+    }
+    
+    // Pin worker thread to specific CPU core for better cache locality
+    static inline void pin_to_core(size_t worker_id) {
+        platform::set_thread_affinity(worker_id);
+    }
 };
 
 
