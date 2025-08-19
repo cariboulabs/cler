@@ -64,10 +64,10 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
         new (&_signal_channels[i]) cler::Channel<std::complex<float>>(_buffer_size);
     }
 
-    // Snapshot buffers
+    // Snapshot buffers - only need FFT size, not full buffer size
     _snapshot_buffers = new std::complex<float>*[_num_inputs];
     for (size_t i = 0; i < _num_inputs; ++i) {
-        _snapshot_buffers[i] = new std::complex<float>[_buffer_size];
+        _snapshot_buffers[i] = new std::complex<float>[_n_fft_samples];
     }
 
     _tmp_buffer = new std::complex<float>[_buffer_size];
@@ -191,7 +191,10 @@ void PlotCSpectrumBlock::render() {
         if (available >= _n_fft_samples) {
             for (size_t i = 0; i < _num_inputs; ++i) {
                 auto [ptr, size] = _signal_channels[i].read_dbf();
-                memcpy(_snapshot_buffers[i], ptr, size * sizeof(std::complex<float>));
+                // Copy only the last _n_fft_samples samples for FFT
+                memcpy(_snapshot_buffers[i], 
+                       ptr + size - _n_fft_samples, 
+                       _n_fft_samples * sizeof(std::complex<float>));
             }
         }
          _snapshot_mutex.unlock();
@@ -227,7 +230,7 @@ void PlotCSpectrumBlock::render() {
 
         for (size_t i = 0; i < _num_inputs; ++i) {
             memcpy(_liquid_inout,
-                   &_snapshot_buffers[i][_snapshot_ready_size - _n_fft_samples],
+                   _snapshot_buffers[i],
                    _n_fft_samples * sizeof(std::complex<float>));
 
             float coherent_gain = 0.0f;
