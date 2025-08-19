@@ -4,6 +4,14 @@ project(cler
         LANGUAGES CXX C
         DESCRIPTION "Compile Time DSP Flowgraph Framework for SDRs and Embedded Systems")
 
+# Lock this build dir to one generator to prevent mismatch issues
+set(PROJECT_CONFIGURED_GENERATOR "${CMAKE_GENERATOR}" CACHE STRING "Generator used to configure this build tree")
+if (NOT PROJECT_CONFIGURED_GENERATOR STREQUAL CMAKE_GENERATOR)
+  message(FATAL_ERROR
+    "This build dir was configured with '${PROJECT_CONFIGURED_GENERATOR}', "
+    "but now you're using '${CMAKE_GENERATOR}'. Use a different build dir or clean it.")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 99)

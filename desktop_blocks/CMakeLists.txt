@@ -3,25 +3,43 @@ add_library(cler::desktop_blocks ALIAS cler_desktop_blocks)
 
 target_link_libraries(cler_desktop_blocks INTERFACE cler::cler)
 
-target_include_directories(cler_desktop_blocks INTERFACE #so people call #include "blocks/..."
+target_include_directories(cler_desktop_blocks INTERFACE #so people call #include "desktop_blocks/..."
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
 )
 
 if (CLER_BUILD_BLOCKS_LIQUID)
   include(FetchContent)
-  set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(BUILD_AUTOTESTS OFF CACHE BOOL "" FORCE)
+
+  # Put dep trees under the current build dir (prevents cross-build clashes)
+  set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/_deps")
+
+  # Disable liquid's extra builds
+  set(BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
+  set(BUILD_AUTOTESTS  OFF CACHE BOOL "" FORCE)
   set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
-  
-  FetchContent_Declare(
-    liquid
+
+  # Declare liquid dependency
+  # TODO: Consider pinning to a specific commit for reproducibility
+  FetchContent_Declare(liquid
     GIT_REPOSITORY https://github.com/jgaeddert/liquid-dsp
-    GIT_TAG master
+    GIT_TAG        master   # better: replace with a specific commit
+    GIT_SHALLOW    TRUE
+    GIT_PROGRESS   TRUE
   )
-  FetchContent_MakeAvailable(liquid)
-  target_include_directories(liquid INTERFACE 
-      SYSTEM ${liquid_SOURCE_DIR}/include #system ignore warnings from liquid
-      SYSTEM ${liquid_SOURCE_DIR}/scripts #for config.h
+
+  # Download only
+  FetchContent_Populate(liquid)
+
+  # Clean mismatched generator cache if needed
+  include(${CMAKE_SOURCE_DIR}/cmake/CleanOnGenMismatch.cmake)
+  clean_on_gen_mismatch("${liquid_BINARY_DIR}")  # nuke mismatched build cache only
+
+  # Configure & build the dep with current generator
+  add_subdirectory(${liquid_SOURCE_DIR} ${liquid_BINARY_DIR})
+
+  target_include_directories(liquid INTERFACE
+    SYSTEM ${liquid_SOURCE_DIR}/include
+    SYSTEM ${liquid_SOURCE_DIR}/scripts  # for config.h
   )
 endif()
 
