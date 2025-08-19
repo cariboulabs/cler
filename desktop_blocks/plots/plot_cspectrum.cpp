@@ -79,6 +79,13 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
         _freq_bins[i] = (_sps * (static_cast<float>(i) / static_cast<float>(_n_fft_samples)))
                       - (_sps / 2.0f);
     }
+    
+    // Allocate averaged spectrum buffers for each input
+    _spectrum_avg = new float*[_num_inputs];
+    for (size_t i = 0; i < _num_inputs; ++i) {
+        _spectrum_avg[i] = new float[_n_fft_samples];
+        std::memset(_spectrum_avg[i], 0, _n_fft_samples * sizeof(float));
+    }
 
     _fftplan = fft_create_plan(_n_fft_samples,
         reinterpret_cast<liquid_float_complex*>(_liquid_inout),
@@ -104,6 +111,15 @@ PlotCSpectrumBlock::~PlotCSpectrumBlock() {
     delete[] _liquid_inout;
     delete[] _tmp_mag_buffer;
     delete[] _freq_bins;
+    
+    // Cleanup averaged spectrum buffers
+    if (_spectrum_avg) {
+        for (size_t i = 0; i < _num_inputs; ++i) {
+            delete[] _spectrum_avg[i];
+        }
+        delete[] _spectrum_avg;
+    }
+    
     fft_destroy_plan(_fftplan);
 }
 
@@ -198,6 +214,13 @@ void PlotCSpectrumBlock::render() {
     if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
         _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
     }
+    
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(80.0f);  // Small fixed width slider
+    ImGui::SliderFloat("##avg", &_avg_alpha, 0.0f, 1.0f, "alpha:%.2f");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Averaging: 0=frozen, 0.3=heavy, 0.7=light, 1=none");
+    }
 
     if (ImPlot::BeginPlot(name())) {
         ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]");
@@ -227,10 +250,25 @@ void PlotCSpectrumBlock::render() {
                 float power = (re * re + im * im) / scale2;
                 _tmp_mag_buffer[j] = 10.0f * log10f(power + 1e-20f);
             }
+            
+            // Apply exponential averaging
+            if (_first_spectrum) {
+                // First frame: initialize with current values
+                std::memcpy(_spectrum_avg[i], _tmp_mag_buffer, _n_fft_samples * sizeof(float));
+                if (i == _num_inputs - 1) {
+                    _first_spectrum = false;
+                }
+            } else {
+                // Exponential moving average: new = alpha * current + (1 - alpha) * old
+                for (size_t j = 0; j < _n_fft_samples; ++j) {
+                    _spectrum_avg[i][j] = _avg_alpha * _tmp_mag_buffer[j] + 
+                                          (1.0f - _avg_alpha) * _spectrum_avg[i][j];
+                }
+            }
 
             ImPlot::PlotLine(_signal_labels[i].c_str(),
                              _freq_bins,
-                             _tmp_mag_buffer,
+                             _spectrum_avg[i],  // Plot averaged spectrum instead
                              static_cast<int>(_n_fft_samples));
         }
         ImPlot::EndPlot();

@@ -43,6 +43,9 @@ private:
     std::complex<float>* _liquid_inout = nullptr;
     float* _freq_bins = nullptr;
     float* _tmp_mag_buffer = nullptr;
+    float** _spectrum_avg = nullptr;  // Averaged spectrum for each input
+    float _avg_alpha = 0.7f;          // Exponential averaging factor (0=frozen, 1=no averaging)
+    bool _first_spectrum = true;      // First spectrum frame flag
 
     fftplan _fftplan;
 
