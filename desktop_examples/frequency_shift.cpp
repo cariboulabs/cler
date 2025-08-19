@@ -13,11 +13,12 @@ int main() {
     const size_t SPS = 1000;
     SourceCWBlock<std::complex<float>> source("CWSource", 1.0f, 100.0f, SPS); //amplitude, frequency
     ThrottleBlock<std::complex<float>> throttle("Throttle", SPS);
+    FanoutBlock<std::complex<float>> fanout("Fanout", 2);
     FrequencyShiftBlock frequency_shift("FrequencyShift", 300.0f, SPS);
 
     PlotCSpectrumBlock plot(
         "Freq shift plot",
-        {"shifted"},
+        {"original","shifted"},
         SPS,
         256
     );
@@ -25,8 +26,9 @@ int main() {
 
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source, &throttle.in),
-        cler::BlockRunner(&throttle, &frequency_shift.in),
-        cler::BlockRunner(&frequency_shift, &plot.in[0]),
+        cler::BlockRunner(&throttle, &fanout.in),
+        cler::BlockRunner(&fanout, &plot.in[0], &frequency_shift.in),
+        cler::BlockRunner(&frequency_shift, &plot.in[1]),
         cler::BlockRunner(&plot)
     );
 
