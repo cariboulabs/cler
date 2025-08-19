@@ -24,9 +24,24 @@ PlotCSpectrogramBlock::PlotCSpectrogramBlock(const char*name,
         ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
     );
     
-    // Ensure buffer size meets minimum requirements for doubly-mapped buffers
+    // Calculate buffer size with better DBF compatibility
     size_t min_buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>);
-    size_t buffer_size = std::max(_n_fft_samples, min_buffer_size);
+    
+    // Use standard multiplier, but ensure we meet DBF requirements for small FFTs
+    size_t buffer_multiplier = BUFFER_SIZE_MULTIPLIER;  // Default is 3
+    if (_n_fft_samples < min_buffer_size) {
+        // For small FFT sizes, increase multiplier to ensure adequate buffering
+        // This ensures smooth operation with high-throughput DBF sources
+        buffer_multiplier = std::max(
+            BUFFER_SIZE_MULTIPLIER,
+            (2 * min_buffer_size + _n_fft_samples - 1) / _n_fft_samples
+        );
+    }
+    
+    size_t buffer_size = std::max(
+        buffer_multiplier * _n_fft_samples,
+        min_buffer_size
+    );
     
     for (size_t i = 0; i < _num_inputs; ++i) {
         new (&in[i]) cler::Channel<std::complex<float>>(buffer_size);

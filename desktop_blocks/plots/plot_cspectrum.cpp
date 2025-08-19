@@ -25,28 +25,43 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
         throw std::invalid_argument("FFT size must be > 2 and even");
     }
 
-    _buffer_size = BUFFER_SIZE_MULTIPLIER * _n_fft_samples;
-    
-    // Ensure buffer size meets minimum requirements for doubly-mapped buffers
+    // Calculate buffer size with better DBF compatibility
+    // Use larger multiplier for small FFT sizes to ensure efficient DBF operation
     size_t min_buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>);
+    
+    // For small FFT sizes, increase the multiplier to ensure we have enough buffer
+    // This improves compatibility with DBF-using upstream blocks
+    size_t effective_multiplier = BUFFER_SIZE_MULTIPLIER;
+    if (_n_fft_samples < min_buffer_size) {
+        // Increase multiplier to ensure buffer is at least 2x the minimum DBF size
+        // This provides better buffering for high-throughput DBF sources
+        effective_multiplier = std::max(
+            BUFFER_SIZE_MULTIPLIER,
+            (2 * min_buffer_size + _n_fft_samples - 1) / _n_fft_samples
+        );
+    }
+    
+    _buffer_size = effective_multiplier * _n_fft_samples;
+    
+    // Final check to ensure minimum size
     if (_buffer_size < min_buffer_size) {
         _buffer_size = min_buffer_size;
     }
 
-    // Input channels
+    // Input channels with proper buffer size
     in = static_cast<cler::Channel<std::complex<float>>*>(
         ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
     );
     for (size_t i = 0; i < _num_inputs; ++i) {
-        new (&in[i]) cler::Channel<std::complex<float>>(std::max(_buffer_size, min_buffer_size));
+        new (&in[i]) cler::Channel<std::complex<float>>(_buffer_size);
     }
 
-    // Plot ring buffers
+    // Plot ring buffers with same size as input channels
     _signal_channels = static_cast<cler::Channel<std::complex<float>>*>(
         ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
     );
     for (size_t i = 0; i < _num_inputs; ++i) {
-        new (&_signal_channels[i]) cler::Channel<std::complex<float>>(std::max(_buffer_size, min_buffer_size));
+        new (&_signal_channels[i]) cler::Channel<std::complex<float>>(_buffer_size);
     }
 
     // Snapshot buffers

@@ -12,15 +12,13 @@ if (CLER_BUILD_BLOCKS_LIQUID)
   set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
   set(BUILD_AUTOTESTS OFF CACHE BOOL "" FORCE)
   set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+  
   FetchContent_Declare(
     liquid
     GIT_REPOSITORY https://github.com/jgaeddert/liquid-dsp
     GIT_TAG master
   )
   FetchContent_MakeAvailable(liquid)
-
-  target_compile_definitions(liquid INTERFACE LIQUID_SIMD_DISABLED)
-
   target_include_directories(liquid INTERFACE 
       SYSTEM ${liquid_SOURCE_DIR}/include #system ignore warnings from liquid
       SYSTEM ${liquid_SOURCE_DIR}/scripts #for config.h
@@ -31,7 +29,6 @@ endif()
 add_library(blocks_blob STATIC blob.cpp)
 add_library(cler::blocks_blob ALIAS blocks_blob)
 target_link_libraries(blocks_blob PUBLIC cler::cler)
-
 
 add_subdirectory(sources)
 target_link_libraries(cler_desktop_blocks INTERFACE 
