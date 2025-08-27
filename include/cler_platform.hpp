@@ -1,53 +1,78 @@
 #pragma once
 #include <cstddef>
-#include <thread>  // For hardware_concurrency
+#include <ctime>     // for time() in shm_open unique naming
+#include <cstdio>    // for snprintf()
+
+// ---- Defaults (avoid undefined macro checks) ----
+#ifndef CLER_HAS_UNISTD_H
+#define CLER_HAS_UNISTD_H 0
+#endif
+#ifndef CLER_HAS_MMAP_H
+#define CLER_HAS_MMAP_H 0
+#endif
 
 // Platform-specific includes for feature detection
 #ifdef __has_include
     #if __has_include(<unistd.h>)
         #include <unistd.h>
+        #undef  CLER_HAS_UNISTD_H
         #define CLER_HAS_UNISTD_H 1
     #endif
     #if __has_include(<sys/mman.h>)
         #include <sys/mman.h>
-        #define CLER_HAS_MMAP_H 1  
+        #undef  CLER_HAS_MMAP_H
+        #define CLER_HAS_MMAP_H 1
     #endif
 #else
     // Conservative: assume POSIX headers exist on known POSIX systems
-    #if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+    #if defined(__unix__) || defined(__APPLE__) || defined(__linux__) || defined(__FreeBSD__)
         #include <unistd.h>
         #include <sys/mman.h>
+        #undef  CLER_HAS_UNISTD_H
         #define CLER_HAS_UNISTD_H 1
+        #undef  CLER_HAS_MMAP_H
         #define CLER_HAS_MMAP_H 1
     #endif
 #endif
 
+// macOS and FreeBSD MAP_ANONYMOUS compatibility
+#if (defined(__APPLE__) || defined(__FreeBSD__)) && !defined(MAP_ANONYMOUS)
+    #define MAP_ANONYMOUS MAP_ANON
+#endif
+
 // Additional system headers needed for doubly mapped buffer support
-#if defined(CLER_HAS_MMAP_H)
+#if CLER_HAS_MMAP_H
     #include <fcntl.h>
     #include <errno.h>
-    #include <cstdio>
     #ifdef __linux__
         #include <sys/syscall.h>
-        #include <sys/types.h>
-        #include <pthread.h>
-        #include <sched.h>
+        #ifdef __has_include
+            #if __has_include(<linux/memfd.h>)
+                #include <linux/memfd.h>
+            #endif
+        #endif
+    #endif
+#endif
+
+// Thread affinity headers (desktop only)
+#ifdef __linux__
+    #include <pthread.h>
+    #include <sched.h>
+#endif
+
+// x86 intrinsics for pause instruction  
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    #if defined(_MSC_VER)
+        #include <intrin.h>
+    #elif defined(__GNUC__) || defined(__clang__)
+        #include <immintrin.h>
     #endif
 #endif
 
 // Windows headers for doubly mapped buffer support
 #ifdef _WIN32
     #include <windows.h>
-    #include <versionhelpers.h>
-#endif
-
-// x86 intrinsics for pause instruction
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-    #ifdef _MSC_VER
-        #include <intrin.h>
-    #else
-        #include <immintrin.h>
-    #endif
+    #include <winternl.h>  // RTL_OSVERSIONINFOW
 #endif
 
 namespace cler {
@@ -59,7 +84,7 @@ namespace cler {
         #elif defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
         // Intel x86/x64: 64 bytes
         static constexpr std::size_t cache_line_size = 64;
-        #elif defined(__riscv) || defined(__riscv__)
+        #elif defined(__riscv)
         // RISC-V: typically 64 bytes
         static constexpr std::size_t cache_line_size = 64;
         #elif defined(__ARM_ARCH_7M__) || defined(__ARM_ARCH_6M__) || defined(__ARM_ARCH_7EM__)
@@ -85,27 +110,31 @@ namespace cler {
         // ============= Doubly Mapped Buffer Support =============
         // Compile-time platform support check
         #if ((defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)) && \
-            defined(CLER_HAS_MMAP_H) && defined(CLER_HAS_UNISTD_H)) || defined(_WIN32)
+            CLER_HAS_MMAP_H && CLER_HAS_UNISTD_H) || defined(_WIN32)
             constexpr bool has_doubly_mapped_support = true;
         #else
             constexpr bool has_doubly_mapped_support = false;
         #endif
 
-        // Page size detection
+        // Page size detection with caching
         inline std::size_t get_page_size() {
-            #if defined(_WIN32)
-                SYSTEM_INFO si;
-                GetSystemInfo(&si);
-                return static_cast<std::size_t>(si.dwPageSize);
-            #elif defined(CLER_HAS_UNISTD_H)
-                #if defined(_SC_PAGESIZE)
-                    return static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
-                #elif defined(__APPLE__)
-                    return static_cast<std::size_t>(getpagesize());
+            static std::size_t ps = [] {
+                #if defined(_WIN32)
+                    SYSTEM_INFO si;
+                    GetSystemInfo(&si);
+                    return static_cast<std::size_t>(si.dwPageSize);
+                #elif CLER_HAS_UNISTD_H
+                    #if defined(_SC_PAGESIZE)
+                        long v = sysconf(_SC_PAGESIZE);
+                        return v > 0 ? static_cast<std::size_t>(v) : 4096u;
+                    #else
+                        return static_cast<std::size_t>(getpagesize());
+                    #endif
+                #else
+                    return 4096u;
                 #endif
-            #endif
-            // Fallback to common page size
-            return 4096;
+            }();
+            return ps;
         }
 
         // Runtime capability check with caching
@@ -172,26 +201,49 @@ namespace cler {
                 if (tested) return supported;
                 tested = true;
                 
-                #if defined(CLER_HAS_MMAP_H)
+                #if CLER_HAS_MMAP_H
                     // Try to create a small test mapping
                     const size_t test_size = get_page_size();
                     int fd = -1;
                     
                     #ifdef __linux__
-                        // Try memfd_create first
+                        // Try memfd_create first with proper flags
                         #ifdef __NR_memfd_create
-                            fd = static_cast<int>(syscall(__NR_memfd_create, "cler_test", 0x0001U));
+                            #ifndef MFD_CLOEXEC
+                                #define MFD_CLOEXEC 0x0001U
+                            #endif
+                            #ifndef MFD_ALLOW_SEALING
+                                #define MFD_ALLOW_SEALING 0x0002U
+                            #endif
+                            fd = static_cast<int>(syscall(__NR_memfd_create, "cler_dbuf_probe",
+                                                        MFD_CLOEXEC | MFD_ALLOW_SEALING));
                         #endif
                         if (fd == -1) {
-                            // Fallback to POSIX shm
-                            fd = shm_open("/cler_test", O_CREAT | O_RDWR | O_EXCL, 0600);
-                            if (fd != -1) shm_unlink("/cler_test");
+                            // Fallback to POSIX shm with unique name
+                            char name[64];
+                            for (int attempt = 0; attempt < 8; ++attempt) {
+                                snprintf(name, sizeof(name), "/cler_dbuf_%d_%ld_%d",
+                                        getpid(), time(nullptr), attempt);
+                                fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, 0600);
+                                if (fd != -1) {
+                                    shm_unlink(name);
+                                    break;
+                                }
+                                if (errno != EEXIST) break;
+                            }
                         }
                     #else  // macOS, FreeBSD
                         char name[64];
-                        snprintf(name, sizeof(name), "/cler_test_%d", getpid());
-                        fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, 0600);
-                        if (fd != -1) shm_unlink(name);
+                        for (int attempt = 0; attempt < 8; ++attempt) {
+                            snprintf(name, sizeof(name), "/cler_dbuf_%d_%ld_%d",
+                                    getpid(), time(nullptr), attempt);
+                            fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, 0600);
+                            if (fd != -1) {
+                                shm_unlink(name);
+                                break;
+                            }
+                            if (errno != EEXIST) break;
+                        }
                     #endif
                     
                     if (fd != -1) {
@@ -209,9 +261,9 @@ namespace cler {
                                                    test_size, PROT_READ | PROT_WRITE,
                                                    MAP_SHARED | MAP_FIXED, fd, 0);
                                     if (m2 != MAP_FAILED) {
-                                        // Test that both mappings see the same data
-                                        *static_cast<int*>(m1) = 0x12345678;
-                                        supported = (*static_cast<int*>(m2) == 0x12345678);
+                                        // Test that both mappings see the same data (volatile to prevent optimization)
+                                        *static_cast<volatile int*>(m1) = 0x12345678;
+                                        supported = (*static_cast<volatile int*>(m2) == 0x12345678);
                                     }
                                 }
                                 munmap(addr, test_size * 2);
@@ -224,57 +276,36 @@ namespace cler {
                 return supported;
             #endif
         }
-        
+
         // ============= Platform-Specific Performance Helpers =============
+        // These are actually used by the desktop task policy
         
-        // Efficient pause instruction for spin-wait loops
-        // Reduces CPU contention and power consumption
-        inline void cpu_pause() {
-            #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-                // x86: PAUSE instruction - alerts CPU we're in a spin loop
-                #ifdef _MSC_VER
-                    _mm_pause();
-                #else
-                    __builtin_ia32_pause();
-                #endif
-            #elif defined(__aarch64__) || defined(__ARM_ARCH)
-                // ARM: YIELD instruction - hint to release resources
-                asm volatile("yield" ::: "memory");
-            #elif defined(__powerpc__) || defined(__ppc__) || defined(__PPC__)
-                // PowerPC: hint that we're in a spin loop
-                asm volatile("or 27,27,27" ::: "memory");
-            #elif defined(__riscv)
-                // RISC-V: PAUSE instruction (Zihintpause extension)
-                asm volatile(".insn i 0x0F, 0, x0, x0, 0x010" ::: "memory");
-            #else
-                // Fallback: compiler barrier to prevent optimization
-                asm volatile("" ::: "memory");
-            #endif
-        }
-        
-        // Spin-wait with exponential backoff
-        // Spins briefly with CPU hints, useful for short waits
+        // Simple spin-wait for backward compatibility
         inline void spin_wait(size_t iterations = 64) {
             for (size_t i = 0; i < iterations; ++i) {
-                cpu_pause();
+                #if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
+                    _mm_pause();
+                #elif defined(__x86_64__) || defined(__i386__)
+                    __builtin_ia32_pause();
+                #elif defined(__aarch64__) || defined(__arm__)
+                    asm volatile("yield" ::: "memory");
+                #elif defined(__riscv)
+                    asm volatile("" ::: "memory"); // compiler barrier only
+                #else
+                    asm volatile("" ::: "memory");
+                #endif
             }
         }
-        
-        // Set thread affinity to a specific CPU core
-        inline bool set_thread_affinity(size_t core_id) {
-            #ifdef __linux__
-                cpu_set_t cpuset;
-                CPU_ZERO(&cpuset);
-                CPU_SET(core_id % sysconf(_SC_NPROCESSORS_ONLN), &cpuset);
-                return pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset) == 0;
+
+        // Set thread affinity to a specific CPU core (desktop only)
+        inline bool set_thread_affinity(std::size_t core_id) {
+            #if defined(__linux__)
+                cpu_set_t set;
+                CPU_ZERO(&set);
+                CPU_SET(core_id, &set);
+                return pthread_setaffinity_np(pthread_self(), sizeof(set), &set) == 0;
             #elif defined(_WIN32)
-                DWORD_PTR mask = 1ULL << (core_id % std::thread::hardware_concurrency());
-                return SetThreadAffinityMask(GetCurrentThread(), mask) != 0;
-            #elif defined(__APPLE__)
-                // macOS doesn't support thread affinity in the same way
-                // Could use thread_policy_set() but it's more complex
-                (void)core_id;
-                return false;
+                return SetThreadAffinityMask(GetCurrentThread(), 1ULL << core_id) != 0;
             #else
                 (void)core_id;
                 return false;
