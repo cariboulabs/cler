@@ -20,7 +20,8 @@
 #include <sstream>
 #include <algorithm>
 
-// Helper to map C++ types to UHD format strings
+// Helper to map C++ types to UHD CPU format strings
+// NOTE: UHD fundamentally operates on I/Q pairs. Scalar types are not supported.
 template<typename T>
 inline std::string get_uhd_format() {
     if constexpr (std::is_same_v<T, std::complex<float>>) {
@@ -29,14 +30,10 @@ inline std::string get_uhd_format() {
         return "sc16";
     } else if constexpr (std::is_same_v<T, std::complex<int8_t>>) {
         return "sc8";
-    } else if constexpr (std::is_same_v<T, float>) {
-        return "f32";
-    } else if constexpr (std::is_same_v<T, int16_t>) {
-        return "s16";
-    } else if constexpr (std::is_same_v<T, int8_t>) {
-        return "s8";
     } else {
-        static_assert(!std::is_same_v<T, T>, "Unsupported type for UHD");
+        static_assert(!std::is_same_v<T, T>,
+            "UHD blocks only support complex types (complex<float>, complex<int16_t>, complex<int8_t>). "
+            "UHD operates on I/Q pairs - scalar types would cause stride mismatch and garbage data.");
     }
 }
 
@@ -59,13 +56,15 @@ struct SourceUHDBlock : public cler::BlockBase {
                    double freq,
                    double rate,
                    double gain = 20.0,
-                   size_t channel = 0)
+                   size_t channel = 0,
+                   const std::string& otw_format = "sc16")
         : BlockBase(name),
           device_args(args),
           center_freq(freq),
           sample_rate(rate),
           gain_db(gain),
-          channel_idx(channel) {
+          channel_idx(channel),
+          wire_format(otw_format) {
 
         // Create USRP device
         usrp = uhd::usrp::multi_usrp::make(device_args);
@@ -110,7 +109,9 @@ struct SourceUHDBlock : public cler::BlockBase {
         usrp->set_rx_gain(gain_db, channel_idx);
 
         // Setup RX stream
-        uhd::stream_args_t stream_args(get_uhd_format<T>(), "sc16");
+        // CPU format: what the host sees (fc32, sc16, sc8)
+        // OTW format: what goes over the wire (sc16, sc8, fc32, etc.)
+        uhd::stream_args_t stream_args(get_uhd_format<T>(), wire_format);
         stream_args.channels = {channel_idx};
         rx_stream = usrp->get_rx_stream(stream_args);
         if (!rx_stream) {
@@ -132,6 +133,7 @@ struct SourceUHDBlock : public cler::BlockBase {
         std::cout << "  Frequency: " << center_freq/1e6 << " MHz" << std::endl;
         std::cout << "  Sample rate: " << sample_rate/1e6 << " MSPS" << std::endl;
         std::cout << "  Gain: " << gain_db << " dB" << std::endl;
+        std::cout << "  Format: CPU=" << get_uhd_format<T>() << ", OTW=" << wire_format << std::endl;
         std::cout << "  Max samples/packet: " << max_samps_per_packet << std::endl;
 
         // Print available antennas
@@ -516,6 +518,7 @@ private:
     double sample_rate;
     double gain_db;
     size_t channel_idx;
+    std::string wire_format;  // OTW format (sc16, sc8, fc32, etc.)
 
     // Streaming
     size_t max_samps_per_packet;
@@ -530,13 +533,11 @@ private:
     size_t overflow_count = 0;
 };
 
-// Common template instantiations
+// Common template instantiations (COMPLEX TYPES ONLY)
+// UHD operates on I/Q pairs - scalar types are not supported
 using SourceUHDBlockCF32 = SourceUHDBlock<std::complex<float>>;
 using SourceUHDBlockSC16 = SourceUHDBlock<std::complex<int16_t>>;
 using SourceUHDBlockSC8 = SourceUHDBlock<std::complex<int8_t>>;
-using SourceUHDBlockF32 = SourceUHDBlock<float>;
-using SourceUHDBlockS16 = SourceUHDBlock<int16_t>;
-using SourceUHDBlockS8 = SourceUHDBlock<int8_t>;
 
 // Helper function for device enumeration
 struct UHDDeviceInfo {

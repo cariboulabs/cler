@@ -52,14 +52,16 @@ struct SinkUHDBlock : public cler::BlockBase {
                  double rate,
                  double gain = 0.0,
                  size_t channel = 0,
-                 size_t channel_size = 0)
+                 size_t channel_size = 0,
+                 const std::string& otw_format = "sc16")
         : BlockBase(name),
           in(channel_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : channel_size),
           device_args(args),
           center_freq(freq),
           sample_rate(rate),
           gain_db(gain),
-          channel_idx(channel) {
+          channel_idx(channel),
+          wire_format(otw_format) {
 
         // Validate buffer size for DBF
         if (channel_size > 0 && channel_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
@@ -110,7 +112,9 @@ struct SinkUHDBlock : public cler::BlockBase {
         usrp->set_tx_gain(gain_db, channel_idx);
 
         // Setup TX stream
-        uhd::stream_args_t stream_args(get_uhd_format<T>(), "sc16");
+        // CPU format: what the host sees (fc32, sc16, sc8)
+        // OTW format: what goes over the wire (sc16, sc8, fc32, etc.)
+        uhd::stream_args_t stream_args(get_uhd_format<T>(), wire_format);
         stream_args.channels = {channel_idx};
         tx_stream = usrp->get_tx_stream(stream_args);
         if (!tx_stream) {
@@ -127,6 +131,7 @@ struct SinkUHDBlock : public cler::BlockBase {
         std::cout << "  Frequency: " << center_freq/1e6 << " MHz" << std::endl;
         std::cout << "  Sample rate: " << sample_rate/1e6 << " MSPS" << std::endl;
         std::cout << "  Gain: " << gain_db << " dB" << std::endl;
+        std::cout << "  Format: CPU=" << get_uhd_format<T>() << ", OTW=" << wire_format << std::endl;
         std::cout << "  Max samples/packet: " << max_samps_per_packet << std::endl;
 
         // Print available antennas
@@ -195,6 +200,16 @@ struct SinkUHDBlock : public cler::BlockBase {
             // Transmit samples
             size_t num_tx = tx_stream->send(read_ptr + samples_sent, to_send, md, 0.1);  // 100ms timeout
 
+            // CRITICAL FIX: After first packet with timed metadata, switch to continuous mode
+            // This prevents:
+            // 1. TIME_ERROR from stale timestamp reuse
+            // 2. Spurious BURST_ACK from repeated start_of_burst flags
+            // For "timed start, continuous stream" pattern, metadata is one-shot.
+            // To send another timed burst, call set_tx_metadata() again.
+            if (first_packet && use_tx_metadata && md.has_time_spec) {
+                use_tx_metadata = false;  // Drop back to continuous streaming
+            }
+
             first_packet = false;
 
             if (num_tx < to_send) {
@@ -209,11 +224,6 @@ struct SinkUHDBlock : public cler::BlockBase {
         }
 
         in.commit_read(samples_sent);
-
-        // Clear metadata after use (for continuous mode)
-        if (use_tx_metadata && next_tx_metadata.end_of_burst) {
-            use_tx_metadata = false;  // Reset for next transmission
-        }
 
         // Check for async events
         handle_async_events();
@@ -524,6 +534,7 @@ private:
     double sample_rate;
     double gain_db;
     size_t channel_idx;
+    std::string wire_format;  // OTW format (sc16, sc8, fc32, etc.)
 
     // Streaming
     size_t max_samps_per_packet;
@@ -539,10 +550,8 @@ private:
     size_t underflow_count = 0;
 };
 
-// Common template instantiations
+// Common template instantiations (COMPLEX TYPES ONLY)
+// UHD operates on I/Q pairs - scalar types are not supported
 using SinkUHDBlockCF32 = SinkUHDBlock<std::complex<float>>;
 using SinkUHDBlockSC16 = SinkUHDBlock<std::complex<int16_t>>;
 using SinkUHDBlockSC8 = SinkUHDBlock<std::complex<int8_t>>;
-using SinkUHDBlockF32 = SinkUHDBlock<float>;
-using SinkUHDBlockS16 = SinkUHDBlock<int16_t>;
-using SinkUHDBlockS8 = SinkUHDBlock<int8_t>;
