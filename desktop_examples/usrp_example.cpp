@@ -69,7 +69,7 @@ void mode_rx(int argc, char** argv) {
 
     cler::GuiManager gui(1200, 600, "USRP RX - Spectrum");
 
-    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, freq, rate, gain, 0);
+    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, freq, rate, gain);  // num_channels defaults to 1
     PlotCSpectrumBlock spectrum("USRP Spectrum", {"I/Q"}, rate, 2048, 10);
     spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
 

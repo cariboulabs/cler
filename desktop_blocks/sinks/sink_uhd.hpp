@@ -19,6 +19,7 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <numeric>
 
 // Use format helper from source_uhd.hpp
 template<typename T>
@@ -44,24 +45,30 @@ struct AsyncTxEvent {
 template<typename T>
 struct SinkUHDBlock : public cler::BlockBase {
 
-    cler::Channel<T> in;
+    cler::Channel<T>* in = nullptr;  // Array of input channels (like add.hpp)
 
     SinkUHDBlock(const char* name,
                  const std::string& args,
                  double freq,
                  double rate,
                  double gain = 0.0,
-                 size_t channel = 0,
+                 size_t num_channels = 1,
                  size_t channel_size = 0,
                  const std::string& otw_format = "sc16")
         : BlockBase(name),
-          in(channel_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : channel_size),
           device_args(args),
           center_freq(freq),
           sample_rate(rate),
           gain_db(gain),
-          channel_idx(channel),
+          _num_channels(num_channels),
           wire_format(otw_format) {
+
+        if (num_channels == 0) {
+            throw std::invalid_argument("SinkUHDBlock: num_channels must be at least 1");
+        }
+
+        // Calculate buffer size for DBF
+        size_t actual_buffer_size = (channel_size == 0) ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : channel_size;
 
         // Validate buffer size for DBF
         if (channel_size > 0 && channel_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
@@ -69,53 +76,105 @@ struct SinkUHDBlock : public cler::BlockBase {
                 std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) + " elements");
         }
 
+        // Allocate input channel array (like add.hpp pattern)
+        in = static_cast<cler::Channel<T>*>(
+            ::operator new[](num_channels * sizeof(cler::Channel<T>))
+        );
+
+        // Construct channels with placement new
+        size_t constructed_channels = 0;
+        try {
+            for (size_t i = 0; i < num_channels; ++i) {
+                new (&in[i]) cler::Channel<T>(actual_buffer_size);
+                constructed_channels++;
+            }
+        } catch (...) {
+            // Clean up any successfully constructed channels
+            using TChannel = cler::Channel<T>;
+            for (size_t i = 0; i < constructed_channels; ++i) {
+                in[i].~TChannel();
+            }
+            ::operator delete[](in);
+            in = nullptr;
+            throw std::runtime_error("SinkUHDBlock: Failed to construct input channels");
+        }
+
         // Create USRP device
         usrp = uhd::usrp::multi_usrp::make(device_args);
         if (!usrp) {
+            // Clean up input channels before throwing
+            using TChannel = cler::Channel<T>;
+            for (size_t i = 0; i < num_channels; ++i) {
+                in[i].~TChannel();
+            }
+            ::operator delete[](in);
+            in = nullptr;
             throw std::runtime_error("SinkUHDBlock: Failed to create USRP device with args: " + device_args);
+        }
+
+        // Verify device has enough channels
+        if (num_channels > usrp->get_tx_num_channels()) {
+            std::stringstream ss;
+            ss << "SinkUHDBlock: Requested " << num_channels << " channels but device only has "
+               << usrp->get_tx_num_channels() << " TX channels";
+            // Clean up
+            using TChannel = cler::Channel<T>;
+            for (size_t i = 0; i < num_channels; ++i) {
+                in[i].~TChannel();
+            }
+            ::operator delete[](in);
+            in = nullptr;
+            throw std::runtime_error(ss.str());
         }
 
         // Set thread priority for better performance
         uhd::set_thread_priority_safe(0.5, true);
 
-        // Validate and set sample rate
-        auto sample_rates = usrp->get_tx_rates(channel_idx);
-        double actual_rate = usrp->set_tx_rate(sample_rate, channel_idx);
-        if (std::abs(actual_rate - sample_rate) > 1.0) {
-            std::cout << "SinkUHDBlock: Requested rate " << sample_rate/1e6
-                      << " MSPS, got " << actual_rate/1e6 << " MSPS" << std::endl;
-            sample_rate = actual_rate;
+        // Allocate UHD buffer pointer array
+        _uhd_buffs = new void*[num_channels];
+
+        // Configure all channels with same initial settings
+        for (size_t ch = 0; ch < num_channels; ++ch) {
+            // Validate and set sample rate
+            double actual_rate = usrp->set_tx_rate(sample_rate, ch);
+            if (ch == 0 && std::abs(actual_rate - sample_rate) > 1.0) {
+                std::cout << "SinkUHDBlock: Requested rate " << sample_rate/1e6
+                          << " MSPS, got " << actual_rate/1e6 << " MSPS" << std::endl;
+                sample_rate = actual_rate;
+            }
+
+            // Validate and set center frequency
+            auto freq_range = usrp->get_tx_freq_range(ch);
+            if (center_freq < freq_range.start() || center_freq > freq_range.stop()) {
+                std::stringstream ss;
+                ss << "Frequency " << center_freq/1e6 << " MHz not supported on channel " << ch << ". "
+                   << "Supported range: " << freq_range.start()/1e6 << "-"
+                   << freq_range.stop()/1e6 << " MHz";
+                throw std::runtime_error(ss.str());
+            }
+
+            uhd::tune_request_t tune_req(center_freq);
+            usrp->set_tx_freq(tune_req, ch);
+
+            // Validate and set gain
+            auto gain_range = usrp->get_tx_gain_range(ch);
+            if (gain_db < gain_range.start() || gain_db > gain_range.stop()) {
+                std::stringstream ss;
+                ss << "Gain " << gain_db << " dB not supported on channel " << ch << ". "
+                   << "Supported range: " << gain_range.start() << "-"
+                   << gain_range.stop() << " dB";
+                throw std::runtime_error(ss.str());
+            }
+            usrp->set_tx_gain(gain_db, ch);
         }
 
-        // Validate and set center frequency
-        auto freq_range = usrp->get_tx_freq_range(channel_idx);
-        if (center_freq < freq_range.start() || center_freq > freq_range.stop()) {
-            std::stringstream ss;
-            ss << "Frequency " << center_freq/1e6 << " MHz not supported. "
-               << "Supported range: " << freq_range.start()/1e6 << "-"
-               << freq_range.stop()/1e6 << " MHz";
-            throw std::runtime_error(ss.str());
-        }
-
-        uhd::tune_request_t tune_req(center_freq);
-        uhd::tune_result_t tune_result = usrp->set_tx_freq(tune_req, channel_idx);
-
-        // Validate and set gain
-        auto gain_range = usrp->get_tx_gain_range(channel_idx);
-        if (gain_db < gain_range.start() || gain_db > gain_range.stop()) {
-            std::stringstream ss;
-            ss << "Gain " << gain_db << " dB not supported. "
-               << "Supported range: " << gain_range.start() << "-"
-               << gain_range.stop() << " dB";
-            throw std::runtime_error(ss.str());
-        }
-        usrp->set_tx_gain(gain_db, channel_idx);
-
-        // Setup TX stream
+        // Setup TX stream for all channels
         // CPU format: what the host sees (fc32, sc16, sc8)
         // OTW format: what goes over the wire (sc16, sc8, fc32, etc.)
         uhd::stream_args_t stream_args(get_uhd_format<T>(), wire_format);
-        stream_args.channels = {channel_idx};
+        stream_args.channels.resize(num_channels);
+        std::iota(stream_args.channels.begin(), stream_args.channels.end(), 0);
+
         tx_stream = usrp->get_tx_stream(stream_args);
         if (!tx_stream) {
             throw std::runtime_error("SinkUHDBlock: Failed to setup TX stream");
@@ -128,20 +187,21 @@ struct SinkUHDBlock : public cler::BlockBase {
         std::cout << "SinkUHDBlock: Initialized "
                   << usrp->get_mboard_name() << " / " << usrp->get_pp_string()
                   << std::endl;
-        std::cout << "  Frequency: " << center_freq/1e6 << " MHz" << std::endl;
-        std::cout << "  Sample rate: " << sample_rate/1e6 << " MSPS" << std::endl;
-        std::cout << "  Gain: " << gain_db << " dB" << std::endl;
+        std::cout << "  Channels: " << num_channels << std::endl;
+        std::cout << "  Frequency: " << center_freq/1e6 << " MHz (all channels)" << std::endl;
+        std::cout << "  Sample rate: " << sample_rate/1e6 << " MSPS (all channels)" << std::endl;
+        std::cout << "  Gain: " << gain_db << " dB (all channels)" << std::endl;
         std::cout << "  Format: CPU=" << get_uhd_format<T>() << ", OTW=" << wire_format << std::endl;
         std::cout << "  Max samples/packet: " << max_samps_per_packet << std::endl;
 
-        // Print available antennas
-        auto antennas = usrp->get_tx_antennas(channel_idx);
+        // Print available antennas for first channel
+        auto antennas = usrp->get_tx_antennas(0);
         if (!antennas.empty()) {
             std::cout << "  Available TX antennas: ";
             for (const auto& ant : antennas) {
                 std::cout << ant << " ";
             }
-            std::cout << "(using: " << usrp->get_tx_antenna(channel_idx) << ")" << std::endl;
+            std::cout << "(using: " << usrp->get_tx_antenna(0) << ")" << std::endl;
         }
     }
 
@@ -157,6 +217,20 @@ struct SinkUHDBlock : public cler::BlockBase {
             }
         }
 
+        // Clean up input channel array
+        if (in) {
+            using TChannel = cler::Channel<T>;
+            for (size_t i = 0; i < _num_channels; ++i) {
+                in[i].~TChannel();
+            }
+            ::operator delete[](in);
+        }
+
+        // Clean up UHD buffer pointer array
+        if (_uhd_buffs) {
+            delete[] _uhd_buffs;
+        }
+
         // Print statistics
         if (underflow_count > 0) {
             std::cout << "SinkUHDBlock: Total underflows: " << underflow_count << std::endl;
@@ -164,9 +238,23 @@ struct SinkUHDBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
-        // Use DBF for zero-copy read
-        auto [read_ptr, read_size] = in.read_dbf();
-        if (read_ptr == nullptr || read_size == 0) {
+        // Get DBF read pointers from all input channels
+        T** read_ptrs = new T*[_num_channels];
+        size_t* read_sizes = new size_t[_num_channels];
+
+        for (size_t i = 0; i < _num_channels; ++i) {
+            std::tie(read_ptrs[i], read_sizes[i]) = in[i].read_dbf();
+        }
+
+        // Find minimum available samples across all channels
+        size_t min_available = read_sizes[0];
+        for (size_t i = 1; i < _num_channels; ++i) {
+            min_available = std::min(min_available, read_sizes[i]);
+        }
+
+        if (min_available == 0) {
+            delete[] read_ptrs;
+            delete[] read_sizes;
             return cler::Error::NotEnoughSamples;
         }
 
@@ -174,9 +262,9 @@ struct SinkUHDBlock : public cler::BlockBase {
         size_t samples_sent = 0;
         bool first_packet = true;
 
-        while (samples_sent < read_size) {
-            size_t to_send = std::min(max_samps_per_packet, read_size - samples_sent);
-            bool last_packet = (samples_sent + to_send >= read_size);
+        while (samples_sent < min_available) {
+            size_t to_send = std::min(max_samps_per_packet, min_available - samples_sent);
+            bool last_packet = (samples_sent + to_send >= min_available);
 
             // Prepare metadata (use user-configured or default)
             uhd::tx_metadata_t md;
@@ -197,8 +285,13 @@ struct SinkUHDBlock : public cler::BlockBase {
                 md.end_of_burst = false;
             }
 
-            // Transmit samples
-            size_t num_tx = tx_stream->send(read_ptr + samples_sent, to_send, md, 0.1);  // 100ms timeout
+            // Fill UHD buffer pointer array with current offsets
+            for (size_t i = 0; i < _num_channels; ++i) {
+                _uhd_buffs[i] = read_ptrs[i] + samples_sent;
+            }
+
+            // Transmit samples from all channels (multi-channel atomic send)
+            size_t num_tx = tx_stream->send(_uhd_buffs, to_send, md, 0.1);  // 100ms timeout
 
             // CRITICAL FIX: After first packet with timed metadata, switch to continuous mode
             // This prevents:
@@ -215,7 +308,14 @@ struct SinkUHDBlock : public cler::BlockBase {
             if (num_tx < to_send) {
                 // Partial send - could be timeout or other issue
                 samples_sent += num_tx;
-                in.commit_read(samples_sent);
+
+                // Commit reads on all channels
+                for (size_t i = 0; i < _num_channels; ++i) {
+                    in[i].commit_read(samples_sent);
+                }
+
+                delete[] read_ptrs;
+                delete[] read_sizes;
                 handle_async_events();
                 return cler::Error::NotEnoughSpace;
             }
@@ -223,7 +323,13 @@ struct SinkUHDBlock : public cler::BlockBase {
             samples_sent += num_tx;
         }
 
-        in.commit_read(samples_sent);
+        // Commit reads on all channels
+        for (size_t i = 0; i < _num_channels; ++i) {
+            in[i].commit_read(samples_sent);
+        }
+
+        delete[] read_ptrs;
+        delete[] read_sizes;
 
         // Check for async events
         handle_async_events();
@@ -256,80 +362,149 @@ struct SinkUHDBlock : public cler::BlockBase {
         return false;
     }
 
-    // Control methods
-    void set_frequency(double freq) {
+    // Control methods (per-channel)
+    void set_frequency(double freq, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
         uhd::tune_request_t tune_req(freq);
-        usrp->set_tx_freq(tune_req, channel_idx);
-        center_freq = freq;
+        usrp->set_tx_freq(tune_req, channel);
+        if (channel == 0) {
+            center_freq = freq;
+        }
     }
 
-    void set_gain(double gain) {
-        usrp->set_tx_gain(gain, channel_idx);
-        gain_db = gain;
+    void set_gain(double gain, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        usrp->set_tx_gain(gain, channel);
+        if (channel == 0) {
+            gain_db = gain;
+        }
     }
 
-    void set_sample_rate(double rate) {
-        double actual_rate = usrp->set_tx_rate(rate, channel_idx);
-        sample_rate = actual_rate;
+    void set_sample_rate(double rate, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        double actual_rate = usrp->set_tx_rate(rate, channel);
+        if (channel == 0) {
+            sample_rate = actual_rate;
+        }
     }
 
-    void set_bandwidth(double bw) {
-        usrp->set_tx_bandwidth(bw, channel_idx);
+    void set_bandwidth(double bw, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        usrp->set_tx_bandwidth(bw, channel);
     }
 
-    void set_antenna(const std::string& antenna) {
-        auto antennas = usrp->get_tx_antennas(channel_idx);
+    void set_antenna(const std::string& antenna, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        auto antennas = usrp->get_tx_antennas(channel);
         if (std::find(antennas.begin(), antennas.end(), antenna) == antennas.end()) {
             std::stringstream ss;
-            ss << "Antenna '" << antenna << "' not supported. Available antennas: ";
+            ss << "Antenna '" << antenna << "' not supported on channel " << channel
+               << ". Available antennas: ";
             for (const auto& ant : antennas) {
                 ss << ant << " ";
             }
             throw std::runtime_error(ss.str());
         }
-        usrp->set_tx_antenna(antenna, channel_idx);
+        usrp->set_tx_antenna(antenna, channel);
     }
 
-    // Getters
-    double get_frequency() const { return center_freq; }
-    double get_gain() const { return gain_db; }
-    double get_sample_rate() const { return sample_rate; }
-
-    double get_bandwidth() const {
-        return usrp->get_tx_bandwidth(channel_idx);
+    // Getters (channel 0 values cached for backward compatibility)
+    double get_frequency(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return channel == 0 ? center_freq : usrp->get_tx_freq(channel);
     }
 
-    std::string get_antenna() const {
-        return usrp->get_tx_antenna(channel_idx);
+    double get_gain(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return channel == 0 ? gain_db : usrp->get_tx_gain(channel);
     }
 
-    std::vector<std::string> list_antennas() const {
-        return usrp->get_tx_antennas(channel_idx);
+    double get_sample_rate(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return channel == 0 ? sample_rate : usrp->get_tx_rate(channel);
     }
 
-    uhd::freq_range_t get_frequency_range() const {
-        return usrp->get_tx_freq_range(channel_idx);
+    double get_bandwidth(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return usrp->get_tx_bandwidth(channel);
     }
 
-    uhd::gain_range_t get_gain_range() const {
-        return usrp->get_tx_gain_range(channel_idx);
+    std::string get_antenna(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return usrp->get_tx_antenna(channel);
     }
 
-    std::vector<std::string> list_gains() const {
-        return usrp->get_tx_gain_names(channel_idx);
+    std::vector<std::string> list_antennas(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return usrp->get_tx_antennas(channel);
     }
 
-    uhd::gain_range_t get_gain_range(const std::string& name) const {
-        return usrp->get_tx_gain_range(name, channel_idx);
+    uhd::freq_range_t get_frequency_range(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return usrp->get_tx_freq_range(channel);
     }
 
-    uhd::meta_range_t get_sample_rate_range() const {
-        return usrp->get_tx_rates(channel_idx);
+    uhd::gain_range_t get_gain_range(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return usrp->get_tx_gain_range(channel);
     }
 
-    uhd::freq_range_t get_bandwidth_range() const {
-        return usrp->get_tx_bandwidth_range(channel_idx);
+    std::vector<std::string> list_gains(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return usrp->get_tx_gain_names(channel);
     }
+
+    uhd::gain_range_t get_gain_range(const std::string& name, size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return usrp->get_tx_gain_range(name, channel);
+    }
+
+    uhd::meta_range_t get_sample_rate_range(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return usrp->get_tx_rates(channel);
+    }
+
+    uhd::freq_range_t get_bandwidth_range(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return usrp->get_tx_bandwidth_range(channel);
+    }
+
+    // Get number of channels
+    size_t get_num_channels() const { return _num_channels; }
 
     // Device information
     std::string get_mboard_name() const {
@@ -357,52 +532,80 @@ struct SinkUHDBlock : public cler::BlockBase {
         command_time_set = false;
     }
 
-    void set_frequency_timed(double freq) {
+    void set_frequency_timed(double freq, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
         uhd::tune_request_t tune_req(freq);
-        usrp->set_tx_freq(tune_req, channel_idx);
+        usrp->set_tx_freq(tune_req, channel);
         if (command_time_set) {
             usrp->clear_command_time();
             command_time_set = false;
         }
-        center_freq = freq;
+        if (channel == 0) {
+            center_freq = freq;
+        }
     }
 
-    void set_gain_timed(double gain) {
-        usrp->set_tx_gain(gain, channel_idx);
+    void set_gain_timed(double gain, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        usrp->set_tx_gain(gain, channel);
         if (command_time_set) {
             usrp->clear_command_time();
             command_time_set = false;
         }
-        gain_db = gain;
+        if (channel == 0) {
+            gain_db = gain;
+        }
     }
 
-    void set_antenna_timed(const std::string& antenna) {
-        usrp->set_tx_antenna(antenna, channel_idx);
+    void set_antenna_timed(const std::string& antenna, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        usrp->set_tx_antenna(antenna, channel);
         if (command_time_set) {
             usrp->clear_command_time();
             command_time_set = false;
         }
     }
 
-    // GPIO Control
-    void gpio_set_ctrl(const std::string& bank, uint32_t value, uint32_t mask = 0xFFFFFFFF) {
-        usrp->set_gpio_attr(bank, "CTRL", value, mask, channel_idx);
+    // GPIO Control (per-channel)
+    void gpio_set_ctrl(const std::string& bank, uint32_t value, uint32_t mask = 0xFFFFFFFF, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        usrp->set_gpio_attr(bank, "CTRL", value, mask, channel);
     }
 
-    void gpio_set_ddr(const std::string& bank, uint32_t value, uint32_t mask = 0xFFFFFFFF) {
-        usrp->set_gpio_attr(bank, "DDR", value, mask, channel_idx);
+    void gpio_set_ddr(const std::string& bank, uint32_t value, uint32_t mask = 0xFFFFFFFF, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        usrp->set_gpio_attr(bank, "DDR", value, mask, channel);
     }
 
-    void gpio_set_out(const std::string& bank, uint32_t value, uint32_t mask = 0xFFFFFFFF) {
-        usrp->set_gpio_attr(bank, "OUT", value, mask, channel_idx);
+    void gpio_set_out(const std::string& bank, uint32_t value, uint32_t mask = 0xFFFFFFFF, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        usrp->set_gpio_attr(bank, "OUT", value, mask, channel);
     }
 
-    uint32_t gpio_get_in(const std::string& bank) {
-        return usrp->get_gpio_attr(bank, "READBACK", channel_idx);
+    uint32_t gpio_get_in(const std::string& bank, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return usrp->get_gpio_attr(bank, "READBACK", channel);
     }
 
-    void gpio_set_out_timed(const std::string& bank, uint32_t value, uint32_t mask = 0xFFFFFFFF) {
-        usrp->set_gpio_attr(bank, "OUT", value, mask, channel_idx);
+    void gpio_set_out_timed(const std::string& bank, uint32_t value, uint32_t mask = 0xFFFFFFFF, size_t channel = 0) {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        usrp->set_gpio_attr(bank, "OUT", value, mask, channel);
         if (command_time_set) {
             usrp->clear_command_time();
             command_time_set = false;
@@ -446,13 +649,19 @@ struct SinkUHDBlock : public cler::BlockBase {
         return usrp->get_time_sources(0);
     }
 
-    // Sensor Access
-    std::vector<std::string> get_tx_sensor_names() const {
-        return usrp->get_tx_sensor_names(channel_idx);
+    // Sensor Access (per-channel)
+    std::vector<std::string> get_tx_sensor_names(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return usrp->get_tx_sensor_names(channel);
     }
 
-    std::string get_tx_sensor(const std::string& name) const {
-        return usrp->get_tx_sensor(name, channel_idx).to_pp_string();
+    std::string get_tx_sensor(const std::string& name, size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        return usrp->get_tx_sensor(name, channel).to_pp_string();
     }
 
     std::vector<std::string> get_mboard_sensor_names() const {
@@ -463,10 +672,13 @@ struct SinkUHDBlock : public cler::BlockBase {
         return usrp->get_mboard_sensor(name).to_pp_string();
     }
 
-    bool is_lo_locked() const {
-        auto sensors = usrp->get_tx_sensor_names(channel_idx);
+    bool is_lo_locked(size_t channel = 0) const {
+        if (channel >= _num_channels) {
+            throw std::out_of_range("SinkUHDBlock: Channel index out of range");
+        }
+        auto sensors = usrp->get_tx_sensor_names(channel);
         if (std::find(sensors.begin(), sensors.end(), "lo_locked") != sensors.end()) {
-            return usrp->get_tx_sensor("lo_locked", channel_idx).to_bool();
+            return usrp->get_tx_sensor("lo_locked", channel).to_bool();
         }
         return true;
     }
@@ -533,8 +745,11 @@ private:
     double center_freq;
     double sample_rate;
     double gain_db;
-    size_t channel_idx;
+    size_t _num_channels;
     std::string wire_format;  // OTW format (sc16, sc8, fc32, etc.)
+
+    // Multi-channel support
+    void** _uhd_buffs = nullptr;  // Array of buffer pointers for UHD multi-channel send()
 
     // Streaming
     size_t max_samps_per_packet;
