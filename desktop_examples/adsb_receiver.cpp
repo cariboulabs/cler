@@ -10,17 +10,26 @@
 #include <cstdlib>
 #include <variant>
 #include <string>
+#include <fstream>
+#include <vector>
 
-// Block to convert complex<float> IQ to uint16_t magnitude
+// Block to decimate from 40 MHz to 2 MHz and convert to magnitude
+// Decimation by 20: keeps every 20th sample (40MHz / 20 = 2MHz)
 struct IQToMagnitudeBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> iq_in;
+    size_t sample_count = 0;
+    uint16_t min_mag = 65535;
+    uint16_t max_mag = 0;
+    float running_max = 1e-6f;  // Running max for normalization
+    static constexpr float ALPHA = 0.001f;  // Smoothing factor for running max
+    static constexpr int DECIMATION = 20;  // 40 MHz → 2 MHz
 
     IQToMagnitudeBlock(const char* name, size_t buffer_size = 65536)
         : BlockBase(name), iq_in(buffer_size) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<uint16_t>* mag_out) {
         auto [read_ptr, read_size] = iq_in.read_dbf();
-        if (read_size == 0) {
+        if (read_size < DECIMATION) {
             return cler::Error::NotEnoughSamples;
         }
 
@@ -29,25 +38,78 @@ struct IQToMagnitudeBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSpace;
         }
 
-        size_t to_process = std::min(read_size, write_size);
-
-        // Convert complex IQ to magnitude: sqrt(I^2 + Q^2) scaled to uint16_t
-        for (size_t i = 0; i < to_process; ++i) {
+        // Process samples with decimation: keep every 20th sample (40MHz → 2MHz)
+        size_t output_count = 0;
+        for (size_t i = 0; i + DECIMATION <= read_size && output_count < write_size; i += DECIMATION) {
             float i_val = read_ptr[i].real();
             float q_val = read_ptr[i].imag();
             float mag = std::sqrt(i_val * i_val + q_val * q_val);
 
-            // Scale to uint16_t range (0-65535)
-            mag = std::min(65535.0f, mag * 256.0f);  // Scale factor may need tuning
-            write_ptr[i] = static_cast<uint16_t>(mag);
+            // Update running maximum for statistics only
+            running_max = (1.0f - ALPHA) * running_max + ALPHA * mag;
+
+            // Scale by 64x to match libmodes expected input range (like RTL-SDR 8-bit magnitude)
+            float scaled = mag * 64.0f;
+            write_ptr[output_count] = static_cast<uint16_t>(std::min(65535.0f, scaled));
+
+            min_mag = std::min(min_mag, write_ptr[output_count]);
+            max_mag = std::max(max_mag, write_ptr[output_count]);
+
+            output_count++;
         }
 
-        iq_in.commit_read(to_process);
-        mag_out->commit_write(to_process);
+        sample_count += read_size;
+        if (sample_count % 40000000 == 0) {  // Log every 40M input samples (2M output)
+            std::cerr << "[IQToMagnitude] Processed: " << sample_count << " input samples (" << sample_count/DECIMATION << " output) | Min: " << min_mag << " Max: " << max_mag << " | running_max: " << running_max << std::endl;
+            std::cerr.flush();
+        }
+
+        iq_in.commit_read(read_size);
+        mag_out->commit_write(output_count);
 
         return cler::Empty{};
     }
 };
+
+// Debug block to monitor messages between decoder and aggregator
+struct DebugMessageCounterBlock : public cler::BlockBase {
+    cler::Channel<mode_s_msg> msg_in;
+    size_t msg_count = 0;
+    static constexpr size_t LOG_INTERVAL = 10000;
+
+    DebugMessageCounterBlock(const char* name, size_t buffer_size = 1024)
+        : BlockBase(name), msg_in(buffer_size) {}
+
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<mode_s_msg>* msg_out) {
+        size_t available = msg_in.size();
+        if (available == 0) {
+            return cler::Error::NotEnoughSamples;
+        }
+
+        // Read all available messages
+        std::vector<mode_s_msg> buffer(available);
+        msg_in.readN(buffer.data(), available);
+
+        // Forward to output and count
+        for (const auto& msg : buffer) {
+            if (msg_out->space() > 0) {
+                msg_out->push(msg);
+                msg_count++;
+
+                if (msg_count % LOG_INTERVAL == 0) {
+                    std::cerr << "[MessageCounter] Total messages: " << msg_count << std::endl;
+                    std::cerr.flush();
+                }
+            }
+        }
+
+        return cler::Empty{};
+    }
+};
+
+// Global stats
+static size_t g_total_messages = 0;
+static size_t g_valid_messages = 0;
 
 // Optional callback: called when aircraft state updates
 void on_aircraft_update(const ADSBState& state, void* context) {
@@ -70,12 +132,13 @@ inline auto make_source_variant(bool use_soapy, const std::string& device_args_o
                                 uint64_t freq, uint32_t rate, double gain) {
     using SoapyType = SourceSoapySDRBlock<std::complex<float>>;
     using FileType = SourceFileBlock<std::complex<float>>;
-    using VariantType = std::variant<SoapyType, FileType>;
 
     if (use_soapy) {
-        return VariantType(std::in_place_type<SoapyType>, "SoapySDR", device_args_or_filename, freq, rate, gain, 0);
+        return std::variant<SoapyType, FileType>(
+            std::in_place_type<SoapyType>, "SoapySDR", device_args_or_filename, freq, rate, gain, 0);
     } else {
-        return VariantType(std::in_place_type<FileType>, "File", device_args_or_filename.c_str(), true);
+        return std::variant<SoapyType, FileType>(
+            std::in_place_type<FileType>, "File", device_args_or_filename.c_str(), true);
     }
 }
 
@@ -160,6 +223,7 @@ int main(int argc, char** argv) {
 
         IQToMagnitudeBlock mag_converter("IQ to Magnitude");
         ADSBDecoderBlock decoder("ADSB Decoder", 0xFFFF); //all messages
+        DebugMessageCounterBlock debug_counter("MessageCounter");
 
         ADSBAggregateBlock aggregator(
             "ADSB Map",
@@ -172,11 +236,12 @@ int main(int argc, char** argv) {
         // Configure window
         aggregator.set_initial_window(0.0f, 0.0f, 1400.0f, 800.0f);
 
-        // Create flowgraph
+        // Create flowgraph with debug counter between decoder and aggregator
         auto flowgraph = cler::make_desktop_flowgraph(
             cler::BlockRunner(&source, &mag_converter.iq_in),
             cler::BlockRunner(&mag_converter, &decoder.magnitude_in),
-            cler::BlockRunner(&decoder, &aggregator.message_in),
+            cler::BlockRunner(&decoder, &debug_counter.msg_in),
+            cler::BlockRunner(&debug_counter, &aggregator.message_in),
             cler::BlockRunner(&aggregator)
         );
 
@@ -204,6 +269,7 @@ int main(int argc, char** argv) {
         flowgraph.stop();
 
         std::cout << "Total aircraft tracked: " << aggregator.aircraft_count() << std::endl;
+        std::cerr << "[DONE] Receiver completed successfully" << std::endl;
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
