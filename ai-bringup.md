@@ -921,19 +921,23 @@ enum class Error : int {
 7. Stop flowgraph before cleanup
 
 ### Performance Tips
-1. Use bulk read/write operations (`readN`/`writeN`)
-2. Prefer `peek_read`/`peek_write` for zero-copy processing
-3. Avoid single-sample `push`/`pop` in hot paths
-4. Process multiple samples per `procedure()` call
-5. Use compile-time channel sizes when possible
-6. Enable adaptive sleep for better CPU usage
+1. **CRITICAL: Never allocate memory in `procedure()`** - It's the hot path called repeatedly
+   - Generally speaking we prefer c-arrays with new/delete,
+   but if there are many failure points, and RAII principles simplify by alot, cpp vectors can be used
+2. Use bulk read/write operations (`readN`/`writeN`)
+3. Prefer `peek_read`/`peek_write` for zero-copy processing
+4. Avoid single-sample `push`/`pop` in hot paths
+5. Process multiple samples per `procedure()` call
+6. Use compile-time channel sizes when possible
+7. Enable adaptive sleep for better CPU usage
 
 ### Common Pitfalls
-1. Forgetting task policy include for flowgraph mode
-2. Incorrect `peek_write` usage (pass by reference, not pointer)
-3. Not checking channel space before writing
-4. Missing `BlockRunner` for a block
-5. Type mismatch between connected channels
-6. Not handling terminal errors appropriately
+1. **Allocating memory in `procedure()`** - Use member variables instead (hot path!)
+2. Forgetting task policy include for flowgraph mode
+3. Incorrect `peek_write` usage (pass by reference, not pointer)
+4. Not checking channel space before writing
+5. Missing `BlockRunner` for a block
+6. Type mismatch between connected channels
+7. Not handling terminal errors appropriately
 
 This comprehensive guide provides accurate context for AI assistants working with the Cler DSP framework, with all corrections applied based on the actual codebase structure and API usage.

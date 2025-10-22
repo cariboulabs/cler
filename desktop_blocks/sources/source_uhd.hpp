@@ -92,7 +92,8 @@ struct SourceUHDBlock : public cler::BlockBase {
         // This ensures exception safety - if validation throws, no leaks occur
         for (size_t ch = 0; ch < num_channels; ++ch) {
             // Validate and set sample rate
-            double actual_rate = usrp->set_rx_rate(sample_rate, ch);
+            usrp->set_rx_rate(sample_rate, ch);
+            double actual_rate = usrp->get_rx_rate(ch);
             if (ch == 0 && std::abs(actual_rate - sample_rate) > 1.0) {
                 std::cout << "SourceUHDBlock: Requested rate " << sample_rate/1e6
                           << " MSPS, got " << actual_rate/1e6 << " MSPS" << std::endl;
@@ -146,6 +147,8 @@ struct SourceUHDBlock : public cler::BlockBase {
 
         // Allocate UHD buffer pointer array (vector auto-manages, exception-safe)
         _uhd_buffs.resize(num_channels);
+        _write_ptrs.resize(num_channels);
+        _write_sizes.resize(num_channels);
 
         // Print device info
         std::cout << "SourceUHDBlock: Initialized "
@@ -200,25 +203,20 @@ struct SourceUHDBlock : public cler::BlockBase {
             return cler::Error::TERM_ProcedureError;
         }
 
-        // Get DBF write pointers from all outputs - use C arrays
-        T** write_ptrs = new T*[num_outs];
-        size_t* write_sizes = new size_t[num_outs];
-
+        // Get DBF write pointers from all outputs
         size_t idx = 0;
         auto get_write_ptrs = [&](auto*... chs) {
-            ((std::tie(write_ptrs[idx], write_sizes[idx]) = chs->write_dbf(), idx++), ...);
+            ((std::tie(_write_ptrs[idx], _write_sizes[idx]) = chs->write_dbf(), idx++), ...);
         };
         get_write_ptrs(outs...);
 
         // Find minimum space across all channels
-        size_t min_space = write_sizes[0];
+        size_t min_space = _write_sizes[0];
         for (size_t i = 1; i < num_outs; ++i) {
-            min_space = std::min(min_space, write_sizes[i]);
+            min_space = std::min(min_space, _write_sizes[i]);
         }
 
         if (min_space == 0) {
-            delete[] write_ptrs;
-            delete[] write_sizes;
             return cler::Error::NotEnoughSpace;
         }
 
@@ -227,7 +225,7 @@ struct SourceUHDBlock : public cler::BlockBase {
 
         // Fill UHD buffer pointer array
         for (size_t i = 0; i < num_outs; ++i) {
-            _uhd_buffs[i] = write_ptrs[i];
+            _uhd_buffs[i] = _write_ptrs[i];
         }
 
         // Receive samples directly into all output buffers (multi-channel atomic recv)
@@ -252,8 +250,6 @@ struct SourceUHDBlock : public cler::BlockBase {
                 break;
 
             case uhd::rx_metadata_t::ERROR_CODE_TIMEOUT:
-                delete[] write_ptrs;
-                delete[] write_sizes;
                 return cler::Error::NotEnoughSamples;
 
             case uhd::rx_metadata_t::ERROR_CODE_OVERFLOW:
@@ -275,8 +271,6 @@ struct SourceUHDBlock : public cler::BlockBase {
 
             case uhd::rx_metadata_t::ERROR_CODE_ALIGNMENT:
                 std::cerr << "SourceUHDBlock: Multi-channel alignment error" << std::endl;
-                delete[] write_ptrs;
-                delete[] write_sizes;
                 return cler::Error::TERM_ProcedureError;
 
             case uhd::rx_metadata_t::ERROR_CODE_BAD_PACKET:
@@ -286,8 +280,6 @@ struct SourceUHDBlock : public cler::BlockBase {
             default:
                 std::cerr << "SourceUHDBlock: Unknown error code: "
                           << md.strerror() << std::endl;
-                delete[] write_ptrs;
-                delete[] write_sizes;
                 return cler::Error::TERM_ProcedureError;
         }
 
@@ -296,13 +288,9 @@ struct SourceUHDBlock : public cler::BlockBase {
             idx = 0;
             ((outs->commit_write(num_rx), idx++), ...);
 
-            delete[] write_ptrs;
-            delete[] write_sizes;
             return cler::Empty{};
         }
 
-        delete[] write_ptrs;
-        delete[] write_sizes;
         return cler::Error::NotEnoughSamples;
     }
 
@@ -335,7 +323,8 @@ struct SourceUHDBlock : public cler::BlockBase {
         if (channel >= _num_channels) {
             throw std::out_of_range("SourceUHDBlock: Channel index out of range");
         }
-        double actual_rate = usrp->set_rx_rate(rate, channel);
+        usrp->set_rx_rate(rate, channel);
+        double actual_rate = usrp->get_rx_rate(channel);
         if (channel == 0) {
             sample_rate = actual_rate;
         }
@@ -699,6 +688,8 @@ private:
 
     // Multi-channel support
     std::vector<void*> _uhd_buffs;  // Buffer pointers for UHD multi-channel recv()
+    std::vector<T*> _write_ptrs;    // Temp storage for write_dbf pointers
+    std::vector<size_t> _write_sizes;  // Temp storage for write_dbf sizes
 
     // Streaming
     size_t max_samps_per_packet;

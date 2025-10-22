@@ -117,7 +117,8 @@ struct SinkUHDBlock : public cler::BlockBase {
             // Configure and validate all channels
             for (size_t ch = 0; ch < num_channels; ++ch) {
                 // Validate and set sample rate
-                double actual_rate = usrp->set_tx_rate(sample_rate, ch);
+                usrp->set_tx_rate(sample_rate, ch);
+                double actual_rate = usrp->get_tx_rate(ch);
                 if (ch == 0 && std::abs(actual_rate - sample_rate) > 1.0) {
                     std::cout << "SinkUHDBlock: Requested rate " << sample_rate/1e6
                               << " MSPS, got " << actual_rate/1e6 << " MSPS" << std::endl;
@@ -163,6 +164,8 @@ struct SinkUHDBlock : public cler::BlockBase {
 
             // Allocate UHD buffer pointer array (vector auto-manages)
             _uhd_buffs.resize(num_channels);
+            _read_ptrs.resize(num_channels);
+            _read_sizes.resize(num_channels);
 
             // Get max number of samples per packet
             max_samps_per_packet = tx_stream->get_max_num_samps();
@@ -222,22 +225,19 @@ struct SinkUHDBlock : public cler::BlockBase {
 
     cler::Result<cler::Empty, cler::Error> procedure() {
         // Get DBF read pointers from all input channels
-        T** read_ptrs = new T*[_num_channels];
-        size_t* read_sizes = new size_t[_num_channels];
-
         for (size_t i = 0; i < _num_channels; ++i) {
-            std::tie(read_ptrs[i], read_sizes[i]) = in[i].read_dbf();
+            auto [ptr, size] = in[i].read_dbf();
+            _read_ptrs[i] = ptr;
+            _read_sizes[i] = size;
         }
 
         // Find minimum available samples across all channels
-        size_t min_available = read_sizes[0];
+        size_t min_available = _read_sizes[0];
         for (size_t i = 1; i < _num_channels; ++i) {
-            min_available = std::min(min_available, read_sizes[i]);
+            min_available = std::min(min_available, _read_sizes[i]);
         }
 
         if (min_available == 0) {
-            delete[] read_ptrs;
-            delete[] read_sizes;
             return cler::Error::NotEnoughSamples;
         }
 
@@ -270,7 +270,7 @@ struct SinkUHDBlock : public cler::BlockBase {
 
             // Fill UHD buffer pointer array with current offsets
             for (size_t i = 0; i < _num_channels; ++i) {
-                _uhd_buffs[i] = read_ptrs[i] + samples_sent;
+                _uhd_buffs[i] = const_cast<T*>(_read_ptrs[i] + samples_sent);
             }
 
             // Transmit samples from all channels (multi-channel atomic send)
@@ -302,8 +302,6 @@ struct SinkUHDBlock : public cler::BlockBase {
                     in[i].commit_read(samples_sent);
                 }
 
-                delete[] read_ptrs;
-                delete[] read_sizes;
                 handle_async_events();
                 return cler::Error::NotEnoughSpace;
             }
@@ -315,9 +313,6 @@ struct SinkUHDBlock : public cler::BlockBase {
         for (size_t i = 0; i < _num_channels; ++i) {
             in[i].commit_read(samples_sent);
         }
-
-        delete[] read_ptrs;
-        delete[] read_sizes;
 
         // Check for async events
         handle_async_events();
@@ -376,7 +371,8 @@ struct SinkUHDBlock : public cler::BlockBase {
         if (channel >= _num_channels) {
             throw std::out_of_range("SinkUHDBlock: Channel index out of range");
         }
-        double actual_rate = usrp->set_tx_rate(rate, channel);
+        usrp->set_tx_rate(rate, channel);
+        double actual_rate = usrp->get_tx_rate(channel);
         if (channel == 0) {
             sample_rate = actual_rate;
         }
@@ -749,6 +745,8 @@ private:
 
     // Multi-channel support
     std::vector<void*> _uhd_buffs;  // Buffer pointers for UHD multi-channel send()
+    std::vector<const T*> _read_ptrs;  // Temp storage for read_dbf pointers
+    std::vector<size_t> _read_sizes;   // Temp storage for read_dbf sizes
 
     // Streaming
     size_t max_samps_per_packet;

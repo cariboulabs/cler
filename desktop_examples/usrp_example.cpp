@@ -73,7 +73,7 @@ void mode_rx(int argc, char** argv) {
     cler::GuiManager gui(1200, 600, "USRP RX - Spectrum");
 
     SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, freq, rate, gain, 1);
-    PlotCSpectrumBlock spectrum("USRP Spectrum", {"I/Q"}, rate, 2048, 10);
+    PlotCSpectrumBlock spectrum("USRP Spectrum", {"I/Q"}, rate, 2048);
     spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
 
     auto flowgraph = cler::make_desktop_flowgraph(
@@ -108,8 +108,8 @@ void mode_mimo(int argc, char** argv) {
     cler::GuiManager gui(1200, 800, "USRP MIMO - Dual Channel");
 
     SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, freq, rate, gain, 2);
-    PlotCSpectrumBlock spectrum0("Channel 0", {"Ch0"}, rate, 2048, 10);
-    PlotCSpectrumBlock spectrum1("Channel 1", {"Ch1"}, rate, 2048, 10);
+    PlotCSpectrumBlock spectrum0("Channel 0", {"Ch0"}, rate, 2048);
+    PlotCSpectrumBlock spectrum1("Channel 1", {"Ch1"}, rate, 2048);
 
     spectrum0.set_initial_window(0.0f, 0.0f, 1200.0f, 380.0f);
     spectrum1.set_initial_window(0.0f, 400.0f, 1200.0f, 380.0f);
@@ -149,7 +149,7 @@ void mode_tx_burst(int argc, char** argv) {
     std::cout << "Freq: " << freq/1e6 << " MHz, Rate: " << rate/1e6 << " MSPS, Gain: " << gain << " dB" << std::endl;
     std::cout << "TX Time: " << tx_time << "s" << std::endl;
 
-    SourceFileBlock<std::complex<float>> file("File", filename);
+    SourceFileBlock<std::complex<float>> file("File", filename.c_str());
     SinkUHDBlock<std::complex<float>> usrp("USRP", device_args, freq, rate, gain, 1);
 
     usrp.set_time_now(0.0);
@@ -165,7 +165,7 @@ void mode_tx_burst(int argc, char** argv) {
     std::cout << "Burst configured for t=" << tx_time << "s" << std::endl;
 
     auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&file, &usrp.in),
+        cler::BlockRunner(&file, &usrp.in[0]),
         cler::BlockRunner(&usrp)
     );
 
