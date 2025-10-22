@@ -5,10 +5,8 @@
 #include "adsb_coastline_loader.hpp"
 #include "libmodes/mode-s.h"
 #include <unordered_map>
-#include <ctime>
 #include <imgui.h>
 #include <cmath>
-#include <vector>
 
 struct ADSBAggregateBlock : public cler::BlockBase {
     cler::Channel<mode_s_msg> message_in;
