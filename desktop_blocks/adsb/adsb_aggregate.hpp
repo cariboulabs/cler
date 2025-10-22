@@ -155,7 +155,8 @@ struct ADSBAggregateBlock : public cler::BlockBase {
         draw_grid(draw_list, canvas_pos, canvas_size);
 
         // Draw coastlines if loaded
-        draw_coastlines(draw_list, canvas_pos, canvas_size);
+        // TODO: Temporarily disabled to debug crash
+        // draw_coastlines(draw_list, canvas_pos, canvas_size);
 
         // Draw aircraft
         draw_aircraft(draw_list, canvas_pos, canvas_size);
