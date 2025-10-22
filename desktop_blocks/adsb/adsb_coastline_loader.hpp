@@ -82,9 +82,12 @@ private:
     }
 
     static double swap_endian_double(double val) {
-        uint64_t* ptr = reinterpret_cast<uint64_t*>(&val);
-        uint64_t swapped = swap_endian_double_bits(*ptr);
-        return *reinterpret_cast<double*>(&swapped);
+        uint64_t bits;
+        std::memcpy(&bits, &val, sizeof(double));
+        uint64_t swapped = swap_endian_double_bits(bits);
+        double result;
+        std::memcpy(&result, &swapped, sizeof(double));
+        return result;
     }
 
     static uint64_t swap_endian_double_bits(uint64_t val) {

@@ -21,7 +21,7 @@ struct ADSBAggregateBlock : public cler::BlockBase {
                        float initial_map_center_lon = 34.0f,
                        OnAircraftUpdateCallback callback = nullptr,
                        void* callback_context = nullptr,
-                       const char* coastline_data_path = "adsb_data/ne_110m_coastline.shp")
+                       const char* coastline_data_path = "adsb_coastlines/ne_110m_coastline.shp")
         : BlockBase(name), message_in(1024),
           _callback(callback), _callback_context(callback_context),
           _map_center_lat(initial_map_center_lat), _map_center_lon(initial_map_center_lon),
