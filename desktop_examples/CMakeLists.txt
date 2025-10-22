@@ -103,9 +103,9 @@ else()
     message(STATUS "Skipping usrp_example - requires UHD and GUI blocks")
 endif()
 
-if (CLER_BUILD_BLOCKS_GUI AND HACKRF_FOUND)
+if (CLER_BUILD_BLOCKS_GUI AND SOAPYSDR_FOUND)
     add_executable(adsb_receiver adsb_receiver.cpp)
-    target_link_libraries(adsb_receiver PRIVATE cler::desktop_blocks)
+    target_link_libraries(adsb_receiver PRIVATE cler::desktop_blocks PkgConfig::SOAPYSDR)
 
     # Copy ADSB coastline data to binary directory
     add_custom_command(TARGET adsb_receiver POST_BUILD
@@ -114,6 +114,14 @@ if (CLER_BUILD_BLOCKS_GUI AND HACKRF_FOUND)
             $<TARGET_FILE_DIR:adsb_receiver>/adsb_coastlines
         COMMENT "Copying ADSB coastline data to binary directory"
     )
+
+    # Copy ADSB recording file to binary directory
+    add_custom_command(TARGET adsb_receiver POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_SOURCE_DIR}/desktop_examples/adsb_recording.bin
+            $<TARGET_FILE_DIR:adsb_receiver>/adsb_recording.bin
+        COMMENT "Copying ADSB recording file to binary directory"
+    )
 else()
-    message(STATUS "Skipping adsb_receiver example because CLER_BUILD_BLOCKS_GUI or HACKRF_FOUND is OFF")
+    message(STATUS "Skipping adsb_receiver example because CLER_BUILD_BLOCKS_GUI or SOAPYSDR_FOUND is OFF")
 endif()

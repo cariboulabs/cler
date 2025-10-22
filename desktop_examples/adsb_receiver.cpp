@@ -1,45 +1,15 @@
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
-#include "desktop_blocks/sources/source_hackrf.hpp"
+#include "desktop_blocks/sources/source_soapysdr.hpp"
+#include "desktop_blocks/sources/source_file.hpp"
 #include "desktop_blocks/adsb/adsb_decoder.hpp"
 #include "desktop_blocks/adsb/adsb_aggregate.hpp"
 #include <iostream>
 #include <chrono>
 #include <cstdlib>
-
-// Include HackRF header for hackrf_init/hackrf_exit
-#ifdef __has_include
-    #if __has_include(<libhackrf/hackrf.h>)
-        #include <libhackrf/hackrf.h>
-    #elif __has_include(<hackrf.h>)
-        #include <hackrf.h>
-    #endif
-#endif
-
-/**
- * ADSB Receiver Example
- *
- * Real-time ADS-B aircraft tracking using HackRF SDR.
- *
- * This example demonstrates:
- * 1. Receiving IQ samples from HackRF at 1090 MHz (ADS-B frequency)
- * 2. Converting complex IQ to magnitude samples
- * 3. Decoding Mode S messages using ADSBDecoderBlock
- * 4. Aggregating aircraft states and rendering an interactive map
- *
- * Usage:
- *   ./adsb_receiver [latitude] [longitude]
- *
- * Arguments:
- *   latitude  - Initial map center latitude (default: 32.0)
- *   longitude - Initial map center longitude (default: 34.0)
- *
- * Example:
- *   ./adsb_receiver              # Default: Israel (32.0°N, 34.0°E)
- *   ./adsb_receiver 37.7 -122.4  # San Francisco
- *   ./adsb_receiver 51.5 -0.1    # London
- */
+#include <variant>
+#include <string>
 
 // Block to convert complex<float> IQ to uint16_t magnitude
 struct IQToMagnitudeBlock : public cler::BlockBase {
@@ -95,14 +65,61 @@ void on_aircraft_update(const ADSBState& state, void* context) {
     std::cout << " | Messages: " << state.message_count << std::endl;
 }
 
+// Helper to create variant with proper initialization
+inline auto make_source_variant(bool use_soapy, const std::string& device_args_or_filename,
+                                uint64_t freq, uint32_t rate, double gain) {
+    using SoapyType = SourceSoapySDRBlock<std::complex<float>>;
+    using FileType = SourceFileBlock<std::complex<float>>;
+    using VariantType = std::variant<SoapyType, FileType>;
+
+    if (use_soapy) {
+        return VariantType(std::in_place_type<SoapyType>, "SoapySDR", device_args_or_filename, freq, rate, gain, 0);
+    } else {
+        return VariantType(std::in_place_type<FileType>, "File", device_args_or_filename.c_str(), true);
+    }
+}
+
+// Variant-based source selector block
+struct SelectableSourceBlock : public cler::BlockBase {
+    std::variant<SourceSoapySDRBlock<std::complex<float>>, SourceFileBlock<std::complex<float>>> source;
+
+    SelectableSourceBlock(const char* name, bool use_soapy, const std::string& device_args_or_filename,
+                         uint64_t freq = 0, uint32_t rate = 0, double gain = 0)
+        : cler::BlockBase(name),
+          source(make_source_variant(use_soapy, device_args_or_filename, freq, rate, gain))
+    {
+    }
+
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
+        return std::visit([&](auto& src) {
+            return src.procedure(out);
+        }, source);
+    }
+};
+
 int main(int argc, char** argv) {
-    // Parse command line arguments for initial map position
+    // Show help if missing source argument
+    if (argc < 2) {
+        std::cout << "Usage: " << argv[0] << " <source> [latitude] [longitude]\n";
+        std::cout << "\nArguments:\n";
+        std::cout << "  source    - \"soapy\" for auto-detected SoapySDR device, or path to IQ file\n";
+        std::cout << "  latitude  - Initial map center latitude (default: 32.0)\n";
+        std::cout << "  longitude - Initial map center longitude (default: 34.0)\n";
+        std::cout << "\nExamples:\n";
+        std::cout << "  " << argv[0] << " soapy\n";
+        std::cout << "  " << argv[0] << " adsb_recording.bin\n";
+        std::cout << "  " << argv[0] << " soapy 37.7 -122.4\n";
+        return 0;
+    }
+
+    // Parse command line arguments
+    std::string source_arg = argv[1];
     float initial_lat = 32.0f;   // Default: Israel
     float initial_lon = 34.0f;
 
-    if (argc >= 3) {
-        initial_lat = std::atof(argv[1]);
-        initial_lon = std::atof(argv[2]);
+    if (argc >= 4) {
+        initial_lat = std::atof(argv[2]);
+        initial_lon = std::atof(argv[3]);
     }
 
     std::cout << "=== ADSB Receiver ===" << std::endl;
@@ -112,30 +129,37 @@ int main(int argc, char** argv) {
     // ADS-B frequency and settings
     constexpr uint64_t ADSB_FREQ_HZ = 1090000000;  // 1090 MHz
     constexpr uint32_t SAMPLE_RATE_HZ = 2000000;   // 2 MSPS
-    constexpr int LNA_GAIN_DB = 32;                // LNA gain (0-40 dB)
-    constexpr int VGA_GAIN_DB = 40;                // VGA gain (0-62 dB)
+    constexpr double GAIN_DB = 30.0;               // RX gain in dB
 
-    std::cout << "Configuring HackRF:" << std::endl;
-    std::cout << "  Frequency: " << ADSB_FREQ_HZ / 1e6 << " MHz" << std::endl;
-    std::cout << "  Sample Rate: " << SAMPLE_RATE_HZ / 1e6 << " MSPS" << std::endl;
-    std::cout << "  LNA Gain: " << LNA_GAIN_DB << " dB" << std::endl;
-    std::cout << "  VGA Gain: " << VGA_GAIN_DB << " dB" << std::endl;
+    bool use_soapy = (source_arg == "soapy");
+
+    if (use_soapy) {
+        std::cout << "Source: SoapySDR (auto-detected)" << std::endl;
+        std::cout << "  Frequency: " << ADSB_FREQ_HZ / 1e6 << " MHz" << std::endl;
+        std::cout << "  Sample Rate: " << SAMPLE_RATE_HZ / 1e6 << " MSPS" << std::endl;
+        std::cout << "  Gain: " << GAIN_DB << " dB" << std::endl;
+    } else {
+        std::cout << "Source: File playback" << std::endl;
+        std::cout << "  File: " << source_arg << std::endl;
+    }
     std::cout << std::endl;
 
     try {
-        // Initialize HackRF library
-        if (hackrf_init() != HACKRF_SUCCESS) {
-            std::cerr << "Failed to initialize HackRF library" << std::endl;
-            return 1;
-        }
-
         // Initialize GUI
         cler::GuiManager gui(1400, 800, "ADSB Aircraft Tracker");
 
         // Create blocks
-        SourceHackRFBlock hackrf("HackRF", ADSB_FREQ_HZ, SAMPLE_RATE_HZ, LNA_GAIN_DB, VGA_GAIN_DB);
+        SelectableSourceBlock source(
+            "Source",
+            use_soapy,
+            use_soapy ? "" : source_arg,  // Empty string for auto-detect, or filename
+            ADSB_FREQ_HZ,
+            SAMPLE_RATE_HZ,
+            GAIN_DB
+        );
+
         IQToMagnitudeBlock mag_converter("IQ to Magnitude");
-        ADSBDecoderBlock decoder("ADSB Decoder", 1 << 17);  // DF17 only (Extended Squitter)
+        ADSBDecoderBlock decoder("ADSB Decoder", 0xFFFF); //all messages
 
         ADSBAggregateBlock aggregator(
             "ADSB Map",
@@ -148,9 +172,9 @@ int main(int argc, char** argv) {
         // Configure window
         aggregator.set_initial_window(0.0f, 0.0f, 1400.0f, 800.0f);
 
-        // Create flowgraph: HackRF → Magnitude → Decoder → Aggregator
+        // Create flowgraph
         auto flowgraph = cler::make_desktop_flowgraph(
-            cler::BlockRunner(&hackrf, &mag_converter.iq_in),
+            cler::BlockRunner(&source, &mag_converter.iq_in),
             cler::BlockRunner(&mag_converter, &decoder.magnitude_in),
             cler::BlockRunner(&decoder, &aggregator.message_in),
             cler::BlockRunner(&aggregator)
@@ -181,17 +205,15 @@ int main(int argc, char** argv) {
 
         std::cout << "Total aircraft tracked: " << aggregator.aircraft_count() << std::endl;
 
-        // Cleanup HackRF library
-        hackrf_exit();
-
     } catch (const std::exception& e) {
-        hackrf_exit();
         std::cerr << "Error: " << e.what() << std::endl;
         std::cerr << std::endl;
-        std::cerr << "Make sure:" << std::endl;
-        std::cerr << "  1. HackRF device is connected" << std::endl;
-        std::cerr << "  2. You have permissions to access USB devices" << std::endl;
-        std::cerr << "     (You may need to run with sudo or add udev rules)" << std::endl;
+        if (use_soapy) {
+            std::cerr << "Make sure:" << std::endl;
+            std::cerr << "  1. SoapySDR device is connected" << std::endl;
+            std::cerr << "  2. SoapySDR drivers are installed for your device" << std::endl;
+            std::cerr << "  3. You have permissions to access USB devices" << std::endl;
+        }
         return 1;
     }
 
