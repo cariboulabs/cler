@@ -82,13 +82,17 @@ struct IQToMagnitudeBlock : public cler::BlockBase {
 // Optional callback: called when aircraft state updates
 void on_aircraft_update(const ADSBState& state, void* context) {
     // Print updates to console
+    std::cout << "Aircraft detected: ICAO 0x" << std::hex << state.icao << std::dec;
     if (state.callsign[0] != '\0') {
-        std::cout << "Aircraft: " << state.callsign
-                  << " | ICAO: 0x" << std::hex << state.icao << std::dec
-                  << " | Alt: " << state.altitude << " ft"
-                  << " | Speed: " << static_cast<int>(state.groundspeed) << " kts"
-                  << std::endl;
+        std::cout << " | Callsign: " << state.callsign;
     }
+    if (state.altitude > 0) {
+        std::cout << " | Alt: " << state.altitude << " ft";
+    }
+    if (state.groundspeed > 0) {
+        std::cout << " | Speed: " << static_cast<int>(state.groundspeed) << " kts";
+    }
+    std::cout << " | Messages: " << state.message_count << std::endl;
 }
 
 int main(int argc, char** argv) {
