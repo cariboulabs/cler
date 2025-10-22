@@ -102,3 +102,18 @@ if (UHD_FOUND AND CLER_BUILD_BLOCKS_GUI AND CLER_BUILD_BLOCKS_LIQUID)
 else()
     message(STATUS "Skipping usrp_example - requires UHD and GUI blocks")
 endif()
+
+if (CLER_BUILD_BLOCKS_GUI)
+    add_executable(adsb_map adsb_map.cpp)
+    target_link_libraries(adsb_map PRIVATE cler::desktop_blocks)
+
+    # Copy ADSB coastline data to binary directory
+    add_custom_command(TARGET adsb_map POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/desktop_blocks/adsb/data
+            $<TARGET_FILE_DIR:adsb_map>/adsb_data
+        COMMENT "Copying ADSB coastline data to binary directory"
+    )
+else()
+    message(STATUS "Skipping adsb_map example because CLER_BUILD_BLOCKS_GUI is OFF")
+endif()

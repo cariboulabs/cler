@@ -7,6 +7,10 @@
 
 #define MODE_S_ICAO_CACHE_TTL 60   // Time to live of cached addresses.
 
+#ifndef M_PI
+  #define M_PI 3.14159265358979323846
+#endif
+
 static uint16_t maglut[129*129*2];
 static int maglut_initialized = 0;
 
@@ -559,7 +563,7 @@ void apply_phase_correction(uint16_t *mag) {
 // Detect a Mode S messages inside the magnitude buffer pointed by 'mag' and of
 // size 'maglen' bytes. Every detected Mode S message is convert it into a
 // stream of bits and passed to the function to display it.
-void mode_s_detect(mode_s_t *self, uint16_t *mag, uint32_t maglen, mode_s_callback_t cb) {
+void mode_s_detect(mode_s_t *self, const uint16_t *mag, uint32_t maglen, mode_s_callback_t cb, void *cb_context) {
   unsigned char bits[MODE_S_LONG_MSG_BITS];
   unsigned char msg[MODE_S_LONG_MSG_BITS/2];
   uint16_t aux[MODE_S_LONG_MSG_BITS*2];
@@ -725,7 +729,7 @@ good_preamble:
 
       // Pass data to the next layer
       if (self->check_crc == 0 || mm.crcok) {
-        cb(self, &mm);
+        cb(self, &mm, cb_context);
       }
     }
 

@@ -62,9 +62,10 @@ int main(int argc, char** argv) {
     // ADSBAggregateBlock aggregates messages and renders map
     ADSBAggregateBlock aggregator(
         "ADSB Map",
+        32.0f, 34.0f,                                          // Initial map center (Israel)
         on_aircraft_update,                                    // Optional state-change callback
-        nullptr,                                               // Callback context (nullptr for this example)
-        "desktop_blocks/adsb/data/ne_110m_coastline.shp"      // Coastline data path
+        nullptr                                                // Callback context (nullptr for this example)
+        // Coastline path defaults to "adsb_data/ne_110m_coastline.shp"
     );
 
     // Configure window positions
