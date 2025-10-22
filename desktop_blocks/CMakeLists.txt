@@ -78,6 +78,14 @@ endif()
 
 if (CLER_BUILD_BLOCKS_LIQUID)
   add_subdirectory(ezgmsk)
-  target_link_libraries(cler_desktop_blocks INTERFACE 
+  target_link_libraries(cler_desktop_blocks INTERFACE
     cler::blocks_ezgmsk)
+endif()
+
+if (CLER_BUILD_BLOCKS_GUI)
+  add_subdirectory(adsb)
+  target_link_libraries(cler_desktop_blocks INTERFACE
+    cler::blocks_adsb)
+else()
+  message(STATUS "Skipping ADSB blocks because CLER_BUILD_BLOCKS_GUI is OFF")
 endif()
