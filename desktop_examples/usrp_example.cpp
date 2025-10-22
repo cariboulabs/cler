@@ -19,12 +19,14 @@ void print_usage(const char* prog) {
     std::cout << "\nAvailable modes:" << std::endl;
     std::cout << "  list        - List available USRP devices" << std::endl;
     std::cout << "  rx          - Simple RX with spectrum plot" << std::endl;
+    std::cout << "  mimo        - Dual-channel MIMO RX with spectrum plots" << std::endl;
     std::cout << "  tx-burst    - Timed TX burst transmission" << std::endl;
     std::cout << "  freq-hop    - Frequency hopping with timed commands" << std::endl;
     std::cout << "  gpio        - GPIO control with precise timing" << std::endl;
     std::cout << "  info        - Display detailed device information" << std::endl;
     std::cout << "\nMode-specific options:" << std::endl;
     std::cout << "  rx:         [device_args] [freq_hz] [rate_hz] [gain_db]" << std::endl;
+    std::cout << "  mimo:       [device_args] [freq_hz] [rate_hz] [gain_db]" << std::endl;
     std::cout << "  tx-burst:   [device_args] [filename] [freq_hz] [rate_hz] [gain_db] [tx_time_s]" << std::endl;
     std::cout << "  freq-hop:   [device_args] [base_freq_hz] [hop_interval_s] [num_hops]" << std::endl;
     std::cout << "  gpio:       [device_args] [gpio_bank]" << std::endl;
@@ -32,6 +34,7 @@ void print_usage(const char* prog) {
     std::cout << "\nExamples:" << std::endl;
     std::cout << "  " << prog << " list" << std::endl;
     std::cout << "  " << prog << " rx \"addr=192.168.10.2\" 915e6 2e6 30" << std::endl;
+    std::cout << "  " << prog << " mimo \"addr=192.168.10.2\" 915e6 2e6 30" << std::endl;
     std::cout << "  " << prog << " tx-burst \"addr=192.168.10.2\" burst.bin 915e6 2e6 0 2.0" << std::endl;
     std::cout << "  " << prog << " freq-hop \"addr=192.168.10.2\" 900e6 0.1 10" << std::endl;
     std::cout << "  " << prog << " gpio \"addr=192.168.10.2\" FP0" << std::endl;
@@ -69,7 +72,7 @@ void mode_rx(int argc, char** argv) {
 
     cler::GuiManager gui(1200, 600, "USRP RX - Spectrum");
 
-    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, freq, rate, gain);  // num_channels defaults to 1
+    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, freq, rate, gain, 1);
     PlotCSpectrumBlock spectrum("USRP Spectrum", {"I/Q"}, rate, 2048, 10);
     spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
 
@@ -84,6 +87,46 @@ void mode_rx(int argc, char** argv) {
     while (!gui.should_close()) {
         gui.begin_frame();
         spectrum.render();
+        gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    flowgraph.stop();
+    std::cout << "Overflows: " << usrp.get_overflow_count() << std::endl;
+}
+
+void mode_mimo(int argc, char** argv) {
+    std::string device_args = argc > 2 ? argv[2] : "";
+    double freq = argc > 3 ? std::stod(argv[3]) : 915e6;
+    double rate = argc > 4 ? std::stod(argv[4]) : 2e6;
+    double gain = argc > 5 ? std::stod(argv[5]) : 30.0;
+
+    std::cout << "MIMO Mode - Dual-channel RX with Spectrum Plots" << std::endl;
+    std::cout << "Device: " << (device_args.empty() ? "default" : device_args) << std::endl;
+    std::cout << "Freq: " << freq/1e6 << " MHz, Rate: " << rate/1e6 << " MSPS, Gain: " << gain << " dB" << std::endl;
+
+    cler::GuiManager gui(1200, 800, "USRP MIMO - Dual Channel");
+
+    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, freq, rate, gain, 2);
+    PlotCSpectrumBlock spectrum0("Channel 0", {"Ch0"}, rate, 2048, 10);
+    PlotCSpectrumBlock spectrum1("Channel 1", {"Ch1"}, rate, 2048, 10);
+
+    spectrum0.set_initial_window(0.0f, 0.0f, 1200.0f, 380.0f);
+    spectrum1.set_initial_window(0.0f, 400.0f, 1200.0f, 380.0f);
+
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&usrp, &spectrum0.in[0], &spectrum1.in[0]),
+        cler::BlockRunner(&spectrum0),
+        cler::BlockRunner(&spectrum1)
+    );
+
+    flowgraph.run();
+    std::cout << "Flowgraph running... Close window to exit." << std::endl;
+
+    while (!gui.should_close()) {
+        gui.begin_frame();
+        spectrum0.render();
+        spectrum1.render();
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
@@ -107,7 +150,7 @@ void mode_tx_burst(int argc, char** argv) {
     std::cout << "TX Time: " << tx_time << "s" << std::endl;
 
     SourceFileBlock<std::complex<float>> file("File", filename);
-    SinkUHDBlock<std::complex<float>> usrp("USRP", device_args, freq, rate, gain, 0);
+    SinkUHDBlock<std::complex<float>> usrp("USRP", device_args, freq, rate, gain, 1);
 
     usrp.set_time_now(0.0);
 
@@ -161,7 +204,7 @@ void mode_freq_hop(int argc, char** argv) {
     for (auto f : frequencies) std::cout << f/1e6 << " ";
     std::cout << "MHz" << std::endl;
 
-    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, frequencies[0], 2e6, 30.0, 0);
+    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, frequencies[0], 2e6, 30.0, 1);
     SinkNullBlock<std::complex<float>> null_sink("Null");
 
     usrp.set_time_now(0.0);
@@ -208,7 +251,7 @@ void mode_gpio(int argc, char** argv) {
     std::cout << "GPIO Trigger Mode" << std::endl;
     std::cout << "GPIO Bank: " << gpio_bank << " (device-specific)" << std::endl;
 
-    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, 915e6, 2e6, 30.0, 0);
+    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, 915e6, 2e6, 30.0, 1);
     SinkNullBlock<std::complex<float>> null_sink("Null");
 
     std::cout << "Configuring GPIO..." << std::endl;
@@ -251,7 +294,7 @@ void mode_info(int argc, char** argv) {
 
     std::cout << "Device Information Mode" << std::endl;
 
-    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, 915e6, 2e6, 30.0, 0);
+    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, 915e6, 2e6, 30.0, 1);
 
     std::cout << "\n=== Device Information ===" << std::endl;
     std::cout << "Motherboard: " << usrp.get_mboard_name() << std::endl;
@@ -315,6 +358,8 @@ int main(int argc, char** argv) {
             mode_list();
         } else if (mode == "rx") {
             mode_rx(argc, argv);
+        } else if (mode == "mimo") {
+            mode_mimo(argc, argv);
         } else if (mode == "tx-burst") {
             mode_tx_burst(argc, argv);
         } else if (mode == "freq-hop") {

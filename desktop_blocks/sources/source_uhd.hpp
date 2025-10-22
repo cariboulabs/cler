@@ -88,10 +88,8 @@ struct SourceUHDBlock : public cler::BlockBase {
         // Set thread priority for better performance
         uhd::set_thread_priority_safe(0.5, true);
 
-        // Allocate UHD buffer pointer array
-        _uhd_buffs = new void*[num_channels];
-
-        // Configure all channels with same initial settings
+        // Configure and validate all channels BEFORE allocating resources
+        // This ensures exception safety - if validation throws, no leaks occur
         for (size_t ch = 0; ch < num_channels; ++ch) {
             // Validate and set sample rate
             double actual_rate = usrp->set_rx_rate(sample_rate, ch);
@@ -126,7 +124,7 @@ struct SourceUHDBlock : public cler::BlockBase {
             usrp->set_rx_gain(gain_db, ch);
         }
 
-        // Setup RX stream for all channels
+        // Setup RX stream for all channels (do this BEFORE allocating _uhd_buffs)
         // CPU format: what the host sees (fc32, sc16, sc8)
         // OTW format: what goes over the wire (sc16, sc8, fc32, etc.)
         uhd::stream_args_t stream_args(get_uhd_format<T>(), wire_format);
@@ -145,6 +143,9 @@ struct SourceUHDBlock : public cler::BlockBase {
         uhd::stream_cmd_t stream_cmd(uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS);
         stream_cmd.stream_now = true;
         rx_stream->issue_stream_cmd(stream_cmd);
+
+        // Allocate UHD buffer pointer array (vector auto-manages, exception-safe)
+        _uhd_buffs.resize(num_channels);
 
         // Print device info
         std::cout << "SourceUHDBlock: Initialized "
@@ -180,10 +181,7 @@ struct SourceUHDBlock : public cler::BlockBase {
             }
         }
 
-        // Clean up UHD buffer pointer array
-        if (_uhd_buffs) {
-            delete[] _uhd_buffs;
-        }
+        // _uhd_buffs vector cleans up automatically
 
         // Print statistics
         if (overflow_count > 0) {
@@ -234,7 +232,7 @@ struct SourceUHDBlock : public cler::BlockBase {
 
         // Receive samples directly into all output buffers (multi-channel atomic recv)
         uhd::rx_metadata_t md;
-        size_t num_rx = rx_stream->recv(_uhd_buffs, to_read, md, 0.1);  // 100ms timeout
+        size_t num_rx = rx_stream->recv(_uhd_buffs.data(), to_read, md, 0.1);  // 100ms timeout
 
         // Store metadata for user access (shared across all channels)
         last_rx_metadata.has_time_spec = md.has_time_spec;
@@ -700,7 +698,7 @@ private:
     std::string wire_format;  // OTW format (sc16, sc8, fc32, etc.)
 
     // Multi-channel support
-    void** _uhd_buffs = nullptr;  // Array of buffer pointers for UHD multi-channel recv()
+    std::vector<void*> _uhd_buffs;  // Buffer pointers for UHD multi-channel recv()
 
     // Streaming
     size_t max_samps_per_packet;
