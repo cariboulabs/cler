@@ -25,7 +25,7 @@ struct ADSBAggregateBlock : public cler::BlockBase {
         : BlockBase(name), message_in(1024),
           _callback(callback), _callback_context(callback_context),
           _map_center_lat(initial_map_center_lat), _map_center_lon(initial_map_center_lon),
-          _map_zoom(10.0f), _coastlines_loaded(false) {
+          _map_zoom(0.1f), _coastlines_loaded(false) {
         // Load coastline data
         _coastlines_loaded = _coastline_data.load_from_shapefile(coastline_data_path);
     }
@@ -136,13 +136,17 @@ struct ADSBAggregateBlock : public cler::BlockBase {
     void render() {
         ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
-        ImGui::Begin("ADSB Map");
+
+        // Add ImGui window flags to lock window in place (no move, no resize, no collapse)
+        ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse;
+
+        ImGui::Begin("ADSB Map", nullptr, window_flags);
 
         // Canvas setup
         ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
         ImVec2 canvas_size = ImGui::GetContentRegionAvail();
-        if (canvas_size.x < MIN_CANVAS_SIZE) canvas_size.x = MIN_CANVAS_SIZE;
-        if (canvas_size.y < MIN_CANVAS_SIZE) canvas_size.y = MIN_CANVAS_SIZE;
+        if (canvas_size.x < MIN_CANVAS_SIZE) {canvas_size.x = MIN_CANVAS_SIZE;}
+        if (canvas_size.y < MIN_CANVAS_SIZE) {canvas_size.y = MIN_CANVAS_SIZE;}
 
         ImVec2 canvas_p1 = ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y);
         ImDrawList* draw_list = ImGui::GetWindowDrawList();
@@ -155,8 +159,7 @@ struct ADSBAggregateBlock : public cler::BlockBase {
         draw_grid(draw_list, canvas_pos, canvas_size);
 
         // Draw coastlines if loaded
-        // TODO: Temporarily disabled to debug crash
-        // draw_coastlines(draw_list, canvas_pos, canvas_size);
+        draw_coastlines(draw_list, canvas_pos, canvas_size);
 
         // Draw aircraft
         draw_aircraft(draw_list, canvas_pos, canvas_size);
@@ -196,16 +199,18 @@ private:
     static constexpr float LABEL_OFFSET_Y_CALLSIGN = -8.0f;
     static constexpr float LABEL_OFFSET_Y_ALTITUDE = 4.0f;
     static constexpr float ZOOM_SENSITIVITY = 0.1f;
-    static constexpr float MIN_ZOOM = 1.0f;
+    static constexpr float MIN_ZOOM = 0.01f;
     static constexpr float MAX_ZOOM = 50.0f;
     static constexpr float DEFAULT_LAT_SPAN = 2.0f;
+    static constexpr float INITIAL_WINDOW_SIZE_X = 1400.0f;
+    static constexpr float INITIAL_WINDOW_SIZE_Y = 800.0f;
 
     std::unordered_map<uint32_t, ADSBState> _aircraft;
     OnAircraftUpdateCallback _callback;
     void* _callback_context;
 
     ImVec2 _initial_window_position{0.0f, 0.0f};
-    ImVec2 _initial_window_size{1400.0f, 800.0f};
+    ImVec2 _initial_window_size{INITIAL_WINDOW_SIZE_X, INITIAL_WINDOW_SIZE_Y};
 
     // Map state
     float _map_center_lat;
