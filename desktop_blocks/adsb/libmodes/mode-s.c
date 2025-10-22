@@ -563,7 +563,7 @@ void apply_phase_correction(uint16_t *mag) {
 // Detect a Mode S messages inside the magnitude buffer pointed by 'mag' and of
 // size 'maglen' bytes. Every detected Mode S message is convert it into a
 // stream of bits and passed to the function to display it.
-void mode_s_detect(mode_s_t *self, const uint16_t *mag, uint32_t maglen, mode_s_callback_t cb, void *cb_context) {
+void mode_s_detect(mode_s_t *self, uint16_t *mag, uint32_t maglen, mode_s_callback_t cb, void *cb_context) {
   unsigned char bits[MODE_S_LONG_MSG_BITS];
   unsigned char msg[MODE_S_LONG_MSG_BITS/2];
   uint16_t aux[MODE_S_LONG_MSG_BITS*2];
