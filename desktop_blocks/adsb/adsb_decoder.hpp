@@ -5,13 +5,13 @@
 #include <cstring>
 
 struct ADSBDecoderBlock : public cler::BlockBase {
-    cler::Channel<uint16_t> magnitude_in;
+    cler::Channel<uint16_t> in;
 
     // Bitmask of DFs to pass through (e.g., 1<<17 for DF17)
     //                   If 0, all messages pass through
     ADSBDecoderBlock(const char* name, uint32_t df_filter = 0)
         : BlockBase(name),
-        magnitude_in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(uint16_t)),
+        in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(uint16_t)),
         _df_filter(df_filter),
         _tmp_buffer(new uint16_t[cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(uint16_t)]) {
         mode_s_init(&_decoder_state);
@@ -24,7 +24,7 @@ struct ADSBDecoderBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<mode_s_msg>* out) {
-        auto [read_ptr, read_size] = magnitude_in.read_dbf();
+        auto [read_ptr, read_size] = in.read_dbf();
 
         // Mode S detection requires at least MODES_LONG_MSG_SAMPLES samples
         // (preamble + longest message at 2 samples per bit)
@@ -43,7 +43,7 @@ struct ADSBDecoderBlock : public cler::BlockBase {
         size_t to_process = std::min(read_size, buffer_size);
 
         memcpy(_tmp_buffer, read_ptr, to_process * sizeof(uint16_t));
-        magnitude_in.commit_read(to_process);
+        in.commit_read(to_process);
 
         CallbackContext ctx;
         ctx.out_channel = out;
@@ -70,6 +70,21 @@ private:
     };
 
     static void on_message_detected(mode_s_t* self, struct mode_s_msg* mm, void* context) {
+        static size_t total_messages = 0;
+        static size_t good_crc_messages = 0;
+
+        total_messages++;
+        if (mm->crcok) {
+            good_crc_messages++;
+        }
+
+        if (total_messages % 100 == 0) {
+            printf("[Decoder] Total: %zu, Good CRC: %zu (%.1f%%)\n",
+                   total_messages, good_crc_messages,
+                   100.0 * good_crc_messages / total_messages);
+            fflush(stdout);
+        }
+
         (void)self;
         CallbackContext* ctx = static_cast<CallbackContext*>(context);
 
