@@ -9,7 +9,7 @@
 #include <cmath>
 
 struct ADSBAggregateBlock : public cler::BlockBase {
-    cler::Channel<mode_s_msg> message_in;
+    cler::Channel<mode_s_msg> in;
 
     // Callback type: called when aircraft state is updated
     typedef void (*OnAircraftUpdateCallback)(const ADSBState&, void* context);
@@ -20,7 +20,7 @@ struct ADSBAggregateBlock : public cler::BlockBase {
                        OnAircraftUpdateCallback callback = nullptr,
                        void* callback_context = nullptr,
                        const char* coastline_data_path = "adsb_coastlines/ne_110m_coastline.shp")
-        : BlockBase(name), message_in(1024),
+        : BlockBase(name), in(1024),
           _callback(callback), _callback_context(callback_context),
           _map_center_lat(initial_map_center_lat), _map_center_lon(initial_map_center_lon),
           _map_zoom(0.1f), _coastlines_loaded(false) {
@@ -30,13 +30,13 @@ struct ADSBAggregateBlock : public cler::BlockBase {
 
     // Procedure: read messages, update aircraft states, invoke callbacks
     cler::Result<cler::Empty, cler::Error> procedure() {
-        size_t available = message_in.size();
+        size_t available = in.size();
         if (available == 0) {
             return cler::Error::NotEnoughSamples;
         }
 
         size_t to_process = std::min(available, MESSAGE_BUFFER_SIZE);
-        message_in.readN(_msg_buffer, to_process);
+        in.readN(_msg_buffer, to_process);
 
         uint32_t now = static_cast<uint32_t>(std::time(nullptr));
 
