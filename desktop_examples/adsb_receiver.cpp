@@ -137,8 +137,8 @@ int main(int argc, char** argv) {
     std::cout << std::endl;
 
     // ADS-B frequency and settings
-    constexpr uint64_t ADSB_FREQ_HZ = 1090000000;  // 1090 MHz
-    constexpr uint32_t SAMPLE_RATE_HZ = 2000000;   // 2 MSPS
+    constexpr uint64_t ADSB_FREQ_HZ = 1'090'000'000;  // 1090 MHz
+    constexpr uint32_t SAMPLE_RATE_HZ = 2'400'000;   
     constexpr double GAIN_DB = 30.0;               // RX gain in dB
 
     bool use_soapy = (source_arg == "soapy");
