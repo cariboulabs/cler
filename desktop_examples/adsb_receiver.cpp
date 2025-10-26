@@ -37,7 +37,7 @@ inline auto make_source_variant(bool use_soapy, const std::string& device_args_o
                                     "SoapySourceCS16", device_args_or_filename, freq, rate, gain);
     } else {
         return SourceVariant(std::in_place_type<FileTypeCS16>,
-                                    "FileSourceCS16", device_args_or_filename.c_str(), true);
+                                    "FileSourceCS16", device_args_or_filename.c_str(), false);
     }
 }
 
