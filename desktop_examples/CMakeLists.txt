@@ -107,13 +107,13 @@ if (CLER_BUILD_BLOCKS_GUI AND SOAPYSDR_FOUND)
     add_executable(adsb_receiver adsb_receiver.cpp)
     target_link_libraries(adsb_receiver PRIVATE cler::desktop_blocks PkgConfig::SOAPYSDR)
 
-    # # Copy ADSB coastline data to binary directory
-    # add_custom_command(TARGET adsb_receiver POST_BUILD
-    #     COMMAND ${CMAKE_COMMAND} -E copy_directory
-    #         ${CMAKE_SOURCE_DIR}/desktop_blocks/adsb/coastlines_map
-    #         $<TARGET_FILE_DIR:adsb_receiver>/adsb_coastlines
-    #     COMMENT "Copying ADSB coastline data to binary directory"
-    # )
+    # Copy ADSB coastline data to binary directory
+    add_custom_command(TARGET adsb_receiver POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/desktop_blocks/adsb/coastlines_map
+            $<TARGET_FILE_DIR:adsb_receiver>/adsb_coastlines
+        COMMENT "Copying ADSB coastline data to binary directory"
+    )
 
     # # Copy ADSB recording file to binary directory
     # add_custom_command(TARGET adsb_receiver POST_BUILD

@@ -12,12 +12,15 @@ struct ADSBDecoderBlock : public cler::BlockBase {
     constexpr static size_t BUFFER_ELEMENTS = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(uint16_t) * 1000;
 
     // Bitmask of DFs to pass through (e.g., 1<<17 for DF17)
-    //                   If 0, all messages pass through
-    ADSBDecoderBlock(const char* name, uint32_t df_filter = 0)
+    // Default: 0xFFFFFFFFU accepts all 32 message types
+    // Use specific bits to filter to desired message types
+    ADSBDecoderBlock(const char* name, uint32_t df_filter = 0xFFFFFFFFU)
         : BlockBase(name),
         in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(uint16_t)),
         _df_filter(df_filter),
         _tmp_buffer(new uint16_t[BUFFER_ELEMENTS]) {
+        // Validate filter: 0 is ambiguous, must use 0xFFFFFFFFU for "allow all messages"
+        assert(_df_filter != 0 && "df_filter=0 is invalid. Use 0xFFFFFFFFU to allow all message types.");
         mode_s_init(&_decoder_state);
     }
 
