@@ -120,28 +120,56 @@ struct IQToMagnitudeBlock : public cler::BlockBase {
 };
 
 int main(int argc, char** argv) {
-    // Show help if missing source argument
-    if (argc < 2) {
-        std::cout << "Usage: " << argv[0] << " <source> [latitude] [longitude]\n";
-        std::cout << "\nArguments:\n";
-        std::cout << "  source    - \"soapy\" for auto-detected SoapySDR device, or path to IQ file\n";
-        std::cout << "  latitude  - Initial map center latitude (default: 32.0)\n";
-        std::cout << "  longitude - Initial map center longitude (default: 34.0)\n";
-        std::cout << "\nExamples:\n";
-        std::cout << "  " << argv[0] << " soapy\n";
-        std::cout << "  " << argv[0] << " adsb_recording.bin\n";
-        std::cout << "  " << argv[0] << " soapy 37.7 -122.4\n";
-        return 0;
-    }
-
-    // Parse command line arguments
-    std::string source_arg = argv[1];
+    // Default values
+    std::string source_arg;
     float initial_lat = 32.0f;   // Default: Israel
     float initial_lon = 34.0f;
+    float sample_rate_mhz = -1.0f;  // No default - must be specified
 
-    if (argc >= 3) {
-        initial_lat = std::atof(argv[3]);
-        initial_lon = std::atof(argv[4]);
+    // Parse command line arguments
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        if (arg == "--source" && i + 1 < argc) {
+            source_arg = argv[++i];
+        } else if (arg == "--lat" && i + 1 < argc) {
+            initial_lat = std::atof(argv[++i]);
+        } else if (arg == "--lon" && i + 1 < argc) {
+            initial_lon = std::atof(argv[++i]);
+        } else if (arg == "--rate" && i + 1 < argc) {
+            sample_rate_mhz = std::atof(argv[++i]);
+        } else if (arg == "--help" || arg == "-h") {
+            std::cout << "Usage: " << argv[0] << " [options]\n";
+            std::cout << "\nOptions:\n";
+            std::cout << "  --source <src>  - \"soapy\" for SoapySDR device, or path to IQ file (required)\n";
+            std::cout << "  --rate <rate>   - Sample rate in MHz: 2 or 2.4 (required)\n";
+            std::cout << "  --lat <lat>     - Map center latitude (default: 32.0)\n";
+            std::cout << "  --lon <lon>     - Map center longitude (default: 34.0)\n";
+            std::cout << "\nExamples:\n";
+            std::cout << "  " << argv[0] << " --source soapy --rate 2\n";
+            std::cout << "  " << argv[0] << " --source adsb_recording.bin --rate 2.4\n";
+            std::cout << "  " << argv[0] << " --source soapy --rate 2.4 --lat 37.7 --lon -122.4\n";
+            return 0;
+        }
+    }
+
+    // Validate required arguments
+    if (source_arg.empty()) {
+        std::cerr << "Error: --source argument is required\n";
+        std::cerr << "Run with --help for usage information\n";
+        return 1;
+    }
+
+    if (sample_rate_mhz < 0.0f) {
+        std::cerr << "Error: --rate argument is required (2 or 2.4)\n";
+        std::cerr << "Run with --help for usage information\n";
+        return 1;
+    }
+
+    // Validate sample rate
+    if (sample_rate_mhz != 2.0f && sample_rate_mhz != 2.4f) {
+        std::cerr << "Error: --rate must be either 2 or 2.4\n";
+        return 1;
     }
 
     std::cout << "=== ADSB Receiver ===" << std::endl;
@@ -150,7 +178,7 @@ int main(int argc, char** argv) {
 
     // ADS-B frequency and settings
     constexpr uint64_t ADSB_FREQ_HZ = 1'090'000'000;  // 1090 MHz
-    constexpr uint32_t SAMPLE_RATE_HZ = 2'000'000;   // 2 MSPS
+    uint32_t SAMPLE_RATE_HZ = static_cast<uint32_t>(sample_rate_mhz * 1'000'000);
     constexpr double GAIN_DB = 30.0;               // RX gain in dB
 
     bool use_soapy = (source_arg == "soapy");
@@ -158,11 +186,12 @@ int main(int argc, char** argv) {
     if (use_soapy) {
         std::cout << "Source: SoapySDR (auto-detected)" << std::endl;
         std::cout << "  Frequency: " << ADSB_FREQ_HZ / 1e6 << " MHz" << std::endl;
-        std::cout << "  Sample Rate: " << SAMPLE_RATE_HZ / 1e6 << " MSPS" << std::endl;
+        std::cout << "  Sample Rate: " << sample_rate_mhz << " MHz" << std::endl;
         std::cout << "  Gain: " << GAIN_DB << " dB" << std::endl;
     } else {
         std::cout << "Source: File playback" << std::endl;
         std::cout << "  File: " << source_arg << std::endl;
+        std::cout << "  Sample Rate: " << sample_rate_mhz << " MHz" << std::endl;
     }
     std::cout << std::endl;
 
@@ -186,7 +215,12 @@ int main(int argc, char** argv) {
         );
 
         IQToMagnitudeBlock iq2mag("IQ to Magnitude", SAMPLE_RATE_HZ);
-        ADSBDecoderBlock decoder("ADSB Decoder"); // Default: accepts all message types
+
+        // Determine decoder mode based on sample rate
+        ADSBDecoderBlock::SampleRateMode decoder_mode = (sample_rate_mhz == 2.4f)
+            ? ADSBDecoderBlock::SampleRateMode::RATE_2_4MHZ
+            : ADSBDecoderBlock::SampleRateMode::RATE_2MHZ;
+        ADSBDecoderBlock decoder("ADSB Decoder", decoder_mode);
         
         
         SinkNullBlock<uint16_t> null_sink("Null Sink");

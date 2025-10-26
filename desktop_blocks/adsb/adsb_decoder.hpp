@@ -11,12 +11,18 @@ struct ADSBDecoderBlock : public cler::BlockBase {
 
     constexpr static size_t BUFFER_ELEMENTS = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(uint16_t) * 1000;
 
+    enum class SampleRateMode {
+        RATE_2MHZ,
+        RATE_2_4MHZ
+    };
+
     // Bitmask of DFs to pass through (e.g., 1<<17 for DF17)
     // Default: 0xFFFFFFFFU accepts all 32 message types
     // Use specific bits to filter to desired message types
-    ADSBDecoderBlock(const char* name, uint32_t df_filter = 0xFFFFFFFFU)
+    ADSBDecoderBlock(const char* name, SampleRateMode mode = SampleRateMode::RATE_2MHZ, uint32_t df_filter = 0xFFFFFFFFU)
         : BlockBase(name),
         in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(uint16_t)),
+        _mode(mode),
         _df_filter(df_filter),
         _tmp_buffer(new uint16_t[BUFFER_ELEMENTS]) {
         // Validate filter: 0 is ambiguous, must use 0xFFFFFFFFU for "allow all messages"
@@ -60,7 +66,12 @@ struct ADSBDecoderBlock : public cler::BlockBase {
         CallbackContext ctx;
         ctx.out_channel = out;
         ctx.df_filter = _df_filter;
-        mode_s_detect_2400(&_decoder_state, _tmp_buffer, to_process, on_message_detected, &ctx);
+
+        if (_mode == SampleRateMode::RATE_2MHZ) {
+            mode_s_detect(&_decoder_state, _tmp_buffer, to_process, on_message_detected, &ctx);
+        } else {
+            mode_s_detect_2400(&_decoder_state, _tmp_buffer, to_process, on_message_detected, &ctx);
+        }
 
         return cler::Empty{};
     }
@@ -72,6 +83,7 @@ struct ADSBDecoderBlock : public cler::BlockBase {
 
 private:
     mode_s_t _decoder_state;
+    SampleRateMode _mode;
     uint32_t _df_filter;
     uint16_t* _tmp_buffer = nullptr;
 
