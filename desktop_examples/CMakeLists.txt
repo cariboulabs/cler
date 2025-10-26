@@ -115,17 +115,13 @@ if (CLER_BUILD_BLOCKS_GUI AND SOAPYSDR_FOUND)
         COMMENT "Copying ADSB coastline data to binary directory"
     )
 
-    # # Copy ADSB recording file to binary directory
-    # add_custom_command(TARGET adsb_receiver POST_BUILD
-    #     COMMAND ${CMAKE_COMMAND} -E copy
-    #         ${CMAKE_SOURCE_DIR}/desktop_examples/adsb_recording_cf32_scidb.bin
-    #         $<TARGET_FILE_DIR:adsb_receiver>/adsb_recording_cf32_scidb.bin 
-    #         &
-    #         ${CMAKE_COMMAND} -E copy
-    #         ${CMAKE_SOURCE_DIR}/desktop_examples/adsb_recording_cu8_libmodes.bin
-    #         $<TARGET_FILE_DIR:adsb_receiver>/adsb_recording_cu8_libmodes.bin
-    #     COMMENT "Copying ADSB recording files to binary directory"
-    # )
+    # Copy ADSB recording file to binary directory
+    add_custom_command(TARGET adsb_receiver POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_SOURCE_DIR}/desktop_examples/adsb_recording.bin
+            $<TARGET_FILE_DIR:adsb_receiver>/adsb_recording.bin
+        COMMENT "Copying ADSB recording file to binary directory"
+    )
 
 
 else()
