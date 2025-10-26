@@ -7,7 +7,8 @@
 #include "desktop_blocks/adsb/adsb_aggregate.hpp"
 #include "desktop_blocks/sinks/sink_null.hpp"
 #include "desktop_blocks/math/frequency_shift.hpp"
-
+#include "desktop_blocks/utils/fanout.hpp"
+#include "desktop_blocks/sinks/sink_file.hpp"
 
 void on_aircraft_update(const ADSBState& state, void* context) {
     // Print updates to console
@@ -61,12 +62,19 @@ struct SelectableSourceBlock : public cler::BlockBase {
 struct IQToMagnitudeBlock : public cler::BlockBase {
     cler::Channel<std::complex<int16_t>> in;
 
-    // Statistics
-    float maximum_magnitude = 0.0f;
-    size_t sample_counter = 0;
+    // DC offset removal filter state (1 Hz high-pass)
+    float z1_I = 0.0f;
+    float z1_Q = 0.0f;
+    float dc_a;
+    float dc_b;
 
-    IQToMagnitudeBlock(const char* name)
-        : BlockBase(name), in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<int16_t>)) {}
+    IQToMagnitudeBlock(const char* name, uint32_t sample_rate = 2000000)
+        : BlockBase(name), in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<int16_t>)) {
+
+        // Initialize DC filter coefficients (1 Hz high-pass filter)
+        dc_b = expf(-2.0f * M_PI * 1.0f / sample_rate);
+        dc_a = 1.0f - dc_b;
+    }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<uint16_t>* mag_out) {
         auto [read_ptr, read_size] = in.read_dbf();
@@ -82,23 +90,27 @@ struct IQToMagnitudeBlock : public cler::BlockBase {
         size_t to_process = std::min(read_size, write_size);
 
         for (size_t k = 0; k < to_process; k++) {
-            const float i = static_cast<float>(read_ptr[k].imag());
-            const float r = static_cast<float>(read_ptr[k].real());
-            const float mag = (sqrtf(r * r + i * i));
+            // Normalize int16_t to [-1.0, 1.0] range
+            float fI = read_ptr[k].real() / 32768.0f;
+            float fQ = read_ptr[k].imag() / 32768.0f;
 
-            // Update statistics
-            maximum_magnitude = std::max(maximum_magnitude, mag);
-            sample_counter++;
+            // DC offset removal (1 Hz high-pass filter)
+            z1_I = fI * dc_a + z1_I * dc_b;
+            z1_Q = fQ * dc_a + z1_Q * dc_b;
+            fI -= z1_I;
+            fQ -= z1_Q;
+
+            // Compute magnitude squared
+            float magsq = fI * fI + fQ * fQ;
+
+            // Clamp to [0, 1]
+            if (magsq > 1.0f) magsq = 1.0f;
+
+            // Scale to uint16_t range [0, 65535]
+            float mag = sqrtf(magsq) * 65535.0f + 0.5f;
 
             write_ptr[k] = static_cast<uint16_t>(mag);
         }
-
-        // if (sample_counter >= 10000) {
-        //     std::cout << "[IQToMagnitude] Avg magnitude: " << (int)maximum_magnitude
-        //               << " (ratio: " << (maximum_magnitude / 65535.0f) << ")" << std::endl;
-        //     std::cout.flush();
-        //     sample_counter = 0;
-        // }
 
         in.commit_read(to_process);
         mag_out->commit_write(to_process);
@@ -138,7 +150,7 @@ int main(int argc, char** argv) {
 
     // ADS-B frequency and settings
     constexpr uint64_t ADSB_FREQ_HZ = 1'090'000'000;  // 1090 MHz
-    constexpr uint32_t SAMPLE_RATE_HZ = 2'400'000;   
+    constexpr uint32_t SAMPLE_RATE_HZ = 2'000'000;   // 2 MSPS
     constexpr double GAIN_DB = 30.0;               // RX gain in dB
 
     bool use_soapy = (source_arg == "soapy");
@@ -159,9 +171,7 @@ int main(int argc, char** argv) {
         cler::GuiManager gui(1400, 800, "ADSB Aircraft Tracker");
 
         std::string device_args_or_filename = "";
-        if (use_soapy) {
-            //need to ask for u16 if dtype is cu16?
-        } else {
+        if (!use_soapy) {
             device_args_or_filename = source_arg;
         }
 
@@ -175,9 +185,13 @@ int main(int argc, char** argv) {
             GAIN_DB
         );
 
-        IQToMagnitudeBlock iq2mag("IQ to Magnitude");
+        IQToMagnitudeBlock iq2mag("IQ to Magnitude", SAMPLE_RATE_HZ);
         ADSBDecoderBlock decoder("ADSB Decoder", 0xFFFF); //all messages
+        
+        
         SinkNullBlock<uint16_t> null_sink("Null Sink");
+        FanoutBlock<uint16_t> fanout("Fanout", 2);
+        SinkFileBlock<uint16_t> file_sink("File Sink", "adsb_magnitudes.bin");
 
         ADSBAggregateBlock aggregator(
             "ADSB Map",
@@ -193,7 +207,11 @@ int main(int argc, char** argv) {
         // Create flowgraph with debug counter between decoder and aggregator
         auto flowgraph = cler::make_desktop_flowgraph(
             cler::BlockRunner(&source, &iq2mag.in),
-            cler::BlockRunner(&iq2mag, &decoder.in),
+
+            cler::BlockRunner(&iq2mag, &fanout.in),
+            
+            cler::BlockRunner(&fanout, &file_sink.in, &decoder.in),
+            cler::BlockRunner(&file_sink),
             
             // cler::BlockRunner(&null_sink)
 
