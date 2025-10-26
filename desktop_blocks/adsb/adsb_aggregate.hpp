@@ -4,6 +4,7 @@
 #include "adsb_types.hpp"
 #include "adsb_coastline_loader.hpp"
 #include "modes.h"
+#include "cpr.h"
 #include <unordered_map>
 #include <imgui.h>
 #include <cmath>
@@ -30,6 +31,10 @@ struct ADSBAggregateBlock : public cler::BlockBase {
 
     // Procedure: read messages, update aircraft states, invoke callbacks
     cler::Result<cler::Empty, cler::Error> procedure() {
+        static size_t proc_count = 0;
+        static size_t position_messages = 0;
+        static size_t cpr_attempts = 0;
+
         size_t available = in.size();
         if (available == 0) {
             return cler::Error::NotEnoughSamples;
@@ -43,6 +48,11 @@ struct ADSBAggregateBlock : public cler::BlockBase {
         // Process all messages
         for (size_t i = 0; i < to_process; ++i) {
             const mode_s_msg& msg = _msg_buffer[i];
+
+            // Debug: count position messages
+            if (msg.msgtype == 17 && msg.metype >= 9 && msg.metype <= 18) {
+                position_messages++;
+            }
 
             // Get or create aircraft state for this ICAO
             uint32_t icao = (msg.aa1 << 16) | (msg.aa2 << 8) | msg.aa3;
@@ -98,10 +108,41 @@ struct ADSBAggregateBlock : public cler::BlockBase {
             }
 
             // Update position if present (DF17 metype 9-18)
-            // TODO: Implement CPR decoding for actual lat/lon
+            // CPR (Compact Position Reporting) requires both even and odd frames
             if (msg.msgtype == 17 && msg.metype >= 9 && msg.metype <= 18) {
-                if (msg.raw_latitude >= 0 && msg.raw_longitude >= 0) {
-                    state.position_update_time = now;
+                // Store the raw CPR values (msg.raw_latitude/longitude are unsigned 17-bit values)
+                if (msg.fflag == 0) {  // Even frame
+                    state.last_even_cprlat = msg.raw_latitude;
+                    state.last_even_cprlon = msg.raw_longitude;
+                    state.has_even_position = true;
+                } else {  // Odd frame (fflag == 1)
+                    state.last_odd_cprlat = msg.raw_latitude;
+                    state.last_odd_cprlon = msg.raw_longitude;
+                    state.has_odd_position = true;
+                }
+
+                // Try to decode position if we have both even and odd frames
+                if (state.has_even_position && state.has_odd_position) {
+                    cpr_attempts++;
+                    double lat, lon;
+                    int result = decodeCPRairborne(
+                        state.last_even_cprlat, state.last_even_cprlon,
+                        state.last_odd_cprlat, state.last_odd_cprlon,
+                        msg.fflag,
+                        &lat, &lon
+                    );
+
+                    if (result == 0) {  // Success
+                        state.lat = lat;
+                        state.lon = lon;
+                        state.position_valid = true;
+                        state.position_update_time = now;
+                        state_changed = true;
+                    } else {
+                        // CPR decode failed, reset for next attempt
+                        state.has_even_position = false;
+                        state.has_odd_position = false;
+                    }
                 }
             }
 
@@ -113,6 +154,26 @@ struct ADSBAggregateBlock : public cler::BlockBase {
             if (state_changed && _callback) {
                 _callback(state, _callback_context);
             }
+        }
+
+        // Debug output
+        proc_count++;
+        if (proc_count % 10 == 0) {
+            // Count message types
+            std::map<int, int> msgtype_counts;
+            for (size_t i = 0; i < to_process; ++i) {
+                msgtype_counts[_msg_buffer[i].msgtype]++;
+            }
+            printf("[Aggregate] Proc:%zu | MessageTypes: ", proc_count);
+            for (const auto& pair : msgtype_counts) {
+                printf("DF%d:%d ", pair.first, pair.second);
+            }
+            printf("| Pos:%zu CPR:%zu ValidPos:%zu Aircraft:%zu\n",
+                   position_messages, cpr_attempts,
+                   std::count_if(_aircraft.begin(), _aircraft.end(),
+                                 [](const auto& p) { return p.second.position_valid; }),
+                   _aircraft.size());
+            fflush(stdout);
         }
 
         return cler::Empty{};
@@ -297,15 +358,30 @@ private:
     }
 
     void draw_aircraft(ImDrawList* draw_list, ImVec2 canvas_pos, ImVec2 canvas_size) {
+        static size_t draw_calls = 0;
+        static size_t valid_positions_drawn = 0;
+
+        draw_calls++;
+
         for (const auto& pair : _aircraft) {
             const ADSBState& state = pair.second;
 
-            // Skip aircraft without valid position (for now, just draw at center)
-            // TODO: Use actual lat/lon when CPR decoding is implemented
-            ImVec2 pos = ImVec2(
-                canvas_pos.x + canvas_size.x / 2.0f + (static_cast<float>(state.icao % static_cast<uint32_t>(AIRCRAFT_SPREAD_RANGE)) - AIRCRAFT_SPREAD_OFFSET),
-                canvas_pos.y + canvas_size.y / 2.0f + (static_cast<float>((state.icao >> 8) % static_cast<uint32_t>(AIRCRAFT_SPREAD_RANGE)) - AIRCRAFT_SPREAD_OFFSET)
-            );
+            // ONLY draw if we have valid position - no fallback!
+            if (!state.position_valid) {
+                continue;
+            }
+
+            valid_positions_drawn++;
+
+            // Convert lat/lon to screen coordinates
+            ImVec2 pos = lat_lon_to_screen(state.lat, state.lon, canvas_pos, canvas_size);
+
+            // Debug output every 30 draw calls
+            if (draw_calls % 30 == 0) {
+                printf("[Map] Draw call %zu, aircraft with valid positions drawn: %zu / %zu total\n",
+                       draw_calls, valid_positions_drawn, _aircraft.size());
+                fflush(stdout);
+            }
 
             // Color by altitude (blue=low, red=high)
             float alt_norm = std::min(1.0f, state.altitude / MAX_ALTITUDE_FOR_COLOR);
@@ -339,6 +415,9 @@ private:
     }
 
     void handle_map_interaction(ImVec2 canvas_pos, ImVec2 canvas_size) {
+        static size_t interaction_count = 0;
+        static bool zoom_detected = false, pan_detected = false;
+
         ImGuiIO& io = ImGui::GetIO();
         ImVec2 mouse_pos = io.MousePos;
 
@@ -349,19 +428,42 @@ private:
         if (mouse_over) {
             // Zoom with mouse wheel
             if (io.MouseWheel != 0.0f) {
+                zoom_detected = true;
+                float old_zoom = _map_zoom;
                 _map_zoom *= (1.0f + io.MouseWheel * ZOOM_SENSITIVITY);
                 _map_zoom = std::max(MIN_ZOOM, std::min(MAX_ZOOM, _map_zoom));
+                printf("[Interaction] Zoom: wheel=%.2f old=%.4f new=%.4f\n", io.MouseWheel, old_zoom, _map_zoom);
+                fflush(stdout);
             }
 
-            // Pan with right-click drag
-            if (ImGui::IsMouseDragging(ImGuiMouseButton_Right, 0.0f)) {
-                ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Right);
+            // Pan with left or right-click drag (inverted: push the map)
+            bool panning_left = ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f);
+            bool panning_right = ImGui::IsMouseDragging(ImGuiMouseButton_Right, 0.0f);
+
+            if (panning_left || panning_right) {
+                pan_detected = true;
+                ImGuiMouseButton button = panning_left ? ImGuiMouseButton_Left : ImGuiMouseButton_Right;
+                ImVec2 delta = ImGui::GetMouseDragDelta(button);
                 float lat_span = DEFAULT_LAT_SPAN / _map_zoom;
                 float lon_span = lat_span * (canvas_size.x / canvas_size.y);
-                _map_center_lon += (delta.x / canvas_size.x) * lon_span;
-                _map_center_lat -= (delta.y / canvas_size.y) * lat_span;
-                ImGui::ResetMouseDragDelta(ImGuiMouseButton_Right);
+                float old_lat = _map_center_lat, old_lon = _map_center_lon;
+
+                // Inverted pan: drag right pushes map right (subtracts from center)
+                _map_center_lon -= (delta.x / canvas_size.x) * lon_span;
+                _map_center_lat += (delta.y / canvas_size.y) * lat_span;
+
+                printf("[Interaction] Pan: delta=(%.1f,%.1f) lat: %.2f->%.2f lon: %.2f->%.2f\n",
+                       delta.x, delta.y, old_lat, _map_center_lat, old_lon, _map_center_lon);
+                ImGui::ResetMouseDragDelta(button);
+                fflush(stdout);
             }
+        }
+
+        interaction_count++;
+        if (interaction_count % 100 == 0 && (zoom_detected || pan_detected)) {
+            printf("[Interaction] Stats: zoom_detected=%d pan_detected=%d lat=%.2f lon=%.2f zoom=%.4f\n",
+                   zoom_detected, pan_detected, _map_center_lat, _map_center_lon, _map_zoom);
+            fflush(stdout);
         }
     }
 };

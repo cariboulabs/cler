@@ -186,7 +186,7 @@ int main(int argc, char** argv) {
         );
 
         IQToMagnitudeBlock iq2mag("IQ to Magnitude", SAMPLE_RATE_HZ);
-        ADSBDecoderBlock decoder("ADSB Decoder", 0xFFFF); //all messages
+        ADSBDecoderBlock decoder("ADSB Decoder"); // Default: accepts all message types
         
         
         SinkNullBlock<uint16_t> null_sink("Null Sink");
