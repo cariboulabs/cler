@@ -7,8 +7,6 @@
 #include "desktop_blocks/adsb/adsb_aggregate.hpp"
 #include "desktop_blocks/sinks/sink_null.hpp"
 #include "desktop_blocks/math/frequency_shift.hpp"
-#include "desktop_blocks/utils/fanout.hpp"
-#include "desktop_blocks/sinks/sink_file.hpp"
 
 void on_aircraft_update(const ADSBState& state, void* context) {
     // --------Print updates to console------ if desired[Decoder] 
@@ -224,8 +222,6 @@ int main(int argc, char** argv) {
         
         
         SinkNullBlock<uint16_t> null_sink("Null Sink");
-        FanoutBlock<uint16_t> fanout("Fanout", 2);
-        SinkFileBlock<uint16_t> file_sink("File Sink", "adsb_magnitudes.bin");
 
         ADSBAggregateBlock aggregator(
             "ADSB Map",
@@ -241,14 +237,7 @@ int main(int argc, char** argv) {
         // Create flowgraph with debug counter between decoder and aggregator
         auto flowgraph = cler::make_desktop_flowgraph(
             cler::BlockRunner(&source, &iq2mag.in),
-
-            cler::BlockRunner(&iq2mag, &fanout.in),
-            
-            cler::BlockRunner(&fanout, &file_sink.in, &decoder.in),
-            cler::BlockRunner(&file_sink),
-            
-            // cler::BlockRunner(&null_sink)
-
+            cler::BlockRunner(&iq2mag, &decoder.in),
             cler::BlockRunner(&decoder, &aggregator.in),
             cler::BlockRunner(&aggregator)
         );
