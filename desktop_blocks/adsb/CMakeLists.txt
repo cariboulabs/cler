@@ -1,15 +1,18 @@
-# ADSB blocks - requires libmodes
-add_subdirectory(libmodes)
-
-# ADSB blocks are header-only but depend on libmodes
-add_library(cler_blocks_adsb INTERFACE)
+# ADSB blocks - includes mode-s decoder
+add_library(cler_blocks_adsb STATIC modes.c cpr.c)
 add_library(cler::blocks_adsb ALIAS cler_blocks_adsb)
 
-target_link_libraries(cler_blocks_adsb INTERFACE
+target_link_libraries(cler_blocks_adsb PUBLIC
     cler::cler
-    cler::libmodes
 )
 
-target_include_directories(cler_blocks_adsb INTERFACE
+target_include_directories(cler_blocks_adsb PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
+)
+
+# modes.c and cpr.c are C code
+set_target_properties(cler_blocks_adsb PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED ON
 )

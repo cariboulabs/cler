@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
-#include "libmodes/mode-s.h"
+#include "desktop_blocks/adsb/modes.h"
 #include <cstring>
 
 struct ADSBDecoderBlock : public cler::BlockBase {
