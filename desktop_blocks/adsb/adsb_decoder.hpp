@@ -57,13 +57,6 @@ struct ADSBDecoderBlock : public cler::BlockBase {
         total_samples += to_process;
         call_count++;
 
-        if (call_count % 1000 == 0) {
-            printf("[Decoder] Called %zu times, processed %zu samples (%.2f MB), avg mag: %u, max mag: %u\n",
-                   call_count, total_samples, total_samples * 2.0 / 1e6,
-                   _tmp_buffer[0], *std::max_element(_tmp_buffer, _tmp_buffer + to_process));
-            fflush(stdout);
-        }
-
         CallbackContext ctx;
         ctx.out_channel = out;
         ctx.df_filter = _df_filter;
@@ -95,13 +88,6 @@ private:
         total_messages++;
         if (mm->crcok) {
             good_crc_messages++;
-        }
-
-        if (total_messages % 100 == 0) {
-            printf("[Decoder] Total: %zu, Good CRC: %zu (%.1f%%)\n",
-                   total_messages, good_crc_messages,
-                   100.0 * good_crc_messages / total_messages);
-            fflush(stdout);
         }
 
         (void)self;
