@@ -3,7 +3,7 @@
 #include "cler.hpp"
 #include "adsb_types.hpp"
 #include "adsb_coastline_loader.hpp"
-#include "libmodes/mode-s.h"
+#include "modes.h"
 #include <unordered_map>
 #include <imgui.h>
 #include <cmath>

@@ -16,16 +16,14 @@
 #include <vector>
 
 struct IQToMagnitudeBlock : public cler::BlockBase {
-    cler::Channel<std::complex<float>> in;
-
-    static constexpr float COMBINED_GAIN = 65535.0f * 10.0f;
+    cler::Channel<std::complex<uint8_t>> in;
 
     // Statistics
     float sliding_window_mag = 0.0f;
     size_t sample_counter = 0;
 
     IQToMagnitudeBlock(const char* name)
-        : BlockBase(name), in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>)) {}
+        : BlockBase(name), in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<uint8_t>)) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<uint16_t>* mag_out) {
         auto [read_ptr, read_size] = in.read_dbf();
@@ -41,15 +39,9 @@ struct IQToMagnitudeBlock : public cler::BlockBase {
         size_t to_process = std::min(read_size, write_size);
 
         for (size_t i = 0; i < to_process; i++) {
-            // Compute magnitude directly from complex<float>
+            // Compute magnitude directly from complex<uint16_t>
             // Simple approach: just compute magnitude and scale it
-            const float mag_raw = std::abs(read_ptr[i]);
-
-            // Apply fixed gain
-            const float mag_scaled = mag_raw * COMBINED_GAIN;
-
-            // Clamp to uint16_t range
-            const uint16_t mag = static_cast<uint16_t>(std::min(mag_scaled, 65535.0f));
+            const float mag = std::abs(read_ptr[i]);
 
             // Update statistics
             sliding_window_mag = sliding_window_mag * 0.99f + mag * 0.01f;
@@ -88,33 +80,38 @@ void on_aircraft_update(const ADSBState& state, void* context) {
     std::cout << " | Messages: " << state.message_count << std::endl;
 }
 
+using SoapyTypeCU8 = SourceSoapySDRBlock<std::complex<uint8_t>>;
+using FileTypeCU8 = SourceFileBlock<std::complex<uint8_t>>;
+using SourceVariant = std::variant<SoapyTypeCU8, FileTypeCU8>;
+
 // Helper to create variant with proper initialization
 inline auto make_source_variant(bool use_soapy, const std::string& device_args_or_filename,
                                 uint64_t freq, uint32_t rate, double gain) {
-    using SoapyType = SourceSoapySDRBlock<std::complex<float>>;
-    using FileType = SourceFileBlock<std::complex<float>>;
-
     if (use_soapy) {
-        return std::variant<SoapyType, FileType>(
-            std::in_place_type<SoapyType>, "SoapySDR", device_args_or_filename, freq, rate, gain, 0);
-    } else {
-        return std::variant<SoapyType, FileType>(
-            std::in_place_type<FileType>, "File", device_args_or_filename.c_str(), true);
+        return SourceVariant(std::in_place_type<SoapyTypeCU8>,
+                                    "SoapySourceCU8", device_args_or_filename, freq, rate, gain);
+        } else {
+        return SourceVariant(std::in_place_type<FileTypeCU8>,
+                                    "FileSourceCU8", device_args_or_filename.c_str(), true);
     }
 }
 
 // Variant-based source selector block
 struct SelectableSourceBlock : public cler::BlockBase {
-    std::variant<SourceSoapySDRBlock<std::complex<float>>, SourceFileBlock<std::complex<float>>> source;
+    std::variant<
+    SourceSoapySDRBlock<std::complex<uint8_t>>,
+    SourceFileBlock<std::complex<uint8_t>>
+    > source;
+
 
     SelectableSourceBlock(const char* name, bool use_soapy, const std::string& device_args_or_filename,
-                         uint64_t freq = 0, uint32_t rate = 0, double gain = 0)
+                         uint64_t freq, uint32_t rate, double gain)
         : cler::BlockBase(name),
           source(make_source_variant(use_soapy, device_args_or_filename, freq, rate, gain))
     {
     }
 
-    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<uint8_t>>* out) {
         return std::visit([&](auto& src) {
             return src.procedure(out);
         }, source);
@@ -141,9 +138,9 @@ int main(int argc, char** argv) {
     float initial_lat = 32.0f;   // Default: Israel
     float initial_lon = 34.0f;
 
-    if (argc >= 4) {
-        initial_lat = std::atof(argv[2]);
-        initial_lon = std::atof(argv[3]);
+    if (argc >= 3) {
+        initial_lat = std::atof(argv[3]);
+        initial_lon = std::atof(argv[4]);
     }
 
     std::cout << "=== ADSB Receiver ===" << std::endl;
@@ -171,6 +168,13 @@ int main(int argc, char** argv) {
     try {
         // Initialize GUI
         cler::GuiManager gui(1400, 800, "ADSB Aircraft Tracker");
+
+        std::string device_args_or_filename = "";
+        if (use_soapy) {
+            //need to ask for u16 if dtype is cu16?
+        } else {
+            device_args_or_filename = source_arg;
+        }
 
         // Create blocks
         SelectableSourceBlock source(
