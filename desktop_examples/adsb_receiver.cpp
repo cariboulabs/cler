@@ -7,64 +7,8 @@
 #include "desktop_blocks/adsb/adsb_aggregate.hpp"
 #include "desktop_blocks/sinks/sink_null.hpp"
 #include "desktop_blocks/math/frequency_shift.hpp"
-#include <iostream>
-#include <chrono>
-#include <cstdlib>
-#include <variant>
-#include <string>
-#include <fstream>
-#include <vector>
 
-struct IQToMagnitudeBlock : public cler::BlockBase {
-    cler::Channel<std::complex<uint8_t>> in;
 
-    // Statistics
-    float sliding_window_mag = 0.0f;
-    size_t sample_counter = 0;
-
-    IQToMagnitudeBlock(const char* name)
-        : BlockBase(name), in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<uint8_t>)) {}
-
-    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<uint16_t>* mag_out) {
-        auto [read_ptr, read_size] = in.read_dbf();
-        if (read_size == 0) {
-            return cler::Error::NotEnoughSamples;
-        }
-
-        auto [write_ptr, write_size] = mag_out->write_dbf();
-        if (write_size == 0) {
-            return cler::Error::NotEnoughSpace;
-        }
-
-        size_t to_process = std::min(read_size, write_size);
-
-        for (size_t i = 0; i < to_process; i++) {
-            // Compute magnitude directly from complex<uint16_t>
-            // Simple approach: just compute magnitude and scale it
-            const float mag = std::abs(read_ptr[i]);
-
-            // Update statistics
-            sliding_window_mag = sliding_window_mag * 0.99f + mag * 0.01f;
-            sample_counter++;
-
-            write_ptr[i] = mag;
-        }
-
-        if (sample_counter >= 10000) {
-            std::cout << "[IQToMagnitude] Avg magnitude: " << (int)sliding_window_mag
-                      << " (ratio: " << (sliding_window_mag / 65535.0f) << ")" << std::endl;
-            std::cout.flush();
-            sample_counter = 0;
-        }
-
-        in.commit_read(to_process);
-        mag_out->commit_write(to_process);
-
-        return cler::Empty{};
-    }
-};
-
-// Optional callback: called when aircraft state updates
 void on_aircraft_update(const ADSBState& state, void* context) {
     // Print updates to console
     std::cout << "Aircraft detected: ICAO 0x" << std::hex << state.icao << std::dec;
@@ -80,29 +24,25 @@ void on_aircraft_update(const ADSBState& state, void* context) {
     std::cout << " | Messages: " << state.message_count << std::endl;
 }
 
-using SoapyTypeCU8 = SourceSoapySDRBlock<std::complex<uint8_t>>;
-using FileTypeCU8 = SourceFileBlock<std::complex<uint8_t>>;
-using SourceVariant = std::variant<SoapyTypeCU8, FileTypeCU8>;
+using SoapyTypeCS16 = SourceSoapySDRBlock<std::complex<int16_t>>;
+using FileTypeCS16 = SourceFileBlock<std::complex<int16_t>>;
+using SourceVariant = std::variant<SoapyTypeCS16, FileTypeCS16>;
 
 // Helper to create variant with proper initialization
 inline auto make_source_variant(bool use_soapy, const std::string& device_args_or_filename,
                                 uint64_t freq, uint32_t rate, double gain) {
     if (use_soapy) {
-        return SourceVariant(std::in_place_type<SoapyTypeCU8>,
-                                    "SoapySourceCU8", device_args_or_filename, freq, rate, gain);
-        } else {
-        return SourceVariant(std::in_place_type<FileTypeCU8>,
-                                    "FileSourceCU8", device_args_or_filename.c_str(), true);
+        return SourceVariant(std::in_place_type<SoapyTypeCS16>,
+                                    "SoapySourceCS16", device_args_or_filename, freq, rate, gain);
+    } else {
+        return SourceVariant(std::in_place_type<FileTypeCS16>,
+                                    "FileSourceCS16", device_args_or_filename.c_str(), true);
     }
 }
 
 // Variant-based source selector block
 struct SelectableSourceBlock : public cler::BlockBase {
-    std::variant<
-    SourceSoapySDRBlock<std::complex<uint8_t>>,
-    SourceFileBlock<std::complex<uint8_t>>
-    > source;
-
+    SourceVariant source;
 
     SelectableSourceBlock(const char* name, bool use_soapy, const std::string& device_args_or_filename,
                          uint64_t freq, uint32_t rate, double gain)
@@ -111,10 +51,59 @@ struct SelectableSourceBlock : public cler::BlockBase {
     {
     }
 
-    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<uint8_t>>* out) {
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<int16_t>>* out) {
         return std::visit([&](auto& src) {
             return src.procedure(out);
         }, source);
+    }
+};
+
+struct IQToMagnitudeBlock : public cler::BlockBase {
+    cler::Channel<std::complex<int16_t>> in;
+
+    // Statistics
+    float maximum_magnitude = 0.0f;
+    size_t sample_counter = 0;
+
+    IQToMagnitudeBlock(const char* name)
+        : BlockBase(name), in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<int16_t>)) {}
+
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<uint16_t>* mag_out) {
+        auto [read_ptr, read_size] = in.read_dbf();
+        if (read_size == 0) {
+            return cler::Error::NotEnoughSamples;
+        }
+
+        auto [write_ptr, write_size] = mag_out->write_dbf();
+        if (write_size == 0) {
+            return cler::Error::NotEnoughSpace;
+        }
+
+        size_t to_process = std::min(read_size, write_size);
+
+        for (size_t k = 0; k < to_process; k++) {
+            const float i = static_cast<float>(read_ptr[k].imag());
+            const float r = static_cast<float>(read_ptr[k].real());
+            const float mag = (sqrtf(r * r + i * i));
+
+            // Update statistics
+            maximum_magnitude = std::max(maximum_magnitude, mag);
+            sample_counter++;
+
+            write_ptr[k] = static_cast<uint16_t>(mag);
+        }
+
+        // if (sample_counter >= 10000) {
+        //     std::cout << "[IQToMagnitude] Avg magnitude: " << (int)maximum_magnitude
+        //               << " (ratio: " << (maximum_magnitude / 65535.0f) << ")" << std::endl;
+        //     std::cout.flush();
+        //     sample_counter = 0;
+        // }
+
+        in.commit_read(to_process);
+        mag_out->commit_write(to_process);
+
+        return cler::Empty{};
     }
 };
 

@@ -829,6 +829,7 @@ void apply_phase_correction(uint16_t *mag)
 // stream of bits and passed to the function to display it.
 void mode_s_detect(mode_s_t *self, uint16_t *mag, uint32_t maglen, mode_s_callback_t cb, void *cb_context) 
 {
+	printf("[MODES] Starting Mode S message detection on %u samples\n", maglen);
 	unsigned char bits[MODE_S_LONG_MSG_BITS];
 	unsigned char msg[MODE_S_LONG_MSG_BITS/2];
 	uint16_t aux[MODE_S_LONG_MSG_BITS*2];
@@ -880,6 +881,7 @@ void mode_s_detect(mode_s_t *self, uint16_t *mag, uint32_t maglen, mode_s_callba
 					mag[j+8] < mag[j+9] &&
 					mag[j+9] > mag[j+6]))
 			{
+				printf("[MODES] Preamble check 1 failed at sample %u\n", j);
 				continue;
 			}
 
@@ -891,6 +893,7 @@ void mode_s_detect(mode_s_t *self, uint16_t *mag, uint32_t maglen, mode_s_callba
 			if (mag[j+4] >= high ||
 				mag[j+5] >= high)
 			{
+				printf("[MODES] Preamble check 2 failed at sample %u\n", j);
 				continue;
 			}
 
@@ -902,6 +905,7 @@ void mode_s_detect(mode_s_t *self, uint16_t *mag, uint32_t maglen, mode_s_callba
 				mag[j+13] >= high ||
 				mag[j+14] >= high)
 			{
+				printf("[MODES] Preamble check 3 failed at sample %u\n", j);
 				continue;
 			}
 		}
@@ -999,6 +1003,7 @@ void mode_s_detect(mode_s_t *self, uint16_t *mag, uint32_t maglen, mode_s_callba
 		// noise.
 		if (delta < 10*255) 
 		{
+			printf("[MODES] Preamble check 4 failed at sample %u\n", j);
 			use_correction = 0;
 			continue;
 		}
