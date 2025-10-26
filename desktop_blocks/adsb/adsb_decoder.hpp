@@ -7,13 +7,15 @@
 struct ADSBDecoderBlock : public cler::BlockBase {
     cler::Channel<uint16_t> in;
 
+    constexpr static size_t BUFFER_ELEMENTS = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(uint16_t) * 1000;
+
     // Bitmask of DFs to pass through (e.g., 1<<17 for DF17)
     //                   If 0, all messages pass through
     ADSBDecoderBlock(const char* name, uint32_t df_filter = 0)
         : BlockBase(name),
         in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(uint16_t)),
         _df_filter(df_filter),
-        _tmp_buffer(new uint16_t[cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(uint16_t)]) {
+        _tmp_buffer(new uint16_t[BUFFER_ELEMENTS]) {
         mode_s_init(&_decoder_state);
     }
 
@@ -39,8 +41,7 @@ struct ADSBDecoderBlock : public cler::BlockBase {
         }
 
         // Limit to buffer size to prevent overflow
-        constexpr size_t buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(uint16_t);
-        size_t to_process = std::min(read_size, buffer_size);
+        size_t to_process = std::min(read_size, BUFFER_ELEMENTS);
 
         memcpy(_tmp_buffer, read_ptr, to_process * sizeof(uint16_t));
         in.commit_read(to_process);
