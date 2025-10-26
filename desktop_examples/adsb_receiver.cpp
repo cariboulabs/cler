@@ -11,18 +11,18 @@
 #include "desktop_blocks/sinks/sink_file.hpp"
 
 void on_aircraft_update(const ADSBState& state, void* context) {
-    // Print updates to console
-    std::cout << "Aircraft detected: ICAO 0x" << std::hex << state.icao << std::dec;
-    if (state.callsign[0] != '\0') {
-        std::cout << " | Callsign: " << state.callsign;
-    }
-    if (state.altitude > 0) {
-        std::cout << " | Alt: " << state.altitude << " ft";
-    }
-    if (state.groundspeed > 0) {
-        std::cout << " | Speed: " << static_cast<int>(state.groundspeed) << " kts";
-    }
-    std::cout << " | Messages: " << state.message_count << std::endl;
+    // --------Print updates to console------ if desired[Decoder] 
+    // std::cout << "Aircraft detected: ICAO 0x" << std::hex << state.icao << std::dec;
+    // if (state.callsign[0] != '\0') {
+    //     std::cout << " | Callsign: " << state.callsign;
+    // }
+    // if (state.altitude > 0) {
+    //     std::cout << " | Alt: " << state.altitude << " ft";
+    // }
+    // if (state.groundspeed > 0) {
+    //     std::cout << " | Speed: " << static_cast<int>(state.groundspeed) << " kts";
+    // }
+    // std::cout << " | Messages: " << state.message_count << std::endl;
 }
 
 using SoapyTypeCS16 = SourceSoapySDRBlock<std::complex<int16_t>>;
