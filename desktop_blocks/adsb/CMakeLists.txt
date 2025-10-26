@@ -1,5 +1,5 @@
-# ADSB blocks - includes mode-s decoder
-add_library(cler_blocks_adsb STATIC modes.c)
+# ADSB blocks - includes mode-s decoder (2.0 MSPS and 2.4 MSPS)
+add_library(cler_blocks_adsb STATIC modes.c modes_2400.c)
 add_library(cler::blocks_adsb ALIAS cler_blocks_adsb)
 
 target_link_libraries(cler_blocks_adsb PUBLIC

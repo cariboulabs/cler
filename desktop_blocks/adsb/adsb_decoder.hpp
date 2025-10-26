@@ -2,7 +2,9 @@
 
 #include "cler.hpp"
 #include "desktop_blocks/adsb/modes.h"
+#include "desktop_blocks/adsb/modes_2400.h"
 #include <cstring>
+#include <algorithm>
 
 struct ADSBDecoderBlock : public cler::BlockBase {
     cler::Channel<uint16_t> in;
@@ -26,6 +28,9 @@ struct ADSBDecoderBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<mode_s_msg>* out) {
+        static size_t call_count = 0;
+        static size_t total_samples = 0;
+
         auto [read_ptr, read_size] = in.read_dbf();
 
         // Mode S detection requires at least MODES_LONG_MSG_SAMPLES samples
@@ -46,10 +51,20 @@ struct ADSBDecoderBlock : public cler::BlockBase {
         memcpy(_tmp_buffer, read_ptr, to_process * sizeof(uint16_t));
         in.commit_read(to_process);
 
+        total_samples += to_process;
+        call_count++;
+
+        if (call_count % 1000 == 0) {
+            printf("[Decoder] Called %zu times, processed %zu samples (%.2f MB), avg mag: %u, max mag: %u\n",
+                   call_count, total_samples, total_samples * 2.0 / 1e6,
+                   _tmp_buffer[0], *std::max_element(_tmp_buffer, _tmp_buffer + to_process));
+            fflush(stdout);
+        }
+
         CallbackContext ctx;
         ctx.out_channel = out;
         ctx.df_filter = _df_filter;
-        mode_s_detect(&_decoder_state, _tmp_buffer, to_process, on_message_detected, &ctx);
+        mode_s_detect_2400(&_decoder_state, _tmp_buffer, to_process, on_message_detected, &ctx);
 
         return cler::Empty{};
     }
