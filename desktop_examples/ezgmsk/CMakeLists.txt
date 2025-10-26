@@ -40,7 +40,7 @@ add_custom_target(ezgmsk_copy_assets ALL
         ${CMAKE_CURRENT_BINARY_DIR}/${RECORDED_STREAM1}
         ${CMAKE_CURRENT_BINARY_DIR}/${RECORDED_STREAM2}
         ${CMAKE_CURRENT_BINARY_DIR}/analyze_demod_outs.py
-    COMMENT "Copying recorded streams to binary directory"
+    COMMENT "Copying EZGMSK recorded streams to binary directory"
 )
 
 # # Make your executable depend on this custom target
