@@ -127,3 +127,18 @@ if (CLER_BUILD_BLOCKS_GUI AND SOAPYSDR_FOUND)
 else()
     message(STATUS "Skipping adsb_receiver example because CLER_BUILD_BLOCKS_GUI or SOAPYSDR_FOUND is OFF")
 endif()
+
+if(FFMPEG_FOUND AND PORTAUDIO_FOUND)
+    add_executable(audio_file_playback audio_file_playback.cpp)
+    target_link_libraries(audio_file_playback PRIVATE cler::desktop_blocks)
+
+    # Copy audio file to binary directory
+    add_custom_command(TARGET audio_file_playback POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_SOURCE_DIR}/desktop_examples/Blues_Traveler_Hook.mp3
+            $<TARGET_FILE_DIR:audio_file_playback>/Blues_Traveler_Hook.mp3
+        COMMENT "Copying audio file to binary directory"
+    )
+else()
+    message(STATUS "Skipping audio_file_playback example - requires FFmpeg and PortAudio")
+endif()

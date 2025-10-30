@@ -49,8 +49,13 @@ add_library(cler::blocks_blob ALIAS blocks_blob)
 target_link_libraries(blocks_blob PUBLIC cler::cler)
 
 add_subdirectory(sources)
-target_link_libraries(cler_desktop_blocks INTERFACE 
+target_link_libraries(cler_desktop_blocks INTERFACE
   cler::blocks_sources
+)
+
+add_subdirectory(sinks)
+target_link_libraries(cler_desktop_blocks INTERFACE
+  cler::blocks_sinks
 )
 
 if (CLER_BUILD_BLOCKS_GUI)

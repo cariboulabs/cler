@@ -24,7 +24,7 @@ void mode_s_detect_2400(mode_s_t *self, uint16_t *mag, uint32_t maglen, mode_s_c
     uint32_t j;
     unsigned char msg1[14], msg2[14], *msg;
     unsigned char *bestmsg;
-    int bestscore, bestphase;
+    int bestscore;
 
     msg = msg1;
 
@@ -96,7 +96,6 @@ void mode_s_detect_2400(mode_s_t *self, uint16_t *mag, uint32_t maglen, mode_s_c
         // Try all phases and find best
         bestmsg = NULL;
         bestscore = -2;
-        bestphase = -1;
 
         for (try_phase = 4; try_phase <= 8; ++try_phase) {
             uint16_t *pPtr;
@@ -198,7 +197,6 @@ void mode_s_detect_2400(mode_s_t *self, uint16_t *mag, uint32_t maglen, mode_s_c
             if (mm.crcok && mm.errorbit == -1) {
                 bestmsg = msg;
                 bestscore = 1;
-                bestphase = try_phase;
                 msg = (msg == msg1) ? msg2 : msg1;
                 break; // Found good message
             }

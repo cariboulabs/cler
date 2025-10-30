@@ -1,5 +1,6 @@
 # blocks/sources/CMakeLists.txt
 
+# Create interface library for audio sources
 add_library(blocks_sources INTERFACE)
 add_library(cler::blocks_sources ALIAS blocks_sources)
 
@@ -7,7 +8,15 @@ target_include_directories(blocks_sources INTERFACE
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+# === FFmpeg ===
 find_package(PkgConfig REQUIRED)
+pkg_check_modules(FFMPEG libavformat libavcodec libswresample libavutil)
+if(FFMPEG_FOUND)
+  target_include_directories(blocks_sources INTERFACE ${FFMPEG_INCLUDE_DIRS})
+  target_link_libraries(blocks_sources INTERFACE
+    avformat avcodec swresample avutil m dl stdc++ pthread
+  )
+endif()
 
 # === CaribouLite ===
 pkg_check_modules(CARIBOULITE cariboulite)
@@ -62,4 +71,14 @@ if(SOAPYSDR_FOUND)
   set(SOAPYSDR_FOUND ${SOAPYSDR_FOUND} CACHE INTERNAL "SoapySDR found")
 else()
   message(WARNING "SoapySDR not found: SourceSoapySDRBlock and SinkSoapySDRBlock will not be available")
+endif()
+
+# Propagate FFmpeg to interface library for downstream users
+if(FFMPEG_FOUND)
+  target_include_directories(blocks_sources INTERFACE ${FFMPEG_INCLUDE_DIRS})
+  target_link_libraries(blocks_sources INTERFACE
+    avformat avcodec swresample avutil m dl stdc++ pthread
+  )
+  target_compile_definitions(blocks_sources INTERFACE CLER_HAS_FFMPEG)
+  message(STATUS "FFmpeg linked to blocks_sources library")
 endif()
