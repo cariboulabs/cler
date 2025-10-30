@@ -3,6 +3,21 @@
 #include "desktop_blocks/sources/source_audio_file.hpp"
 #include "desktop_blocks/sinks/sink_audio.hpp"
 
+#include <atomic>
+#include <csignal>
+#include <chrono>
+#include <thread>
+
+// Signal handler for graceful shutdown
+static std::atomic<bool> should_exit(false);
+
+void signal_handler(int signal) {
+    if (signal == SIGINT) {
+        should_exit = true;
+        printf("\nShutting down...\n");
+    }
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <audio_file>\n", argv[0]);
@@ -13,6 +28,9 @@ int main(int argc, char* argv[]) {
 
     const char* input_file = argv[1];
     const uint32_t sample_rate = 48000;
+
+    // Setup signal handler for graceful shutdown (Ctrl+C)
+    signal(SIGINT, signal_handler);
 
     // Create audio file source and audio sink
     SourceAudioFileBlock<float> audio_source("AudioFileSource", input_file, sample_rate, true);
@@ -26,9 +44,18 @@ int main(int argc, char* argv[]) {
 
     printf("Playing audio file: %s\n", input_file);
     printf("Sample rate: %u Hz (resampled)\n", sample_rate);
-    printf("Press Ctrl+C to stop\n");
+    printf("Press Ctrl+C to stop\n\n");
 
+    // Start flowgraph (runs in background threads)
     flowgraph.run();
+
+    // Blocking loop - keeps main thread alive until Ctrl+C
+    while (!should_exit) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    // Graceful shutdown
+    flowgraph.stop();
 
     return 0;
 }
