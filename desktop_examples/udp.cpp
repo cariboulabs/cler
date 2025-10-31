@@ -4,28 +4,23 @@
 #include "desktop_blocks/udp/sink_udp.hpp"
 #include "desktop_blocks/udp/source_udp.hpp"
 #include "desktop_blocks/sinks/sink_null.hpp"
-#include <queue>
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <array>
 
-/*
-NOTE: SourceDatagramBlock is an ANTI-PATTERN in CLER!
-Usually we would have the same block that generates data and send it over UDP.
-Also, the the same block that receives datagrams can instiantiate data from the blobs before sending them to the next block.
-No reason to burden computer with unnecessary work
-still, it is here showcase capabilities
+const size_t MAX_UDP_BLOB_SIZE = 256;
+const size_t SLAB_SLOTS = 10;
+const size_t FIXED_ARRAY_SIZE = 256;
 
-You can, and should use GenericDatagramSocket directly in your blocks.
- */
+// =============================================================================================
+// Source side: example of using a slab andsending over Blobs (essentially pointers to the slab)
+//              This can be used for variable-size data like LoRa packets with different lengths
+// ==============================================================================================
+struct SourceBlobBlock : public cler::BlockBase {
+    Slab _slab{SLAB_SLOTS, MAX_UDP_BLOB_SIZE};
 
-const size_t MAX_UDP_BLOB_SIZE = 100;
-const size_t SLAB_SLOTS = 10; // Number of slots in the slab
-
-struct SourceDatagramBlock : public cler::BlockBase {
-    Slab _slab {SLAB_SLOTS, MAX_UDP_BLOB_SIZE};
-
-    SourceDatagramBlock(const char* name)
+    SourceBlobBlock(const char* name)
         : cler::BlockBase(name) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<Blob>* out) {
@@ -38,68 +33,77 @@ struct SourceDatagramBlock : public cler::BlockBase {
             return result.unwrap_err();
         }
 
-        Blob slice = result.unwrap();
+        Blob blob = result.unwrap();
         char msg[256];
-        snprintf(msg, sizeof(msg), "Hello, UDP! #%zu", counter++);
+        snprintf(msg, sizeof(msg), "Hello udp! #%zu", counter++);
 
-        //always be cautious
         size_t msg_len = strlen(msg);
-        if (msg_len > slice.len) {
-            _slab.release_slot(slice.slot_idx);
+        if (msg_len + 1 > blob.len) {  // +1 for null terminator
+            blob.release();
             return cler::Error::BadData;
         }
 
-        memcpy(slice.data, msg, msg_len);
-        slice.len = msg_len;
+        memcpy(blob.data, msg, msg_len);
+        blob.data[msg_len] = '\0';  // Null terminate
+        blob.len = msg_len + 1;     // Include null terminator in length
 
-        out->push(slice);
-
+        out->push(blob);
         return cler::Empty{};
     }
+
 private:
     size_t counter = 0;
 };
 
-void on_sink_udp_send(const Blob& slice, [[maybe_unused]] void* context) {
-    assert(slice.data != nullptr);
-    assert(slice.len > 0);
-}
+// ============================================================================
+// Sink side: Fixed-size array from UDP
+// ============================================================================
 
-void on_source_udp_recv(const Blob& slice, [[maybe_unused]] void* context) {
-    assert(slice.data != nullptr);
-    assert(slice.len > 0);
-}
-
-size_t on_sink_null_recv(cler::Channel<Blob>* channel, [[maybe_unused]] void* context) {
-    Blob blob;
-    size_t work_size = channel->size();
-    for (size_t i = 0; i < work_size; ++i) {
-        channel->pop(blob);
-        std::cout << "Received: " << std::string(reinterpret_cast<char*>(blob.data), blob.len) << std::endl;
-        blob.release();
-    }
-    return 0; //we are doing the popping!
+void print_received_array(const std::array<uint8_t, FIXED_ARRAY_SIZE>& arr, void* context) {
+    // arr.data() is now null-terminated, so use C-string constructor
+    std::string msg(reinterpret_cast<const char*>(arr.data()));
+    std::cout << "Received array UDP message: " << msg << std::endl;
 }
 
 int main() {
-    SourceDatagramBlock source_datagram("SourceDatagram");
-    SinkUDPSocketBlock sink_udp("SinkUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1:9001", on_sink_udp_send);
-    SourceUDPSocketBlock source_udp("SourceUDPSocket", UDPBlock::SocketType::INET_UDP, "127.0.0.1:9001",
-                      MAX_UDP_BLOB_SIZE, SLAB_SLOTS, on_source_udp_recv, nullptr);
-    SinkNullBlock<Blob> sink_null("SinkNull", on_sink_null_recv, nullptr);
+    std::cout << "=== UDP Example: Blob → UDP → std::array ===" << std::endl;
+    std::cout << "Source generates variable-size Blobs" << std::endl;
+    std::cout << "Sends over UDP on 127.0.0.1:9001" << std::endl;
+    std::cout << "Sink receives as fixed-size std::array" << std::endl;
+    std::cout << std::endl;
 
+    // Source: generate Blobs
+    SourceBlobBlock source_blob("SourceBlob");
+
+    // Sink Blob to UDP: send Blobs over network
+    SinkUDPSocketBlock<Blob> sink_blob_udp("SinkBlobUDP",
+                                            UDPBlock::SocketType::INET_UDP,
+                                            "127.0.0.1:9001");
+
+    // Source UDP to Array: receive from network as fixed-size arrays
+    SourceUDPSocketBlock<std::array<uint8_t, FIXED_ARRAY_SIZE>> source_array_udp(
+                                "SourceArrayUDP",
+                                UDPBlock::SocketType::INET_UDP,
+                                "127.0.0.1:9001",
+                                nullptr,
+                                print_received_array
+                                );
+
+    SinkNullBlock<std::array<uint8_t, FIXED_ARRAY_SIZE>> sink_null("SinkNull");
+
+    // Create flowgraph
     auto fg = cler::make_desktop_flowgraph(
-                    cler::BlockRunner(&source_datagram, &sink_udp.in),
-                    cler::BlockRunner(&sink_udp),
-                    cler::BlockRunner(&source_udp, &sink_null.in),
-                    cler::BlockRunner(&sink_null)
-                    );
+        cler::BlockRunner(&source_blob, &sink_blob_udp.in),
+        cler::BlockRunner(&sink_blob_udp),
+        cler::BlockRunner(&source_array_udp, &sink_null.in),
+        cler::BlockRunner(&sink_null)
+    );
 
     fg.run();
 
     while (true) {
-        // Simulate some work in the main thread
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
+
     return 0;
 }
