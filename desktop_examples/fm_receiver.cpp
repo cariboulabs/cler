@@ -30,12 +30,13 @@ void print_usage(const char* prog_name) {
               << "  --gain <dB>      RX gain in dB (default: 20.0)\n"
               << "  --device <args>  SoapySDR device arguments (default: auto-detect)\n"
               << "  --help           Print this message\n"
-              << "\nPost-Processing (add blocks as needed):\n"
-              << "  1. Resampler: down to 48 kHz audio rate (if sample rate > 48 kHz)\n"
-              << "  2. LPF: low-pass filter around 15 kHz to smooth audio\n"
-              << "  3. De-emphasis: frequency correction (75µs or 50µs, broadcast standard)\n"
+              << "\nPost-Processing (included in this example):\n"
+              << "  1. Resampler: down to 48 kHz with built-in anti-aliasing filter (60 dB)\n"
+              << "\nOptional additions (not included):\n"
+              << "  - LPF: Kaiser low-pass filter for additional audio shaping\n"
+              << "  - De-emphasis: frequency correction (75µs or 50µs, broadcast standard)\n"
               << "\nSample Rate Guidance:\n"
-              << "  Rule: sample_rate >= 10 × frequency_deviation (150 kHz minimum)\n"
+              << "  Rule: sample_rate >= 10 x frequency_deviation (150 kHz minimum)\n"
               << "  Practical: 1-4 MSPS (1 MSPS=safe, 2 MSPS=recommended, 4 MSPS=best quality)\n"
               << "\nExamples:\n"
               << "  Listen to 88.5 FM Israel with RTL-SDR:\n"
@@ -106,6 +107,7 @@ int main(int argc, char* argv[]) {
     );
 
     // Resampler: downsample from SDR rate to 48 kHz audio rate
+    // (includes built-in anti-aliasing filter with 60 dB stopband attenuation)
     float resample_ratio = 48000.0f / rate_hz;
     MultiStageResamplerBlock<float> resampler(
         "Resampler",
@@ -143,7 +145,7 @@ int main(int argc, char* argv[]) {
     flowgraph.run(config);
 
     std::cout << "Flowgraph running. Tuned to " << freq_mhz << " MHz.\n"
-              << "Chain: SDR (" << rate_msps << " MSPS) → FM Demod → Resampler (48 kHz) → Audio\n";
+              << "Chain: SDR (" << rate_msps << " MSPS) → FM Demod → Resampler (48 kHz, 60dB LPF) → Audio\n";
 
     // Keep main thread alive and check signal flag
     while (!g_should_exit) {
