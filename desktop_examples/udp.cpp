@@ -14,7 +14,7 @@ const size_t SLAB_SLOTS = 10;
 const size_t FIXED_ARRAY_SIZE = 256;
 
 // =============================================================================================
-// Source side: example of using a slab andsending over Blobs (essentially pointers to the slab)
+// Source side: example of using a slab and sending over Blobs (essentially pointers to the slab)
 //              This can be used for variable-size data like LoRa packets with different lengths
 // ==============================================================================================
 struct SourceBlobBlock : public cler::BlockBase {
