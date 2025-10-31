@@ -6,6 +6,13 @@ This comprehensive guide provides context and guidance for AI assistants (Claude
 
 Cler is a C++17 template-based DSP flowgraph framework for SDRs and embedded systems. It prioritizes compile-time safety, zero-cost abstractions, and minimal runtime footprint suitable for everything from desktop SDR applications to bare-metal MCUs.
 
+### Platform Support
+- **Linux**: Fully supported (Ubuntu, Debian, and other distributions)
+- **macOS**: Fully supported (Intel and Apple Silicon)
+- **Windows**: Not natively supported. Windows users should use [Windows Subsystem for Linux (WSL2)](https://docs.microsoft.com/en-us/windows/wsl/install)
+  - WSL2 provides full POSIX compliance and allows you to use CLER exactly as on Linux
+  - No special Windows toolchain or modifications needed when using WSL2
+
 ### Key Design Principles
 - **Template-based**: Compile-time type safety and optimization
 - **Two execution modes**: Flowgraph (threaded) vs Streamlined (manual control)
@@ -498,21 +505,21 @@ cler::Result<cler::Empty, cler::Error> procedure(/* outputs */) {
 ## 7. Platform Support & Task Policies
 
 ### Task Policy Abstraction
-Different platforms require different threading models:
+Different embedded platforms require different threading models:
 
 ```cpp
-// Desktop: std::thread
+// Desktop (Linux/macOS): std::thread
 #include "task_policies/cler_desktop_tpolicy.hpp"
 auto flowgraph = cler::make_desktop_flowgraph(/* runners */);
 
-// FreeRTOS: xTaskCreate  
+// FreeRTOS: xTaskCreate
 #include "task_policies/cler_freertos_tpolicy.hpp"
 auto flowgraph = cler::FlowGraph<cler::FreeRTOSTaskPolicy, /* runners */>(/* runners */);
 
 // ThreadX: tx_thread_create
 #include "task_policies/cler_threadx_tpolicy.hpp"
 
-// Zephyr: k_thread_create  
+// Zephyr: k_thread_create
 #include "task_policies/cler_zephyr_tpolicy.hpp"
 
 // Baremetal: no threading - use streamlined mode only
@@ -528,7 +535,7 @@ auto flowgraph = cler::FlowGraph<cler::FreeRTOSTaskPolicy, /* runners */>(/* run
 ```
 embedded_examples/
 ├── baremetal_examples/     # No OS, direct hardware
-├── freertos_examples/      # FreeRTOS integration  
+├── freertos_examples/      # FreeRTOS integration
 ├── threadx_examples/       # ThreadX integration
 └── zephyr_examples/        # Zephyr RTOS integration
 ```

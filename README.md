@@ -3,7 +3,6 @@
   <h1>a Compile Time DSP Flowgraph for SDRs and Embedded Systems</h1>
   <p>
     <img src="https://img.shields.io/badge/Ubuntu-supported-brightgreen?logo=ubuntu&logoColor=white" alt="Ubuntu">
-    <img src="https://img.shields.io/badge/Windows-supported-brightgreen?logo=windows&logoColor=white" alt="Windows">
     <img src="https://img.shields.io/badge/macOS-supported-brightgreen?logo=apple&logoColor=white" alt="macOS">
     <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
   </p>
@@ -103,9 +102,16 @@ target_link_libraries(my_executable PRIVATE     cler::cler_desktop_blocks)
 ```
 
 # Things to Know
-* **Cross-Platform** </br>
-The CI/CD pipline ensures that Linux/MacOS/Windows are fully supported, though windows is currently tested without liquid. **On windows, We highly recommend using wsl**
-Note: Doubly-mapped buffers (DBF) require Windows 10 1809+ with specific APIs (VirtualAlloc2/MapViewOfFile3). Desktop blocks that use DBF methods will fail with an assertion if DBF allocation fails on Windows. For maximum compatibility, use WSL or ensure your Windows version supports these APIs.
+
+* **Cross-Platform Support** </br>
+CLER is fully supported on **Linux** and **macOS**. Windows users should use [Windows Subsystem for Linux (WSL2)](https://docs.microsoft.com/en-us/windows/wsl/install) for the best experience.
+
+* **Why WSL2 for Windows?** </br>
+  - **Full POSIX Compatibility**: Get true Linux APIs and system calls instead of Windows API emulation
+  - **No Special Toolchain**: Use the exact same build commands as on Linux
+  - **Better Performance**: Direct filesystem access and native system calls
+  - **Recommended**: This is the same approach used by most cross-platform C++ projects
+  - **Simple Setup**: WSL2 takes minutes to install and integrates seamlessly with Windows
 
 * **Schedulers** </br>
 CLER includes two schedulers: **ThreadPerBlock** (default, simple, debuggable) and **FixedThreadPool** (better for constrained systems).  It also has Performance mode which eliminates stats overhead for ultra-high throughput applications,

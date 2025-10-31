@@ -13,17 +13,17 @@ This directory contains GitHub Actions workflows that automate testing, building
 - **Dependencies**: Pre-installed in container for consistency
 - **Isolation**: Each build runs in a clean environment
 
-### Windows (Native)
-- **Runner**: GitHub's windows-latest
-- **Compilers**: MSVC and MinGW
-- **Dependencies**: Managed via vcpkg package manager
-- **Build system**: Native Windows builds for authentic testing
-
 ### macOS (Native)
 - **Runner**: GitHub's macos-latest
 - **Compiler**: Apple Clang
 - **Dependencies**: Installed via Homebrew
 - **Architecture**: Supports both Intel and Apple Silicon
+
+### Windows (WSL Recommended)
+- **Note**: CLER does not officially support native Windows builds
+- **Recommended approach**: Use [Windows Subsystem for Linux (WSL2)](https://docs.microsoft.com/en-us/windows/wsl/install)
+- **WSL setup**: WSL provides full Linux compatibility, allowing you to use CLER exactly as you would on Ubuntu/Debian
+- **Benefits**: No special Windows toolchain needed, full POSIX support, direct use of Linux build instructions
 
 ## Docker Development Environment
 
@@ -83,7 +83,6 @@ docker run --rm -e CC=clang-14 -e CXX=clang++-14 cler:test
 
 ### Build Matrix
 - **Linux**: Docker-based builds with GCC/Clang × Debug/Release
-- **Windows**: Native builds with MSVC/MinGW × Debug/Release  
 - **macOS**: Native builds with Clang × Debug/Release
 
 ## Configuration Details
@@ -97,7 +96,6 @@ CTEST_OUTPUT_ON_FAILURE: ON      # Show output for failed tests
 
 ### Caching Strategy
 - Docker layer caching for Linux builds
-- vcpkg binary caching for Windows
 - Build dependency caching for all platforms
 - Cache keys include OS, compiler, and build type
 
@@ -117,12 +115,6 @@ Edit the `docker/Dockerfile` to add/update dependencies:
 RUN apt-get update && apt-get install -y \
     new-package-name \
     && rm -rf /var/lib/apt/lists/*
-```
-
-#### Windows (vcpkg)
-Update the vcpkg install command in `ci.yml`:
-```powershell
-& "$env:VCPKG_ROOT\vcpkg" install new-package:x64-windows
 ```
 
 #### macOS (Homebrew)
@@ -157,19 +149,6 @@ docker compose run test-gcc
 docker run --rm -e CMAKE_BUILD_TYPE=Debug cler:test
 ```
 
-#### Windows
-```powershell
-# Set up vcpkg
-git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
-C:\vcpkg\bootstrap-vcpkg.bat
-C:\vcpkg\vcpkg install fftw3:x64-windows glfw3:x64-windows libusb:x64-windows
-
-# Build
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="C:\vcpkg\scripts\buildsystems\vcpkg.cmake"
-cmake --build build
-ctest --test-dir build --output-on-failure
-```
-
 #### macOS
 ```bash
 brew install libusb fftw glfw
@@ -187,10 +166,10 @@ For difficult issues, trigger a debug session:
 
 ### Common Issues
 - **Docker build fails**: Check Dockerfile syntax and base image availability
-- **vcpkg fails**: Ensure packages exist for Windows platform
 - **Missing dependencies**: Update package lists in respective sections
 - **Test timeouts**: Increase timeout or optimize test
 - **Clang compilation errors**: See KNOWN_ISSUES.md for plots.cpp compilation issue with Clang
+- **Windows users**: Use WSL2 to build CLER with full Linux support
 
 ## Performance Optimization
 
@@ -222,5 +201,5 @@ For difficult issues, trigger a debug session:
 
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Docker Best Practices](https://docs.docker.com/develop/dev-best-practices/)
-- [vcpkg Documentation](https://vcpkg.io/)
+- [Windows Subsystem for Linux (WSL2)](https://docs.microsoft.com/en-us/windows/wsl/install)
 - [Building and Testing C++](https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-cpp)

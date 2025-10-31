@@ -65,87 +65,6 @@ jobs:
           build/Testing/
           build/**/*_test.xml
 
-  # Windows native builds
-  windows-native:
-    name: Windows ${{ matrix.compiler }} ${{ matrix.build_type }}
-    runs-on: windows-latest
-    
-    strategy:
-      fail-fast: false
-      matrix:
-        compiler: [msvc, mingw]
-        build_type: [Debug, Release]
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-    
-    - name: Setup Windows environment
-      shell: powershell
-      run: |
-        if ("${{ matrix.compiler }}" -eq "mingw") {
-          echo "CC=gcc" | Out-File -FilePath $env:GITHUB_ENV -Append
-          echo "CXX=g++" | Out-File -FilePath $env:GITHUB_ENV -Append
-        }
-    
-    - name: Install dependencies with vcpkg
-      shell: powershell
-      run: |
-        # Check for vcpkg in common locations
-        $vcpkgRoot = $env:VCPKG_ROOT
-        if ([string]::IsNullOrEmpty($vcpkgRoot)) {
-          # Check GitHub Actions default location
-          if (Test-Path "C:\vcpkg") {
-            $vcpkgRoot = "C:\vcpkg"
-          } elseif (Test-Path "$env:VCPKG_INSTALLATION_ROOT") {
-            $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
-          } else {
-            # Install vcpkg if not found
-            git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
-            & C:\vcpkg\bootstrap-vcpkg.bat
-            $vcpkgRoot = "C:\vcpkg"
-          }
-          echo "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
-        }
-        
-        # Install dependencies
-        & "$vcpkgRoot\vcpkg" install fftw3:x64-windows glfw3:x64-windows libusb:x64-windows
-    
-    - name: Configure CMake
-      shell: powershell
-      run: |
-        $vcpkgRoot = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { "C:\vcpkg" }
-        cmake -B build -S . `
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} `
-          -DCMAKE_TOOLCHAIN_FILE="$vcpkgRoot\scripts\buildsystems\vcpkg.cmake" `
-          -DCLER_BUILD_TESTS=ON `
-          -DCLER_BUILD_EXAMPLES=ON `
-          -DCLER_BUILD_BLOCKS=ON `
-          -DCLER_BUILD_BLOCKS_GUI=ON `
-          -DCLER_BUILD_BLOCKS_LIQUID=OFF
-    
-    - name: Build
-      run: cmake --build build --config ${{ matrix.build_type }}
-    
-    - name: Run tests
-      working-directory: build
-      run: ctest --build-config ${{ matrix.build_type }} --output-on-failure --parallel
-    
-    - name: Run virtual memory tests
-      working-directory: build
-      run: ctest --build-config ${{ matrix.build_type }} -R "vmem|doubly_mapped" -V
-    
-    - name: Upload test results
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-results-windows-${{ matrix.compiler }}-${{ matrix.build_type }}
-        path: |
-          build/Testing/
-          build/**/*_test.xml
-
   # macOS native builds
   macos-native:
     name: macOS ${{ matrix.build_type }}
@@ -238,15 +157,14 @@ jobs:
   # All tests pass check
   all-tests-pass:
     name: All Tests Pass
-    needs: [linux-docker, windows-native, macos-native]
+    needs: [linux-docker, macos-native]
     runs-on: ubuntu-latest
     if: always()
-    
+
     steps:
     - name: Check test results
       run: |
         if [ "${{ needs.linux-docker.result }}" != "success" ] || \
-           [ "${{ needs.windows-native.result }}" != "success" ] || \
            [ "${{ needs.macos-native.result }}" != "success" ]; then
           echo "Tests failed!"
           exit 1

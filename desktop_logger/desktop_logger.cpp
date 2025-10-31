@@ -8,21 +8,9 @@
 #include <mutex>
 #include <string>
 #include <atomic>
+#include <fcntl.h>
+#include <unistd.h>
 // No filesystem needed - using C functions for C++11 compatibility
-
-#ifdef _WIN32
-    #include <io.h>
-    #include <windows.h>
-    #define fileno _fileno
-    #define fsync _commit
-    // For Windows console colors
-    #ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
-        #define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
-    #endif
-#else
-    #include <fcntl.h>
-    #include <unistd.h>
-#endif
 
 static FILE* _log_file = nullptr;
 static bool _logger_started = false;
@@ -30,23 +18,6 @@ static std::mutex log_mutex;
 static std::string _log_filepath;
 static cler::LogRotationConfig _rotation_config;
 static std::atomic<bool> _shutting_down{false};
-
-#ifdef _WIN32
-static void enable_windows_ansi_colors() {
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (hOut == INVALID_HANDLE_VALUE) {
-        return;
-    }
-
-    DWORD dwMode = 0;
-    if (!GetConsoleMode(hOut, &dwMode)) {
-        return;
-    }
-
-    dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-    SetConsoleMode(hOut, dwMode);
-}
-#endif
 
 static void _unguarded_close_log_file() noexcept {
     if (_log_file) {
@@ -154,19 +125,10 @@ logger_retval_enum verify_logfile() noexcept {
         return cler::LOGGER_FILE_INVALID_FD;
     }
 
-#ifdef _WIN32
-    // On Windows, we can't use fcntl, so we'll just check if the handle is valid
-    HANDLE handle = (HANDLE)_get_osfhandle(fd);
-    if (handle == INVALID_HANDLE_VALUE) {
-        _unguarded_close_log_file();
-        return cler::LOGGER_FILE_INVALID_FD;
-    }
-#else
     if (fcntl(fd, F_GETFL) == -1) {
         _unguarded_close_log_file();
         return cler::LOGGER_FILE_INVALID_FD;
     }
-#endif
 
     if (fsync(fd) != 0) {
         _unguarded_close_log_file();
@@ -189,17 +151,7 @@ static void zf_output_callback(const zf_log_message *msg, void *arg) {
     thread_local struct tm tm_buf;
     
     time_t t = time(nullptr);
-    
-#ifdef _WIN32
-    // Use thread-safe localtime_s on Windows
-    errno_t err = localtime_s(&tm_buf, &t);
-    if (err != 0) {
-        // Fallback to empty time string on error
-        time_str[0] = '\0';
-    } else {
-        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_buf);
-    }
-#else
+
     // Use thread-safe localtime_r on POSIX systems
     struct tm *tm = localtime_r(&t, &tm_buf);
     if (tm == nullptr) {
@@ -207,7 +159,6 @@ static void zf_output_callback(const zf_log_message *msg, void *arg) {
     } else {
         strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm);
     }
-#endif
 
     const char *color, *lvl_char;
     switch (msg->lvl) {
@@ -247,11 +198,7 @@ logger_retval_enum start_logging(const char *log_filepath) noexcept {
         if (_logger_started) {
             return cler::LOGGER_ALREADY_STARTED;
         }
-        
-#ifdef _WIN32
-        enable_windows_ansi_colors();
-#endif
-        
+
         zf_log_set_output_v(ZF_LOG_PUT_STD, nullptr, zf_output_callback);
         _logger_started = true;
         atexit(_thread_safe_close_log_file);

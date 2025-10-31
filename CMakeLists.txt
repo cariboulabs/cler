@@ -15,35 +15,18 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 99)
-# Set compile options based on compiler
-if(MSVC)
-  add_compile_options(
-    /W3  # Warning level 3
-    /wd4996  # Disable deprecated warnings
-    /wd4267  # Disable size_t to int conversion warnings
-    /wd4244  # Disable narrowing conversion warnings
-    /wd4848  # Disable [[no_unique_address]] warning in C++17
-  )
-  # Keep assertions enabled
-  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    add_compile_definitions(_DEBUG)
-  endif()
-  add_compile_definitions(NOMINMAX)  # Prevent Windows.h from defining min/max macros
-  message(STATUS "MSVC: Disabled min/max macros with NOMINMAX")
-else()
-  # GCC/Clang options
-  add_compile_options(-Wall -Wextra #mainly disable warnings for liquid. but need a better way of this doing
-        -Wno-unused-variable 
-        -Wno-missing-braces 
-        -Wno-unused-function 
-        -Wno-unused-parameter
-        -Wno-deprecated-declarations
-        -Wno-sign-compare
-        -Wno-implicit-fallthrough
-        -Wno-return-type-c-linkage
-        -UNDEBUG
-        )
-endif()
+# Set compile options
+add_compile_options(-Wall -Wextra
+      -Wno-unused-variable
+      -Wno-missing-braces
+      -Wno-unused-function
+      -Wno-unused-parameter
+      -Wno-deprecated-declarations
+      -Wno-sign-compare
+      -Wno-implicit-fallthrough
+      -Wno-return-type-c-linkage
+      -UNDEBUG
+      )
 message(STATUS "Asserts are ENABLED even in Release builds")
 
 option(CLER_BUILD_BLOCKS "Build CLER blocks" ON)
@@ -53,16 +36,9 @@ option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
 option(CLER_BUILD_PERFORMANCE "Build CLER performance tests" OFF)
 option(CLER_BUILD_TESTS "Build CLER unit tests" OFF)
 
-if(WIN32 AND CLER_BUILD_BLOCKS_LIQUID)
-  set(CLER_BUILD_BLOCKS_LIQUID OFF CACHE BOOL "Liquid blocks are not supported on Windows yet" FORCE)
-  message(STATUS "CLER: liquid-dsp blocks are disabled on Windows")
-endif()
-
 # Default max workers per platform (if not overridden)
 if(NOT DEFINED CLER_DEFAULT_MAX_WORKERS)
-  if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    set(CLER_DEFAULT_MAX_WORKERS "16" CACHE STRING "Default: 16 for Windows")
-  elseif(APPLE)
+  if(APPLE)
     set(CLER_DEFAULT_MAX_WORKERS "16" CACHE STRING "Default: 16 for macOS")
   elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Try to detect embedded via processor type
@@ -82,15 +58,9 @@ endif()
 
 # For Release, force optimization
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-  if(MSVC)
-    add_compile_options(/O2)  # MSVC optimization for speed
-  else()
-    add_compile_options(-O3)  # GCC/Clang maximum optimization
-  endif()
+  add_compile_options(-O3)  # Maximum optimization
 elseif (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  if(NOT MSVC)
-    add_compile_options(-g)  # Debug symbols for GCC/Clang
-  endif()
+  add_compile_options(-g)  # Debug symbols
 endif()
 message(STATUS "CLER: CMAKE_BUILD_TYPE is '${CMAKE_BUILD_TYPE}'")
 
@@ -106,10 +76,8 @@ target_include_directories(cler INTERFACE
 if(UNIX AND NOT APPLE)
     target_link_libraries(cler INTERFACE rt)
 endif()
-if(UNIX OR APPLE OR WIN32)
-  find_package(Threads REQUIRED)
-  target_link_libraries(cler INTERFACE Threads::Threads)
-endif()
+find_package(Threads REQUIRED)
+target_link_libraries(cler INTERFACE Threads::Threads)
 
 # Check if compiler supports -Wno-interference-size (GCC 12+ specific)
 include(CheckCXXCompilerFlag)
@@ -120,20 +88,6 @@ if(COMPILER_SUPPORTS_WNO_INTERFERENCE_SIZE)
       -Wno-interference-size
     >
   )
-endif()
-
-if(WIN32)
-  set(PKGCONFIG_EXE ${CMAKE_CURRENT_SOURCE_DIR}/misc/pkg-config.exe)
-
-  if(NOT EXISTS "${PKGCONFIG_EXE}")
-    message(FATAL_ERROR "pkg-config.exe not found at ${PKGCONFIG_EXE}")
-  endif()
-
-  set(ENV{PKG_CONFIG} "${PKGCONFIG_EXE}")  # Helps subprocesses like pkg_search_module
-  set(PKG_CONFIG_EXECUTABLE "${PKGCONFIG_EXE}" CACHE FILEPATH "Path to pkg-config.exe")
-
-
-  message(STATUS "Using pkg-config: ${PKGCONFIG_EXE}")
 endif()
 
 find_package(PkgConfig REQUIRED)
@@ -147,11 +101,7 @@ endif()
 
 if(CLER_BUILD_EXAMPLES AND CLER_BUILD_BLOCKS)
   add_subdirectory(desktop_examples)
-  if (NOT WIN32)
-    add_subdirectory(embedded_examples)
-  else()
-    message(STATUS "Skipping embedded examples for Windows builds as they are not supported")
-  endif()
+  add_subdirectory(embedded_examples)
 endif()
 
 if(CLER_BUILD_PERFORMANCE)

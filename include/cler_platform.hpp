@@ -60,20 +60,11 @@
     #include <sched.h>
 #endif
 
-// x86 intrinsics for pause instruction  
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-    #if defined(_MSC_VER)
-        #include <intrin.h>
-    #elif defined(__GNUC__) || defined(__clang__)
-        #include <immintrin.h>
-    #endif
+// x86 intrinsics for pause instruction
+#if defined(__x86_64__) || defined(__i386__)
+    #include <immintrin.h>
 #endif
 
-// Windows headers for doubly mapped buffer support
-#ifdef _WIN32
-    #include <windows.h>
-    #include <winternl.h>  // RTL_OSVERSIONINFOW
-#endif
 
 namespace cler {
     
@@ -109,8 +100,8 @@ namespace cler {
 
         // ============= Doubly Mapped Buffer Support =============
         // Compile-time platform support check
-        #if ((defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)) && \
-            CLER_HAS_MMAP_H && CLER_HAS_UNISTD_H) || defined(_WIN32)
+        #if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)) && \
+            CLER_HAS_MMAP_H && CLER_HAS_UNISTD_H
             constexpr bool has_doubly_mapped_support = true;
         #else
             constexpr bool has_doubly_mapped_support = false;
@@ -119,11 +110,7 @@ namespace cler {
         // Page size detection with caching
         inline std::size_t get_page_size() {
             static std::size_t ps = [] {
-                #if defined(_WIN32)
-                    SYSTEM_INFO si;
-                    GetSystemInfo(&si);
-                    return static_cast<std::size_t>(si.dwPageSize);
-                #elif CLER_HAS_UNISTD_H
+                #if CLER_HAS_UNISTD_H
                     #if defined(_SC_PAGESIZE)
                         long v = sysconf(_SC_PAGESIZE);
                         return v > 0 ? static_cast<std::size_t>(v) : 4096u;
@@ -139,60 +126,7 @@ namespace cler {
 
         // Runtime capability check with caching
         inline bool supports_doubly_mapped_buffers() {
-            #if defined(_WIN32)
-                // Windows 10 1809+ supports doubly-mapped buffers via VirtualAlloc2/MapViewOfFile3
-                static bool tested = false;
-                static bool supported = false;
-                
-                if (tested) return supported;
-                tested = true;
-                
-                // Use RtlGetVersion directly to avoid manifest issues
-                typedef LONG (WINAPI *RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
-                HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-                if (ntdll) {
-                    RtlGetVersionPtr RtlGetVersion = reinterpret_cast<RtlGetVersionPtr>(GetProcAddress(ntdll, "RtlGetVersion"));
-                    if (RtlGetVersion) {
-                        RTL_OSVERSIONINFOW osvi = {};
-                        osvi.dwOSVersionInfoSize = sizeof(osvi);
-                        if (RtlGetVersion(&osvi) == 0) {
-                            // Windows 10 1809 is version 10.0.17763
-                            if (osvi.dwMajorVersion > 10 || 
-                                (osvi.dwMajorVersion == 10 && osvi.dwBuildNumber >= 17763)) {
-                                // Check if required APIs are available
-                                HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
-                                if (kernel32) {
-                                    FARPROC va2 = GetProcAddress(kernel32, "VirtualAlloc2");
-                                    FARPROC mv3 = GetProcAddress(kernel32, "MapViewOfFile3");
-                                    supported = (va2 != nullptr) && (mv3 != nullptr);
-                                    #ifdef CLER_VMEM_DEBUG
-                                    if (!supported) {
-                                        OutputDebugStringA("[CLER_PLATFORM] VirtualAlloc2 or MapViewOfFile3 not found\n");
-                                    } else {
-                                        OutputDebugStringA("[CLER_PLATFORM] VirtualAlloc2 and MapViewOfFile3 found - DBF should be supported\n");
-                                    }
-                                    #endif
-                                }
-                                #ifdef CLER_VMEM_DEBUG
-                                else {
-                                    OutputDebugStringA("[CLER_PLATFORM] kernel32.dll not found\n");
-                                }
-                                #endif
-                            }
-                            #ifdef CLER_VMEM_DEBUG
-                            else {
-                                char buf[256];
-                                snprintf(buf, sizeof(buf), "[CLER_PLATFORM] Windows version %lu.%lu.%lu does not support DBF\n", 
-                                         osvi.dwMajorVersion, osvi.dwMinorVersion, osvi.dwBuildNumber);
-                                OutputDebugStringA(buf);
-                            }
-                            #endif
-                        }
-                    }
-                }
-                
-                return supported;
-            #elif !defined(__linux__) && !defined(__APPLE__) && !defined(__FreeBSD__)
+            #if !defined(__linux__) && !defined(__APPLE__) && !defined(__FreeBSD__)
                 return false;
             #else
                 static bool tested = false;
@@ -283,9 +217,7 @@ namespace cler {
         // Simple spin-wait for backward compatibility
         inline void spin_wait(size_t iterations = 64) {
             for (size_t i = 0; i < iterations; ++i) {
-                #if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
-                    _mm_pause();
-                #elif defined(__x86_64__) || defined(__i386__)
+                #if defined(__x86_64__) || defined(__i386__)
                     __builtin_ia32_pause();
                 #elif defined(__aarch64__) || defined(__arm__)
                     asm volatile("yield" ::: "memory");
@@ -304,8 +236,6 @@ namespace cler {
                 CPU_ZERO(&set);
                 CPU_SET(core_id, &set);
                 return pthread_setaffinity_np(pthread_self(), sizeof(set), &set) == 0;
-            #elif defined(_WIN32)
-                return SetThreadAffinityMask(GetCurrentThread(), 1ULL << core_id) != 0;
             #else
                 (void)core_id;
                 return false;
