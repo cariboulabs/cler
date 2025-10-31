@@ -62,8 +62,11 @@ export class PreviewPanel {
             // Generate Mermaid diagram
             const mermaidContent = await this.generateMermaid(document.fileName);
 
+            // Detect theme and get appropriate Mermaid theme
+            const theme = this.getMermaidTheme();
+
             // Update webview with diagram
-            webview.html = this.getHtmlForWebview(webview, mermaidContent, document.fileName);
+            webview.html = this.getHtmlForWebview(webview, mermaidContent, document.fileName, theme);
 
         } catch (error: any) {
             webview.html = this.getErrorHtml(error);
@@ -118,6 +121,21 @@ export class PreviewPanel {
                 throw new Error(`cler-mermaid tool not found at: ${toolPath}\n\nPlease run install.sh or configure the path in settings.`);
             }
             throw new Error(`Failed to generate diagram: ${error.message}`);
+        }
+    }
+
+    private getMermaidTheme(): string {
+        const config = vscode.workspace.getConfiguration('cler');
+        const colorTheme = vscode.window.activeColorTheme;
+
+        // Determine if current theme is light or dark
+        const isLight = colorTheme.kind === vscode.ColorThemeKind.Light ||
+                        colorTheme.kind === vscode.ColorThemeKind.HighContrastLight;
+
+        if (isLight) {
+            return config.get<string>('lightModeTheme', 'default');
+        } else {
+            return config.get<string>('darkModeTheme', 'dark');
         }
     }
 
@@ -193,7 +211,7 @@ export class PreviewPanel {
         </html>`;
     }
 
-    private getHtmlForWebview(webview: vscode.Webview, mermaidContent: string, filePath: string): string {
+    private getHtmlForWebview(webview: vscode.Webview, mermaidContent: string, filePath: string, theme: string): string {
         const fileName = path.basename(filePath);
 
         return `<!DOCTYPE html>
@@ -240,7 +258,7 @@ ${mermaidContent}
             <script>
                 mermaid.initialize({
                     startOnLoad: true,
-                    theme: 'default',
+                    theme: '${theme}',
                     flowchart: {
                         useMaxWidth: true,
                         htmlLabels: true,

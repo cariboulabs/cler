@@ -61,3 +61,8 @@ target_link_libraries(cler-mermaid PRIVATE
     tree-sitter
     tree-sitter-cpp
 )
+
+# Install target
+install(TARGETS cler-mermaid
+    RUNTIME DESTINATION bin
+)

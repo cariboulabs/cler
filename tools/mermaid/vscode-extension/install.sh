@@ -107,10 +107,9 @@ echo "Step 3/6: Installing cler-mermaid..."
 echo ""
 
 INSTALL_DIR="$HOME/.local/bin"
-mkdir -p "$INSTALL_DIR"
 
-cp "$MERMAID_BUILD/cler-mermaid" "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/cler-mermaid"
+info "Installing with CMake..."
+cmake --install "$MERMAID_BUILD" --prefix "$HOME/.local" > /dev/null 2>&1 || error "CMake install failed"
 
 success "cler-mermaid installed to $INSTALL_DIR"
 
