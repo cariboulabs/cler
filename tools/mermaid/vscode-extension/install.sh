@@ -31,13 +31,58 @@ info() {
     echo "ℹ $1"
 }
 
+# Spinner for long-running commands
+spinner() {
+    local pid=$1
+    local message=$2
+    local spinstr='|/-\\'
+    local delay=0.1
+
+    while kill -0 $pid 2>/dev/null; do
+        local temp=${spinstr#?}
+        printf "\r  %s [%c]  " "$message" "$spinstr"
+        spinstr=$temp${spinstr%"$temp"}
+        sleep $delay
+    done
+
+    wait $pid
+    local exit_code=$?
+
+    if [ $exit_code -eq 0 ]; then
+        printf "\r  %s " "$message"
+        echo -e "${GREEN}✓${NC}\033[K"  # \033[K clears to end of line
+    else
+        printf "\r  %s " "$message"
+        echo -e "${RED}✗${NC}\033[K"
+        return $exit_code
+    fi
+}
+
+# Run command with spinner
+run_with_spinner() {
+    local message=$1
+    shift
+
+    "$@" > /tmp/install_output.log 2>&1 &
+    local pid=$!
+
+    spinner $pid "$message" || {
+        # Check if it's the VSCode install crash (extension actually installed)
+        if grep -q "successfully installed" /tmp/install_output.log; then
+            return 0  # Ignore the crash, extension is installed
+        fi
+        echo ""
+        error "Command failed. Log:\n$(tail -20 /tmp/install_output.log)"
+    }
+}
+
 # Check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
 # Step 1: Check prerequisites
-echo "Step 1/6: Checking prerequisites..."
+echo "Step 1/7: Checking prerequisites..."
 echo ""
 
 MISSING_DEPS=()
@@ -70,7 +115,7 @@ success "All prerequisites found"
 echo ""
 
 # Step 2: Build cler-mermaid tool
-echo "Step 2/6: Building cler-mermaid tool..."
+echo "Step 2/7: Building cler-mermaid tool..."
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -89,11 +134,8 @@ if [ -d "$MERMAID_BUILD" ]; then
     rm -rf "$MERMAID_BUILD"
 fi
 
-info "Configuring with CMake..."
-cmake -B build -S . > /dev/null 2>&1 || error "CMake configuration failed"
-
-info "Building..."
-cmake --build build > /dev/null 2>&1 || error "Build failed"
+run_with_spinner "Configuring with CMake..." cmake -B build -S .
+run_with_spinner "Building C++ tool..." cmake --build build
 
 if [ ! -f "$MERMAID_BUILD/cler-mermaid" ]; then
     error "Build succeeded but executable not found"
@@ -103,13 +145,12 @@ success "cler-mermaid built successfully"
 echo ""
 
 # Step 3: Install cler-mermaid to ~/.local/bin
-echo "Step 3/6: Installing cler-mermaid..."
+echo "Step 3/7: Installing cler-mermaid..."
 echo ""
 
 INSTALL_DIR="$HOME/.local/bin"
 
-info "Installing with CMake..."
-cmake --install "$MERMAID_BUILD" --prefix "$HOME/.local" > /dev/null 2>&1 || error "CMake install failed"
+run_with_spinner "Installing to ~/.local/bin..." cmake --install "$MERMAID_BUILD" --prefix "$HOME/.local"
 
 success "cler-mermaid installed to $INSTALL_DIR"
 
@@ -122,7 +163,7 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
 fi
 
 # Step 4: Install npm dependencies
-echo "Step 4/6: Installing extension dependencies..."
+echo "Step 4/7: Installing extension dependencies..."
 echo ""
 
 cd "$SCRIPT_DIR"
@@ -131,34 +172,39 @@ if [ ! -f "package.json" ]; then
     error "package.json not found in $SCRIPT_DIR"
 fi
 
-info "Running npm install..."
-npm install > /dev/null 2>&1 || error "npm install failed"
+run_with_spinner "Installing npm dependencies..." npm install
 
 success "Dependencies installed"
 echo ""
 
 # Step 5: Compile TypeScript
-echo "Step 5/6: Compiling extension..."
+echo "Step 5/7: Compiling extension..."
 echo ""
 
-info "Running npm run compile..."
-npm run compile > /dev/null 2>&1 || error "TypeScript compilation failed"
+run_with_spinner "Compiling TypeScript..." npm run compile
 
 success "Extension compiled"
 echo ""
 
-# Step 6: Package and install extension
-echo "Step 6/6: Packaging and installing VS Code extension..."
+# Step 6: Install Markdown Preview Mermaid Support (before Cler extension in case it crashes)
+echo "Step 6/7: Installing Mermaid preview extension..."
+echo ""
+
+run_with_spinner "Installing bierner.markdown-mermaid..." code --install-extension bierner.markdown-mermaid
+
+success "Mermaid preview extension installed"
+echo ""
+
+# Step 7: Package and install extension
+echo "Step 7/7: Packaging and installing VS Code extension..."
 echo ""
 
 # Check if vsce is available (should be in node_modules)
 if [ ! -f "node_modules/.bin/vsce" ]; then
-    info "Installing vsce..."
-    npm install --save-dev vsce > /dev/null 2>&1 || error "Failed to install vsce"
+    run_with_spinner "Installing vsce..." npm install --save-dev vsce
 fi
 
-info "Packaging extension..."
-npx vsce package --allow-star-activation > /dev/null 2>&1 || error "Failed to package extension"
+run_with_spinner "Packaging extension..." npx vsce package --allow-star-activation
 
 # Find the generated .vsix file
 VSIX_FILE=$(ls -t *.vsix 2>/dev/null | head -1)
@@ -167,8 +213,7 @@ if [ -z "$VSIX_FILE" ]; then
     error "No .vsix file generated"
 fi
 
-info "Installing extension to VS Code..."
-code --install-extension "$VSIX_FILE" > /dev/null 2>&1 || error "Failed to install extension"
+run_with_spinner "Installing to VS Code..." code --install-extension "$VSIX_FILE"
 
 success "Extension installed: $VSIX_FILE"
 echo ""

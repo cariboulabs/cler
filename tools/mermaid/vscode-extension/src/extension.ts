@@ -24,8 +24,8 @@ export function activate(context: vscode.ExtensionContext) {
         const config = vscode.workspace.getConfiguration('cler');
         const autoUpdate = config.get<boolean>('autoUpdate', true);
 
-        if (autoUpdate && doc.languageId === 'cpp' && PreviewPanel.currentPanel) {
-            PreviewPanel.currentPanel.update(doc);
+        if (autoUpdate && doc.languageId === 'cpp' && PreviewPanel.currentPreview) {
+            PreviewPanel.update(doc);
         }
     });
 
@@ -35,12 +35,12 @@ export function activate(context: vscode.ExtensionContext) {
         const autoUpdate = config.get<boolean>('autoUpdate', true);
         const delay = config.get<number>('updateDelay', 500);
 
-        if (autoUpdate && event.document.languageId === 'cpp' && PreviewPanel.currentPanel) {
+        if (autoUpdate && event.document.languageId === 'cpp' && PreviewPanel.currentPreview) {
             if (updateTimer) {
                 clearTimeout(updateTimer);
             }
             updateTimer = setTimeout(() => {
-                PreviewPanel.currentPanel?.update(event.document);
+                PreviewPanel.update(event.document);
             }, delay);
         }
     });

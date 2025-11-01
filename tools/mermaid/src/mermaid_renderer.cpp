@@ -102,12 +102,12 @@ std::string MermaidRenderer::create_node_label(const Block& block) const {
     if (pos != std::string::npos) {
         clean_type.erase(pos, 5);
     }
-    label += "\\n(" + clean_type + ")";
+    label += "<br/>(" + clean_type + ")";
 
     // Show template parameters with safe HTML escaping
     if (!block.template_params.empty()) {
         std::string escaped = html_escape(block.template_params);
-        label += "\\n&lt;" + escaped + "&gt;";
+        label += "<br/>&lt;" + escaped + "&gt;";
     }
 
     return label;

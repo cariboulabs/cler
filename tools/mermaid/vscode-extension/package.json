@@ -4,6 +4,7 @@
   "description": "Live Mermaid preview for Cler C++ flowgraphs",
   "version": "1.0.0",
   "publisher": "cler",
+  "icon": "icon.jpeg",
   "engines": {
     "vscode": "^1.70.0"
   },
@@ -39,7 +40,7 @@
         "cler.toolPath": {
           "type": "string",
           "default": "",
-          "description": "Path to cler-mermaid executable (leave empty to use PATH or bundled version)"
+          "description": "Path to cler-mermaid executable (leave empty to use PATH or workspace build)"
         },
         "cler.autoUpdate": {
           "type": "boolean",
@@ -50,21 +51,12 @@
           "type": "number",
           "default": 500,
           "description": "Delay in milliseconds before updating preview after changes"
-        },
-        "cler.lightModeTheme": {
-          "type": "string",
-          "enum": ["default", "neutral", "dark", "forest", "base"],
-          "default": "default",
-          "description": "Mermaid theme for light color themes"
-        },
-        "cler.darkModeTheme": {
-          "type": "string",
-          "enum": ["default", "neutral", "dark", "forest", "base"],
-          "default": "dark",
-          "description": "Mermaid theme for dark color themes"
         }
       }
-    }
+    },
+    "extensionDependencies": [
+      "bierner.markdown-mermaid"
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

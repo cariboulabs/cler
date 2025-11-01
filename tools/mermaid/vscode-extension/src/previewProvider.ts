@@ -7,79 +7,61 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 
 export class PreviewPanel {
-    public static currentPanel: PreviewPanel | undefined;
-    private readonly _panel: vscode.WebviewPanel;
-    private readonly _extensionUri: vscode.Uri;
-    private _disposables: vscode.Disposable[] = [];
-    private _isUpdating: boolean = false;
+    public static currentPreview: { cppFile: string; mdFile: vscode.Uri } | undefined;
+    private static _isUpdating: boolean = false;
 
-    public static createOrShow(extensionUri: vscode.Uri, document: vscode.TextDocument) {
-        const column = vscode.ViewColumn.Beside;
+    public static async createOrShow(extensionUri: vscode.Uri, document: vscode.TextDocument) {
+        try {
+            // Generate the Mermaid markdown file
+            const mdFilePath = await PreviewPanel.generateMermaid(document.fileName);
+            const mdFileUri = vscode.Uri.file(mdFilePath);
 
-        // If we already have a panel, show it
-        if (PreviewPanel.currentPanel) {
-            PreviewPanel.currentPanel._panel.reveal(column);
-            PreviewPanel.currentPanel.update(document);
-            return;
+            // Store current preview info
+            PreviewPanel.currentPreview = {
+                cppFile: document.fileName,
+                mdFile: mdFileUri
+            };
+
+            // Show markdown preview directly (requires Markdown Preview Mermaid Support extension)
+            await vscode.commands.executeCommand('markdown.showPreview', mdFileUri);
+
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Failed to generate flowgraph: ${error.message}`);
         }
-
-        // Otherwise, create a new panel
-        const panel = vscode.window.createWebviewPanel(
-            'clerFlowgraphPreview',
-            'Flowgraph Preview',
-            column,
-            {
-                enableScripts: true,
-                retainContextWhenHidden: true,
-                localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
-            }
-        );
-
-        PreviewPanel.currentPanel = new PreviewPanel(panel, extensionUri);
-        PreviewPanel.currentPanel.update(document);
     }
 
-    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
-        this._panel = panel;
-        this._extensionUri = extensionUri;
-
-        // Listen for when the panel is disposed
-        this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
-    }
-
-    public async update(document: vscode.TextDocument) {
-        if (this._isUpdating) {
+    public static async update(document: vscode.TextDocument) {
+        if (PreviewPanel._isUpdating) {
             return; // Prevent concurrent updates
         }
 
-        this._isUpdating = true;
-        const webview = this._panel.webview;
+        // Only update if this is the file we're previewing
+        if (!PreviewPanel.currentPreview || PreviewPanel.currentPreview.cppFile !== document.fileName) {
+            return;
+        }
+
+        PreviewPanel._isUpdating = true;
 
         try {
-            // Show loading state
-            webview.html = this.getLoadingHtml();
+            // Regenerate the Mermaid file
+            const mdFilePath = await PreviewPanel.generateMermaid(document.fileName);
 
-            // Generate Mermaid diagram
-            const mermaidContent = await this.generateMermaid(document.fileName);
-
-            // Detect theme and get appropriate Mermaid theme
-            const theme = this.getMermaidTheme();
-
-            // Update webview with diagram
-            webview.html = this.getHtmlForWebview(webview, mermaidContent, document.fileName, theme);
+            // The markdown preview will auto-refresh when the file changes
+            // No need to manually trigger refresh
 
         } catch (error: any) {
-            webview.html = this.getErrorHtml(error);
+            console.error('Failed to update preview:', error);
         } finally {
-            this._isUpdating = false;
+            PreviewPanel._isUpdating = false;
         }
     }
 
-    private async generateMermaid(filePath: string): Promise<string> {
+    private static async generateMermaid(filePath: string): Promise<string> {
         // Find cler-mermaid executable
-        const toolPath = await this.findToolPath();
+        const toolPath = await PreviewPanel.findToolPath();
         const tmpDir = path.join(require('os').tmpdir(), 'cler-preview');
-        const outputPath = path.join(tmpDir, `preview-${Date.now()}`);
+        const baseName = path.basename(filePath, path.extname(filePath));
+        const outputPath = path.join(tmpDir, `${baseName}-flowgraph`);
 
         // Ensure tmp directory exists
         if (!fs.existsSync(tmpDir)) {
@@ -98,23 +80,7 @@ export class PreviewPanel {
                 throw new Error(`Output file not created: ${mdPath}`);
             }
 
-            // Read and parse Mermaid content
-            const content = fs.readFileSync(mdPath, 'utf8');
-
-            // Clean up temp file
-            try {
-                fs.unlinkSync(mdPath);
-            } catch (e) {
-                // Ignore cleanup errors
-            }
-
-            // Extract mermaid code (remove fences)
-            const match = content.match(/```mermaid\n([\s\S]*?)\n```/);
-            if (!match) {
-                throw new Error('No Mermaid diagram found in output');
-            }
-
-            return match[1];
+            return mdPath;
 
         } catch (error: any) {
             if (error.code === 'ENOENT') {
@@ -124,22 +90,7 @@ export class PreviewPanel {
         }
     }
 
-    private getMermaidTheme(): string {
-        const config = vscode.workspace.getConfiguration('cler');
-        const colorTheme = vscode.window.activeColorTheme;
-
-        // Determine if current theme is light or dark
-        const isLight = colorTheme.kind === vscode.ColorThemeKind.Light ||
-                        colorTheme.kind === vscode.ColorThemeKind.HighContrastLight;
-
-        if (isLight) {
-            return config.get<string>('lightModeTheme', 'default');
-        } else {
-            return config.get<string>('darkModeTheme', 'dark');
-        }
-    }
-
-    private async findToolPath(): Promise<string> {
+    private static async findToolPath(): Promise<string> {
         const config = vscode.workspace.getConfiguration('cler');
         const configuredPath = config.get<string>('toolPath');
 
@@ -148,10 +99,19 @@ export class PreviewPanel {
             return configuredPath;
         }
 
-        // 2. Try bundled with extension
-        const bundledPath = path.join(this._extensionUri.fsPath, 'bin', 'cler-mermaid');
-        if (fs.existsSync(bundledPath)) {
-            return bundledPath;
+        // 2. Try in workspace
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (workspaceFolders) {
+            const workspacePath = path.join(
+                workspaceFolders[0].uri.fsPath,
+                'tools',
+                'mermaid',
+                'build',
+                'cler-mermaid'
+            );
+            if (fs.existsSync(workspacePath)) {
+                return workspacePath;
+            }
         }
 
         // 3. Try in PATH
@@ -169,7 +129,6 @@ export class PreviewPanel {
         const commonPaths = [
             path.join(require('os').homedir(), '.local', 'bin', 'cler-mermaid'),
             '/usr/local/bin/cler-mermaid',
-            path.join(this._extensionUri.fsPath, '..', 'mermaid', 'build', 'cler-mermaid')
         ];
 
         for (const p of commonPaths) {
@@ -179,144 +138,5 @@ export class PreviewPanel {
         }
 
         throw new Error('cler-mermaid tool not found');
-    }
-
-    private getLoadingHtml(): string {
-        return `<!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                body {
-                    padding: 20px;
-                    background: var(--vscode-editor-background);
-                    color: var(--vscode-editor-foreground);
-                    font-family: var(--vscode-font-family);
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    height: 100vh;
-                }
-                .loading {
-                    text-align: center;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="loading">
-                <p>⚙️ Generating flowgraph...</p>
-            </div>
-        </body>
-        </html>`;
-    }
-
-    private getHtmlForWebview(webview: vscode.Webview, mermaidContent: string, filePath: string, theme: string): string {
-        const fileName = path.basename(filePath);
-
-        return `<!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-            <style>
-                body {
-                    padding: 20px;
-                    background: var(--vscode-editor-background);
-                    color: var(--vscode-editor-foreground);
-                    font-family: var(--vscode-font-family);
-                    margin: 0;
-                }
-                .header {
-                    padding: 10px 0;
-                    border-bottom: 1px solid var(--vscode-panel-border);
-                    margin-bottom: 20px;
-                }
-                .filename {
-                    font-size: 14px;
-                    color: var(--vscode-descriptionForeground);
-                }
-                #diagram {
-                    text-align: center;
-                    padding: 20px;
-                }
-                .mermaid {
-                    display: inline-block;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <div class="filename">📊 ${fileName}</div>
-            </div>
-            <div id="diagram">
-                <pre class="mermaid">
-${mermaidContent}
-                </pre>
-            </div>
-            <script>
-                mermaid.initialize({
-                    startOnLoad: true,
-                    theme: '${theme}',
-                    flowchart: {
-                        useMaxWidth: true,
-                        htmlLabels: true,
-                        curve: 'basis'
-                    }
-                });
-            </script>
-        </body>
-        </html>`;
-    }
-
-    private getErrorHtml(error: any): string {
-        return `<!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <style>
-                body {
-                    padding: 20px;
-                    background: var(--vscode-editor-background);
-                    color: var(--vscode-editor-foreground);
-                    font-family: var(--vscode-font-family);
-                }
-                .error {
-                    color: var(--vscode-errorForeground);
-                    padding: 20px;
-                    border: 1px solid var(--vscode-errorBorder);
-                    border-radius: 4px;
-                    background: var(--vscode-inputValidation-errorBackground);
-                }
-                h3 {
-                    margin-top: 0;
-                }
-                pre {
-                    white-space: pre-wrap;
-                    word-wrap: break-word;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="error">
-                <h3>❌ Failed to generate flowgraph</h3>
-                <pre>${error.message || error}</pre>
-            </div>
-        </body>
-        </html>`;
-    }
-
-    public dispose() {
-        PreviewPanel.currentPanel = undefined;
-
-        this._panel.dispose();
-
-        while (this._disposables.length) {
-            const disposable = this._disposables.pop();
-            if (disposable) {
-                disposable.dispose();
-            }
-        }
     }
 }
