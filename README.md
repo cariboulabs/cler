@@ -164,6 +164,23 @@ CLER supports four buffer access patterns with dramatically different performanc
 
 Bottom line: If you're juggling multiple data streams or your requirements keep changing, flowgraphs save time. If it's a simple pipeline, just write the loop yourself, and then you can use streamlined blocks if it makes things easier.
 
+# Developer Tools
+
+CLER includes tools to help visualize and understand your flowgraphs:
+
+## Flowgraph Visualization
+
+The `cler-mermaid` tool generates interactive Mermaid diagrams from your C++ flowgraph code:
+
+```bash
+# Install the VSCode extension
+cd tools/mermaid/vscode-extension
+./install.sh
+
+# Or use the CLI tool directly
+tools/mermaid/build/cler-mermaid my_flowgraph.cpp -o diagram
+```
+
 # What is missing?
 Below is a wish-list for this library, sorted by importance.
 
@@ -189,7 +206,7 @@ We need to address the current situation where small mistakes can lead to pages 
 
     Additionally, we could develop a VS Code extension to automate watch files and squiggle errors.
 
-an initial implementation already exists tools.
+Initial implementation exists in `tools/mermaid/` — includes both CLI tool and VSCode extension.
 
 * <ins>GUI FrontEnd:</ins> </br>
 This is more of a nice to have, but if we are already creating a reflection tool for Flowgraph validation, we could also create an interactive FlowGraph generator.

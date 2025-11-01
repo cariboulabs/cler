@@ -50,6 +50,7 @@
                         <li><a href="#performance-example">Performance Considerations</a></li>
                         <li><a href="#scheduler-types">Scheduler Types & Optimization</a></li>
                         <li><a href="#buffer-patterns">Buffer Access Patterns</a></li>
+                        <li><a href="#developer-tools">Developer Tools</a></li>
                         <li><a href="#real-world">Real-World Applications</a></li>
                         <li><a href="#architecture">Architecture Deep Dive</a></li>
                     </ul>
@@ -660,6 +661,25 @@ out->push(sample * gain);</code></pre>
                             <li><strong>Run benchmarks</strong>: <code>cd build/performance && ./perf_read_write_techniques</code></li>
                         </ul>
                     </div>
+                </section>
+
+                <section id="developer-tools">
+                    <h2>Developer Tools</h2>
+
+                    <h3>Flowgraph Visualization</h3>
+                    <p>CLER includes a tool to generate interactive Mermaid diagrams from your C++ flowgraph code, helping you visualize and understand your signal processing pipelines.</p>
+
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-bash line-numbers"># Install the VSCode extension
+cd tools/mermaid/vscode-extension
+./install.sh
+
+# Or use the CLI tool directly
+tools/mermaid/build/cler-mermaid my_flowgraph.cpp -o diagram</code></pre>
+                    </div>
+
+                    <p>The VSCode extension provides one-click preview with auto-refresh as you edit. The generated diagrams show block types, connections, and flow direction with automatic theme matching.</p>
                 </section>
 
                 <section id="real-world">
