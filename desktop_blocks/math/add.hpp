@@ -42,58 +42,30 @@ struct AddBlock : public cler::BlockBase {
                 constructed_channels++;
             }
         } catch (...) {
-            // Clean up any successfully constructed channels
-            using TChannel = cler::Channel<T>;
-            for (size_t i = 0; i < constructed_channels; ++i) {
-                in[i].~TChannel();
-            }
-            ::operator delete[](in);
-            in = nullptr;
+            cleanup_channels(constructed_channels);
             throw std::runtime_error("Failed to construct input channels");
         }
 
         try {
             _tmp_buffer = new T[actual_buffer_size];
         } catch (const std::bad_alloc&) {
-            // Clean up channels
-            using TChannel = cler::Channel<T>;
-            for (size_t i = 0; i < _num_inputs; ++i) {
-                in[i].~TChannel();
-            }
-            ::operator delete[](in);
-            in = nullptr;
+            cleanup_channels(_num_inputs);
             throw std::runtime_error("Failed to allocate temporary buffer");
         }
         
         try {
             _sum_buffer = new T[actual_buffer_size];
         } catch (const std::bad_alloc&) {
-            // Clean up everything allocated so far
             delete[] _tmp_buffer;
             _tmp_buffer = nullptr;
-            using TChannel = cler::Channel<T>;
-            for (size_t i = 0; i < _num_inputs; ++i) {
-                in[i].~TChannel();
-            }
-            ::operator delete[](in);
-            in = nullptr;
+            cleanup_channels(_num_inputs);
             throw std::runtime_error("Failed to allocate sum buffer");
         }
      }
     ~AddBlock() {
-        if (in) {
-            using TChannel = cler::Channel<T>; //cant template on Destructor...
-            for (size_t i = 0; i < _num_inputs; ++i) {
-                in[i].~TChannel();
-            }
-            ::operator delete[](in);
-        }
-        if (_tmp_buffer) {
-            delete[] _tmp_buffer;
-        }
-        if (_sum_buffer) {
-            delete[] _sum_buffer;
-        }
+        cleanup_channels(_num_inputs);
+        delete[] _tmp_buffer;
+        delete[] _sum_buffer;
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
@@ -134,6 +106,16 @@ struct AddBlock : public cler::BlockBase {
     }
 
     private:
+        void cleanup_channels(size_t count) {
+            if (!in) return;
+            using TChannel = cler::Channel<T>;
+            for (size_t i = 0; i < count; ++i) {
+                in[i].~TChannel();
+            }
+            ::operator delete[](in);
+            in = nullptr;
+        }
+
         size_t _num_inputs;
         size_t _buffer_size;
         T*  _tmp_buffer = nullptr;
