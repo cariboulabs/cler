@@ -130,6 +130,7 @@ struct SourceUHDBlock : public cler::BlockBase {
         // OTW format: what goes over the wire (sc16, sc8, fc32, etc.)
         uhd::stream_args_t stream_args(get_uhd_format<T>(), wire_format);
         stream_args.channels.resize(num_channels);
+        stream_args.channels = {0};
         std::iota(stream_args.channels.begin(), stream_args.channels.end(), 0);
 
         rx_stream = usrp->get_rx_stream(stream_args);
@@ -210,27 +211,48 @@ struct SourceUHDBlock : public cler::BlockBase {
         };
         get_write_ptrs(outs...);
 
-        // Find minimum space across all channels
-        size_t min_space = _write_sizes[0];
-        for (size_t i = 1; i < num_outs; ++i) {
-            min_space = std::min(min_space, _write_sizes[i]);
-        }
-
-        if (min_space == 0) {
-            return cler::Error::NotEnoughSpace;
-        }
+  
 
         // Limit to max samples per packet to avoid fragmentation
-        size_t to_read = std::min(min_space, max_samps_per_packet);
+        size_t to_read = max_samps_per_packet;
 
         // Fill UHD buffer pointer array
-        for (size_t i = 0; i < num_outs; ++i) {
-            _uhd_buffs[i] = _write_ptrs[i];
+        for (size_t ch = 0; ch < _num_channels; ++ch) {
+            if (_write_sizes[ch] < max_samps_per_packet) {
+                throw std::runtime_error("Output buffer too small for UHD packet size");
+            }
+            _uhd_buffs[ch] = _write_ptrs[ch];  // point to allocated buffer
         }
 
         // Receive samples directly into all output buffers (multi-channel atomic recv)
+        std::cout<<"max samples per packet: "<<std::endl;
+        std::cout<<max_samps_per_packet<<std::endl;
+        std::cout<<"write sizes: "<<std::endl;
+        for (size_t i = 0; i < num_outs; ++i) {
+            std::cout<<_write_sizes[i]<<std::endl;
+        }
         uhd::rx_metadata_t md;
+        std::cout << "UHD CPU format: " << get_uhd_format<T>() << std::endl;
+        std::cout << "UHD OTW format: " << wire_format << std::endl;
+        std::cout << "sizeof(T)=" << sizeof(T) << std::endl;
+        std::cout << "num  usrp channels: " << usrp->get_rx_num_channels() << std::endl;
+
+        // Stage 1: allocate a temporary buffer
+        std::vector<std::vector<T>> temp_buffers(_num_channels);
+        for (size_t ch = 0; ch < _num_channels; ++ch) {
+            temp_buffers[ch].resize(max_samps_per_packet); // allocate enough samples
+        }
+
+        // Fill the pointer array for UHD
+        std::vector<void*> temp_ptrs(_num_channels);
+        for (size_t ch = 0; ch < _num_channels; ++ch) {
+            temp_ptrs[ch] = temp_buffers[ch].data();
+        }
+        // Receive
         size_t num_rx = rx_stream->recv(_uhd_buffs.data(), to_read, md, 0.1);  // 100ms timeout
+        // size_t num_rx = 5;
+        std::cout<<"num rx: "<<std::endl;
+        std::cout<<num_rx<<std::endl;
 
         // Store metadata for user access (shared across all channels)
         last_rx_metadata.has_time_spec = md.has_time_spec;

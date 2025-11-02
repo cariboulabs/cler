@@ -53,40 +53,33 @@ struct SourceUHDBlock : public cler::BlockBase {
         if (_num_channels == 0) throw std::invalid_argument("num_channels must be >= 1");
 
         // Create USRP
-        usrp = uhd::usrp::multi_usrp::make(device_args);
-        if (!usrp) throw std::runtime_error("Failed to create USRP");
+        _usrp = uhd::usrp::multi_usrp::make(device_args);
+        if (!_usrp) throw std::runtime_error("Failed to create USRP");
 
         // Set thread priority
         uhd::set_thread_priority_safe(0.5, true);
 
         // Configure each channel
         for (size_t ch = 0; ch < _num_channels; ++ch) {
-            usrp->set_rx_rate(sample_rate, ch);
-            usrp->set_rx_freq(uhd::tune_request_t(center_freq), ch);
-            usrp->set_rx_gain(gain_db, ch);
+            _usrp->set_rx_rate(sample_rate, ch);
+            _usrp->set_rx_freq(uhd::tune_request_t(center_freq), ch);
+            _usrp->set_rx_gain(gain_db, ch);
         }
 
         // Setup RX stream
         uhd::stream_args_t stream_args(get_uhd_format<T>(), wire_format);
         stream_args.channels.resize(_num_channels);
         std::iota(stream_args.channels.begin(), stream_args.channels.end(), 0);
-        rx_stream = usrp->get_rx_stream(stream_args);
+        rx_stream = _usrp->get_rx_stream(stream_args);
 
         if (!rx_stream) throw std::runtime_error("Failed to create RX stream");
-
-        max_samps_per_packet = rx_stream->get_max_num_samps();
-
-
-        _uhd_buff.resize(max_samps_per_packet); // T = std::complex<float>
-        _uhd_buff_ptr = _uhd_buff.data();       // pointer for recv()
-
 
         // Issue continuous streaming command
         uhd::stream_cmd_t cmd(uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS);
         cmd.stream_now = true;
         rx_stream->issue_stream_cmd(cmd);
 
-        std::cout << "SourceUHDBlock initialized: " 
+        std::cout << "Zohar - SourceUHDBlock initialized: " 
                   << _num_channels << " channel(s), freq=" 
                   << center_freq << " Hz, rate=" << sample_rate << " S/s\n";
     }
@@ -98,24 +91,23 @@ struct SourceUHDBlock : public cler::BlockBase {
             try { rx_stream->issue_stream_cmd(stop_cmd); } catch(...) {}
         }
     }
-
+    
 cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
     uhd::rx_metadata_t md;
 
-    // Receive samples
-    size_t num_rx = rx_stream->recv(_uhd_buff_ptr, max_samps_per_packet, md, 0.1);
-    if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE) {
-        return cler::Error::TERM_ProcedureError;
-    }
-
-    // Write to output
     auto [write_ptr, write_size] = out->write_dbf();
-    if (!write_ptr || write_size == 0) return cler::Error::NotEnoughSpace;
-
-    size_t to_copy = std::min(num_rx, write_size);
-    std::memcpy(write_ptr, _uhd_buff.data(), to_copy * sizeof(std::complex<float>));
-    out->commit_write(to_copy);
-
+    if (!write_ptr || write_size == 0) {
+        return cler::Error::NotEnoughSpace;
+    }
+    size_t num_rx = rx_stream->recv(write_ptr, write_size, md); // need to be minimum of write_zise and max_samps_per_packet?? 
+    if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE) {
+        return cler::Error::NotEnoughSamples;
+    }
+    if (num_rx == 0) {
+        return cler::Empty{};  // Don't error out, just try again
+    }
+    size_t processed = std::min(num_rx, write_size);
+    out->commit_write(processed);
     return cler::Empty{};
 }
 
@@ -128,10 +120,7 @@ private:
     size_t _num_channels;
     std::string wire_format;
 
-    uhd::usrp::multi_usrp::sptr usrp;
+    uhd::usrp::multi_usrp::sptr _usrp;
     uhd::rx_streamer::sptr rx_stream;
     size_t max_samps_per_packet = 0;
-    std::vector<T> _uhd_buff; // single-channel buffer
-    void* _uhd_buff_ptr = nullptr; // pointer to pass to recv()
-
 };

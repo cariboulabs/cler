@@ -8,39 +8,53 @@ target_include_directories(cler_desktop_blocks INTERFACE #so people call #includ
 )
 
 if (CLER_BUILD_BLOCKS_LIQUID)
-  include(FetchContent)
+  # Try to find system-installed liquid-dsp first (prefer /usr/local from source build)
+  find_library(LIQUID_LIBRARY NAMES liquid PATHS /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu)
+  find_path(LIQUID_INCLUDE_BASE NAMES liquid.h PATHS /usr/local/include/liquid /usr/include/liquid)
 
-  # Put dep trees under the current build dir (prevents cross-build clashes)
-  set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/_deps")
+  if (LIQUID_LIBRARY AND LIQUID_INCLUDE_BASE)
+    # Use system-installed liquid-dsp
+    message(STATUS "Using system liquid-dsp: ${LIQUID_LIBRARY}")
+    message(STATUS "  Include dir: ${LIQUID_INCLUDE_BASE}")
+    
+    add_library(liquid SHARED IMPORTED GLOBAL)
+    set_target_properties(liquid PROPERTIES
+      IMPORTED_LOCATION ${LIQUID_LIBRARY}
+    )
+    
+    # Add the liquid subdirectory to include path so #include "liquid.h" works
+    target_include_directories(liquid INTERFACE ${LIQUID_INCLUDE_BASE}
+     /home/alon/repos/liquid-dsp/src )
+  else()
+    # Fall back to FetchContent if not found
+    message(STATUS "System liquid-dsp not found (lib=${LIQUID_LIBRARY}, inc=${LIQUID_INCLUDE_BASE})")
+    message(STATUS "Fetching from GitHub...")
+    
+    include(FetchContent)
+    set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/_deps")
+    set(BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
+    set(BUILD_AUTOTESTS  OFF CACHE BOOL "" FORCE)
+    set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 
-  # Disable liquid's extra builds
-  set(BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
-  set(BUILD_AUTOTESTS  OFF CACHE BOOL "" FORCE)
-  set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(liquid
+      GIT_REPOSITORY https://github.com/jgaeddert/liquid-dsp
+      GIT_TAG        master
+      GIT_SHALLOW    TRUE
+      GIT_PROGRESS   TRUE
+    )
 
-  # Declare liquid dependency
-  # TODO: Consider pinning to a specific commit for reproducibility
-  FetchContent_Declare(liquid
-    GIT_REPOSITORY https://github.com/jgaeddert/liquid-dsp
-    GIT_TAG        master   # better: replace with a specific commit
-    GIT_SHALLOW    TRUE
-    GIT_PROGRESS   TRUE
-  )
-
-  # Download only
-  FetchContent_Populate(liquid)
-
-  # Clean mismatched generator cache if needed
-  include(${CMAKE_SOURCE_DIR}/cmake/CleanOnGenMismatch.cmake)
-  clean_on_gen_mismatch("${liquid_BINARY_DIR}")  # nuke mismatched build cache only
-
-  # Configure & build the dep with current generator
-  add_subdirectory(${liquid_SOURCE_DIR} ${liquid_BINARY_DIR})
-
-  target_include_directories(liquid INTERFACE
-    SYSTEM ${liquid_SOURCE_DIR}/include
-    SYSTEM ${liquid_SOURCE_DIR}/scripts  # for config.h
-  )
+    FetchContent_Populate(liquid)
+    
+    include(${CMAKE_SOURCE_DIR}/cmake/CleanOnGenMismatch.cmake)
+    clean_on_gen_mismatch("${liquid_BINARY_DIR}")
+    
+    add_subdirectory(${liquid_SOURCE_DIR} ${liquid_BINARY_DIR})
+    
+    target_include_directories(liquid INTERFACE
+      SYSTEM ${liquid_SOURCE_DIR}/include
+      SYSTEM ${liquid_SOURCE_DIR}/scripts
+    )
+  endif()
 endif()
 
 #so any block that wants can use this..
