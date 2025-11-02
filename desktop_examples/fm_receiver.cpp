@@ -3,10 +3,10 @@
 
 // Desktop blocks
 #include "desktop_blocks/sources/source_soapysdr.hpp"
+#include "desktop_blocks/filters/kaiser_lpf.hpp"
 #include "desktop_blocks/fm/fm_demod.hpp"
 #include "desktop_blocks/resamplers/multistage_resampler.hpp"
 #include "desktop_blocks/sinks/sink_audio.hpp"
-#include "desktop_blocks/utils/throttle.hpp"
 
 #include <iostream>
 #include <string>
@@ -26,18 +26,10 @@ void print_usage(const char* prog_name) {
               << "  FM receiver with SoapySDR source and audio output (75 kHz deviation, broadcast standard)\n"
               << "\nOptions:\n"
               << "  --freq <MHz>     Center frequency in MHz (default: 88.5)\n"
-              << "  --rate <MSPS>    Sample rate in MSPS (minimum: 0.4, recommended: 2.0-4.0)\n"
+              << "  --rate <MSPS>    Sample rate in MSPS (minimum: 0.4, recommended: 2.0-4.0, default: 2.0)\n"
               << "  --gain <dB>      RX gain in dB (default: 20.0)\n"
               << "  --device <args>  SoapySDR device arguments (default: auto-detect)\n"
               << "  --help           Print this message\n"
-              << "\nPost-Processing (included in this example):\n"
-              << "  1. Resampler: down to 48 kHz with built-in anti-aliasing filter (60 dB)\n"
-              << "\nOptional additions (not included):\n"
-              << "  - LPF: Kaiser low-pass filter for additional audio shaping\n"
-              << "  - De-emphasis: frequency correction (75µs or 50µs, broadcast standard)\n"
-              << "\nSample Rate Guidance:\n"
-              << "  Rule: sample_rate >= 10 x frequency_deviation (150 kHz minimum)\n"
-              << "  Practical: 1-4 MSPS (1 MSPS=safe, 2 MSPS=recommended, 4 MSPS=best quality)\n"
               << "\nExamples:\n"
               << "  Listen to 88.5 FM Israel with RTL-SDR:\n"
               << "    " << prog_name << " --device \"driver=rtlsdr\" --freq 88.5 --rate 2.0\n"
@@ -100,54 +92,57 @@ int main(int argc, char* argv[]) {
         0  // channel 0
     );
 
+    // Channel selection filter: isolate the desired FM station from adjacent channels
+    // FM broadcast spacing: 200 kHz, deviation: ±75 kHz
+    // Filter cutoff: 100 kHz (captures ±75 kHz deviation + audio bandwidth)
+    KaiserLPFBlock<std::complex<float>> channel_filter(
+        "Channel Filter",
+        rate_hz,        // Sample rate (e.g., 2 MSPS)
+        100e3,          // Cutoff: 100 kHz (selects single FM station)
+        20e3,           // Transition: 20 kHz (sharp rolloff to reject adjacent channels)
+        60.0            // Attenuation: 60 dB (excellent adjacent channel rejection)
+    );
+
     FMDemodBlock fm_demod(
         "FM Demod",
-        rate_hz
-        // Uses default 75 kHz deviation (broadcast standard)
+        rate_hz,
+        75e3 /*freq_deviation*/
     );
+
+    static constexpr float kAudioSampleRate = 48000.0f;
 
     // Resampler: downsample from SDR rate to 48 kHz audio rate
     // (includes built-in anti-aliasing filter with 60 dB stopband attenuation)
-    float resample_ratio = 48000.0f / rate_hz;
+    float resample_ratio = kAudioSampleRate / rate_hz;
     MultiStageResamplerBlock<float> resampler(
         "Resampler",
         resample_ratio,
         60.0f  // 60 dB attenuation for filter stopband
     );
 
-    // Throttle: rate-limit decoded audio to match playback speed (48kHz)
-    ThrottleBlock<float> throttle(
-        "Throttle",
-        48000  // 48 kHz audio rate
-    );
-
     SinkAudioBlock audio_out(
         "Audio Out",
-        48000.0  // 48 kHz audio output
+        kAudioSampleRate
     );
 
     std::cout << "Creating flowgraph...\n";
 
-    // Create flowgraph: SDR → FM Demod → Resampler → Throttle → Audio
+    // Signal chain: SDR → Channel Filter → FM Demod → Resampler → Audio Out
     auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&source, &fm_demod.in),
+        cler::BlockRunner(&source, &channel_filter.in),
+        cler::BlockRunner(&channel_filter, &fm_demod.in),
         cler::BlockRunner(&fm_demod, &resampler.in),
-        cler::BlockRunner(&resampler, &throttle.in),
-        cler::BlockRunner(&throttle, &audio_out.in)
+        cler::BlockRunner(&resampler, &audio_out.in),
+        cler::BlockRunner(&audio_out)
     );
 
     std::cout << "Flowgraph created. Starting execution...\n"
               << "Press Ctrl+C to stop.\n\n";
 
-    // Configure and run flowgraph
     cler::FlowGraphConfig config;
-    config.scheduler = cler::SchedulerType::ThreadPerBlock;
+    config.collect_detailed_stats = true;
     flowgraph.run(config);
 
-    std::cout << "Flowgraph running. Tuned to " << freq_mhz << " MHz.\n"
-              << "Chain: SDR (" << rate_msps << " MSPS) → FM Demod → Resampler (48 kHz, 60dB LPF) → Audio\n";
-
-    // Keep main thread alive and check signal flag
     while (!g_should_exit) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
@@ -155,5 +150,11 @@ int main(int argc, char* argv[]) {
     flowgraph.stop();
     std::cout << "Flowgraph stopped. Cleanup complete.\n";
 
+    // Print stats:
+    for (const auto& s : flowgraph.stats()) {
+        printf("%s: %zu successful, %zu failed, %.1f%% CPU\n",
+                s.name.c_str(), s.successful_procedures, s.failed_procedures,
+                s.get_cpu_utilization_percent());
+    }
     return 0;
 }

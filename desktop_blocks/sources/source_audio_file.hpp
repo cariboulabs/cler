@@ -153,7 +153,7 @@ private:
     AVCodecContext* _codec_ctx;
     SwrContext* _resampler;
     AVFrame* _frame;
-    AVPacket _packet;
+    AVPacket _packet = {};  // Zero-init (no av_init_packet needed)
     int _audio_stream_idx;
     bool _eof_reached;
 
@@ -189,12 +189,29 @@ private:
         ffmpeg_check(ret, "Failed to open codec");
 
         // Setup resampler for float conversion
+        // FFmpeg version compatibility: handle channel layout API changes
+        #if LIBAVCODEC_VERSION_MAJOR >= 59
+            // FFmpeg 5.0+ (libavcodec 59+): New AVChannelLayout API
+            int64_t input_ch_layout = _codec_ctx->ch_layout.nb_channels > 1
+                ? AV_CH_LAYOUT_STEREO
+                : AV_CH_LAYOUT_MONO;
+        #else
+            // FFmpeg 4.x (libavcodec 58): Legacy channel_layout/channels fields
+            int64_t input_ch_layout = _codec_ctx->channel_layout;
+            if (input_ch_layout == 0) {
+                // channel_layout not set, derive from channel count
+                input_ch_layout = _codec_ctx->channels > 1
+                    ? AV_CH_LAYOUT_STEREO
+                    : AV_CH_LAYOUT_MONO;
+            }
+        #endif
+
         _resampler = swr_alloc_set_opts(
             nullptr,
             AV_CH_LAYOUT_MONO,           // output: mono
             AV_SAMPLE_FMT_FLT,           // output: float32
             _output_sample_rate,          // output: target sample rate
-            _codec_ctx->ch_layout.nb_channels > 1 ? AV_CH_LAYOUT_STEREO : AV_CH_LAYOUT_MONO,
+            input_ch_layout,              // input: auto-detected channel layout
             _codec_ctx->sample_fmt,       // input: original format
             _codec_ctx->sample_rate,      // input: original sample rate
             0,
@@ -212,8 +229,6 @@ private:
         if (!_frame) {
             throw std::runtime_error("Failed to allocate frame");
         }
-
-        av_init_packet(&_packet);
     }
 
     void _close_audio_file() {

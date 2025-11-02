@@ -5,35 +5,15 @@
 #include <type_traits>
 #include <cmath>
 
-template <typename>
-inline constexpr bool lpf_dependent_false_v = false;
-
-// Determine output type based on input type
-// float -> float (real filtering)
-// complex<float> -> float (complex filtering, real output)
-template <typename T>
-struct lpf_output_type {
-    using type = T;
-};
-
-template <>
-struct lpf_output_type<std::complex<float>> {
-    using type = float;
-};
-
-template <typename T>
-using lpf_output_type_t = typename lpf_output_type<T>::type;
-
-// Kaiser low-pass filter template supporting float and std::complex<float>
 template <typename T>
 struct KaiserLPFBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
     // Kaiser low-pass filter using liquid-dsp
     // Parameters:
-    //   sample_rate      : Input sample rate in Hz (e.g., 48000 for audio)
-    //   cutoff_freq      : Cutoff frequency in Hz (e.g., 15000 for audio)
-    //   transition_bw    : Transition bandwidth in Hz (e.g., 1000)
+    //   sample_rate      : Input sample rate in Hz (e.g., 2e6 for 2 MSPS)
+    //   cutoff_freq      : Cutoff frequency in Hz (e.g., 100e3 for 100 kHz)
+    //   transition_bw    : Transition bandwidth in Hz (e.g., 20e3 for 20 kHz)
     //   attenuation_db   : Stopband attenuation in dB (default: 60)
     KaiserLPFBlock(const char* name,
                    double sample_rate,
@@ -110,8 +90,6 @@ struct KaiserLPFBlock : public cler::BlockBase {
             if (!_filter_c) {
                 throw std::runtime_error("Failed to create Kaiser LPF for complex float");
             }
-        } else {
-            static_assert(lpf_dependent_false_v<T>, "KaiserLPFBlock only supports float or std::complex<float>");
         }
     }
 
@@ -127,7 +105,8 @@ struct KaiserLPFBlock : public cler::BlockBase {
         }
     }
 
-    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<lpf_output_type_t<T>>* out) {
+    // Simple: T -> T (same as resampler pattern)
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
         auto [read_ptr, read_size] = in.read_dbf();
         if (!read_ptr || read_size == 0) {
             return cler::Error::NotEnoughSamples;
@@ -138,20 +117,22 @@ struct KaiserLPFBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSpace;
         }
 
-        // Process limited by available input and output space
         size_t samples_to_process = std::min(read_size, write_space);
 
-        // Apply filter sample-by-sample
         if constexpr (std::is_same_v<T, float>) {
-            for (size_t i = 0; i < samples_to_process; i++) {
-                firfilt_rrrf_execute_one(_filter_r, read_ptr[i], &write_ptr[i]);
-            }
+            firfilt_rrrf_execute_block(
+                _filter_r,
+                const_cast<float*>(read_ptr),
+                samples_to_process,
+                write_ptr
+            );
         } else if constexpr (std::is_same_v<T, std::complex<float>>) {
-            for (size_t i = 0; i < samples_to_process; i++) {
-                firfilt_crcf_execute_one(_filter_c,
-                    *reinterpret_cast<const liquid_float_complex*>(&read_ptr[i]),
-                    &write_ptr[i]);
-            }
+            firfilt_crcf_execute_block(
+                _filter_c,
+                reinterpret_cast<liquid_float_complex*>(const_cast<std::complex<float>*>(read_ptr)),
+                samples_to_process,
+                reinterpret_cast<liquid_float_complex*>(write_ptr)
+            );
         }
 
         in.commit_read(samples_to_process);

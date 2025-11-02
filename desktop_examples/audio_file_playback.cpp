@@ -29,14 +29,11 @@ int main(int argc, char* argv[]) {
     const char* input_file = argv[1];
     const uint32_t sample_rate = 48000;
 
-    // Setup signal handler for graceful shutdown (Ctrl+C)
     signal(SIGINT, signal_handler);
 
-    // Create audio file source and audio sink
     SourceAudioFileBlock<float> audio_source("AudioFileSource", input_file, sample_rate, true);
     SinkAudioBlock audio_sink("AudioSink", static_cast<double>(sample_rate), -1);  // default device
 
-    // Create flowgraph: audio source -> audio sink
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&audio_source, &audio_sink.in),
         cler::BlockRunner(&audio_sink)
@@ -46,10 +43,8 @@ int main(int argc, char* argv[]) {
     printf("Sample rate: %u Hz (resampled)\n", sample_rate);
     printf("Press Ctrl+C to stop\n\n");
 
-    // Start flowgraph (runs in background threads)
     flowgraph.run();
 
-    // Blocking loop - keeps main thread alive until Ctrl+C
     while (!should_exit) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
