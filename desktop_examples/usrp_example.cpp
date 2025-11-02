@@ -3,7 +3,7 @@
 
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
-#include "desktop_blocks/sources/source_uhd.hpp"
+#include "desktop_blocks/sources/source_uhd_zohar_full.hpp"
 #include "desktop_blocks/sources/source_file.hpp"
 #include "desktop_blocks/sinks/sink_uhd.hpp"
 #include "desktop_blocks/sinks/sink_null.hpp"
