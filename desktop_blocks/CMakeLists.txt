@@ -27,20 +27,8 @@ if (CLER_BUILD_BLOCKS_LIQUID)
     GIT_PROGRESS   TRUE
   )
 
-  # Download only
-  FetchContent_Populate(liquid)
-
-  # Clean mismatched generator cache if needed
-  include(${CMAKE_SOURCE_DIR}/cmake/CleanOnGenMismatch.cmake)
-  clean_on_gen_mismatch("${liquid_BINARY_DIR}")  # nuke mismatched build cache only
-
-  # Configure & build the dep with current generator
-  add_subdirectory(${liquid_SOURCE_DIR} ${liquid_BINARY_DIR})
-
-  target_include_directories(liquid INTERFACE
-    SYSTEM ${liquid_SOURCE_DIR}/include
-    SYSTEM ${liquid_SOURCE_DIR}/scripts  # for config.h
-  )
+  # Modern FetchContent - handles everything automatically
+  FetchContent_MakeAvailable(liquid)
 endif()
 
 #so any block that wants can use this..

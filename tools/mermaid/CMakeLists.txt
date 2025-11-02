@@ -21,7 +21,7 @@ if(NOT tree-sitter_POPULATED)
         ${tree-sitter_SOURCE_DIR}/lib/src/lib.c
     )
     target_include_directories(tree-sitter PUBLIC
-        ${tree-sitter_SOURCE_DIR}/lib/include
+        $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/include>
     )
 endif()
 
@@ -40,7 +40,7 @@ if(NOT tree-sitter-cpp_POPULATED)
         ${tree-sitter-cpp_SOURCE_DIR}/src/scanner.c
     )
     target_include_directories(tree-sitter-cpp PUBLIC
-        ${tree-sitter-cpp_SOURCE_DIR}/src
+        $<BUILD_INTERFACE:${tree-sitter-cpp_SOURCE_DIR}/src>
     )
     target_link_libraries(tree-sitter-cpp PRIVATE tree-sitter)
 endif()
@@ -54,7 +54,7 @@ add_executable(cler-mermaid
 )
 
 target_include_directories(cler-mermaid PRIVATE
-    ${tree-sitter_SOURCE_DIR}/lib/include
+    $<BUILD_INTERFACE:${tree-sitter_SOURCE_DIR}/lib/include>
 )
 
 target_link_libraries(cler-mermaid PRIVATE
