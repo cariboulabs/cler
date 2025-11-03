@@ -1,13 +1,16 @@
-// Unified USRP Example - demonstrates all UHD block features
+// Unified USRP Example - demonstrates all UHD block features including TX
 // Select mode via command line argument
 
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
-#include "desktop_blocks/sources/source_uhd_zohar_full.hpp"
+#include "desktop_blocks/sources/source_uhd.hpp"
 #include "desktop_blocks/sources/source_file.hpp"
+#include "desktop_blocks/sources/source_chirp.hpp"
+#include "desktop_blocks/sources/source_cw.hpp"
 #include "desktop_blocks/sinks/sink_uhd.hpp"
 #include "desktop_blocks/sinks/sink_null.hpp"
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
+#include "desktop_blocks/utils/fanout.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include <iostream>
 #include <vector>
@@ -20,14 +23,16 @@ void print_usage(const char* prog) {
     std::cout << "  list        - List available USRP devices" << std::endl;
     std::cout << "  rx          - Simple RX with spectrum plot" << std::endl;
     std::cout << "  mimo        - Dual-channel MIMO RX with spectrum plots" << std::endl;
-    std::cout << "  tx-burst    - Timed TX burst transmission" << std::endl;
+    std::cout << "  tx-chirp    - Transmit chirp signal with spectrum plot" << std::endl;
+    std::cout << "  tx-cw       - Transmit continuous wave with spectrum plot" << std::endl;
     std::cout << "  freq-hop    - Frequency hopping with timed commands" << std::endl;
     std::cout << "  gpio        - GPIO control with precise timing" << std::endl;
     std::cout << "  info        - Display detailed device information" << std::endl;
     std::cout << "\nMode-specific options:" << std::endl;
     std::cout << "  rx:         [device_args] [freq_hz] [rate_hz] [gain_db]" << std::endl;
     std::cout << "  mimo:       [device_args] [freq_hz] [rate_hz] [gain_db]" << std::endl;
-    std::cout << "  tx-burst:   [device_args] [filename] [freq_hz] [rate_hz] [gain_db] [tx_time_s]" << std::endl;
+    std::cout << "  tx-chirp:   [device_args] [freq_hz] [rate_hz] [gain_db] [amplitude]" << std::endl;
+    std::cout << "  tx-cw:      [device_args] [freq_hz] [rate_hz] [gain_db] [cw_offset_hz] [amplitude]" << std::endl;
     std::cout << "  freq-hop:   [device_args] [base_freq_hz] [hop_interval_s] [num_hops]" << std::endl;
     std::cout << "  gpio:       [device_args] [gpio_bank]" << std::endl;
     std::cout << "  info:       [device_args]" << std::endl;
@@ -35,7 +40,8 @@ void print_usage(const char* prog) {
     std::cout << "  " << prog << " list" << std::endl;
     std::cout << "  " << prog << " rx \"addr=192.168.10.2\" 915e6 2e6 30" << std::endl;
     std::cout << "  " << prog << " mimo \"addr=192.168.10.2\" 915e6 2e6 30" << std::endl;
-    std::cout << "  " << prog << " tx-burst \"addr=192.168.10.2\" burst.bin 915e6 2e6 0 2.0" << std::endl;
+    std::cout << "  " << prog << " tx-chirp \"addr=192.168.10.2\" 915e6 2e6 0 0.3" << std::endl;
+    std::cout << "  " << prog << " tx-cw \"addr=192.168.10.2\" 915e6 2e6 0 100e3 0.5" << std::endl;
     std::cout << "  " << prog << " freq-hop \"addr=192.168.10.2\" 900e6 0.1 10" << std::endl;
     std::cout << "  " << prog << " gpio \"addr=192.168.10.2\" FP0" << std::endl;
     std::cout << std::endl;
@@ -135,51 +141,109 @@ void mode_mimo(int argc, char** argv) {
     std::cout << "Overflows: " << usrp.get_overflow_count() << std::endl;
 }
 
-void mode_tx_burst(int argc, char** argv) {
+void mode_tx_chirp(int argc, char** argv) {
     std::string device_args = argc > 2 ? argv[2] : "";
-    std::string filename = argc > 3 ? argv[3] : "burst.bin";
-    double freq = argc > 4 ? std::stod(argv[4]) : 915e6;
-    double rate = argc > 5 ? std::stod(argv[5]) : 2e6;
-    double gain = argc > 6 ? std::stod(argv[6]) : 0.0;
-    double tx_time = argc > 7 ? std::stod(argv[7]) : 2.0;
+    double freq = argc > 3 ? std::stod(argv[3]) : 915e6;
+    double rate = argc > 4 ? std::stod(argv[4]) : 2e6;
+    double gain = argc > 5 ? std::stod(argv[5]) : 0.0;
+    float amplitude = argc > 6 ? std::stof(argv[6]) : 0.3f;
 
-    std::cout << "TX Burst Mode" << std::endl;
+    std::cout << "TX Chirp Mode" << std::endl;
     std::cout << "Device: " << (device_args.empty() ? "default" : device_args) << std::endl;
-    std::cout << "File: " << filename << std::endl;
     std::cout << "Freq: " << freq/1e6 << " MHz, Rate: " << rate/1e6 << " MSPS, Gain: " << gain << " dB" << std::endl;
-    std::cout << "TX Time: " << tx_time << "s" << std::endl;
+    std::cout << "Amplitude: " << amplitude << std::endl;
+    std::cout << "Chirp: -500 kHz to +500 kHz over 1 second" << std::endl;
 
-    SourceFileBlock<std::complex<float>> file("File", filename.c_str());
-    SinkUHDBlock<std::complex<float>> usrp("USRP", device_args, freq, rate, gain, 1);
+    cler::GuiManager gui(1200, 600, "USRP TX - Chirp Signal");
 
-    usrp.set_time_now(0.0);
+    // Chirp source: -500 kHz to +500 kHz over 1 second
+    SourceChirpBlock<std::complex<float>> chirp("Chirp", 
+        amplitude,      // Amplitude
+        -500e3f,        // Start frequency
+        500e3f,         // End frequency
+        rate,           // Sample rate
+        10.0f);          // Duration
 
-    TxMetadata md;
-    md.has_time_spec = true;
-    md.time_seconds = tx_time;
-    md.time_frac_seconds = 0.0;
-    md.start_of_burst = true;
-    md.end_of_burst = true;
-    usrp.set_tx_metadata(md);
+    // Fanout to spectrum plot and USRP
+    FanoutBlock<std::complex<float>> fanout("Fanout", 2);
 
-    std::cout << "Burst configured for t=" << tx_time << "s" << std::endl;
+    // Spectrum plot
+    PlotCSpectrumBlock spectrum("TX Spectrum", {"Chirp"}, rate, 2048);
+    spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
+
+    // USRP TX sink
+    SinkUHDBlock<std::complex<float>> usrp("USRP_TX", device_args, freq, rate, gain, 1);
 
     auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&file, &usrp.in[0]),
+        cler::BlockRunner(&chirp, &fanout.in),
+        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp.in[0]),
+        cler::BlockRunner(&spectrum),
         cler::BlockRunner(&usrp)
     );
 
-    std::cout << "Starting transmission..." << std::endl;
     flowgraph.run();
+    std::cout << "Transmitting chirp signal. Close window to stop." << std::endl;
 
-    while (usrp.get_time_now() < tx_time + 1.0) {
-        AsyncTxEvent event;
-        if (usrp.poll_async_event(event, 0.0)) {
-            if (event.event_code == uhd::async_metadata_t::EVENT_CODE_BURST_ACK) {
-                std::cout << "Burst ACK at t=" << event.time_seconds + event.time_frac_seconds << "s" << std::endl;
-            }
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    while (!gui.should_close()) {
+        gui.begin_frame();
+        spectrum.render();
+        gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    flowgraph.stop();
+    std::cout << "Underflows: " << usrp.get_underflow_count() << std::endl;
+}
+
+void mode_tx_cw(int argc, char** argv) {
+    std::string device_args = argc > 2 ? argv[2] : "";
+    double freq = argc > 3 ? std::stod(argv[3]) : 915e6;
+    double rate = argc > 4 ? std::stod(argv[4]) : 2e6;
+    double gain = argc > 5 ? std::stod(argv[5]) : 0.0;
+    double cw_offset = argc > 6 ? std::stod(argv[6]) : 100e3;
+    float amplitude = argc > 7 ? std::stof(argv[7]) : 0.5f;
+
+    std::cout << "TX CW Mode - Continuous Wave" << std::endl;
+    std::cout << "Device: " << (device_args.empty() ? "default" : device_args) << std::endl;
+    std::cout << "Center Freq: " << freq/1e6 << " MHz" << std::endl;
+    std::cout << "CW Offset: " << cw_offset/1e3 << " kHz" << std::endl;
+    std::cout << "Actual TX: " << (freq + cw_offset)/1e6 << " MHz" << std::endl;
+    std::cout << "Rate: " << rate/1e6 << " MSPS, Gain: " << gain << " dB" << std::endl;
+    std::cout << "Amplitude: " << amplitude << std::endl;
+
+    cler::GuiManager gui(1200, 600, "USRP TX - Continuous Wave");
+
+    // CW source
+    SourceCWBlock<std::complex<float>> cw("CW", 
+        amplitude,      // Amplitude
+        cw_offset,      // Frequency offset
+        rate);          // Sample rate
+
+    // Fanout to spectrum plot and USRP
+    FanoutBlock<std::complex<float>> fanout("Fanout", 2);
+
+    // Spectrum plot
+    PlotCSpectrumBlock spectrum("TX Spectrum", {"CW Tone"}, rate, 2048);
+    spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
+
+    // USRP TX sink
+    SinkUHDBlock<std::complex<float>> usrp("USRP_TX", device_args, freq, rate, gain, 1);
+
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&cw, &fanout.in),
+        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp.in[0]),
+        cler::BlockRunner(&spectrum),
+        cler::BlockRunner(&usrp)
+    );
+
+    flowgraph.run();
+    std::cout << "Transmitting CW tone. Close window to stop." << std::endl;
+
+    while (!gui.should_close()) {
+        gui.begin_frame();
+        spectrum.render();
+        gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
     flowgraph.stop();
@@ -360,12 +424,14 @@ int main(int argc, char** argv) {
             mode_rx(argc, argv);
         } else if (mode == "mimo") {
             mode_mimo(argc, argv);
-        } else if (mode == "tx-burst") {
-            mode_tx_burst(argc, argv);
-        } else if (mode == "freq-hop") {
-            mode_freq_hop(argc, argv);
+        } else if (mode == "tx-chirp") {
+            mode_tx_chirp(argc, argv);
+        } else if (mode == "tx-cw") {
+            mode_tx_cw(argc, argv);
         } else if (mode == "gpio") {
             mode_gpio(argc, argv);
+        } else if (mode == "freq-hop") {
+            mode_freq_hop(argc, argv);
         } else if (mode == "info") {
             mode_info(argc, argv);
         } else {
