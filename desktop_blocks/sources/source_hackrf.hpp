@@ -18,7 +18,7 @@ struct SourceHackRFBlock : public cler::BlockBase {
     SourceHackRFBlock(const char* name,
                       uint64_t freq_hz,
                       uint32_t samp_rate_hz,
-                      int lna_gain_db = 16,  // 0-40 dB, multiple of 8
+                      int lna_gain_db = 40,  // 0-40 dB, multiple of 8
                       int vga_gain_db = 16,  // 0-62 dB, multiple of 2
                       bool amp_enable = false, // Enable RX amp (adds ~14dB)
                       size_t buffer_size = 0)
