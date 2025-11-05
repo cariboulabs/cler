@@ -12,6 +12,7 @@
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
 #include "desktop_blocks/utils/fanout.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
+#include <chrono>
 #include <iostream>
 #include <vector>
 #include <map>
@@ -229,25 +230,44 @@ void mode_tx_cw(int argc, char** argv) {
     // USRP TX sink
     SinkUHDBlock<std::complex<float>> usrp("USRP_TX", device_args, freq, rate, gain, 1);
 
-    auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&cw, &fanout.in),
-        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp.in[0]),
-        cler::BlockRunner(&spectrum),
-        cler::BlockRunner(&usrp)
-    );
+    // auto flowgraph = cler::make_desktop_flowgraph(
+    //     cler::BlockRunner(&cw, &fanout.in),
+    //     cler::BlockRunner(&fanout, &spectrum.in[0], &usrp.in[0]),
+    //     cler::BlockRunner(&spectrum),
+    //     cler::BlockRunner(&usrp)
+    // );
 
-    flowgraph.run();
-    std::cout << "Transmitting CW tone. Close window to stop." << std::endl;
+    // cler::FlowGraphConfig config;
+    // config.scheduler = cler::SchedulerType::FixedThreadPool;
+    // config.collect_detailed_stats = true;
+    // flowgraph.run(config);
+    // std::cout << "Transmitting CW tone. Close window to stop." << std::endl;
 
+    
+    auto start = std::chrono::high_resolution_clock::now();
     while (!gui.should_close()) {
-        gui.begin_frame();
-        spectrum.render();
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        cw.procedure(&fanout.in);
+        fanout.procedure(&spectrum.in[0], &usrp.in[0]);
+        spectrum.procedure();
+        usrp.procedure();
+
+        auto current = std::chrono::high_resolution_clock::now();
+        auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(current - start);
+        if (dur.count() > 20) {
+            start = current;
+
+            gui.begin_frame();
+            spectrum.render();
+            gui.end_frame();
+        }
+
+        // std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
-    flowgraph.stop();
-    std::cout << "Underflows: " << usrp.get_underflow_count() << std::endl;
+    // flowgraph.stop();
+    // std::cout << "Underflows: " << usrp.get_underflow_count() << std::endl;
+
+    // flowgraph.stats();
 }
 
 void mode_freq_hop(int argc, char** argv) {

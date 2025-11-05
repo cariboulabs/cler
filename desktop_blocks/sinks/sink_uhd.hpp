@@ -229,89 +229,22 @@ struct SinkUHDBlock : public cler::BlockBase {
             auto [ptr, size] = in[i].read_dbf();
             _read_ptrs[i] = ptr;
             _read_sizes[i] = size;
-        }
 
-        // Find minimum available samples across all channels
-        size_t min_available = _read_sizes[0];
-        for (size_t i = 1; i < _num_channels; ++i) {
-            min_available = std::min(min_available, _read_sizes[i]);
-        }
+            if (_read_sizes[i] < 300) {
+                return cler::Error::NotEnoughSamples;
+            }
+            printf("SinkUHDBlock: Channel %zu has %zu samples available\n", i, _read_sizes[i]);
 
-        if (min_available == 0) {
-            return cler::Error::NotEnoughSamples;
-        }
-
-        // Process in MTU-sized chunks
-        size_t samples_sent = 0;
-        bool first_packet = true;
-
-        while (samples_sent < min_available) {
-            size_t to_send = std::min(max_samps_per_packet, min_available - samples_sent);
-            bool last_packet = (samples_sent + to_send >= min_available);
-
-            // Prepare metadata (use user-configured or default)
             uhd::tx_metadata_t md;
-            md.has_time_spec = use_tx_metadata && next_tx_metadata.has_time_spec;
-            if (md.has_time_spec) {
-                md.time_spec = uhd::time_spec_t(
-                    next_tx_metadata.time_seconds,
-                    next_tx_metadata.time_frac_seconds
-                );
-            }
+            md.start_of_burst = false;
+            md.end_of_burst = false;
+            md.has_time_spec = false;               
 
-            // Handle burst flags
-            if (use_tx_metadata) {
-                md.start_of_burst = first_packet && next_tx_metadata.start_of_burst;
-                md.end_of_burst = last_packet && next_tx_metadata.end_of_burst;
-            } else {
-                md.start_of_burst = false;
-                md.end_of_burst = false;
-            }
-
-            // Fill UHD buffer pointer array with current offsets
-            for (size_t i = 0; i < _num_channels; ++i) {
-                _uhd_buffs[i] = const_cast<T*>(_read_ptrs[i] + samples_sent);
-            }
-
-            // Transmit samples from all channels (multi-channel atomic send)
-            size_t num_tx = tx_stream->send(_uhd_buffs.data(), to_send, md, 0.1);  // 100ms timeout
-
-            // CRITICAL FIX: Only demote to continuous mode after EOB is sent
-            // For timed bursts (has_time_spec + end_of_burst), keep metadata active
-            // until the final packet carries the EOB flag to properly close the burst.
-            // For "timed start, continuous stream" (has_time_spec but no EOB), demote
-            // after first packet to prevent timestamp reuse errors.
-            if (use_tx_metadata && md.has_time_spec) {
-                if (md.end_of_burst) {
-                    // Burst complete - demote to continuous for next data
-                    use_tx_metadata = false;
-                } else if (first_packet && !next_tx_metadata.end_of_burst) {
-                    // Continuous stream pattern - demote after first packet
-                    use_tx_metadata = false;
-                }
-            }
-
-            first_packet = false;
-
-            if (num_tx < to_send) {
-                // Partial send - could be timeout or other issue
-                samples_sent += num_tx;
-
-                // Commit reads on all channels
-                for (size_t i = 0; i < _num_channels; ++i) {
-                    in[i].commit_read(samples_sent);
-                }
-
-                handle_async_events();
-                return cler::Error::NotEnoughSpace;
-            }
-
-            samples_sent += num_tx;
-        }
-
-        // Commit reads on all channels
-        for (size_t i = 0; i < _num_channels; ++i) {
-            in[i].commit_read(samples_sent);
+            size_t sent = tx_stream->send(_read_ptrs[i],
+                            _read_sizes[i],
+                            md,
+                            0.1);  // 100ms timeout
+            in->commit_read(sent);
         }
 
         // Check for async events
