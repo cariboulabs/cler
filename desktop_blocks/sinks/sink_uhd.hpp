@@ -233,7 +233,6 @@ struct SinkUHDBlock : public cler::BlockBase {
             if (_read_sizes[i] < 300) {
                 return cler::Error::NotEnoughSamples;
             }
-            printf("SinkUHDBlock: Channel %zu has %zu samples available\n", i, _read_sizes[i]);
 
             uhd::tx_metadata_t md;
             md.start_of_burst = false;
