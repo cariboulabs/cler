@@ -3,13 +3,14 @@
 
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
-#include "desktop_blocks/sources/source_uhd_zohar_full.hpp"
+#include "desktop_blocks/sources/source_uhd.hpp"
 #include "desktop_blocks/sources/source_file.hpp"
 #include "desktop_blocks/sources/source_chirp.hpp"
 #include "desktop_blocks/sources/source_cw.hpp"
 #include "desktop_blocks/sinks/sink_uhd.hpp"
 #include "desktop_blocks/sinks/sink_null.hpp"
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
+#include "desktop_blocks/plots/plot_cspectrogram.hpp"
 #include "desktop_blocks/utils/fanout.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include <chrono>
@@ -40,18 +41,23 @@ void mode_rx(int argc, char** argv) {
     double rate = argc > 3 ? std::stod(argv[3]) : 2e6;
     double gain = argc > 4 ? std::stod(argv[4]) : 30.0;
     std::string device_address = argc > 5 ? argv[5] : "";
-
+    const size_t FFT_SIZE = 1024;
     std::cout << "RX Mode - Spectrum Plot" << std::endl;
     std::cout << "Device: " << (device_address.empty() ? "default" : device_address) << std::endl;
     std::cout << "Freq: " << freq/1e6 << " MHz, Rate: " << rate/1e6 << " MSPS, Gain: " << gain << " dB" << std::endl;
 
-    cler::GuiManager gui(1200, 600, "USRP RX - Spectrum");
-    SourceUHDBlock<std::complex<float>> usrp("USRP", freq, rate, device_address, gain, 1);
+
     PlotCSpectrumBlock spectrum("USRP Spectrum", {"I/Q"}, rate, 2048);
-    spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
+    PlotCSpectrogramBlock spectrogram("Spectrogram", {"usrp_signal"}, rate, FFT_SIZE, 1000);
+    cler::GuiManager gui(1000, 800, "USRP Receiver Example");
+    spectrum.set_initial_window(1000.0f, 0.0f, 400.0f, 400.0f);
+    FanoutBlock<std::complex<float>> fanout("Fanout", 2);
+    SourceUHDBlock<std::complex<float>> usrp("USRP", freq, rate, device_address, gain, 1);
     auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&usrp, &spectrum.in[0]),
-        cler::BlockRunner(&spectrum)
+        cler::BlockRunner(&usrp, &fanout.in),
+        cler::BlockRunner(&fanout, &spectrum.in[0], &spectrogram.in[0]),
+        cler::BlockRunner(&spectrum),
+        cler::BlockRunner(&spectrogram)
     );
 
     flowgraph.run();
@@ -60,6 +66,7 @@ void mode_rx(int argc, char** argv) {
     while (!gui.should_close()) {
         gui.begin_frame();
         spectrum.render();
+        spectrogram.render();
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
@@ -97,6 +104,7 @@ void mode_tx_chirp(int argc, char** argv) {
     // Spectrum plot
     PlotCSpectrumBlock spectrum("TX Spectrum", {"Chirp"}, rate, 2048);
     spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
+
 
     // USRP TX sink
     SinkUHDBlock<std::complex<float>> usrp("USRP_TX", freq, rate, device_address, gain, 1);
