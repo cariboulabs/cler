@@ -23,28 +23,19 @@ void print_usage(const char* prog) {
     std::cout << "\nAvailable modes:" << std::endl;
     std::cout << "  list        - List available USRP devices" << std::endl;
     std::cout << "  rx          - Simple RX with spectrum plot" << std::endl;
-    std::cout << "  mimo        - Dual-channel MIMO RX with spectrum plots" << std::endl;
     std::cout << "  tx-chirp    - Transmit chirp signal with spectrum plot" << std::endl;
     std::cout << "  tx-cw       - Transmit continuous wave with spectrum plot" << std::endl;
-    std::cout << "  freq-hop    - Frequency hopping with timed commands" << std::endl;
-    std::cout << "  gpio        - GPIO control with precise timing" << std::endl;
     std::cout << "  info        - Display detailed device information" << std::endl;
     std::cout << "\nMode-specific options:" << std::endl;
     std::cout << "  rx:         [device_args] [freq_hz] [rate_hz] [gain_db]" << std::endl;
-    std::cout << "  mimo:       [device_args] [freq_hz] [rate_hz] [gain_db]" << std::endl;
     std::cout << "  tx-chirp:   [device_args] [freq_hz] [rate_hz] [gain_db] [amplitude]" << std::endl;
     std::cout << "  tx-cw:      [device_args] [freq_hz] [rate_hz] [gain_db] [cw_offset_hz] [amplitude]" << std::endl;
-    std::cout << "  freq-hop:   [device_args] [base_freq_hz] [hop_interval_s] [num_hops]" << std::endl;
-    std::cout << "  gpio:       [device_args] [gpio_bank]" << std::endl;
     std::cout << "  info:       [device_args]" << std::endl;
     std::cout << "\nExamples:" << std::endl;
     std::cout << "  " << prog << " list" << std::endl;
     std::cout << "  " << prog << " rx \"addr=192.168.10.2\" 915e6 2e6 30" << std::endl;
-    std::cout << "  " << prog << " mimo \"addr=192.168.10.2\" 915e6 2e6 30" << std::endl;
     std::cout << "  " << prog << " tx-chirp \"addr=192.168.10.2\" 915e6 2e6 0 0.3" << std::endl;
     std::cout << "  " << prog << " tx-cw \"addr=192.168.10.2\" 915e6 2e6 0 100e3 0.5" << std::endl;
-    std::cout << "  " << prog << " freq-hop \"addr=192.168.10.2\" 900e6 0.1 10" << std::endl;
-    std::cout << "  " << prog << " gpio \"addr=192.168.10.2\" FP0" << std::endl;
     std::cout << std::endl;
 }
 
@@ -102,53 +93,13 @@ void mode_rx(int argc, char** argv) {
     std::cout << "Overflows: " << usrp.get_overflow_count() << std::endl;
 }
 
-void mode_mimo(int argc, char** argv) {
-    std::string device_args = argc > 2 ? argv[2] : "";
-    double freq = argc > 3 ? std::stod(argv[3]) : 915e6;
-    double rate = argc > 4 ? std::stod(argv[4]) : 2e6;
-    double gain = argc > 5 ? std::stod(argv[5]) : 30.0;
-
-    std::cout << "MIMO Mode - Dual-channel RX with Spectrum Plots" << std::endl;
-    std::cout << "Device: " << (device_args.empty() ? "default" : device_args) << std::endl;
-    std::cout << "Freq: " << freq/1e6 << " MHz, Rate: " << rate/1e6 << " MSPS, Gain: " << gain << " dB" << std::endl;
-
-    cler::GuiManager gui(1200, 800, "USRP MIMO - Dual Channel");
-
-    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, freq, rate, gain, 2);
-    PlotCSpectrumBlock spectrum0("Channel 0", {"Ch0"}, rate, 2048);
-    PlotCSpectrumBlock spectrum1("Channel 1", {"Ch1"}, rate, 2048);
-
-    spectrum0.set_initial_window(0.0f, 0.0f, 1200.0f, 380.0f);
-    spectrum1.set_initial_window(0.0f, 400.0f, 1200.0f, 380.0f);
-
-    auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&usrp, &spectrum0.in[0], &spectrum1.in[0]),
-        cler::BlockRunner(&spectrum0),
-        cler::BlockRunner(&spectrum1)
-    );
-
-    flowgraph.run();
-    std::cout << "Flowgraph running... Close window to exit." << std::endl;
-
-    while (!gui.should_close()) {
-        gui.begin_frame();
-        spectrum0.render();
-        spectrum1.render();
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    }
-
-    flowgraph.stop();
-    std::cout << "Overflows: " << usrp.get_overflow_count() << std::endl;
-}
-
 void mode_tx_chirp(int argc, char** argv) {
     std::string device_args = argc > 2 ? argv[2] : "";
     double freq = argc > 3 ? std::stod(argv[3]) : 915e6;
     double rate = argc > 4 ? std::stod(argv[4]) : 2e6;
     double gain = argc > 5 ? std::stod(argv[5]) : 0.0;
     float amplitude = argc > 6 ? std::stof(argv[6]) : 0.3f;
-
+    float chirp_duration = argc > 7 ? std::stof(argv[7]) : 1.0f;
     std::cout << "TX Chirp Mode" << std::endl;
     std::cout << "Device: " << (device_args.empty() ? "default" : device_args) << std::endl;
     std::cout << "Freq: " << freq/1e6 << " MHz, Rate: " << rate/1e6 << " MSPS, Gain: " << gain << " dB" << std::endl;
@@ -159,11 +110,11 @@ void mode_tx_chirp(int argc, char** argv) {
 
     // Chirp source: -500 kHz to +500 kHz over 1 second
     SourceChirpBlock<std::complex<float>> chirp("Chirp", 
-        amplitude,      // Amplitude
-        -500e3f,        // Start frequency
-        500e3f,         // End frequency
-        rate,           // Sample rate
-        10.0f);          // Duration
+        amplitude,       // Amplitude
+        -500e3f,         // Start frequency
+        500e3f,          // End frequency
+        rate,            // Sample rate
+        chirp_duration); // Duration
 
     // Fanout to spectrum plot and USRP
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
@@ -230,147 +181,25 @@ void mode_tx_cw(int argc, char** argv) {
     // USRP TX sink
     SinkUHDBlock<std::complex<float>> usrp("USRP_TX", device_args, freq, rate, gain, 1);
 
-    // auto flowgraph = cler::make_desktop_flowgraph(
-    //     cler::BlockRunner(&cw, &fanout.in),
-    //     cler::BlockRunner(&fanout, &spectrum.in[0], &usrp.in[0]),
-    //     cler::BlockRunner(&spectrum),
-    //     cler::BlockRunner(&usrp)
-    // );
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&cw, &fanout.in),
+        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp.in[0]),
+        cler::BlockRunner(&spectrum),
+        cler::BlockRunner(&usrp)
+    );
 
-    // cler::FlowGraphConfig config;
-    // config.scheduler = cler::SchedulerType::FixedThreadPool;
-    // config.collect_detailed_stats = true;
-    // flowgraph.run(config);
-    // std::cout << "Transmitting CW tone. Close window to stop." << std::endl;
+    flowgraph.run();
+    std::cout << "Transmitting chirp signal. Close window to stop." << std::endl;
 
-    
-    auto start = std::chrono::high_resolution_clock::now();
     while (!gui.should_close()) {
-        cw.procedure(&fanout.in);
-        fanout.procedure(&spectrum.in[0], &usrp.in[0]);
-        spectrum.procedure();
-        usrp.procedure();
-
-        auto current = std::chrono::high_resolution_clock::now();
-        auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(current - start);
-        if (dur.count() > 20) {
-            start = current;
-
-            gui.begin_frame();
-            spectrum.render();
-            gui.end_frame();
-        }
-
-        // std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        gui.begin_frame();
+        spectrum.render();
+        gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
-    // flowgraph.stop();
-    // std::cout << "Underflows: " << usrp.get_underflow_count() << std::endl;
-
-    // flowgraph.stats();
-}
-
-void mode_freq_hop(int argc, char** argv) {
-    std::string device_args = argc > 2 ? argv[2] : "";
-    double base_freq = argc > 3 ? std::stod(argv[3]) : 900e6;
-    double hop_interval = argc > 4 ? std::stod(argv[4]) : 0.1;
-    int num_hops = argc > 5 ? std::stoi(argv[5]) : 10;
-
-    std::cout << "Frequency Hopping Mode" << std::endl;
-    std::cout << "Base Freq: " << base_freq/1e6 << " MHz, Interval: " << hop_interval << "s, Hops: " << num_hops << std::endl;
-
-    std::vector<double> frequencies;
-    for (int i = 0; i < num_hops; ++i) {
-        frequencies.push_back(base_freq + (i * 10e6));
-    }
-
-    std::cout << "Hopping sequence: ";
-    for (auto f : frequencies) std::cout << f/1e6 << " ";
-    std::cout << "MHz" << std::endl;
-
-    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, frequencies[0], 2e6, 30.0, 1);
-    SinkNullBlock<std::complex<float>> null_sink("Null");
-
-    usrp.set_time_now(0.0);
-
-    std::cout << "Scheduling hops..." << std::endl;
-    for (size_t i = 0; i < frequencies.size(); ++i) {
-        double hop_time = i * hop_interval;
-        usrp.set_command_time(hop_time);
-        usrp.set_frequency_timed(frequencies[i]);
-    }
-
-    auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&usrp, &null_sink.in),
-        cler::BlockRunner(&null_sink)
-    );
-
-    flowgraph.run();
-
-    double total_time = num_hops * hop_interval + 0.5;
-    auto start = std::chrono::steady_clock::now();
-
-    while (true) {
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count() / 1000.0;
-        if (elapsed >= total_time) break;
-
-        double usrp_time = usrp.get_time_now();
-        int current_hop = static_cast<int>(usrp_time / hop_interval);
-        if (current_hop < num_hops) {
-            std::cout << "\rTime: " << usrp_time << "s | Hop: " << current_hop
-                      << " | Freq: " << frequencies[current_hop]/1e6 << " MHz     " << std::flush;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-
-    std::cout << std::endl;
     flowgraph.stop();
-}
-
-void mode_gpio(int argc, char** argv) {
-    std::string device_args = argc > 2 ? argv[2] : "";
-    std::string gpio_bank = argc > 3 ? argv[3] : "FP0";
-
-    std::cout << "GPIO Trigger Mode" << std::endl;
-    std::cout << "GPIO Bank: " << gpio_bank << " (device-specific)" << std::endl;
-
-    SourceUHDBlock<std::complex<float>> usrp("USRP", device_args, 915e6, 2e6, 30.0, 1);
-    SinkNullBlock<std::complex<float>> null_sink("Null");
-
-    std::cout << "Configuring GPIO..." << std::endl;
-    usrp.gpio_set_ddr(gpio_bank, 0xFF, 0xFF);
-    usrp.gpio_set_ctrl(gpio_bank, 0x00, 0xFF);
-    usrp.gpio_set_out(gpio_bank, 0x00, 0xFF);
-
-    usrp.set_time_now(0.0);
-
-    std::cout << "Scheduling GPIO toggles..." << std::endl;
-    for (int i = 0; i < 5; ++i) {
-        double toggle_time = 1.0 + (i * 0.5);
-        uint32_t value = (i % 2 == 0) ? 0xFF : 0x00;
-        usrp.set_command_time(toggle_time);
-        usrp.gpio_set_out_timed(gpio_bank, value, 0xFF);
-        std::cout << "  t=" << toggle_time << "s: 0x" << std::hex << value << std::dec << std::endl;
-    }
-
-    auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&usrp, &null_sink.in),
-        cler::BlockRunner(&null_sink)
-    );
-
-    flowgraph.run();
-
-    while (usrp.get_time_now() < 4.0) {
-        uint32_t gpio_state = usrp.gpio_get_in(gpio_bank);
-        std::cout << "\rTime: " << usrp.get_time_now() << "s | GPIO: 0x"
-                  << std::hex << gpio_state << std::dec << "     " << std::flush;
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-
-    std::cout << std::endl;
-    flowgraph.stop();
-    usrp.gpio_set_out(gpio_bank, 0x00, 0xFF);
+    std::cout << "Underflows: " << usrp.get_underflow_count() << std::endl;
 }
 
 void mode_info(int argc, char** argv) {
@@ -442,16 +271,10 @@ int main(int argc, char** argv) {
             mode_list();
         } else if (mode == "rx") {
             mode_rx(argc, argv);
-        } else if (mode == "mimo") {
-            mode_mimo(argc, argv);
         } else if (mode == "tx-chirp") {
             mode_tx_chirp(argc, argv);
         } else if (mode == "tx-cw") {
             mode_tx_cw(argc, argv);
-        } else if (mode == "gpio") {
-            mode_gpio(argc, argv);
-        } else if (mode == "freq-hop") {
-            mode_freq_hop(argc, argv);
         } else if (mode == "info") {
             mode_info(argc, argv);
         } else {
