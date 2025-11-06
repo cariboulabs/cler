@@ -50,16 +50,16 @@ template<typename T>
 struct SourceUHDBlock : public cler::BlockBase {
 
     SourceUHDBlock(const char* name,
-                   const std::string& args,
                    double freq,
                    double rate,
+                   const std::string& dvc_adrs = "",
                    double gain = 20.0,
                    size_t num_channels = 1,
                    const std::string& otw_format = "sc16")
         : BlockBase(name),
-          device_args(args),
           center_freq(freq),
           sample_rate(rate),
+          device_address(dvc_adrs),
           gain_db(gain),
           _num_channels(num_channels),
           wire_format(otw_format) {
@@ -68,7 +68,7 @@ struct SourceUHDBlock : public cler::BlockBase {
             throw std::invalid_argument("SourceUHDBlock: num_channels must be at least 1");
         }
 
-        usrp = uhd::usrp::multi_usrp::make(device_args);
+        usrp = uhd::usrp::multi_usrp::make(device_address);
         if (!usrp) {
             throw std::runtime_error("SourceUHDBlock: Failed to create USRP device");
         }
@@ -358,9 +358,9 @@ protected:
     uhd::rx_streamer::sptr rx_stream;
 
 private:
-    std::string device_args;
     double center_freq;
     double sample_rate;
+    std::string device_address;
     double gain_db;
     size_t _num_channels;
     std::string wire_format;

@@ -48,15 +48,15 @@ struct SinkUHDBlock : public cler::BlockBase {
     cler::Channel<T>* in = nullptr;  // Array of input channels (like add.hpp)
 
     SinkUHDBlock(const char* name,
-                 const std::string& args,
                  double freq,
                  double rate,
+                 const std::string& dvc_adrs = "",
                  double gain = 0.0,
                  size_t num_channels = 1,
                  size_t channel_size = 0,
                  const std::string& otw_format = "sc16")
         : BlockBase(name),
-          device_args(args),
+          device_address(dvc_adrs),
           center_freq(freq),
           sample_rate(rate),
           gain_db(gain),
@@ -98,9 +98,9 @@ struct SinkUHDBlock : public cler::BlockBase {
         // Any throw here will cleanup all channels automatically
         try {
             // Create USRP device
-            usrp = uhd::usrp::multi_usrp::make(device_args);
+            usrp = uhd::usrp::multi_usrp::make(device_address);
             if (!usrp) {
-                throw std::runtime_error("SinkUHDBlock: Failed to create USRP device with args: " + device_args);
+                throw std::runtime_error("SinkUHDBlock: Failed to create USRP device with args: " + device_address);
             }
 
             // Verify device has enough channels
@@ -668,7 +668,7 @@ private:
     }
 
     // Configuration
-    std::string device_args;
+    std::string device_address;
     double center_freq;
     double sample_rate;
     double gain_db;
