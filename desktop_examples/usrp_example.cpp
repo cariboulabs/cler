@@ -52,9 +52,9 @@ void mode_rx(int argc, char** argv) {
     cler::GuiManager gui(1000, 800, "USRP Receiver Example");
     spectrum.set_initial_window(1000.0f, 0.0f, 400.0f, 400.0f);
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
-    SourceUHDBlock<std::complex<float>> usrp("USRP", freq, rate, device_address, gain, 1);
+    SourceUHDBlock<std::complex<float>> usrp_source("USRP", freq, rate, device_address, gain, 1);
     auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&usrp, &fanout.in),
+        cler::BlockRunner(&usrp_source, &fanout.in),
         cler::BlockRunner(&fanout, &spectrum.in[0], &spectrogram.in[0]),
         cler::BlockRunner(&spectrum),
         cler::BlockRunner(&spectrogram)
@@ -63,16 +63,42 @@ void mode_rx(int argc, char** argv) {
     flowgraph.run();
     std::cout << "Flowgraph running... Close window to exit." << std::endl;
 
+    double freq1 = freq + 0.5e6;       // -10 MHz (e.g., 905 MHz)
+    double freq2 = freq - 0.5e6;       // +10 MHz (e.g., 925 MHz)
+    bool use_freq1 = true;
+    auto last_hop = std::chrono::steady_clock::now();
+
+
     while (!gui.should_close()) {
         gui.begin_frame();
         spectrum.render();
         spectrogram.render();
         gui.end_frame();
+
+        // Check if 1 second has elapsed
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_hop);
+        
+        if (elapsed.count() >= 1000) {  // 1 second
+            // Toggle frequency
+            use_freq1 = !use_freq1;
+            double new_freq = use_freq1 ? freq1 : freq2;
+            
+            // Reconfigure
+            USRPConfig new_config{new_freq, rate, gain};
+            if (usrp_source.configure(new_config, 0)) {
+                std::cout << "\rHopped to " << new_freq/1e6 << " MHz     " << std::flush;
+            } else {
+                std::cerr << "\nFailed to hop to " << new_freq/1e6 << " MHz" << std::endl;
+            }
+            
+            last_hop = now;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
     flowgraph.stop();
-    std::cout << "Overflows: " << usrp.get_overflow_count() << std::endl;
+    std::cout << "Overflows: " << usrp_source.get_overflow_count() << std::endl;
 }
 
 void mode_tx_chirp(int argc, char** argv) {
@@ -87,6 +113,11 @@ void mode_tx_chirp(int argc, char** argv) {
     std::cout << "Freq: " << freq/1e6 << " MHz, Rate: " << rate/1e6 << " MSPS, Gain: " << gain << " dB" << std::endl;
     std::cout << "Amplitude: " << amplitude << std::endl;
     std::cout << "Chirp: -500 kHz to +500 kHz over " << chirp_duration << " seconds" << std::endl;
+
+    USRPConfig config;
+    config.center_freq_Hz = freq;
+    config.sample_rate_Hz = rate;
+    config.gain = gain;
 
     cler::GuiManager gui(1200, 600, "USRP TX - Chirp Signal");
 
@@ -105,15 +136,15 @@ void mode_tx_chirp(int argc, char** argv) {
     PlotCSpectrumBlock spectrum("TX Spectrum", {"Chirp"}, rate, 2048);
     spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
 
-
+    
     // USRP TX sink
-    SinkUHDBlock<std::complex<float>> usrp("USRP_TX", freq, rate, device_address, gain, 1);
+    SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX", device_address, 1, 0, "sc16", &config);
 
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&chirp, &fanout.in),
-        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp.in[0]),
+        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp_sink.in[0]),
         cler::BlockRunner(&spectrum),
-        cler::BlockRunner(&usrp)
+        cler::BlockRunner(&usrp_sink)
     );
 
     flowgraph.run();
@@ -127,7 +158,7 @@ void mode_tx_chirp(int argc, char** argv) {
     }
 
     flowgraph.stop();
-    std::cout << "Underflows: " << usrp.get_underflow_count() << std::endl;
+    std::cout << "Underflows: " << usrp_sink.get_underflow_count() << std::endl;
 }
 
 void mode_tx_cw(int argc, char** argv) {
@@ -147,6 +178,11 @@ void mode_tx_cw(int argc, char** argv) {
     std::cout << "Rate: " << rate/1e6 << " MSPS, Gain: " << gain << " dB" << std::endl;
     std::cout << "Amplitude: " << amplitude << std::endl;
 
+    USRPConfig config;
+    config.center_freq_Hz = freq;
+    config.sample_rate_Hz = rate;
+    config.gain = gain;
+
     cler::GuiManager gui(1200, 600, "USRP TX - Continuous Wave");
 
     // CW source
@@ -163,17 +199,17 @@ void mode_tx_cw(int argc, char** argv) {
     spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
 
     // USRP TX sink
-    SinkUHDBlock<std::complex<float>> usrp("USRP_TX", freq, rate, device_address, gain, 1);
-
+    SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX", device_address, 1, 0, "sc16", &config);
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&cw, &fanout.in),
-        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp.in[0]),
+        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp_sink.in[0]),
         cler::BlockRunner(&spectrum),
-        cler::BlockRunner(&usrp)
+        cler::BlockRunner(&usrp_sink)
     );
 
     flowgraph.run();
     std::cout << "Transmitting cw signal. Close window to stop." << std::endl;
+    size_t last_underflows = 0;
 
     while (!gui.should_close()) {
         gui.begin_frame();
@@ -183,7 +219,7 @@ void mode_tx_cw(int argc, char** argv) {
     }
 
     flowgraph.stop();
-    std::cout << "Underflows: " << usrp.get_underflow_count() << std::endl;
+    std::cout << "Underflows: " << usrp_sink.get_underflow_count() << std::endl;
 }
 
 int main(int argc, char** argv) {
