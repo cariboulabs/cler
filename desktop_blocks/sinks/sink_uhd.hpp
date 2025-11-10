@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
+#include "desktop_blocks/utils/usrp_common.hpp"
 
 #ifdef __has_include
     #if __has_include(<uhd/usrp/multi_usrp.hpp>)
@@ -31,13 +32,6 @@ struct AsyncTxEvent {
     uhd::async_metadata_t::event_code_t event_code = uhd::async_metadata_t::EVENT_CODE_BURST_ACK;
     double time_seconds = 0.0;
     double time_frac_seconds = 0.0;
-};
-
-struct USRPConfig {
-    double center_freq_Hz = 915e6;
-    double sample_rate_Hz = 2e6;
-    double gain = 40.0;
-    double bandwidth_Hz = 4e6;
 };
 
 template<typename T>

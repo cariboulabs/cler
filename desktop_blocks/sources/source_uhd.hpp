@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
+#include "desktop_blocks/utils/usrp_common.hpp"
 
 #ifdef __has_include
     #if __has_include(<uhd/usrp/multi_usrp.hpp>)
@@ -50,7 +51,8 @@ struct SourceUHDBlock : public cler::BlockBase {
           device_address(dvc_adrs),
           gain_db(gain),
           _num_channels(num_channels),
-          wire_format(otw_format) {
+          wire_format(otw_format),
+          _configuring(false) {
 
         usrp = uhd::usrp::multi_usrp::make(device_address);
         if (!usrp) {
@@ -89,10 +91,58 @@ struct SourceUHDBlock : public cler::BlockBase {
     }
 
     ~SourceUHDBlock() {
+        if (overflow_count > 0) {
+            std::cout << "SourceUHDBlock: Total overflows: " << overflow_count << std::endl;
+        }
+    }
+
+    bool configure(const USRPConfig& config, size_t channel = 0) {
+        _configuring = true;
+        try {
+            // Set sample rate
+            usrp->set_rx_rate(config.sample_rate_Hz, channel);
+            double actual_rate = usrp->get_rx_rate(channel);
+            if (std::abs(actual_rate - config.sample_rate_Hz) > 1.0) {
+                std::cout << "Warning: Requested " << config.sample_rate_Hz/1e6 
+                          << " MSPS, got " << actual_rate/1e6 << " MSPS" << std::endl;
+            }
+
+            // Set frequency
+            auto freq_range = usrp->get_rx_freq_range(channel);
+            if (config.center_freq_Hz < freq_range.start() || 
+                config.center_freq_Hz > freq_range.stop()) {
+                std::cerr << "Frequency " << config.center_freq_Hz/1e6 
+                          << " MHz out of range" << std::endl;
+            }
+            usrp->set_rx_freq(uhd::tune_request_t(config.center_freq_Hz), channel);
+
+            // Set gain
+            auto gain_range = usrp->get_rx_gain_range(channel);
+            if (config.gain < gain_range.start() || config.gain > gain_range.stop()) {
+                std::cerr << "Gain " << config.gain << " dB out of range" << std::endl;
+            }
+            usrp->set_rx_gain(config.gain, channel);
+
+            // Set bandwidth (if specified)
+            if (config.bandwidth_Hz > 0) {
+                usrp->set_rx_bandwidth(config.bandwidth_Hz, channel);
+            }
+            _configuring = false;
+            return true;
+
+        } catch (const std::exception& e) {
+            std::cerr << "Configuration failed: " << e.what() << std::endl;
+            _configuring = false;
+            return false;
+        }
     }
 
     template<typename... OChannels>
     cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
+        if (_configuring.load(std::memory_order_acquire)) {
+            return cler::Empty{};  // Skip this iteration
+        }
+
         constexpr size_t num_outs = sizeof...(OChannels);
 
         if (num_outs != _num_channels) {
@@ -132,15 +182,10 @@ private:
     double gain_db;
     size_t _num_channels;
     std::string wire_format;
+    std::atomic<bool> _configuring;
     size_t overflow_count = 0;
 };
 
 using SourceUHDBlockCF32 = SourceUHDBlock<std::complex<float>>;
 using SourceUHDBlockSC16 = SourceUHDBlock<std::complex<int16_t>>;
 using SourceUHDBlockSC8 = SourceUHDBlock<std::complex<int8_t>>;
-
-struct UHDDeviceInfo {
-    std::string type, serial, name, product;
-    uhd::device_addr_t args;
-    std::string get_args_string() const { return args.to_string(); }
-};
