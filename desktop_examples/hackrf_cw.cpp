@@ -11,29 +11,32 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <string>
+#include <cstring>
 
 void print_usage(const char* prog) {
     std::cout << "\nHackRF CW Example - Transmit Continuous Wave\n" << std::endl;
-    std::cout << "Usage: " << prog << " [freq_mhz] [sample_rate_msps] [cw_offset_khz] [amplitude] [txvga_gain_db] [amp_enable]" << std::endl;
-    std::cout << "\nParameters:" << std::endl;
-    std::cout << "  freq_mhz         - TX center frequency in MHz (default: 915)" << std::endl;
-    std::cout << "  sample_rate_msps - Sample rate in MSPS (default: 2)" << std::endl;
-    std::cout << "  cw_offset_khz    - CW tone offset from center in kHz (default: 100)" << std::endl;
-    std::cout << "  amplitude        - Signal amplitude 0.0-1.0 (default: 0.5)" << std::endl;
-    std::cout << "  txvga_gain_db    - TX VGA gain 0-47 dB (default: 20)" << std::endl;
-    std::cout << "  amp_enable       - Enable TX amp: 0 or 1 (default: 0)" << std::endl;
+    std::cout << "Usage: " << prog << " [OPTIONS]" << std::endl;
+    std::cout << "\nOptions:" << std::endl;
+    std::cout << "  -f, --freq FREQ          TX center frequency in MHz (default: 915)" << std::endl;
+    std::cout << "  -s, --samplerate RATE    Sample rate in MSPS (default: 2)" << std::endl;
+    std::cout << "  -o, --offset OFFSET      CW tone offset from center in kHz (default: 100)" << std::endl;
+    std::cout << "  -a, --amplitude AMP      Signal amplitude 0.0-1.0 (default: 0.5)" << std::endl;
+    std::cout << "  -g, --gain GAIN          TX VGA gain 0-47 dB (default: 47)" << std::endl;
+    std::cout << "  -A, --amp                Enable TX amplifier (default: disabled)" << std::endl;
+    std::cout << "  -h, --help               Show this help message" << std::endl;
     std::cout << "\nExamples:" << std::endl;
     std::cout << "  " << prog << std::endl;
-    std::cout << "  " << prog << " 915 2 100 0.5 20 0" << std::endl;
-    std::cout << "  " << prog << " 433 4 0 0.3 30 0    # Tone at center frequency" << std::endl;
-    std::cout << "  " << prog << " 915 2 250 0.7 25 1  # With amp enabled" << std::endl;
+    std::cout << "  " << prog << " -f 915 -s 2 -o 100 -a 0.5 -g 20" << std::endl;
+    std::cout << "  " << prog << " --freq 433 --samplerate 4 --offset 0 --amplitude 0.3" << std::endl;
+    std::cout << "  " << prog << " -f 915 -o 250 -a 0.7 -g 25 -A" << std::endl;
     std::cout << "\nWarning: Ensure you have proper licensing and are using appropriate" << std::endl;
     std::cout << "frequencies for your region. This transmits a continuous carrier!" << std::endl;
     std::cout << std::endl;
 }
 
 int main(int argc, char** argv) {
-    // Parse command line arguments
+    // Default values
     double freq_mhz = 915.0;
     double sample_rate_msps = 2.0;
     double cw_offset_khz = 100.0;
@@ -41,35 +44,70 @@ int main(int argc, char** argv) {
     int txvga_gain_db = 47;
     bool amp_enable = false;
 
-    if (argc > 1) {
-        if (std::string(argv[1]) == "-h" || std::string(argv[1]) == "--help") {
+    // Parse command line flags
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        
+        if (arg == "-h" || arg == "--help") {
             print_usage(argv[0]);
             return 0;
         }
-        freq_mhz = std::stod(argv[1]);
-    }
-    if (argc > 2) {
-        sample_rate_msps = std::stod(argv[2]);
-    }
-    if (argc > 3) {
-        cw_offset_khz = std::stod(argv[3]);
-    }
-    if (argc > 4) {
-        amplitude = std::stof(argv[4]);
-        if (amplitude < 0.0f || amplitude > 1.0f) {
-            std::cerr << "Error: Amplitude must be 0.0-1.0" << std::endl;
+        else if (arg == "-f" || arg == "--freq") {
+            if (i + 1 < argc) {
+                freq_mhz = std::stod(argv[++i]);
+            } else {
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
+                return 1;
+            }
+        }
+        else if (arg == "-s" || arg == "--samplerate") {
+            if (i + 1 < argc) {
+                sample_rate_msps = std::stod(argv[++i]);
+            } else {
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
+                return 1;
+            }
+        }
+        else if (arg == "-o" || arg == "--offset") {
+            if (i + 1 < argc) {
+                cw_offset_khz = std::stod(argv[++i]);
+            } else {
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
+                return 1;
+            }
+        }
+        else if (arg == "-a" || arg == "--amplitude") {
+            if (i + 1 < argc) {
+                amplitude = std::stof(argv[++i]);
+                if (amplitude < 0.0f || amplitude > 1.0f) {
+                    std::cerr << "Error: Amplitude must be 0.0-1.0" << std::endl;
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
+                return 1;
+            }
+        }
+        else if (arg == "-g" || arg == "--gain") {
+            if (i + 1 < argc) {
+                txvga_gain_db = std::stoi(argv[++i]);
+                if (txvga_gain_db < 0 || txvga_gain_db > 47) {
+                    std::cerr << "Error: TXVGA gain must be 0-47 dB" << std::endl;
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
+                return 1;
+            }
+        }
+        else if (arg == "-A" || arg == "--amp") {
+            amp_enable = true;
+        }
+        else {
+            std::cerr << "Error: Unknown option '" << arg << "'" << std::endl;
+            std::cerr << "Use -h or --help for usage information" << std::endl;
             return 1;
         }
-    }
-    if (argc > 5) {
-        txvga_gain_db = std::stoi(argv[5]);
-        if (txvga_gain_db < 0 || txvga_gain_db > 47) {
-            std::cerr << "Error: TXVGA gain must be 0-47 dB" << std::endl;
-            return 1;
-        }
-    }
-    if (argc > 6) {
-        amp_enable = (std::stoi(argv[6]) != 0);
     }
 
     uint64_t freq_hz = static_cast<uint64_t>(freq_mhz * 1e6);

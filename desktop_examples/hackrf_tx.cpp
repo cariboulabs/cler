@@ -11,57 +11,133 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <string>
 
 void print_usage(const char* prog) {
     std::cout << "\nHackRF TX Example - Transmit Chirp Signal\n" << std::endl;
-    std::cout << "Usage: " << prog << " [freq_mhz] [sample_rate_msps] [txvga_gain_db] [amp_enable]" << std::endl;
-    std::cout << "\nParameters:" << std::endl;
-    std::cout << "  freq_mhz         - TX frequency in MHz (default: 915)" << std::endl;
-    std::cout << "  sample_rate_msps - Sample rate in MSPS (default: 2)" << std::endl;
-    std::cout << "  txvga_gain_db    - TX VGA gain 0-47 dB (default: 20)" << std::endl;
-    std::cout << "  amp_enable       - Enable TX amp: 0 or 1 (default: 0)" << std::endl;
-    std::cout << "\nChirp parameters:" << std::endl;
-    std::cout << "  Amplitude: 0.3 (to prevent clipping)" << std::endl;
-    std::cout << "  Sweep: -500 kHz to +500 kHz over 1 second" << std::endl;
+    std::cout << "Usage: " << prog << " [OPTIONS]" << std::endl;
+    std::cout << "\nOptions:" << std::endl;
+    std::cout << "  -f, --freq FREQ          TX frequency in MHz (default: 915)" << std::endl;
+    std::cout << "  -s, --samplerate RATE    Sample rate in MSPS (default: 2)" << std::endl;
+    std::cout << "  -g, --gain GAIN          TX VGA gain 0-47 dB (default: 47)" << std::endl;
+    std::cout << "  -A, --amp                Enable TX amplifier (default: disabled)" << std::endl;
+    std::cout << "  -a, --amplitude AMP      Signal amplitude 0.0-1.0 (default: 0.3)" << std::endl;
+    std::cout << "  -S, --start START        Chirp start frequency offset in kHz (default: -500)" << std::endl;
+    std::cout << "  -E, --end END            Chirp end frequency offset in kHz (default: 500)" << std::endl;
+    std::cout << "  -d, --duration DUR       Chirp duration in seconds (default: 0.1)" << std::endl;
+    std::cout << "  -h, --help               Show this help message" << std::endl;
     std::cout << "\nExamples:" << std::endl;
     std::cout << "  " << prog << std::endl;
-    std::cout << "  " << prog << " 915 2 20 0" << std::endl;
-    std::cout << "  " << prog << " 433 4 30 1  # 433 MHz with amp enabled" << std::endl;
+    std::cout << "  " << prog << " -f 915 -s 2 -g 20" << std::endl;
+    std::cout << "  " << prog << " --freq 433 --samplerate 4 --gain 30 -A" << std::endl;
+    std::cout << "  " << prog << " -f 915 -S -1000 -E 1000 -d 0.5  # 2 MHz sweep over 0.5s" << std::endl;
+    std::cout << "  " << prog << " -f 2400 -a 0.5 -g 25 -A  # Higher amplitude with amp" << std::endl;
     std::cout << "\nWarning: Ensure you have proper licensing and are using appropriate" << std::endl;
     std::cout << "frequencies for your region. TX amplifier adds ~10dB but increases harmonics." << std::endl;
     std::cout << std::endl;
 }
 
 int main(int argc, char** argv) {
-    // Parse command line arguments
+    // Default values
     double freq_mhz = 915.0;
     double sample_rate_msps = 2.0;
     int txvga_gain_db = 47;
     bool amp_enable = false;
+    float amplitude = 1.0f;
+    double start_freq_khz = -500.0;
+    double end_freq_khz = 500.0;
+    float duration_s = 0.1f;
 
-    if (argc > 1) {
-        if (std::string(argv[1]) == "-h" || std::string(argv[1]) == "--help") {
+    // Parse command line flags
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        
+        if (arg == "-h" || arg == "--help") {
             print_usage(argv[0]);
             return 0;
         }
-        freq_mhz = std::stod(argv[1]);
-    }
-    if (argc > 2) {
-        sample_rate_msps = std::stod(argv[2]);
-    }
-    if (argc > 3) {
-        txvga_gain_db = std::stoi(argv[3]);
-        if (txvga_gain_db < 0 || txvga_gain_db > 47) {
-            std::cerr << "Error: TXVGA gain must be 0-47 dB" << std::endl;
+        else if (arg == "-f" || arg == "--freq") {
+            if (i + 1 < argc) {
+                freq_mhz = std::stod(argv[++i]);
+            } else {
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
+                return 1;
+            }
+        }
+        else if (arg == "-s" || arg == "--samplerate") {
+            if (i + 1 < argc) {
+                sample_rate_msps = std::stod(argv[++i]);
+            } else {
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
+                return 1;
+            }
+        }
+        else if (arg == "-g" || arg == "--gain") {
+            if (i + 1 < argc) {
+                txvga_gain_db = std::stoi(argv[++i]);
+                if (txvga_gain_db < 0 || txvga_gain_db > 47) {
+                    std::cerr << "Error: TXVGA gain must be 0-47 dB" << std::endl;
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
+                return 1;
+            }
+        }
+        else if (arg == "-A" || arg == "--amp") {
+            amp_enable = true;
+        }
+        else if (arg == "-a" || arg == "--amplitude") {
+            if (i + 1 < argc) {
+                amplitude = std::stof(argv[++i]);
+                if (amplitude < 0.0f || amplitude > 1.0f) {
+                    std::cerr << "Error: Amplitude must be 0.0-1.0" << std::endl;
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
+                return 1;
+            }
+        }
+        else if (arg == "-S" || arg == "--start") {
+            if (i + 1 < argc) {
+                start_freq_khz = std::stod(argv[++i]);
+            } else {
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
+                return 1;
+            }
+        }
+        else if (arg == "-E" || arg == "--end") {
+            if (i + 1 < argc) {
+                end_freq_khz = std::stod(argv[++i]);
+            } else {
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
+                return 1;
+            }
+        }
+        else if (arg == "-d" || arg == "--duration") {
+            if (i + 1 < argc) {
+                duration_s = std::stof(argv[++i]);
+                if (duration_s <= 0.0f) {
+                    std::cerr << "Error: Duration must be greater than 0" << std::endl;
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
+                return 1;
+            }
+        }
+        else {
+            std::cerr << "Error: Unknown option '" << arg << "'" << std::endl;
+            std::cerr << "Use -h or --help for usage information" << std::endl;
             return 1;
         }
-    }
-    if (argc > 4) {
-        amp_enable = (std::stoi(argv[4]) != 0);
     }
 
     uint64_t freq_hz = static_cast<uint64_t>(freq_mhz * 1e6);
     uint32_t sample_rate_hz = static_cast<uint32_t>(sample_rate_msps * 1e6);
+    float start_freq_hz = static_cast<float>(start_freq_khz * 1e3);
+    float end_freq_hz = static_cast<float>(end_freq_khz * 1e3);
 
     std::cout << "HackRF TX Example - Chirp Signal" << std::endl;
     std::cout << "=================================" << std::endl;
@@ -69,6 +145,10 @@ int main(int argc, char** argv) {
     std::cout << "Sample Rate: " << sample_rate_msps << " MSPS" << std::endl;
     std::cout << "TXVGA Gain: " << txvga_gain_db << " dB" << std::endl;
     std::cout << "Amp Enable: " << (amp_enable ? "Yes" : "No") << std::endl;
+    std::cout << "Amplitude: " << amplitude << std::endl;
+    std::cout << "Chirp Sweep: " << start_freq_khz << " kHz to " << end_freq_khz << " kHz" << std::endl;
+    std::cout << "Chirp Duration: " << duration_s << " seconds" << std::endl;
+    std::cout << "Sweep Bandwidth: " << (end_freq_khz - start_freq_khz) << " kHz" << std::endl;
     std::cout << std::endl;
 
     try {
@@ -76,13 +156,12 @@ int main(int argc, char** argv) {
         cler::GuiManager gui(1200, 600, "HackRF TX - Chirp Signal");
 
         // Create blocks
-        // Chirp: -500 kHz to +500 kHz over 1 second, amplitude 0.3 to prevent clipping
         SourceChirpBlock<std::complex<float>> chirp("Chirp", 
-            0.3f,                    // Amplitude (reduced to prevent clipping)
-            -500e3f,                 // Start frequency: -500 kHz
-            500e3f,                  // End frequency: +500 kHz  
-            sample_rate_hz,          // Sample rate
-            0.1f);                   // Duration: 1 second
+            amplitude,               // Amplitude
+            start_freq_hz,          // Start frequency
+            end_freq_hz,            // End frequency
+            sample_rate_hz,         // Sample rate
+            duration_s);            // Duration
 
         // Fanout to send chirp to both spectrum plot and HackRF
         FanoutBlock<std::complex<float>> fanout("Fanout", 2);

@@ -30,61 +30,92 @@ struct USRPArgs {
     double chirp_duration_s = 1; // for tx-chirp
 };
 
+void print_usage(const char* prog) {
+    std::cout << "\nUSRP Example - Unified demonstration of UHD block features\n" << std::endl;
+    std::cout << "Usage: " << prog << " [OPTIONS]" << std::endl;
+    std::cout << "\nAvailable modes:" << std::endl;
+    std::cout << "  rx          - Simple RX with spectrum plot" << std::endl;
+    std::cout << "  tx-chirp    - Transmit chirp signal with spectrum plot" << std::endl;
+    std::cout << "  tx-cw       - Transmit continuous wave with spectrum plot" << std::endl;
+    std::cout << "\nOptions:" << std::endl;
+    std::cout << "  -m, --mode MODE          Operating mode: rx, tx-chirp, or tx-cw (required)" << std::endl;
+    std::cout << "  -f, --freq FREQ          Center frequency in Hz (default: 915e6)" << std::endl;
+    std::cout << "  -r, --rate RATE          Sample rate in samples/sec (default: 2e6)" << std::endl;
+    std::cout << "  -g, --gain GAIN          Gain in dB (default: depends on mode)" << std::endl;
+    std::cout << "  -a, --amp AMP            Amplitude 0.0-1.0 (default: depends on mode)" << std::endl;
+    std::cout << "  -o, --cw_offset OFFSET   CW tone offset from center in Hz (default: 0)" << std::endl;
+    std::cout << "  -F, --fft SIZE           FFT size for spectrum analysis (default: 2048)" << std::endl;
+    std::cout << "  -c, --chirp_duration DUR Chirp duration in seconds (default: 0.001)" << std::endl;
+    std::cout << "  -d, --dev ADDRESS        USRP device address (default: auto)" << std::endl;
+    std::cout << "  -h, --help               Show this help message" << std::endl;
+    std::cout << "\nExamples:" << std::endl;
+    std::cout << "  " << prog << " -m rx -f 915e6 -r 2e6 -g 30" << std::endl;
+    std::cout << "  " << prog << " --mode tx-chirp --freq 915e6 --rate 2e6 --gain 89 --amp 0.3" << std::endl;
+    std::cout << "  " << prog << " -m tx-cw -f 915e6 -r 2e6 -g 89 -o 100e3 -a 0.5" << std::endl;
+    std::cout << "  " << prog << " -m rx -d \"addr=192.168.10.2\" -f 2.4e9" << std::endl;
+    std::cout << std::endl;
+}
+
 USRPArgs parse_args(int argc, char** argv) {
     USRPArgs args;
+    
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
 
         auto next_arg = [&]() -> std::string {
             if (i + 1 >= argc) {
-                std::cerr << "Missing value after " << arg << "\n";
+                std::cerr << "Error: " << arg << " requires a value" << std::endl;
                 exit(1);
             }
             return argv[++i];
         };
 
         try {
-            if (arg == "--help" || arg == "--h") {
-                std::cout << "Usage: " << argv[0]
-                          << " --mode <rx|tx-chirp|tx-cw> [--freq <Hz>] [--rate <SPS>] "
-                             "[--gain <dB>] [--amp <0-1>] [--cw_offset <Hz>] [--fft <size>] [--chirp_duration <s>] [--dev <addr>]\n";
+            if (arg == "-h" || arg == "--help") {
+                print_usage(argv[0]);
                 exit(0);
-            } else if (arg == "--mode") {
+            }
+            else if (arg == "-m" || arg == "--mode") {
                 args.mode = next_arg();
-            } else if (arg == "--freq") {
+            }
+            else if (arg == "-f" || arg == "--freq") {
                 args.freq = std::stod(next_arg());  // supports 918e6 or 918000000
-            } else if (arg == "--rate") {
+            }
+            else if (arg == "-r" || arg == "--rate") {
                 args.rate = std::stod(next_arg());  // supports 2e6 or 2000000
-            } else if (arg == "--gain") {
+            }
+            else if (arg == "-g" || arg == "--gain") {
                 args.gain = std::stod(next_arg());
-            } else if (arg == "--amp") {
+            }
+            else if (arg == "-a" || arg == "--amp") {
                 args.amp = std::stod(next_arg());
-            } else if (arg == "--cw_offset") {
+            }
+            else if (arg == "-o" || arg == "--cw_offset") {
                 args.cw_offset = std::stod(next_arg());
-            } else if (arg == "--fft") {
+            }
+            else if (arg == "-F" || arg == "--fft") {
                 args.fft = std::stoul(next_arg());
-            } else if (arg == "--chirp_duration") {
+            }
+            else if (arg == "-c" || arg == "--chirp_duration") {
                 args.chirp_duration_s = std::stod(next_arg());
-            } else if (arg == "--dev" || arg == "--device") {
+            }
+            else if (arg == "-d" || arg == "--dev" || arg == "--device") {
                 args.device_address = next_arg();
-            } else {
-                std::cerr << "Unknown argument: " << arg << "\n";
+            }
+            else {
+                std::cerr << "Error: Unknown option '" << arg << "'" << std::endl;
+                std::cerr << "Use -h or --help for usage information" << std::endl;
                 exit(1);
             }
         } catch (const std::invalid_argument& e) {
-            std::cerr << "Invalid numeric value for " << arg << ": " << e.what() << "\n";
+            std::cerr << "Error: Invalid numeric value for " << arg << ": " << e.what() << std::endl;
             exit(1);
         } catch (const std::out_of_range& e) {
-            std::cerr << "Value out of range for " << arg << ": " << e.what() << "\n";
+            std::cerr << "Error: Value out of range for " << arg << ": " << e.what() << std::endl;
             exit(1);
         }
     }
-
-    if (args.mode.empty()) {
-        std::cerr << "Error: --mode must be specified\n";
-        exit(1);
-    }
-
+    
     return args;
 }
 
@@ -136,24 +167,6 @@ void run_usrp_tx(cler::GuiManager& gui,
 
     flowgraph.stop();
     std::cout << "Underflows: " << usrp_sink.get_underflow_count() << std::endl;
-}
-
-void print_usage(const char* prog) {
-    std::cout << "\nUSRP Example - Unified demonstration of UHD block features\n" << std::endl;
-    std::cout << "Usage: " << prog << " <mode> [options...]" << std::endl;
-    std::cout << "\nAvailable modes:" << std::endl;
-    std::cout << "  rx          - Simple RX with spectrum plot" << std::endl;
-    std::cout << "  tx-chirp    - Transmit chirp signal with spectrum plot" << std::endl;
-    std::cout << "  tx-cw       - Transmit continuous wave with spectrum plot" << std::endl;
-    std::cout << "\nMode-specific options:" << std::endl;
-    std::cout << "  rx:         [freq_hz] [rate_hz] [gain_db]" << std::endl;
-    std::cout << "  tx-chirp:   [freq_hz] [rate_hz] [gain_db] [amplitude]" << std::endl;
-    std::cout << "  tx-cw:      [freq_hz] [rate_hz] [gain_db] [cw_offset_hz] [amplitude]" << std::endl;
-    std::cout << "\nExamples:" << std::endl;
-    std::cout << "  " << prog << " rx 915e6 2e6 30" << std::endl;
-    std::cout << "  " << prog << " tx-chirp 915e6 2e6 89 0.3" << std::endl;
-    std::cout << "  " << prog << " tx-cw 915e6 2e6 89 100e3 0.5" << std::endl;
-    std::cout << std::endl;
 }
 
 void mode_rx(const USRPArgs& args) {
@@ -214,10 +227,6 @@ void mode_rx(const USRPArgs& args) {
         spectrum.render();
         spectrogram.render();
         gui.end_frame();
-
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_hop);
-
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
