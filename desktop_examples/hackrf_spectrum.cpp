@@ -6,14 +6,39 @@
 #include "desktop_blocks/utils/fanout.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
 
-int main() {
+#include <cstdlib>
+#include <string>
+#include <iostream>
+
+int main(int argc, char** argv) {
     if (hackrf_init() != HACKRF_SUCCESS) {
         throw std::runtime_error("Failed to initialize HackRF library");
     }
 
-    const uint32_t samp_rate = 4'000'000; // 4 MHz
-    const uint64_t freq_hz = 915e6;       // 915 MHz
-    const size_t FFT_SIZE = 1024; // FFT size
+    // Default parameters
+    uint64_t freq_hz = 915e6;          // 915 MHz
+    uint32_t samp_rate = 4e6;    // 4 MHz
+    size_t FFT_SIZE = 1024;            // FFT size
+
+    // --- Parse command-line flags ---
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--freq" && i + 1 < argc) {
+            freq_hz = static_cast<uint64_t>(std::stod(argv[++i]));
+        } else if (arg == "--rate" && i + 1 < argc) {
+            samp_rate = static_cast<uint32_t>(std::stod(argv[++i]));
+        } else if (arg == "--fft" && i + 1 < argc) {
+            FFT_SIZE = std::stoul(argv[++i]);
+        } else if (arg == "--help" || arg == "--h") {
+            std::cout << "Usage: " << argv[0] << " [--freq <Hz>] [--rate <SPS>] [--fft <size>]\n";
+            return 0;
+        }
+    }
+
+    std::cout << "HackRF Receiver Example:\n"
+              << "Frequency: " << freq_hz << " Hz\n"
+              << "Sample Rate: " << samp_rate << " S/s\n"
+              << "FFT Size: " << FFT_SIZE << "\n";
 
     SourceHackRFBlock source_hackrf(
         "SourceHackRF",
@@ -45,12 +70,12 @@ int main() {
         cler::BlockRunner(&timeplot)
     );
 
-    cler::GuiManager gui(800, 400, "Hackrf Receiver Example");
+    cler::GuiManager gui(800, 400, "HackRF Receiver Example");
     timeplot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f);
 
     flowgraph.run();
 
-    while (gui.should_close() == false) {
+    while (!gui.should_close()) {
         gui.begin_frame();
         timeplot.render();
         spectrogram.render();

@@ -18,6 +18,126 @@
 #include <vector>
 #include <map>
 
+struct USRPArgs {
+    std::string mode;
+    double freq = 915e6;
+    double rate = 2e6;
+    double gain = 89.75;
+    double cw_offset = 10e3; // for tx-cw
+    double amp = 1;         // amplitude
+    size_t fft = 1024;
+    std::string device_address;
+    double chirp_duration_s = 1; // for tx-chirp
+};
+
+USRPArgs parse_args(int argc, char** argv) {
+    USRPArgs args;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        auto next_arg = [&]() -> std::string {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after " << arg << "\n";
+                exit(1);
+            }
+            return argv[++i];
+        };
+
+        try {
+            if (arg == "--help" || arg == "--h") {
+                std::cout << "Usage: " << argv[0]
+                          << " --mode <rx|tx-chirp|tx-cw> [--freq <Hz>] [--rate <SPS>] "
+                             "[--gain <dB>] [--amp <0-1>] [--cw_offset <Hz>] [--fft <size>] [--chirp_duration <s>] [--dev <addr>]\n";
+                exit(0);
+            } else if (arg == "--mode") {
+                args.mode = next_arg();
+            } else if (arg == "--freq") {
+                args.freq = std::stod(next_arg());  // supports 918e6 or 918000000
+            } else if (arg == "--rate") {
+                args.rate = std::stod(next_arg());  // supports 2e6 or 2000000
+            } else if (arg == "--gain") {
+                args.gain = std::stod(next_arg());
+            } else if (arg == "--amp") {
+                args.amp = std::stod(next_arg());
+            } else if (arg == "--cw_offset") {
+                args.cw_offset = std::stod(next_arg());
+            } else if (arg == "--fft") {
+                args.fft = std::stoul(next_arg());
+            } else if (arg == "--chirp_duration") {
+                args.chirp_duration_s = std::stod(next_arg());
+            } else if (arg == "--dev" || arg == "--device") {
+                args.device_address = next_arg();
+            } else {
+                std::cerr << "Unknown argument: " << arg << "\n";
+                exit(1);
+            }
+        } catch (const std::invalid_argument& e) {
+            std::cerr << "Invalid numeric value for " << arg << ": " << e.what() << "\n";
+            exit(1);
+        } catch (const std::out_of_range& e) {
+            std::cerr << "Value out of range for " << arg << ": " << e.what() << "\n";
+            exit(1);
+        }
+    }
+
+    if (args.mode.empty()) {
+        std::cerr << "Error: --mode must be specified\n";
+        exit(1);
+    }
+
+    return args;
+}
+
+template<typename T>
+std::unique_ptr<T> init_usrp_async(const char* label,
+                                   const std::string& device_address,
+                                   const USRPConfig* config,
+                                   std::atomic<bool>& ready_flag,
+                                   std::atomic<bool>& fail_flag)
+{
+    std::unique_ptr<T> ptr;
+    std::thread([&]() {
+        try {
+            ptr = std::make_unique<T>(label, device_address, 1, 0, "sc16", config);
+            ready_flag = true;
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to initialize USRP: " << e.what() << std::endl;
+            fail_flag = true;
+        }
+    }).detach();
+    return ptr;
+}
+
+
+template<typename SourceBlockType, typename SinkBlockType>
+void run_usrp_tx(cler::GuiManager& gui,
+                 SourceBlockType& source_block,
+                 PlotCSpectrumBlock& spectrum,
+                 std::unique_ptr<SinkBlockType>& usrp_sink_ptr,
+                 FanoutBlock<std::complex<float>>& fanout)
+{
+    auto& usrp_sink = *usrp_sink_ptr;
+
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source_block, &fanout.in),
+        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp_sink.in[0]),
+        cler::BlockRunner(&spectrum),
+        cler::BlockRunner(&usrp_sink)
+    );
+
+    flowgraph.run();
+
+    while (!gui.should_close()) {
+        gui.begin_frame();
+        spectrum.render();
+        gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    flowgraph.stop();
+    std::cout << "Underflows: " << usrp_sink.get_underflow_count() << std::endl;
+}
+
 void print_usage(const char* prog) {
     std::cout << "\nUSRP Example - Unified demonstration of UHD block features\n" << std::endl;
     std::cout << "Usage: " << prog << " <mode> [options...]" << std::endl;
@@ -36,23 +156,48 @@ void print_usage(const char* prog) {
     std::cout << std::endl;
 }
 
-void mode_rx(int argc, char** argv) {
-    double freq = argc > 2 ? std::stod(argv[2]) : 915e6;
-    double rate = argc > 3 ? std::stod(argv[3]) : 2e6;
-    double gain = argc > 4 ? std::stod(argv[4]) : 30.0;
-    std::string device_address = argc > 5 ? argv[5] : "";
-    const size_t FFT_SIZE = 1024;
+void mode_rx(const USRPArgs& args) {
+    const size_t FFT_SIZE = args.fft;
     std::cout << "RX Mode - Spectrum Plot" << std::endl;
-    std::cout << "Device: " << (device_address.empty() ? "default" : device_address) << std::endl;
-    std::cout << "Freq: " << freq/1e6 << " MHz, Rate: " << rate/1e6 << " MSPS, Gain: " << gain << " dB" << std::endl;
+    std::cout << "Device: " << (args.device_address.empty() ? "default" : args.device_address) << std::endl;
+    std::cout << "Freq: " << args.freq/1e6 << " MHz, Rate: " << args.rate/1e6
+              << " MSPS, Gain: " << args.gain << " dB" << std::endl;
 
-
-    PlotCSpectrumBlock spectrum("USRP Spectrum", {"I/Q"}, rate, 2048);
-    PlotCSpectrogramBlock spectrogram("Spectrogram", {"usrp_signal"}, rate, FFT_SIZE, 1000);
+    PlotCSpectrumBlock spectrum("USRP Spectrum", {"I/Q"}, args.rate, 2048);
+    PlotCSpectrogramBlock spectrogram("Spectrogram", {"usrp_signal"}, args.rate, FFT_SIZE, 1000);
     cler::GuiManager gui(1000, 800, "USRP Receiver Example");
     spectrum.set_initial_window(1000.0f, 0.0f, 400.0f, 400.0f);
+
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
-    SourceUHDBlock<std::complex<float>> usrp_source("USRP", freq, rate, device_address, gain, 1);
+
+    std::atomic<bool> usrp_ready{false};
+    std::atomic<bool> usrp_failed{false};
+    std::unique_ptr<SourceUHDBlock<std::complex<float>>> usrp_source_ptr;
+
+    std::thread init_thread([&]() {
+        try {
+            usrp_source_ptr = std::make_unique<SourceUHDBlock<std::complex<float>>>(
+                "USRP", args.freq, args.rate, args.device_address, args.gain, 1
+            );
+            usrp_ready = true;
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to initialize USRP: " << e.what() << std::endl;
+            usrp_failed = true;
+        }
+    });
+    init_thread.detach();
+
+    while (!usrp_ready && !usrp_failed && !gui.should_close()) {
+        gui.begin_frame();
+        ImGui::Text("Loading FPGA image, this may take a while...\nOnly for first use after USRP reboot.");
+        gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    }
+
+    if (usrp_failed) return;
+
+    auto& usrp_source = *usrp_source_ptr;
+
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&usrp_source, &fanout.in),
         cler::BlockRunner(&fanout, &spectrum.in[0], &spectrogram.in[0]),
@@ -63,11 +208,6 @@ void mode_rx(int argc, char** argv) {
     flowgraph.run();
     std::cout << "Flowgraph running... Close window to exit." << std::endl;
 
-    double freq1 = freq + 0.5e6;       // -10 MHz (e.g., 905 MHz)
-    double freq2 = freq - 0.5e6;       // +10 MHz (e.g., 925 MHz)
-    bool use_freq1 = true;
-    auto last_hop = std::chrono::steady_clock::now();
-
 
     while (!gui.should_close()) {
         gui.begin_frame();
@@ -75,25 +215,9 @@ void mode_rx(int argc, char** argv) {
         spectrogram.render();
         gui.end_frame();
 
-        // Check if 1 second has elapsed
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_hop);
-        
-        if (elapsed.count() >= 1000) {  // 1 second
-            // Toggle frequency
-            use_freq1 = !use_freq1;
-            double new_freq = use_freq1 ? freq1 : freq2;
-            
-            // Reconfigure
-            USRPConfig new_config{new_freq, rate, gain};
-            if (usrp_source.configure(new_config, 0)) {
-                std::cout << "\rHopped to " << new_freq/1e6 << " MHz     " << std::flush;
-            } else {
-                std::cerr << "\nFailed to hop to " << new_freq/1e6 << " MHz" << std::endl;
-            }
-            
-            last_hop = now;
-        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
@@ -101,149 +225,92 @@ void mode_rx(int argc, char** argv) {
     std::cout << "Overflows: " << usrp_source.get_overflow_count() << std::endl;
 }
 
-void mode_tx_chirp(int argc, char** argv) {
-    double freq = argc > 2 ? std::stod(argv[2]) : 915e6;
-    double rate = argc > 3 ? std::stod(argv[3]) : 2e6;
-    double gain = argc > 4 ? std::stod(argv[4]) : 89.75;
-    float amplitude = argc > 5 ? std::stof(argv[5]) : 0.5f;
-    float chirp_duration = argc > 6 ? std::stof(argv[6]) : 1.0f;
-    std::string device_address = argc > 7 ? argv[7] : "";
-    std::cout << "TX Chirp Mode" << std::endl;
-    std::cout << "Device: " << (device_address.empty() ? "default" : device_address) << std::endl;
-    std::cout << "Freq: " << freq/1e6 << " MHz, Rate: " << rate/1e6 << " MSPS, Gain: " << gain << " dB" << std::endl;
-    std::cout << "Amplitude: " << amplitude << std::endl;
-    std::cout << "Chirp: -500 kHz to +500 kHz over " << chirp_duration << " seconds" << std::endl;
-
-    USRPConfig config;
-    config.center_freq_Hz = freq;
-    config.sample_rate_Hz = rate;
-    config.gain = gain;
-
+void mode_tx_chirp(const USRPArgs& args) {
+    USRPConfig config{args.freq, args.rate, args.gain};
     cler::GuiManager gui(1200, 600, "USRP TX - Chirp Signal");
 
-    // Chirp source: -500 kHz to +500 kHz over 1 second
-    SourceChirpBlock<std::complex<float>> chirp("Chirp", 
-        amplitude,       // Amplitude
-        -500e3f,         // Start frequency
-        500e3f,          // End frequency
-        rate,            // Sample rate
-        chirp_duration); // Duration
+    SourceChirpBlock<std::complex<float>> chirp("Chirp",
+                                                 args.amp,
+                                                 -500e3f,
+                                                 500e3f,
+                                                 args.rate,
+                                                 args.chirp_duration_s);
 
-    // Fanout to spectrum plot and USRP
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
-
-    // Spectrum plot
-    PlotCSpectrumBlock spectrum("TX Spectrum", {"Chirp"}, rate, 2048);
+    PlotCSpectrumBlock spectrum("TX Spectrum", {"Chirp"}, args.rate, 2048);
     spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
 
-    
-    // USRP TX sink
-    SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX", device_address, 1, 0, "sc16", &config);
-
-    auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&chirp, &fanout.in),
-        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp_sink.in[0]),
-        cler::BlockRunner(&spectrum),
-        cler::BlockRunner(&usrp_sink)
+    std::atomic<bool> usrp_ready{false}, usrp_failed{false};
+    auto usrp_sink_ptr = init_usrp_async<SinkUHDBlock<std::complex<float>>>(
+        "USRP_TX",
+        args.device_address,
+        &config,
+        usrp_ready,
+        usrp_failed
     );
 
-    flowgraph.run();
-    std::cout << "Transmitting chirp signal. Close window to stop." << std::endl;
-
-    while (!gui.should_close()) {
+    while (!usrp_ready && !usrp_failed && !gui.should_close()) {
         gui.begin_frame();
-        spectrum.render();
+        ImGui::Text("Loading FPGA image, this may take a while...\nOnly for first use after USRP reboot.");
         gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
+    if (usrp_failed) return;
 
-    flowgraph.stop();
-    std::cout << "Underflows: " << usrp_sink.get_underflow_count() << std::endl;
+    run_usrp_tx(gui, chirp, spectrum, usrp_sink_ptr, fanout);
 }
 
-void mode_tx_cw(int argc, char** argv) {
-    double freq = argc > 2 ? std::stod(argv[2]) : 915e6;
-    double rate = argc > 3 ? std::stod(argv[3]) : 2e6;
-    double gain = argc > 4 ? std::stod(argv[4]) : 89.75;
-    double cw_offset = argc > 5 ? std::stod(argv[5]) : 1;
-    float amplitude = argc > 6 ? std::stof(argv[6]) : 0.5f;
-    std::string device_address = argc > 7 ? argv[7] : "";
-
-
-    std::cout << "TX CW Mode - Continuous Wave" << std::endl;
-    std::cout << "Device: " << (device_address.empty() ? "default" : device_address) << std::endl;
-    std::cout << "Center Freq: " << freq/1e6 << " MHz" << std::endl;
-    std::cout << "CW Offset: " << cw_offset/1e3 << " kHz" << std::endl;
-    std::cout << "Actual TX: " << (freq + cw_offset)/1e6 << " MHz" << std::endl;
-    std::cout << "Rate: " << rate/1e6 << " MSPS, Gain: " << gain << " dB" << std::endl;
-    std::cout << "Amplitude: " << amplitude << std::endl;
-
-    USRPConfig config;
-    config.center_freq_Hz = freq;
-    config.sample_rate_Hz = rate;
-    config.gain = gain;
-
+void mode_tx_cw(const USRPArgs& args) {
+    USRPConfig config{args.freq, args.rate, args.gain};
     cler::GuiManager gui(1200, 600, "USRP TX - Continuous Wave");
 
-    // CW source
-    SourceCWBlock<std::complex<float>> cw("CW", 
-        amplitude,      // Amplitude
-        cw_offset,      // Frequency offset
-        rate);          // Sample rate
+    SourceCWBlock<std::complex<float>> cw("CW", args.amp, args.cw_offset, args.rate);
 
-    // Fanout to spectrum plot and USRP
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
-
-    // Spectrum plot
-    PlotCSpectrumBlock spectrum("TX Spectrum", {"CW Tone"}, rate, 2048);
+    PlotCSpectrumBlock spectrum("TX Spectrum", {"CW Tone"}, args.rate, 2048);
     spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
 
-    // USRP TX sink
-    SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX", device_address, 1, 0, "sc16", &config);
-    auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&cw, &fanout.in),
-        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp_sink.in[0]),
-        cler::BlockRunner(&spectrum),
-        cler::BlockRunner(&usrp_sink)
+    std::atomic<bool> usrp_ready{false}, usrp_failed{false};
+    auto usrp_sink_ptr = init_usrp_async<SinkUHDBlock<std::complex<float>>>(
+        "USRP_TX",
+        args.device_address,
+        &config,
+        usrp_ready,
+        usrp_failed
     );
 
-    flowgraph.run();
-    std::cout << "Transmitting cw signal. Close window to stop." << std::endl;
-    size_t last_underflows = 0;
-
-    while (!gui.should_close()) {
+    while (!usrp_ready && !usrp_failed && !gui.should_close()) {
         gui.begin_frame();
-        spectrum.render();
+        ImGui::Text("Loading FPGA image, this may take a while...\nOnly for first use after USRP reboot.");
         gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
+    if (usrp_failed) return;
 
-    flowgraph.stop();
-    std::cout << "Underflows: " << usrp_sink.get_underflow_count() << std::endl;
+    run_usrp_tx(gui, cw, spectrum, usrp_sink_ptr, fanout);
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        print_usage(argv[0]);
-        return 1;
-    }
+    USRPArgs args = parse_args(argc, argv);
 
-    std::string mode = argv[1];
+    std::cout << "Mode: " << args.mode << "\n"
+              << "Freq: " << args.freq << " Hz\n"
+              << "Rate: " << args.rate << " S/s\n"
+              << "Gain: " << args.gain << " dB\n"
+              << "Amplitude: " << args.amp << "\n"
+              << "CW Offset: " << args.cw_offset << " Hz\n"
+              << "FFT: " << args.fft << "\n"
+              << "Device: " << (args.device_address.empty() ? "default" : args.device_address)
+              << std::endl;
 
-    try {
-        if (mode == "rx") {
-            mode_rx(argc, argv);
-        } else if (mode == "tx-chirp") {
-            mode_tx_chirp(argc, argv);
-        } else if (mode == "tx-cw") {
-            mode_tx_cw(argc, argv);
-        } else {
-            std::cerr << "Unknown mode: " << mode << std::endl;
-            print_usage(argv[0]);
-            return 1;
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+    if (args.mode == "rx") {
+        mode_rx(args);
+    } else if (args.mode == "tx-chirp") {
+        mode_tx_chirp(args);
+    } else if (args.mode == "tx-cw") {
+        mode_tx_cw(args);
+    } else {
+        std::cerr << "Unknown mode: " << args.mode << "\n";
         return 1;
     }
 
