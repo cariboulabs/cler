@@ -25,7 +25,7 @@ struct FanoutBlock : public cler::BlockBase {
     template <typename... OChannels>
     cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
         constexpr size_t num_outs = sizeof...(OChannels);
-        assert(num_outs == _num_outputs && "Number of output channels must match the number of polyphase channels");
+        assert(num_outs == _num_outputs && "Number of output channels defined in block constructor must match the number of channels");
 
         // Use zero-copy path
         auto dbf_result = in.read_dbf();

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
-#include "desktop_blocks/utils/usrp_common.hpp"
+#include "desktop_blocks/misc/uhd_common.hpp"
 
 #ifdef __has_include
     #if __has_include(<uhd/usrp/multi_usrp.hpp>)
@@ -14,26 +14,10 @@
     #endif
 #endif
 
-#include <complex>
 #include <vector>
 #include <string>
 #include <iostream>
-#include <sstream>
-#include <algorithm>
 #include <numeric>
-
-template<typename T>
-inline std::string get_uhd_format() {
-    if constexpr (std::is_same_v<T, std::complex<float>>) {
-        return "fc32";
-    } else if constexpr (std::is_same_v<T, std::complex<int16_t>>) {
-        return "sc16";
-    } else if constexpr (std::is_same_v<T, std::complex<int8_t>>) {
-        return "sc8";
-    } else {
-        static_assert(!std::is_same_v<T, T>, "UHD blocks only support complex types");
-    }
-}
 
 template<typename T>
 struct SourceUHDBlock : public cler::BlockBase {
@@ -96,8 +80,10 @@ struct SourceUHDBlock : public cler::BlockBase {
         }
     }
 
-    bool configure(const USRPConfig& config, size_t channel = 0) {
+    bool configure(const UHDConfig& config, size_t channel = 0) {
         _configuring = true;
+        
+        //We want to avoid try-catch but UHD API crashes on errors
         try {
             // Set sample rate
             usrp->set_rx_rate(config.sample_rate_Hz, channel);
@@ -139,35 +125,51 @@ struct SourceUHDBlock : public cler::BlockBase {
 
     template<typename... OChannels>
     cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
+        constexpr size_t num_outs = sizeof...(OChannels);
+        assert(num_outs == _num_channels && "Number of output channels defined in block constructor must match the number of channels");
+
         if (_configuring.load(std::memory_order_acquire)) {
             return cler::Empty{};  // Skip this iteration
         }
 
-        constexpr size_t num_outs = sizeof...(OChannels);
-
-        if (num_outs != _num_channels) {
-            std::cerr << "SourceUHDBlock: Channel count mismatch" << std::endl;
-            return cler::Error::TERM_ProcedureError;
-        }
         uhd::rx_metadata_t md;
-        auto out = std::get<0>(std::forward_as_tuple(outs...));
-        auto [write_ptr, write_size] = out->write_dbf();
-        if (!write_ptr || write_size == 0) {
-            return cler::Error::NotEnoughSpace;
+        cler::Error result_error = cler::Error::OK;
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            ([&](OChannels* out) {
+
+                if (result_error != cler::Error::OK) {
+                    return;
+                }
+                auto [write_ptr, write_size] = out->write_dbf();
+                if (!write_ptr || write_size == 0) {
+                    result_error = cler::Error::NotEnoughSpace;
+                    return;
+                }
+                size_t num_rx = rx_stream->recv(write_ptr, write_size, md, 0.1);
+                if (num_rx == 0) {
+                    return;
+                }
+                if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_OVERFLOW) {
+                    overflow_count++;
+                } else if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE &&
+                            md.error_code != uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {
+                    std::cerr << "SourceUHDBlock: " << md.strerror() << std::endl;
+                    result_error = cler::Error::TERM_ProcedureError;
+                    return;
+                }
+
+                out->commit_write(num_rx);
+            }(outs), ...);
+        }(std::make_index_sequence<num_outs>{});
+
+
+
+        if (result_error != cler::Error::OK) {
+            return result_error;
         }
-        size_t num_rx = rx_stream->recv(write_ptr, write_size, md, 0.1);
-        if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_OVERFLOW) {
-            overflow_count++;
-        } else if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE && 
-                    md.error_code != uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {
-            std::cerr << "SourceUHDBlock: " << md.strerror() << std::endl;
-            return cler::Error::TERM_ProcedureError;
-        }
-        if (num_rx == 0) {
-            return cler::Empty{};
-        }
-        out->commit_write(num_rx);
         return cler::Empty{};
+
+
     }
     size_t get_overflow_count() const { return overflow_count; }
 

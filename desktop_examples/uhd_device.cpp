@@ -122,7 +122,7 @@ USRPArgs parse_args(int argc, char** argv) {
 template<typename T>
 std::unique_ptr<T> init_usrp_async(const char* label,
                                    const std::string& device_address,
-                                   const USRPConfig* config,
+                                   const UHDConfig* config,
                                    std::atomic<bool>& ready_flag,
                                    std::atomic<bool>& fail_flag)
 {
@@ -170,46 +170,23 @@ void run_usrp_tx(cler::GuiManager& gui,
 }
 
 void mode_rx(const USRPArgs& args) {
-    const size_t FFT_SIZE = args.fft;
-    std::cout << "RX Mode - Spectrum Plot" << std::endl;
-    std::cout << "Device: " << (args.device_address.empty() ? "default" : args.device_address) << std::endl;
-    std::cout << "Freq: " << args.freq/1e6 << " MHz, Rate: " << args.rate/1e6
-              << " MSPS, Gain: " << args.gain << " dB" << std::endl;
-
-    PlotCSpectrumBlock spectrum("USRP Spectrum", {"I/Q"}, args.rate, 2048);
-    PlotCSpectrogramBlock spectrogram("Spectrogram", {"usrp_signal"}, args.rate, FFT_SIZE, 1000);
-    cler::GuiManager gui(1000, 800, "USRP Receiver Example");
-    spectrum.set_initial_window(1000.0f, 0.0f, 400.0f, 400.0f);
-
-    FanoutBlock<std::complex<float>> fanout("Fanout", 2);
-
-    std::atomic<bool> usrp_ready{false};
-    std::atomic<bool> usrp_failed{false};
-    std::unique_ptr<SourceUHDBlock<std::complex<float>>> usrp_source_ptr;
-
-    std::thread init_thread([&]() {
-        try {
-            usrp_source_ptr = std::make_unique<SourceUHDBlock<std::complex<float>>>(
-                "USRP", args.freq, args.rate, args.device_address, args.gain, 1
-            );
-            usrp_ready = true;
-        } catch (const std::exception& e) {
-            std::cerr << "Failed to initialize USRP: " << e.what() << std::endl;
-            usrp_failed = true;
-        }
-    });
-    init_thread.detach();
-
-    while (!usrp_ready && !usrp_failed && !gui.should_close()) {
-        gui.begin_frame();
-        ImGui::Text("Loading FPGA image, this may take a while...\nOnly for first use after USRP reboot.");
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    
+    try {
+        //try to initialize USRP RX
+        SourceUHDBlock<std::complex<float>> usrp_source("USRP", args.freq,
+            args.rate, args.device_address, args.gain, 1 /*num channels*/);
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to initialize USRP" << e.what() << std::endl;
+        return;
     }
+    //Initalization was successful, lets re-init for real
+    SourceUHDBlock<std::complex<float>> usrp_source("USRP", args.freq,
+        args.rate, args.device_address, args.gain, 1 /*num channels*/);
 
-    if (usrp_failed) return;
-
-    auto& usrp_source = *usrp_source_ptr;
+    cler::GuiManager gui(1000, 800, "USRP Receiver Example");
+    PlotCSpectrumBlock spectrum("USRP Spectrum", {"I/Q"}, args.rate, args.fft);
+    PlotCSpectrogramBlock spectrogram("Spectrogram", {"usrp_signal"}, args.rate, args.fft, 1000);
+    FanoutBlock<std::complex<float>> fanout("Fanout", 2);
 
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&usrp_source, &fanout.in),
@@ -221,7 +198,7 @@ void mode_rx(const USRPArgs& args) {
     flowgraph.run();
     std::cout << "Flowgraph running... Close window to exit." << std::endl;
 
-
+    spectrum.set_initial_window(1000.0f, 0.0f, 400.0f, 400.0f);
     while (!gui.should_close()) {
         gui.begin_frame();
         spectrum.render();
@@ -235,7 +212,7 @@ void mode_rx(const USRPArgs& args) {
 }
 
 void mode_tx_chirp(const USRPArgs& args) {
-    USRPConfig config{args.freq, args.rate, args.gain};
+    UHDConfig config{args.freq, args.rate, args.gain};
     cler::GuiManager gui(1200, 600, "USRP TX - Chirp Signal");
 
     SourceChirpBlock<std::complex<float>> chirp("Chirp",
@@ -270,7 +247,7 @@ void mode_tx_chirp(const USRPArgs& args) {
 }
 
 void mode_tx_cw(const USRPArgs& args) {
-    USRPConfig config{args.freq, args.rate, args.gain};
+    UHDConfig config{args.freq, args.rate, args.gain};
     cler::GuiManager gui(1200, 600, "USRP TX - Continuous Wave");
 
     SourceCWBlock<std::complex<float>> cw("CW", args.amp, args.cw_offset, args.rate);

@@ -19,7 +19,7 @@ void print_usage(const char* prog) {
     std::cout << "Usage: " << prog << " [OPTIONS]" << std::endl;
     std::cout << "\nOptions:" << std::endl;
     std::cout << "  -f, --freq FREQ          TX center frequency in MHz (default: 915)" << std::endl;
-    std::cout << "  -s, --samplerate RATE    Sample rate in MSPS (default: 2)" << std::endl;
+    std::cout << "  -s, --sample rate RATE    Sample rate in MSPS (default: 2)" << std::endl;
     std::cout << "  -o, --offset OFFSET      CW tone offset from center in kHz (default: 100)" << std::endl;
     std::cout << "  -a, --amplitude AMP      Signal amplitude 0.0-1.0 (default: 0.5)" << std::endl;
     std::cout << "  -g, --gain GAIN          TX VGA gain 0-47 dB (default: 47)" << std::endl;
@@ -28,7 +28,7 @@ void print_usage(const char* prog) {
     std::cout << "\nExamples:" << std::endl;
     std::cout << "  " << prog << std::endl;
     std::cout << "  " << prog << " -f 915 -s 2 -o 100 -a 0.5 -g 20" << std::endl;
-    std::cout << "  " << prog << " --freq 433 --samplerate 4 --offset 0 --amplitude 0.3" << std::endl;
+    std::cout << "  " << prog << " --freq 433 --sample rate 4 --offset 0 --amplitude 0.3" << std::endl;
     std::cout << "  " << prog << " -f 915 -o 250 -a 0.7 -g 25 -A" << std::endl;
     std::cout << "\nWarning: Ensure you have proper licensing and are using appropriate" << std::endl;
     std::cout << "frequencies for your region. This transmits a continuous carrier!" << std::endl;

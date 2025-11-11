@@ -25,6 +25,8 @@ namespace cler {
     constexpr size_t DEFAULT_MAX_WORKERS = CLER_DEFAULT_MAX_WORKERS;
 
     enum class Error {
+        OK,
+
         // Non-fatal errors (< TERMINATE_FLOWGRAPH)
         Unknown,
         NotEnoughSamples,

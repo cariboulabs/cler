@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
-#include "desktop_blocks/utils/usrp_common.hpp"
+#include "desktop_blocks/misc/uhd_common.hpp"
 
 #ifdef __has_include
     #if __has_include(<uhd/usrp/multi_usrp.hpp>)
@@ -13,20 +13,14 @@
         #error "UHD headers not found. Please install libuhd-dev package."
     #endif
 #endif
-
 #include <complex>
+
 #include <vector>
 #include <string>
 #include <iostream>
 #include <sstream>
-#include <algorithm>
 #include <numeric>
 
-// Use format helper from source_uhd.hpp
-template<typename T>
-inline std::string get_uhd_format();  // Forward declaration
-
-// Async TX Event structure
 struct AsyncTxEvent {
     bool event_occurred = false;
     uhd::async_metadata_t::event_code_t event_code = uhd::async_metadata_t::EVENT_CODE_BURST_ACK;
@@ -37,14 +31,14 @@ struct AsyncTxEvent {
 template<typename T>
 struct SinkUHDBlock : public cler::BlockBase {
 
-    cler::Channel<T>* in = nullptr;  // Array of input channels (like add.hpp)
+    cler::Channel<T>* in = nullptr;
 
     SinkUHDBlock(const char* name,
                  const std::string& dvc_adrs = "",
                  size_t num_channels = 1,
                  size_t channel_size = 0,
                  const std::string& otw_format = "sc16",
-                 const USRPConfig* initial_config = nullptr)
+                 const UHDConfig* initial_config = nullptr)
         : BlockBase(name),
           _device_address(dvc_adrs),
           _num_channels(num_channels),
@@ -56,7 +50,8 @@ struct SinkUHDBlock : public cler::BlockBase {
         }
 
         // Calculate buffer size for DBF
-        size_t actual_buffer_size = (channel_size == 0) ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : channel_size;
+        size_t actual_buffer_size = (channel_size == 0) ? 
+                cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : channel_size;
 
         // Validate buffer size for DBF
         if (channel_size > 0 && channel_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
@@ -117,7 +112,7 @@ struct SinkUHDBlock : public cler::BlockBase {
 
 
 
-            USRPConfig config_to_use;
+            UHDConfig config_to_use;
             if (initial_config) {
                 config_to_use = *initial_config;
                 std::cout << "  Using provided initial configuration" << std::endl;
@@ -159,7 +154,7 @@ struct SinkUHDBlock : public cler::BlockBase {
         }
     }
 
-    bool configure(const USRPConfig& config, size_t channel = 0) {
+    bool configure(const UHDConfig& config, size_t channel = 0) {
     _configuring = true;
         try {
             // Set sample rate
@@ -209,7 +204,7 @@ struct SinkUHDBlock : public cler::BlockBase {
             _read_ptrs[i] = ptr;
             _read_sizes[i] = size;
 
-            if (_read_sizes[i] < 300) {
+            if (_read_sizes[i] < (cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) / 4) {
                 return cler::Error::NotEnoughSamples;
             }
             uhd::tx_metadata_t md;
@@ -224,7 +219,6 @@ struct SinkUHDBlock : public cler::BlockBase {
             in->commit_read(sent);
         }
 
-        // Check for async events
         handle_async_events();
 
         return cler::Empty{};
@@ -259,11 +253,6 @@ struct SinkUHDBlock : public cler::BlockBase {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         std::cout << "USRP devices synchronized at t=0" << std::endl;
     }
-
-protected:
-    // Allow derived classes to access USRP
-    uhd::usrp::multi_usrp::sptr _usrp;
-    uhd::tx_streamer::sptr _tx_stream;
 
 private:
     void handle_async_events() {
@@ -308,7 +297,10 @@ private:
         }
     }
 
-    USRPConfig _current_config; 
+    uhd::usrp::multi_usrp::sptr _usrp;
+    uhd::tx_streamer::sptr _tx_stream;
+
+    UHDConfig _current_config; 
     std::string _device_address;
     size_t _num_channels;
     std::string _wire_format;

@@ -72,15 +72,10 @@ int main() {
     std::cout << "Sink receives as fixed-size std::array" << std::endl;
     std::cout << std::endl;
 
-    // Source: generate Blobs
     SourceBlobBlock source_blob("SourceBlob");
-
-    // Sink Blob to UDP: send Blobs over network
     SinkUDPSocketBlock<Blob> sink_blob_udp("SinkBlobUDP",
                                             UDPBlock::SocketType::INET_UDP,
                                             "127.0.0.1:9001");
-
-    // Source UDP to Array: receive from network as fixed-size arrays
     SourceUDPSocketBlock<std::array<uint8_t, FIXED_ARRAY_SIZE>> source_array_udp(
                                 "SourceArrayUDP",
                                 UDPBlock::SocketType::INET_UDP,
