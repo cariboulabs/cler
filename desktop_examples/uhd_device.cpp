@@ -119,56 +119,6 @@ USRPArgs parse_args(int argc, char** argv) {
     return args;
 }
 
-template<typename T>
-std::unique_ptr<T> init_usrp_async(const char* label,
-                                   const std::string& device_address,
-                                   const UHDConfig* config,
-                                   std::atomic<bool>& ready_flag,
-                                   std::atomic<bool>& fail_flag)
-{
-    std::unique_ptr<T> ptr;
-    std::thread([&]() {
-        try {
-            ptr = std::make_unique<T>(label, device_address, 1, 0, "sc16", config);
-            ready_flag = true;
-        } catch (const std::exception& e) {
-            std::cerr << "Failed to initialize USRP: " << e.what() << std::endl;
-            fail_flag = true;
-        }
-    }).detach();
-    return ptr;
-}
-
-
-template<typename SourceBlockType, typename SinkBlockType>
-void run_usrp_tx(cler::GuiManager& gui,
-                 SourceBlockType& source_block,
-                 PlotCSpectrumBlock& spectrum,
-                 std::unique_ptr<SinkBlockType>& usrp_sink_ptr,
-                 FanoutBlock<std::complex<float>>& fanout)
-{
-    auto& usrp_sink = *usrp_sink_ptr;
-
-    auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&source_block, &fanout.in),
-        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp_sink.in[0]),
-        cler::BlockRunner(&spectrum),
-        cler::BlockRunner(&usrp_sink)
-    );
-
-    flowgraph.run();
-
-    while (!gui.should_close()) {
-        gui.begin_frame();
-        spectrum.render();
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    }
-
-    flowgraph.stop();
-    std::cout << "Underflows: " << usrp_sink.get_underflow_count() << std::endl;
-}
-
 void mode_rx(const USRPArgs& args) {
     
     try {
@@ -213,71 +163,96 @@ void mode_rx(const USRPArgs& args) {
 
 void mode_tx_chirp(const USRPArgs& args) {
     UHDConfig config{args.freq, args.rate, args.gain};
-    cler::GuiManager gui(1200, 600, "USRP TX - Chirp Signal");
+    
+    try {
+        // Try to initialize USRP TX
+        SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX", 
+            args.device_address, 1 /*num channels*/, 0 /*mboard*/, "sc16", &config);
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to initialize USRP: " << e.what() << std::endl;
+        return;
+    }
+    // Initialization was successful, lets re-init for real
+    SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX", 
+        args.device_address, 1 /*num channels*/, 0 /*mboard*/, "sc16", &config);
 
+    cler::GuiManager gui(1200, 600, "USRP TX - Chirp Signal");
     SourceChirpBlock<std::complex<float>> chirp("Chirp",
                                                  args.amp,
                                                  -500e3f,
                                                  500e3f,
                                                  args.rate,
                                                  args.chirp_duration_s);
-
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
     PlotCSpectrumBlock spectrum("TX Spectrum", {"Chirp"}, args.rate, 2048);
     spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
 
-    std::atomic<bool> usrp_ready{false}, usrp_failed{false};
-    auto usrp_sink_ptr = init_usrp_async<SinkUHDBlock<std::complex<float>>>(
-        "USRP_TX",
-        args.device_address,
-        &config,
-        usrp_ready,
-        usrp_failed
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&chirp, &fanout.in),
+        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp_sink.in[0]),
+        cler::BlockRunner(&spectrum),
+        cler::BlockRunner(&usrp_sink)
     );
 
-    while (!usrp_ready && !usrp_failed && !gui.should_close()) {
-        gui.begin_frame();
-        ImGui::Text("Loading FPGA image, this may take a while...\nOnly for first use after USRP reboot.");
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    }
-    if (usrp_failed) return;
+    flowgraph.run();
+    std::cout << "Transmitting chirp signal. Close window to stop." << std::endl;
 
-    run_usrp_tx(gui, chirp, spectrum, usrp_sink_ptr, fanout);
+    while (!gui.should_close()) {
+        gui.begin_frame();
+        spectrum.render();
+        gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    flowgraph.stop();
+    std::cout << "Underflows: " << usrp_sink.get_underflow_count() << std::endl;
 }
 
 void mode_tx_cw(const USRPArgs& args) {
     UHDConfig config{args.freq, args.rate, args.gain};
+    
+    try {
+        // Try to initialize USRP TX
+        SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX", 
+            args.device_address, 1 /*num channels*/, 0 /*mboard*/, "sc16", &config);
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to initialize USRP: " << e.what() << std::endl;
+        return;
+    }
+    // Initialization was successful, lets re-init for real
+    SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX", 
+        args.device_address, 1 /*num channels*/, 0 /*mboard*/, "sc16", &config);
+
     cler::GuiManager gui(1200, 600, "USRP TX - Continuous Wave");
-
     SourceCWBlock<std::complex<float>> cw("CW", args.amp, args.cw_offset, args.rate);
-
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
     PlotCSpectrumBlock spectrum("TX Spectrum", {"CW Tone"}, args.rate, 2048);
     spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
 
-    std::atomic<bool> usrp_ready{false}, usrp_failed{false};
-    auto usrp_sink_ptr = init_usrp_async<SinkUHDBlock<std::complex<float>>>(
-        "USRP_TX",
-        args.device_address,
-        &config,
-        usrp_ready,
-        usrp_failed
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&cw, &fanout.in),
+        cler::BlockRunner(&fanout, &spectrum.in[0], &usrp_sink.in[0]),
+        cler::BlockRunner(&spectrum),
+        cler::BlockRunner(&usrp_sink)
     );
 
-    while (!usrp_ready && !usrp_failed && !gui.should_close()) {
-        gui.begin_frame();
-        ImGui::Text("Loading FPGA image, this may take a while...\nOnly for first use after USRP reboot.");
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    }
-    if (usrp_failed) return;
+    flowgraph.run();
+    std::cout << "Transmitting CW tone. Close window to stop." << std::endl;
 
-    run_usrp_tx(gui, cw, spectrum, usrp_sink_ptr, fanout);
+    while (!gui.should_close()) {
+        gui.begin_frame();
+        spectrum.render();
+        gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    flowgraph.stop();
+    std::cout << "Underflows: " << usrp_sink.get_underflow_count() << std::endl;
 }
 
 int main(int argc, char** argv) {
     USRPArgs args = parse_args(argc, argv);
+    std::cout<<"inside main"<<std::endl;
 
     std::cout << "Mode: " << args.mode << "\n"
               << "Freq: " << args.freq << " Hz\n"
