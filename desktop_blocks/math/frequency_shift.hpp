@@ -3,7 +3,9 @@
 struct FrequencyShiftBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
 
-    FrequencyShiftBlock(const char* name, const double frequency_shift_hz, const double sample_rate_hz,
+    FrequencyShiftBlock(const char* name, 
+        const double frequency_shift_hz,
+        const double sample_rate_hz,
         const size_t buffer_size = 0)
         : cler::BlockBase(name), in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size), _frequency_shift(frequency_shift_hz), _sample_rate(sample_rate_hz) {
 

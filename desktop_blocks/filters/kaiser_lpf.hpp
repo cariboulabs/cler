@@ -4,6 +4,7 @@
 #include "liquid.h"
 #include <type_traits>
 #include <cmath>
+#include <cassert>
 
 template <typename T>
 struct KaiserLPFBlock : public cler::BlockBase {
@@ -27,31 +28,24 @@ struct KaiserLPFBlock : public cler::BlockBase {
           _cutoff_freq(cutoff_freq)
     {
         // Validate buffer size
-        if (buffer_size > 0 && buffer_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
-            throw std::invalid_argument(
-                "Buffer size too small for doubly-mapped buffers. Need at least " +
-                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) +
-                " elements of type T");
-        }
+        assert(buffer_size == 0 || buffer_size * sizeof(T) >= cler::DOUBLY_MAPPED_MIN_SIZE);
 
         // Validate parameters
-        if (sample_rate <= 0.0) {
-            throw std::invalid_argument("Sample rate must be positive");
-        }
-        if (cutoff_freq <= 0.0 || cutoff_freq >= sample_rate / 2.0) {
-            throw std::invalid_argument("Cutoff frequency must be between 0 and Nyquist");
-        }
-        if (transition_bw <= 0.0) {
-            throw std::invalid_argument("Transition bandwidth must be positive");
-        }
-        if (attenuation_db <= 0.0) {
-            throw std::invalid_argument("Attenuation must be positive");
-        }
+        assert(sample_rate > 0.0 && "Sample rate must be positive");
+        assert(transition_bw > 0.0 && "Transition bandwidth must be positive");
+        assert(attenuation_db > 0.0 && "Attenuation must be positive");
 
-        // Normalize cutoff frequency to [0, 0.5] where 0.5 is Nyquist
-        float fc = static_cast<float>(cutoff_freq / sample_rate);
-        if (fc >= 0.5f) {
-            throw std::invalid_argument("Cutoff frequency must be less than Nyquist frequency (sample_rate/2)");
+        float fc;
+        if constexpr (std::is_same_v<T, std::complex<float>>) {
+            assert(cutoff_freq > 0.0 && cutoff_freq < sample_rate &&
+                   "Cutoff frequency must be between 0 and sample_rate for complex signals");
+            fc = static_cast<float>(cutoff_freq / sample_rate);
+            assert(fc < 1.0f && "Cutoff frequency must be less than sample_rate for complex signals");
+        } else {
+            assert(cutoff_freq > 0.0 && cutoff_freq < sample_rate / 2.0 &&
+                   "Cutoff frequency must be between 0 and Nyquist (sample_rate/2) for real signals");
+            fc = static_cast<float>(cutoff_freq / sample_rate);
+            assert(fc < 0.5f && "Cutoff frequency must be less than Nyquist frequency for real signals");
         }
 
         // Calculate filter order based on transition bandwidth and attenuation
@@ -60,10 +54,8 @@ struct KaiserLPFBlock : public cler::BlockBase {
         unsigned int filter_order = static_cast<unsigned int>(
             std::ceil(attenuation_db / (22.0f * transition_bw_normalized)));
 
-        if (filter_order < 5) {
-            throw std::invalid_argument(
-                "Filter order too small. Increase transition_bw or decrease attenuation_db");
-        }
+        assert(filter_order >= 5 && "Filter order too small. Increase transition_bw or decrease attenuation_db");
+
         // Ensure odd order for better frequency response
         if (filter_order % 2 == 0) {
             filter_order++;
@@ -77,9 +69,7 @@ struct KaiserLPFBlock : public cler::BlockBase {
                 static_cast<float>(attenuation_db),
                 0.0f);  // mu (fractional sample delay, usually 0)
 
-            if (!_filter_r) {
-                throw std::runtime_error("Failed to create Kaiser LPF for float");
-            }
+            assert(_filter_r && "Failed to create Kaiser LPF for float");
         } else if constexpr (std::is_same_v<T, std::complex<float>>) {
             _filter_c = firfilt_crcf_create_kaiser(
                 filter_order,
@@ -87,9 +77,7 @@ struct KaiserLPFBlock : public cler::BlockBase {
                 static_cast<float>(attenuation_db),
                 0.0f);  // mu (fractional sample delay, usually 0)
 
-            if (!_filter_c) {
-                throw std::runtime_error("Failed to create Kaiser LPF for complex float");
-            }
+            assert(_filter_c && "Failed to create Kaiser LPF for complex float");
         }
     }
 

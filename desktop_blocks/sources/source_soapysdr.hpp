@@ -211,6 +211,10 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
         device->setGain(SOAPY_SDR_RX, channel_idx, gain);
         gain_db = gain;
     }
+
+    void set_gain_element(const std::string& name, double gain) {
+        device->setGain(SOAPY_SDR_RX, channel_idx, name, gain);
+    }
     
     void set_sample_rate(double rate) {
         device->setSampleRate(SOAPY_SDR_RX, channel_idx, rate);
