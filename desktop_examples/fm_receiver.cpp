@@ -9,6 +9,7 @@
 #include "desktop_blocks/sinks/sink_audio.hpp"
 #include "desktop_blocks/math/frequency_shift.hpp"
 #include "desktop_blocks/math/gain.hpp"
+#include "desktop_blocks/sinks/sink_file.hpp"
 
 #include <iostream>
 #include <string>
@@ -139,6 +140,12 @@ int main(int argc, char* argv[]) {
         paNoDevice,
         cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float) * 30
     );
+
+    // SinkFileBlock<float> audio_out(
+    //     "File Sink",
+    //     "fm_audio_output.raw",
+    //     cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float) * 30
+    // );
 
     std::cout << "Creating flowgraph...\n";
 
