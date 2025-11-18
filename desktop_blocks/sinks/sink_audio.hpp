@@ -39,15 +39,12 @@ struct SinkAudioBlock : public cler::BlockBase {
           _device_index(device_index),
           _stream(nullptr)
     {
-        if (sample_rate <= 0.0 || sample_rate > 1e6) {
-            throw std::invalid_argument("Invalid sample rate: must be > 0 and <= 1MHz");
-        }
+        assert(sample_rate > 0.0 && "Sample rate must be positive");
+        assert(sample_rate <= 1e6 && "Sample rate must be <= 1MHz for PortAudio");
 
         // Validate buffer size for DBF
-        if (buffer_size > 0 && buffer_size * sizeof(float) < cler::DOUBLY_MAPPED_MIN_SIZE) {
-            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " +
-                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) + " elements");
-        }
+        assert((buffer_size == 0 || buffer_size * sizeof(float) >= cler::DOUBLY_MAPPED_MIN_SIZE) &&
+               "Buffer size too small for doubly-mapped buffers");
 
         // Initialize PortAudio (safe to call multiple times)
         PaError err = Pa_Initialize();
@@ -56,9 +53,8 @@ struct SinkAudioBlock : public cler::BlockBase {
         // Validate device index if specified
         if (device_index != paNoDevice) {
             int num_devices = Pa_GetDeviceCount();
-            if (num_devices < 0 || device_index >= num_devices) {
-                throw std::invalid_argument("Invalid device index: " + std::to_string(device_index));
-            }
+            assert(num_devices >= 0 && "Pa_GetDeviceCount returned negative value");
+            assert(device_index < num_devices && "Invalid device index");
         }
 
         // Open the audio stream
@@ -104,9 +100,7 @@ struct SinkAudioBlock : public cler::BlockBase {
         }
 
         int num_devices = Pa_GetDeviceCount();
-        if (num_devices < 0) {
-            throw std::runtime_error("Pa_GetDeviceCount() failed");
-        }
+        assert(num_devices >= 0 && "Pa_GetDeviceCount returned negative value");
 
         printf("PortAudio Output Devices:\n");
         for (int i = 0; i < num_devices; ++i) {
@@ -131,9 +125,7 @@ private:
         std::memset(&output_params, 0, sizeof(output_params));
 
         output_params.device = (_device_index == paNoDevice) ? Pa_GetDefaultOutputDevice() : _device_index;
-        if (output_params.device < 0) {
-            throw std::runtime_error("No default output device found");
-        }
+        assert(output_params.device != paNoDevice && "No default output device available");
 
         output_params.channelCount = 1;  // Mono
         output_params.sampleFormat = paFloat32;
