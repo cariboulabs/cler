@@ -26,7 +26,7 @@ struct KaiserDecimLPFBlock : public cler::BlockBase {
                         double cutoff_freq,
                         double transition_bw,
                         unsigned int decimation_factor,
-                        double attenuation_db = 60.0,
+                        float attenuation_db = 60.0,
                         size_t buffer_size = 0)
         : cler::BlockBase(name),
           in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size),
@@ -69,7 +69,7 @@ struct KaiserDecimLPFBlock : public cler::BlockBase {
         liquid_firdes_kaiser(
             num_taps,
             fc,
-            static_cast<float>(attenuation_db),
+            attenuation_db,
             0.0f,  // mu (fractional sample delay)
             filter_taps
         );

@@ -8,6 +8,7 @@
 #include "desktop_blocks/resamplers/multistage_resampler.hpp"
 #include "desktop_blocks/sinks/sink_audio.hpp"
 #include "desktop_blocks/math/frequency_shift.hpp"
+#include "desktop_blocks/math/gain.hpp"
 
 #include <iostream>
 #include <string>
@@ -101,18 +102,19 @@ int main(int argc, char* argv[]) {
     KaiserDecimLPFBlock<std::complex<float>> lpf(
         "Channel Filter",
         sdr_sps,   // Sample rate
-        200e3,       // Cutoff
-        20e3,       // Transition
+        100e3,       // Cutoff
+        25e3,       // Transition
         5,          // Decimation factor (1 MSPS -> 200 kSPS)
         60.0        // Attenuation
     );
 
-    //up samples
+
     MultiStageResamplerBlock<std::complex<float>> resampler1(
         "Resampler1",
-        12.0 / 5.0f,  // 200 kSPS to 480 kSPS
-        60.0f  // 60 dB attenuation for filter stopband
+        12.0 / 5.0,
+        60.0
     );
+
 
     FMDemodBlock fm_demod(
         "FM Demod",
@@ -120,15 +122,22 @@ int main(int argc, char* argv[]) {
         75e3 /*freq_deviation*/
     );
 
-    MultiStageResamplerBlock<float> resampler2(
-        "Resampler",
-        1.0f / 10.0f, //decimate 480 kSPS to 48 kSPS
-        60.0f  // 60 dB attenuation for filter stopband
+    MultiStageResamplerBlock<float> audio_decim(
+        "Audio Decim",
+        1.0 / 10.0,
+        60.0
+    );
+
+    GainBlock<float> gain(
+        "Audio Gain",
+        0.3  // unity gain
     );
 
     SinkAudioBlock audio_out(
         "Audio Out",
-        48e3f
+        48e3f,
+        paNoDevice,
+        cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float) * 30
     );
 
     std::cout << "Creating flowgraph...\n";
@@ -138,8 +147,9 @@ int main(int argc, char* argv[]) {
         cler::BlockRunner(&freq_shift, &lpf.in),
         cler::BlockRunner(&lpf, &resampler1.in),
         cler::BlockRunner(&resampler1, &fm_demod.in),
-        cler::BlockRunner(&fm_demod, &resampler2.in),
-        cler::BlockRunner(&resampler2, &audio_out.in),
+        cler::BlockRunner(&fm_demod, &audio_decim.in),
+        cler::BlockRunner(&audio_decim, &gain.in),
+        cler::BlockRunner(&gain, &audio_out.in),
         cler::BlockRunner(&audio_out)
     );
 
@@ -147,11 +157,20 @@ int main(int argc, char* argv[]) {
               << "Press Ctrl+C to stop.\n\n";
 
     cler::FlowGraphConfig config;
-    config.scheduler = cler::SchedulerType::FixedThreadPool;
-    flowgraph.run(config);
+    // config.scheduler = cler::SchedulerType::FixedThreadPool;
+    // flowgraph.run(config);
 
     while (!g_should_exit) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        source.procedure(&freq_shift.in);
+        freq_shift.procedure(&lpf.in);
+        lpf.procedure(&resampler1.in);
+        resampler1.procedure(&fm_demod.in);
+        fm_demod.procedure(&audio_decim.in);
+        audio_decim.procedure(&gain.in);
+        gain.procedure(&audio_out.in);
+        audio_out.procedure();
     }
 
     flowgraph.stop();
