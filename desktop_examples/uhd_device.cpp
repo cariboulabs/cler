@@ -268,18 +268,18 @@ void mode_zero_span(const USRPArgs& args) {
     SourceUHDBlock<std::complex<float>> usrp_source("USRP", args.freq,
         args.rate, args.device_address, args.gain, 1);
 
-    cler::GuiManager gui(1200, 800, "USRP Zero Span - Power vs Time");
+    cler::GuiManager gui(1600, 1600, "USRP Zero Span - Power vs Time");
     
     // Power detector converts complex I/Q to power in dB
-    PowerDetectorBlock<std::complex<float>> power_detector("PowerDetector");
+    PowerDetectorBlock<std::complex<float>> power_detector("PowerDetector", -80.0f);
     
     // Time series plot shows power over time
     PlotTimeSeriesBlock power_plot("Power vs Time", 
                                    {"Power (dB)"}, 
                                    args.rate,    // sample rate
-                                   5.0f);        // show last 5 seconds
+                                   2.0f);        // show last 5 seconds
     
-    power_plot.set_initial_window(0.0f, 0.0f, 1200.0f, 800.0f);
+    power_plot.set_initial_window(0.0f, 0.0f, 1600.0f, 1600.0f);
 
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&usrp_source, &power_detector.in),
