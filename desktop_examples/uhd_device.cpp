@@ -11,6 +11,8 @@
 #include "desktop_blocks/sinks/sink_null.hpp"
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
 #include "desktop_blocks/plots/plot_cspectrogram.hpp"
+#include "desktop_blocks/plots/plot_timeseries.hpp"
+#include "power_detector.hpp"
 #include "desktop_blocks/utils/fanout.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include <chrono>
@@ -35,6 +37,7 @@ void print_usage(const char* prog) {
     std::cout << "Usage: " << prog << " [OPTIONS]" << std::endl;
     std::cout << "\nAvailable modes:" << std::endl;
     std::cout << "  rx          - Simple RX with spectrum plot" << std::endl;
+    std::cout << "  zero-span   - Zero span mode (power vs time)" << std::endl;
     std::cout << "  tx-chirp    - Transmit chirp signal with spectrum plot" << std::endl;
     std::cout << "  tx-cw       - Transmit continuous wave with spectrum plot" << std::endl;
     std::cout << "\nOptions:" << std::endl;
@@ -133,10 +136,12 @@ void mode_rx(const USRPArgs& args) {
     SourceUHDBlock<std::complex<float>> usrp_source("USRP", args.freq,
         args.rate, args.device_address, args.gain, 1 /*num channels*/);
 
-    cler::GuiManager gui(1000, 800, "USRP Receiver Example");
+    cler::GuiManager gui(1600, 1600, "USRP Receiver Example");
     PlotCSpectrumBlock spectrum("USRP Spectrum", {"I/Q"}, args.rate, args.fft);
-    PlotCSpectrogramBlock spectrogram("Spectrogram", {"usrp_signal"}, args.rate, args.fft, 1000);
+    PlotCSpectrogramBlock spectrogram("Spectrogram", {"usrp_signal"}, args.rate, args.fft, 4000);
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
+    spectrogram.set_initial_window(1000.0f, 0.0f, 800.0f, 800.0f);
+
 
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&usrp_source, &fanout.in),
@@ -148,10 +153,11 @@ void mode_rx(const USRPArgs& args) {
     flowgraph.run();
     std::cout << "Flowgraph running... Close window to exit." << std::endl;
 
-    spectrum.set_initial_window(1000.0f, 0.0f, 400.0f, 400.0f);
+    // spectrum.set_initial_window(1000.0f, 0.0f, 400.0f, 400.0f);
+    // spectrogram.set_initial_window(1000.0f, 0.0f, 800.0f, 800.0f);
     while (!gui.should_close()) {
         gui.begin_frame();
-        spectrum.render();
+        // spectrum.render();
         spectrogram.render();
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -186,6 +192,7 @@ void mode_tx_chirp(const USRPArgs& args) {
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
     PlotCSpectrumBlock spectrum("TX Spectrum", {"Chirp"}, args.rate, 2048);
     spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
+
 
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&chirp, &fanout.in),
@@ -250,6 +257,51 @@ void mode_tx_cw(const USRPArgs& args) {
     std::cout << "Underflows: " << usrp_sink.get_underflow_count() << std::endl;
 }
 
+void mode_zero_span(const USRPArgs& args) {
+    try {
+        SourceUHDBlock<std::complex<float>> usrp_source("USRP", args.freq,
+            args.rate, args.device_address, args.gain, 1);
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to initialize USRP: " << e.what() << std::endl;
+        return;
+    }
+    SourceUHDBlock<std::complex<float>> usrp_source("USRP", args.freq,
+        args.rate, args.device_address, args.gain, 1);
+
+    cler::GuiManager gui(1200, 800, "USRP Zero Span - Power vs Time");
+    
+    // Power detector converts complex I/Q to power in dB
+    PowerDetectorBlock<std::complex<float>> power_detector("PowerDetector");
+    
+    // Time series plot shows power over time
+    PlotTimeSeriesBlock power_plot("Power vs Time", 
+                                   {"Power (dB)"}, 
+                                   args.rate,    // sample rate
+                                   5.0f);        // show last 5 seconds
+    
+    power_plot.set_initial_window(0.0f, 0.0f, 1200.0f, 800.0f);
+
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&usrp_source, &power_detector.in),
+        cler::BlockRunner(&power_detector, &power_plot.in[0]),
+        cler::BlockRunner(&power_plot)
+    );
+
+    flowgraph.run();
+    std::cout << "Zero Span mode at " << args.freq << " Hz" << std::endl;
+    std::cout << "Showing instantaneous power vs time. Close window to exit." << std::endl;
+
+    while (!gui.should_close()) {
+        gui.begin_frame();
+        power_plot.render();
+        gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    flowgraph.stop();
+    std::cout << "Overflows: " << usrp_source.get_overflow_count() << std::endl;
+}
+
 int main(int argc, char** argv) {
     USRPArgs args = parse_args(argc, argv);
     std::cout<<"inside main"<<std::endl;
@@ -270,6 +322,8 @@ int main(int argc, char** argv) {
         mode_tx_chirp(args);
     } else if (args.mode == "tx-cw") {
         mode_tx_cw(args);
+    } else if (args.mode == "zero-span") {
+        mode_zero_span(args);
     } else {
         std::cerr << "Unknown mode: " << args.mode << "\n";
         return 1;

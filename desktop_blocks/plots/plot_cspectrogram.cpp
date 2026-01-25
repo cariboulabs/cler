@@ -153,7 +153,7 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
 }
 
 void PlotCSpectrogramBlock::render() {
-    ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_Always);
     ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
     ImGui::Begin(name());
 
@@ -167,7 +167,7 @@ void PlotCSpectrogramBlock::render() {
     }
 
     for (size_t i = 0; i < _num_inputs; ++i) {
-        if (ImPlot::BeginPlot(_signal_labels[i].c_str())) {
+        if (ImPlot::BeginPlot(_signal_labels[i].c_str(), ImVec2(-1, -1))) {
             ImPlot::SetupAxes("Frequency (Hz)", "Time (frames)", x_flags, y_flags);
             ImPlot::SetupAxisLimits(ImAxis_X1, -static_cast<double>(_sps)/2.0, static_cast<double>(_sps)/2.0);
             ImPlot::SetupAxisLimits(ImAxis_Y1, static_cast<double>(_tall), 0.0);

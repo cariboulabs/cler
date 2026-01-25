@@ -69,6 +69,7 @@ target_link_libraries(blocks_gui PUBLIC
   ${GLFW_LIBRARIES}
   OpenGL::GL
   Threads::Threads
+  X11
 )
 
 # Add GLFW library directories for systems like macOS
