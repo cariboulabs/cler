@@ -78,10 +78,6 @@ PlotTimeSeriesBlock::~PlotTimeSeriesBlock() {
 }
 
 cler::Result<cler::Empty, cler::Error> PlotTimeSeriesBlock::procedure() {
-    if (_gui_pause.load(std::memory_order_acquire)) {
-        return cler::Empty{};
-    }
-
     size_t work_size = in[0].size();
     for (size_t i = 1; i < _num_inputs; ++i) {
         if (in[i].size() < work_size) {
@@ -144,7 +140,8 @@ cler::Result<cler::Empty, cler::Error> PlotTimeSeriesBlock::procedure() {
 }
 
 void PlotTimeSeriesBlock::render() {
-    if (_snapshot_mutex.try_lock()) {
+    // Only update snapshot when not paused - data keeps flowing, just freeze the display
+    if (!_gui_pause.load(std::memory_order_acquire) && _snapshot_mutex.try_lock()) {
         // Try to update snapshot if no one is writing
         const float* ptr1; const float* ptr2;
         size_t size1, size2;

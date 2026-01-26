@@ -89,9 +89,7 @@ PlotCSpectrogramBlock::~PlotCSpectrogramBlock() {
 }
 
 cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
-    if (_gui_pause.load(std::memory_order_acquire)) {
-        return cler::Empty{};
-    }
+    bool paused = _gui_pause.load(std::memory_order_acquire);
 
     size_t available = in[0].size();
     for (size_t i = 1; i < _num_inputs; ++i) {
@@ -99,6 +97,14 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
     }
     if (available < _n_fft_samples) {
         return cler::Error::NotEnoughSamples;
+    }
+
+    // When paused, just drain the inputs without updating the spectrogram
+    if (paused) {
+        for (size_t i = 0; i < _num_inputs; ++i) {
+            in[i].commit_read(_n_fft_samples);
+        }
+        return cler::Empty{};
     }
 
     std::lock_guard<std::mutex> lock(_spectrogram_mutex);
