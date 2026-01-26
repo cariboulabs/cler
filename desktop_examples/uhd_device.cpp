@@ -277,7 +277,7 @@ void mode_zero_span(const USRPArgs& args) {
     PlotTimeSeriesBlock power_plot("Power vs Time", 
                                    {"Power (dB)"}, 
                                    args.rate,    // sample rate
-                                   2.0f);        // show last 5 seconds
+                                   5.0f);        // show last 5 seconds
     
     power_plot.set_initial_window(0.0f, 0.0f, 1600.0f, 1600.0f);
 
