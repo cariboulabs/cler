@@ -124,10 +124,6 @@ PlotCSpectrumBlock::~PlotCSpectrumBlock() {
 }
 
 cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
-    if (_gui_pause.load(std::memory_order_acquire)) {
-        return cler::Empty{};
-    }
-
     size_t work_size = in[0].size();
     for (size_t i = 1; i < _num_inputs; ++i) {
         if (in[i].size() < work_size) {
@@ -174,9 +170,10 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
 
 void PlotCSpectrumBlock::render() {
     // Take snapshot inside render, protected by mutex
+    // Only update snapshot when not paused - data keeps flowing, just freeze the display
     size_t available = 0;
 
-    if (_snapshot_mutex.try_lock()) {
+    if (!_gui_pause.load(std::memory_order_acquire) && _snapshot_mutex.try_lock()) {
         available = _signal_channels[0].size();
         for (size_t i = 1; i < _num_inputs; ++i) {
             size_t a = _signal_channels[i].size();
