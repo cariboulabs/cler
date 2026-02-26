@@ -135,7 +135,7 @@ void mode_rx(const USRPArgs& args) {
 
     cler::GuiManager gui(1000, 800, "USRP Receiver Example");
     PlotCSpectrumBlock spectrum("USRP Spectrum", {"I/Q"}, args.rate, args.fft);
-    PlotCSpectrogramBlock spectrogram("Spectrogram", {"usrp_signal"}, args.rate, args.fft, 1000);
+    PlotCSpectrogramBlock spectrogram("Spectrogram", {"usrp_signal"}, args.rate, args.fft, 2000);
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
 
     auto flowgraph = cler::make_desktop_flowgraph(
