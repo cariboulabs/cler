@@ -24,12 +24,19 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
     static_assert(std::is_same_v<T, std::complex<short>> || std::is_same_v<T, std::complex<float>>,
             "SourceCaribouliteBlock only supports std::complex<short> or std::complex<float>");
 
+    // bw_hz: optional IF anti-alias filter cutoff. The AT86RF215's RX
+    // bandwidth is independent of sample_rate; if left at 0 the driver
+    // keeps its previous value (typically the radio default, which can
+    // pass aliases at lower sample rates). Pass non-zero to mirror what
+    // GNU Radio / SoapySDR users do via setBandwidth(). Range is
+    // determined by the driver; out-of-range values throw.
     SourceCaribouliteBlock(const char* name,
         CaribouLiteRadio::RadioType radio_type,
         float freq_hz,
         float samp_rate_hz,
         bool agc,
-        float rx_gain_db = 0.0f
+        float rx_gain_db = 0.0f,
+        float bw_hz      = 0.0f
         ) : cler::BlockBase(name) {
             bool freq_valid = false;
             
@@ -64,11 +71,24 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
 
             _max_samples_to_read = _radio->GetNativeMtuSample();
 
+            if (bw_hz > 0.0f &&
+                (bw_hz > _radio->GetRxBandwidthMax() || bw_hz < _radio->GetRxBandwidthMin())) {
+                throw std::invalid_argument(
+                    "bw_hz must be between " +
+                    std::to_string(_radio->GetRxBandwidthMin()) + " and " +
+                    std::to_string(_radio->GetRxBandwidthMax()) + " Hz, but got " +
+                    std::to_string(bw_hz)
+                    );
+            }
+
             _radio->SetFrequency(freq_hz);
-            _radio->SetRxSampleRate(samp_rate_hz);            
+            _radio->SetRxSampleRate(samp_rate_hz);
+            if (bw_hz > 0.0f) {
+                _radio->SetRxBandwidth(bw_hz);
+            }
             _radio->SetAgc(agc);
             if (!agc) {_radio->SetRxGain(rx_gain_db);}
-                
+
             _radio->StartReceiving();
         }
 
