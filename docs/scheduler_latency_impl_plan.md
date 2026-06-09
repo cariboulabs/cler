@@ -43,10 +43,15 @@ Audience: external reviewer approving direction before further implementation.
   instrumentation; Phase 5 lossless contention-aware run order; Phase 6
   priority/pinning. All lossless.
 
-**Status: design decision pending on Phase 3** (Option A/B/C below). Direction and
-the busy-spin finding were reviewer-approved, but the throughput-collapse
-discovery means the "minimal sweep-once" both reviewers green-lit is insufficient;
-re-review of Option B is warranted before implementing.
+**Status: Phase 3 decided, implementation pending.** Owner decisions: **delete
+adaptive sleep** (measurably harmful, −98.9% FTP throughput); pursue **Option B**
+global-activity backoff (do not burn idle CPU); **FixedThreadPool only**. Option B
+is *principled* (attacks adaptive's exact failure cause — local vs global idle
+signal) but **not yet proven**; it must pass the two-axis test (idle CPU drops AND
+under-load throughput within noise) before committing, else escalate to Option C
+(event-driven) or stop at A (busy-spin). This re-review of Option B is the point
+of the current doc — the "minimal sweep-once" both reviewers green-lit was shown
+insufficient. See Phase 3 for the full argument.
 
 ---
 
@@ -88,6 +93,16 @@ Consequences for this effort:
 The Phase 1 audit found every idle block had a natural `NotEnoughSamples` /
 `NotEnoughSpace` meaning. The existing no-progress vocabulary is sufficient;
 adding `Error::NoWork` would be churn without benefit.
+
+### D4 — Delete adaptive sleep
+
+Adaptive sleep is removed, not kept as an `IdlePolicy` option. Measured harmful:
+`FixedThreadPool (with adaptive sleep)` throughput is 16.4 MS, −98.9% vs the
+1240–1821 MS busy-spin baseline (Discovery log #8), because it sleeps on transient
+per-block starvation that is constant under healthy pipeline load. It adds config
+surface and per-block atomic state for negative value. Breaking change, no shim
+(repo is pre-stable). Its role — cutting idle CPU — is taken over by the global
+idle-backoff in Phase 3, which uses the correct (graph-global) signal.
 
 ---
 
@@ -218,98 +233,104 @@ the Phase 3 fix depends on. All 11 unit-test suites pass.
 
 ## Proposed remaining work (all lossless)
 
-### Phase 3 — FixedThreadPool idle fix + `IdlePolicy`  ← next, highest value
+### Phase 3 — Delete adaptive sleep + global-activity idle backoff (Option B)
 
-Split into two PRs (reviewer request) so the logic-defect fix is reviewed apart
-from the config redesign.
+**Decided** (owner): (1) **delete adaptive sleep** outright — it is measurably
+harmful (Discovery log #8: −98.9% FTP throughput) and nobody should enable it;
+(2) pursue **Option B** (global-activity backoff) to cut idle CPU, because the
+owner does not want FTP burning cores when the graph is idle; (3) **FixedThreadPool
+only** — that is the `blocks ≫ cores` regime; ThreadPerBlock keeps busy-spin.
 
-> **The "minimal sweep-once fix" was tried and REVERTED** (Discovery log #6): it
-> drops idle CPU to 12% but collapses under-load throughput by up to 97%, because
-> `relax()` sleeps on transient mid-pipeline starvation. The benchmark and the
-> root-cause analysis stand; the fix does not. Phase 3 is therefore a design
-> choice, below.
+Two prior attempts were tried and reverted (Discovery log #6): the naive
+sweep-once + `relax()`, and the pre-existing adaptive sleep — both collapse
+under-load throughput (38 MS and 16 MS vs a 1240–1821 MS busy-spin baseline).
+Phase 3 is the principled fix that explains and avoids that failure.
 
-#### Phase 3 design fork — reducing idle CPU without killing throughput
+#### Why Option B should beat adaptive sleep — the core argument
 
-The tension (Discovery log #6, #7): under load, workers must poll hot for fast
-inter-stage handoff (SPSC has no notify-on-push); when the graph is globally
-idle, they should sleep. The discriminator must be **global graph activity**, not
-per-worker idleness. Options, for the owner to choose:
+Both sleep when idle. The difference is the **signal that triggers sleep**:
 
-- **Option A — accept busy-spin (no change).** Keep current behavior: FTP pegs
-  `num_workers` cores always. Simple, max throughput, but the idle-CPU cost the
-  target regime explicitly wants to avoid remains. Effectively "do nothing."
-- **Option B — global-activity-aware backoff (recommended, with a contention
-  caveat).** A worker that completes a no-work sweep should spin/yield while the
-  *graph* is recently active and only sleep once the graph is globally quiet.
+- **Adaptive sleep asks "did *I* (this block) fail?"** — a *local* signal. In a
+  pipeline a downstream block's input is empty for a few µs between batches even
+  while the pipeline is flowing; adaptive counts that as consecutive fails and
+  sleeps (~50µs), upstream backs up, handoff dies → throughput collapse. It cannot
+  distinguish "I'm transiently starved but the graph is busy" from "the graph is
+  idle." Transient starvation is *constant* under healthy pipeline load, so
+  adaptive misfires constantly.
+- **Option B asks "did *anyone* work recently?"** — a *global* signal. A worker
+  whose sweep came up empty checks graph-wide activity; if any block worked in the
+  last few µs it keeps spinning (fast handoff preserved) and sleeps only when the
+  *whole graph* goes quiet. The signal is false constantly under load (good — stay
+  hot) and true only when truly idle (good — sleep).
 
-  **Caveat (raised in review):** the obvious implementation — one shared
-  `std::atomic<uint64_t>` epoch `fetch_add`-ed on *every* successful block run —
-  is **worse than the existing adaptive sleep on the contention axis**. Adaptive
-  sleep's atomics are per-block (each run by one worker, own cache line,
-  uncontended); a single global counter written by all workers on every run is a
-  hot cache line bouncing across all cores — it would throttle the very
-  throughput B is meant to preserve. Do NOT implement B that way.
+One line: **adaptive asks "did I fail?", B asks "did anyone work?"** The first is
+true all the time under load; the second only when the graph is genuinely idle.
 
-  **Contention-free design:** per-worker activity slots. Each worker owns one
-  cache-line-aligned `std::atomic<uint64_t> last_active[worker]` and writes only
-  its own slot, at most once per sweep (not per block) — uncontended, same cost
-  class as adaptive sleep's per-block atomic. A worker that just went idle *reads*
-  all N slots (read-mostly, off the hot path, only at backoff frequency); if every
-  slot is stale beyond a threshold, the graph is globally quiet → sleep, else
-  spin/yield. Active workers never read; idle workers never block the hot path.
-  Result: sustained load = busy-spin throughput (no global contention); sustained
-  idle = low CPU; one-time wake latency only on the idle→active edge. Needs the
-  sweep-once loop fix plus the per-worker slots. Lossless. Validate on BOTH axes
-  (`ftp_idle` cpu drop + `perf_simple_linear_flow` throughput within noise).
-- **Option C — event-driven wakeups.** Add notify-on-push to the channel (futex /
-  condvar / eventfd) so a blocked consumer wakes precisely when data arrives.
-  Best CPU + throughput + latency, but the largest change (touches the SPSC
-  channel hot path and every scheduler) and risks regressing the lock-free fast
-  path. Bigger project than this effort.
+#### Mechanism (contention-free)
 
-Recommendation: **Option B**. It directly targets "low CPU when the graph is
-idle" while preserving the busy-spin handoff that load needs. Validate with both
-`ftp_idle` (idle `cpu_pct` should drop) and `perf_simple_linear_flow` (under-load
-throughput must stay within noise of the busy-spin baseline) — the two-axis test
-that exposed the naive fix.
+Per-worker activity slots. Each worker owns one cache-line-aligned
+`std::atomic<uint64_t> last_active[worker]` and writes **only its own slot**, at
+most **once per sweep** (not per block) — uncontended, same cost class as
+adaptive's per-block atomic. A worker that just completed a no-work sweep *reads*
+all N slots (read-mostly, off the hot path, only at backoff frequency): if every
+slot is stale beyond the quiet-threshold, the graph is globally idle → sleep
+(escalating); otherwise spin/yield. Active workers never read; idle workers never
+touch the hot path.
 
-Acceptance: idle FTP `cpu_pct` drops substantially; `perf_simple_linear_flow`
-FTP throughput within noise of busy-spin baseline (1240–1821 MS); zero sample
-loss; all tests pass.
+**Rejected:** a single shared `std::atomic` epoch `fetch_add`-ed on every block
+run — that hot cache line bouncing across all cores would be *worse* than adaptive
+on the contention axis and throttle the throughput B is meant to preserve.
 
-#### Later — `IdlePolicy` + migrate/remove `adaptive_sleep` (after the fork is settled)
+Still requires the **sweep-once loop fix** (so workers actually reach the backoff;
+the part of the reverted prototype that was correct): stop `get_next_block`
+auto-resetting, add `rewind()`, call it per outer pass.
 
-1. **`enum class IdlePolicy { BusySpin, SpinThenYield, Relax, AdaptiveSleep }`**
-   governs the between-sweep backoff, applied **per worker** (sweep-level), NOT
-   per block:
-   - `BusySpin` → immediate re-sweep (latency-first, cores ≥ blocks).
-   - `SpinThenYield` → spin then `std::this_thread::yield()`.
-   - `Relax` → spin then short sleep after a no-work sweep.
-   - `AdaptiveSleep` → grow sleep on consecutive no-work sweeps (low-power; an
-     explicit preset, NOT a shipped default — adaptive can hide latency
-     surprises). Adaptive state moves from per-block to per-worker.
-   - Work done on a sweep → no sleep, immediately sweep again (full throughput).
-2. **Move fixed-pool no-progress handling out of `execute_block_at_index_helper`**
-   to the worker sweep level. Today `handle_adaptive_sleep()` is called per block
-   inside the helper (`cler.hpp:698,715`); a worker owning many idle blocks would
-   then sleep once per block. The per-block call must be removed/neutralized in
-   the fixed-pool path and replaced by a single per-sweep idle decision.
-3. **Defaults (do not converge the two schedulers):**
-   - `FixedThreadPool` default `idle_policy = Relax` — restores the code's
-     original `relax()` intent and gives low idle CPU for the target regime.
-   - `ThreadPerBlock` default `idle_policy = BusySpin` — keep it latency-first;
-     do not make both schedulers behave the same.
-4. **`adaptive_sleep` bool:** the project owner chose to delete it (no shim).
-   Isolated to this PR so it is independently revertible. Open question 4 below
-   re-checks whether a deprecation window is wanted instead. Keep
-   `adaptive_sleep_multiplier/_max_us/_fail_threshold` (read only when
-   `AdaptiveSleep`). Migrate call sites: `cler.hpp` (both schedulers),
-   `cler_utils.hpp` presets, `cler_desktop_utils.hpp`,
+#### The one tradeoff the owner accepted
+
+"Don't burn CPU when idle" ⇒ workers sleep when the graph is quiet ⇒ the first
+item after a quiet period waits up to **one sleep-quantum** before a worker wakes.
+This idle→active wake latency is unavoidable without event-driven wakeups
+(Option C). The sleep quantum *is* both the idle-CPU floor and the wake latency
+(e.g. 200µs sleep → ~0 idle CPU, ≤200µs wake delay). Owner OK with sub-ms.
+
+#### Correctness condition (where B holds / fails)
+
+B is correct only when the timescales separate:
+`handoff gap under load (µs)  <  quiet-threshold  <  idle inter-arrival (ms)`.
+For the target regime (µs DSP handoff, ms-apart sparse sensors) the gap is wide,
+so B should land. If a stage *legitimately* idles longer than the threshold during
+active operation, B mistakes it for global-idle and sleeps → the adaptive failure
+returns. The threshold must sit in that gap; **measurement decides.**
+
+#### Honest status — principled, not proven
+
+B attacks adaptive's exact failure cause, but is **not proven** until it passes
+the same two-axis test that killed every prior attempt:
+- `ftp_idle`: idle FTP `cpu_pct` must drop substantially (from 200).
+- `perf_simple_linear_flow`: FTP throughput must stay within noise of the
+  busy-spin baseline (1240–1821 MS).
+If B fails the throughput axis the same way, escalate to **Option C** (event-driven
+notify-on-push — exact wakeups, no threshold guessing, but a much larger change to
+the lock-free channel) or stop at Option A (accept busy-spin).
+
+#### Build order
+
+1. **Delete adaptive sleep.** Remove `adaptive_sleep` bool +
+   `adaptive_sleep_multiplier/_max_us/_fail_threshold`, the per-block
+   `consecutive_fails`/`current_adaptive_sleep_us` atomics, `handle_adaptive_sleep()`,
+   the `thread_per_block_adaptive_sleep()` preset, and all call sites
+   (`cler.hpp`, `cler_utils.hpp`, `cler_desktop_utils.hpp`,
    `performance/perf_{simple_linear_flow,fanout_workloads}.cpp`,
    `desktop_examples/{cariboulite_recorder,polyphase_channelizer,cariboulite_spectrum}.cpp`,
-   `ai-bringup.md`. Add a `low_latency()` (BusySpin/SpinThenYield) and a
-   `low_power()` (AdaptiveSleep) preset.
+   `ai-bringup.md`). Breaking change, no shim (owner's call; pre-stable repo).
+2. **Sweep-once loop fix** (FTP worker reaches the backoff).
+3. **Per-worker activity slots + global-quiet backoff** (spin → sleep on
+   threshold; FTP only). Optionally expose quiet-threshold / sleep-quantum as
+   `FlowGraphConfig` knobs.
+4. **Validate both axes** (above). Commit only if both pass.
+
+Acceptance: idle FTP `cpu_pct` drops substantially; `perf_simple_linear_flow` FTP
+throughput within noise of busy-spin baseline; zero sample loss; all tests pass.
 
 Test: `perf_scheduler_latency low_rate` + `contended` across all four policies,
 reading `cpu_pct` as a first-class result. Acceptance: each policy behaves as
@@ -423,15 +444,17 @@ decisions come from local runs on a controlled machine
 
 1. Benchmark scaffold + baselines. **(done)**
 2. Idle-contract test + 11 block fixes. **(done)**
-3a. FixedThreadPool minimal sweep-once fix (no config change).  ← next
-3b. `IdlePolicy` + migrate/remove `adaptive_sleep` (breaking).
-4. Backpressure instrumentation.
-5. Lossless contention-aware run order (FixedThreadPool, experimental/off-by-default).
-6. Priority / pinning hints.
+3. `ftp_idle` benchmark (exercises FixedThreadPool). **(done)**
+4. Delete adaptive sleep (breaking, D4).  ← next
+5. Sweep-once loop fix + global-activity idle backoff (Option B), validated
+   two-axis. Hold if the throughput axis fails → escalate to Option C or stop.
+6. Backpressure instrumentation.
+7. Lossless contention-aware run order (FixedThreadPool, experimental/off-by-default).
+8. Priority / pinning hints.
 
-3a is the minimal logic-defect fix and ships first. 3b/4 are independent given
-0–1. Phase 5 is the main scheduler experiment, opt-in, and depends on the
-`contended` benchmark. 3a is the priority for the target regime.
+PR 4 (delete adaptive sleep) is independent and can land immediately — it is a
+pure simplification (D4). PR 5 is the real idle-CPU fix and the one that must pass
+the two-axis test before it commits. PRs 6–8 follow.
 
 ---
 
@@ -454,9 +477,27 @@ Resolved per their feedback:
 5. **Phase 5** is experimental, config-gated, off by default; round-robin stays
    the default. (R2)
 
-Still open for the owner:
+**Superseded by measurement.** Item 2 above (split into a minimal 3a sweep-once
+fix) was the reviewers' plan based on the data then available. The `ftp_idle`
+benchmark since showed that minimal fix collapses throughput (−97%), and the
+existing adaptive sleep is worse (−98.9%). So the plan changed (Discovery log
+#6–#8): adaptive sleep is **deleted** (D4), and the idle-CPU fix is the
+**global-activity backoff (Option B)** — see Phase 3. The reviewers' caution
+about defaults / not-converging schedulers still applies (B is FTP-only;
+ThreadPerBlock keeps busy-spin).
 
-- **`adaptive_sleep` deletion vs deprecation:** owner chose delete (no shim);
-  both reviewers would keep a one-cycle deprecation *if external API consumers
-  exist*. Confirm cler is pre-stable / has no external consumers, else keep
-  `adaptive_sleep` deprecated for one transition window in 3b.
+Resolved owner decisions:
+- **`adaptive_sleep`: delete, no shim** — repo is pre-stable, and it is
+  measurably harmful (−98.9%), so a deprecation window is not warranted.
+
+For the re-reviewer (this is the point of the current revision):
+- Does the **local-vs-global signal** argument (why Option B should beat adaptive
+  sleep) hold up?
+- Is the **contention-free per-worker-slot** design sound, or is there a hidden
+  hot-path cost?
+- Is the **quiet-threshold timescale separation** assumption safe for real Cler
+  graphs, or are there pipelines whose stages idle longer than the threshold under
+  active load (which would reintroduce the collapse)?
+- If B fails the throughput axis, is **Option C** (event-driven wakeups) worth the
+  cost, or should we settle for **Option A** (busy-spin) and just delete adaptive
+  sleep?
