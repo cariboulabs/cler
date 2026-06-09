@@ -28,23 +28,31 @@ Audience: external reviewer approving direction before further implementation.
   backpressure instrumentation; Phase 5 lossless contention-aware run order;
   Phase 6 priority/pinning. All lossless.
 
-**Asks of the reviewer:** (1) confirm the lossless mandate; (2) confirm the
-`FixedThreadPool` busy-spin reading and that the sweep-once-then-backoff fix is
-acceptable (it changes idle timing, never data); (3) approve the phase order.
+**Status: reviewed & approved** by two independent reviews — direction and the
+`FixedThreadPool` busy-spin finding confirmed; Phase 3 endorsed as next. Their
+edits are folded in below (see "Reviewer sign-off"): D1 wording softened, Phase 3
+split into 3a/3b, per-worker (not per-block) backoff, `Relax`/`BusySpin` defaults
+(AdaptiveSleep is an opt-in preset), Phase 5 made opt-in. Implementing 3a next.
 
 ---
 
 ## Decisions
 
-### D1 — Cler is lossless (scope-defining)
+### D1 — Core channels are lossless; dropping is out of scope for this effort
 
-Cler treats every sample/measurement as critical and must never drop, overwrite,
-or reorder data. There is no "latest-wins" channel. Rationale: the domain is
-sample-stream DSP / sensor measurement (data integrated downstream, e.g. by
-estimators), where dropping a sample injects error. Samples are not
+Core/default `Channel<T>` is lossless FIFO. This scheduler/idle-CPU effort will
+**not** add dropping, overwriting, reordering, or freshness semantics. Rationale:
+the domain is sample-stream DSP / sensor measurement (data integrated downstream,
+e.g. by estimators), where dropping a sample injects error; samples are not
 interchangeable, so a stale backlog is **not** solved by discarding it.
 
-Consequences:
+This is a scope boundary, not a permanent ban. If Cler later needs latest-wins /
+control-state data (e.g. stale vision frames or old GNSS corrections that can be
+worse than skipped), it must be a **separate, explicit, opt-in type** — never a
+default-channel capability, so measurements can never be dropped by accident.
+That is a future decision, not part of this effort.
+
+Consequences for this effort:
 - **Out of scope:** `drop_oldest` / `keep_latest` / `drop_newest` / TTL-drop /
   `OverwriteChannel` / freshness counters / `TimedItem`-for-TTL. (Prototyped on
   this branch, then reverted — see git history.)
@@ -179,38 +187,70 @@ the Phase 3 fix depends on. All 11 unit-test suites pass.
 
 ### Phase 3 — FixedThreadPool idle fix + `IdlePolicy`  ← next, highest value
 
-Goal: stop FixedThreadPool workers burning idle cores; give explicit control over
-idle backoff. Directly addresses the target regime (idle CPU + churn).
+Split into two PRs (reviewer request) so the logic-defect fix is reviewed apart
+from the config redesign.
 
-1. **Fix the worker loop** so each worker sweeps its owned blocks **once** per
-   pass (remove the auto-reset in `get_next_block`; reset the queue at the top of
-   the outer loop), accumulate `did_work` across the sweep, then reach the idle
-   handler. This restores the code's evident intent and makes (B) reachable.
-2. **`enum class IdlePolicy { BusySpin, SpinThenYield, Relax, AdaptiveSleep }`**
-   governs the between-sweep backoff, applied **per worker** (not per block —
-   per-block sleeping would stall the whole sweep many times):
-   - `BusySpin` → immediate re-sweep (today's latency-first behavior, cores ≥ blocks).
+#### Phase 3a — Minimal sweep-once fix (no config change)
+
+Fix the logic defect only; touch no public config. Make each worker sweep its
+owned blocks **once** per pass, then reach the idle handler:
+
+```
+worker: forever:
+    did_work = false
+    for each owned block ONCE:
+        did_work |= run(block)
+    if !did_work: TaskPolicy::relax()    # now reachable
+```
+
+Implementation: stop `get_next_block` auto-resetting (or reset the queue at the
+top of the outer loop) so loop (A) terminates after one sweep, making the
+existing `relax()` at (B) reachable. With the default `adaptive_sleep=false`,
+the per-block `handle_adaptive_sleep()` is a no-op, so 3a's net effect is exactly:
+idle workers `relax()` once per empty sweep instead of busy-spinning forever.
+
+Test/acceptance: idle FixedThreadPool `cpu_pct` drops from ~200 (per active
+worker) toward ~0; DSP throughput (`perf_simple_linear_flow`) unchanged within
+noise; zero sample loss; all tests pass. This alone resolves the target regime's
+idle-CPU churn and is trivially revertible.
+
+#### Phase 3b — `IdlePolicy` + migrate/remove `adaptive_sleep`
+
+1. **`enum class IdlePolicy { BusySpin, SpinThenYield, Relax, AdaptiveSleep }`**
+   governs the between-sweep backoff, applied **per worker** (sweep-level), NOT
+   per block:
+   - `BusySpin` → immediate re-sweep (latency-first, cores ≥ blocks).
    - `SpinThenYield` → spin then `std::this_thread::yield()`.
-   - `Relax` → sleep `idle_sleep_us` after a no-work sweep.
-   - `AdaptiveSleep` → grow sleep on consecutive no-work sweeps (churn-minimizing;
-     likely the default for the target regime). Adaptive state moves to per-worker.
+   - `Relax` → spin then short sleep after a no-work sweep.
+   - `AdaptiveSleep` → grow sleep on consecutive no-work sweeps (low-power; an
+     explicit preset, NOT a shipped default — adaptive can hide latency
+     surprises). Adaptive state moves from per-block to per-worker.
    - Work done on a sweep → no sleep, immediately sweep again (full throughput).
-3. **Delete the `adaptive_sleep` bool** (breaking, accepted; no shim). Keep
+2. **Move fixed-pool no-progress handling out of `execute_block_at_index_helper`**
+   to the worker sweep level. Today `handle_adaptive_sleep()` is called per block
+   inside the helper (`cler.hpp:698,715`); a worker owning many idle blocks would
+   then sleep once per block. The per-block call must be removed/neutralized in
+   the fixed-pool path and replaced by a single per-sweep idle decision.
+3. **Defaults (do not converge the two schedulers):**
+   - `FixedThreadPool` default `idle_policy = Relax` — restores the code's
+     original `relax()` intent and gives low idle CPU for the target regime.
+   - `ThreadPerBlock` default `idle_policy = BusySpin` — keep it latency-first;
+     do not make both schedulers behave the same.
+4. **`adaptive_sleep` bool:** the project owner chose to delete it (no shim).
+   Isolated to this PR so it is independently revertible. Open question 4 below
+   re-checks whether a deprecation window is wanted instead. Keep
    `adaptive_sleep_multiplier/_max_us/_fail_threshold` (read only when
-   `AdaptiveSleep`). Migrate all call sites: `cler.hpp` (both schedulers),
+   `AdaptiveSleep`). Migrate call sites: `cler.hpp` (both schedulers),
    `cler_utils.hpp` presets, `cler_desktop_utils.hpp`,
    `performance/perf_{simple_linear_flow,fanout_workloads}.cpp`,
    `desktop_examples/{cariboulite_recorder,polyphase_channelizer,cariboulite_spectrum}.cpp`,
-   `ai-bringup.md`. Compiler is the migration checklist. Add a `low_latency()`
-   preset.
-4. Apply the same idle handling to `ThreadPerBlock` for consistency.
+   `ai-bringup.md`. Add a `low_latency()` (BusySpin/SpinThenYield) and a
+   `low_power()` (AdaptiveSleep) preset.
 
 Test: `perf_scheduler_latency low_rate` + `contended` across all four policies,
-reading `cpu_pct` as a first-class result.
-
-Acceptance: idle FixedThreadPool `cpu_pct` drops from ~200 (per active worker) to
-near 0 under a non-busy policy; default DSP throughput unchanged within noise;
-**zero sample loss**; all examples/perf/tests compile and pass.
+reading `cpu_pct` as a first-class result. Acceptance: each policy behaves as
+specified; default-config behavior unchanged from 3a; zero sample loss; all
+examples/perf/tests compile and pass.
 
 ### Phase 4 — Backpressure instrumentation (no drop counters)
 
@@ -222,14 +262,17 @@ negligible overhead when disabled; surfaces backpressure hot-spots.
 
 ### Phase 5 — Lossless contention-aware run order (FixedThreadPool)
 
-The surviving "smart scheduler" idea, scoped and lossless. Under core contention
-(Phase 0 `contended` showed ms-scale message p99 when busy pipes saturate cores),
-let a worker pick the **most-starved** ready block instead of strict round-robin
-— run order only, **no dropping**. Sample k owned blocks ("power of two
-choices") and run the best by `score = input_depth + time_since_last_run +
-priority − downstream_full_penalty`. Not applicable to `ThreadPerBlock` (no
-choice — every block has a thread). Test on `contended`: round-robin vs
-sample_k=2/4; track message p99/max, throughput, CPU; confirm zero loss.
+The surviving "smart scheduler" idea, scoped and lossless — and **experimental,
+config-gated, off by default**. Round-robin stays the default (simple,
+predictable); starvation-aware ordering can introduce unfairness or odd latency
+coupling, so it is opt-in only. Under core contention (Phase 0 `contended` showed
+ms-scale message p99 when busy pipes saturate cores), an opt-in mode lets a
+worker pick the **most-starved** ready block instead of strict round-robin — run
+order only, **no dropping**. Sample k owned blocks ("power of two choices") and
+run the best by `score = input_depth + time_since_last_run + priority −
+downstream_full_penalty`. Not applicable to `ThreadPerBlock` (no choice — every
+block has a thread). Test on `contended`: round-robin vs sample_k=2/4; track
+message p99/max, throughput, CPU; confirm zero loss and no fairness regression.
 
 ### Phase 6 — Priority / pinning hints (last)
 
@@ -262,25 +305,40 @@ decisions come from local runs on a controlled machine
 
 1. Benchmark scaffold + baselines. **(done)**
 2. Idle-contract test + 11 block fixes. **(done)**
-3. FixedThreadPool idle fix + `IdlePolicy` (breaking: deletes `adaptive_sleep`).
+3a. FixedThreadPool minimal sweep-once fix (no config change).  ← next
+3b. `IdlePolicy` + migrate/remove `adaptive_sleep` (breaking).
 4. Backpressure instrumentation.
-5. Lossless contention-aware run order (FixedThreadPool).
+5. Lossless contention-aware run order (FixedThreadPool, experimental/off-by-default).
 6. Priority / pinning hints.
 
-Phases 3–4 are independent given 0–1; Phase 5 is the main scheduler experiment
-and depends on the `contended` benchmark. Phase 3 is the priority for the target
-regime.
+3a is the minimal logic-defect fix and ships first. 3b/4 are independent given
+0–1. Phase 5 is the main scheduler experiment, opt-in, and depends on the
+`contended` benchmark. 3a is the priority for the target regime.
 
 ---
 
-## Open questions for the reviewer
+## Reviewer sign-off (two independent reviews)
 
-1. Confirm the lossless mandate (D1) — no dropping, ever, in any mode?
-2. Is the `FixedThreadPool` busy-spin reading correct, and is sweep-once →
-   per-worker backoff the right fix? (It changes idle timing only, never data.)
-3. Default `IdlePolicy` for the shipped presets — `AdaptiveSleep` (lowest idle
-   CPU) vs `Relax` (simple, bounded) vs `SpinThenYield`?
-4. Is deleting the `adaptive_sleep` bool outright acceptable, or is a deprecation
-   shim wanted for downstream users?
-5. Should `ThreadPerBlock` keep busy-spin as its default (latency-first), or also
-   default to a backoff policy?
+Both reviewers approved the direction and confirmed the `FixedThreadPool`
+busy-spin reading as a real logic defect, with Phase 3 as the correct next step.
+Resolved per their feedback:
+
+1. **D1 wording** — softened from "lossless forever" to "core channels lossless;
+   dropping out of scope for this effort; future latest-wins data = separate
+   explicit opt-in type." (R1)
+2. **Phase 3 split** into 3a (minimal sweep-once fix, no config change) and 3b
+   (`IdlePolicy` + migration). (R2)
+3. **Per-worker, not per-block** idle handling; the per-block
+   `handle_adaptive_sleep()` in the fixed-pool helper must be neutralized. (R1)
+4. **Default policy** = `Relax` for FixedThreadPool, `BusySpin` for
+   ThreadPerBlock; `AdaptiveSleep` is an explicit low-power preset, not a default.
+   Schedulers do not converge behaviorally. (R2)
+5. **Phase 5** is experimental, config-gated, off by default; round-robin stays
+   the default. (R2)
+
+Still open for the owner:
+
+- **`adaptive_sleep` deletion vs deprecation:** owner chose delete (no shim);
+  both reviewers would keep a one-cycle deprecation *if external API consumers
+  exist*. Confirm cler is pre-stable / has no external consumers, else keep
+  `adaptive_sleep` deprecated for one transition window in 3b.
