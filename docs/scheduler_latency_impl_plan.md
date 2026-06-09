@@ -30,17 +30,23 @@ Audience: external reviewer approving direction before further implementation.
   so FixedThreadPool was never actually measured. The busy-spin finding stands on
   code reading + review but is **empirically unvalidated** pending a
   `blocks > workers` benchmark.
-- **Current work:** Phase 3a fix (sweep-once + `rewind`) is applied in the working
-  tree, **uncommitted and unvalidated**. Next concrete step: add a
-  `blocks > workers` idle benchmark and measure idle `cpu_pct` before/after.
-- **Proposed remaining:** Phase 3 worker-loop fix + `IdlePolicy`; Phase 4
-  backpressure instrumentation; Phase 5 lossless contention-aware run order;
-  Phase 6 priority/pinning. All lossless.
+- **Phase 3a validated then REVERTED.** Added the `ftp_idle` benchmark
+  (blocks > workers), which confirmed the busy-spin defect (idle FTP = 200% CPU)
+  AND showed the naive sweep-once+`relax()` fix collapses under-load throughput by
+  up to 97% (it sleeps on transient pipeline starvation). cler.hpp is back to the
+  original busy-spin; only the benchmark was kept/committed.
+- **Phase 3 is now a design fork** (Discovery log #6/#7): busy-spin is load-bearing
+  for inter-stage handoff because SPSC has no notify-on-push. Reducing idle CPU
+  without killing throughput needs a **global-activity-aware backoff** (recommended
+  Option B) or event-driven wakeups (Option C) — not a minimal per-worker change.
+- **Proposed remaining:** Phase 3 (design fork, below); Phase 4 backpressure
+  instrumentation; Phase 5 lossless contention-aware run order; Phase 6
+  priority/pinning. All lossless.
 
-**Status: direction reviewed & approved** by two independent reviews (D1 softened,
-Phase 3 split 3a/3b, per-worker backoff, `Relax`/`BusySpin` defaults, Phase 5
-opt-in — see "Reviewer sign-off"). Implementation of 3a is in progress and blocked
-on building a benchmark that actually exercises FixedThreadPool.
+**Status: design decision pending on Phase 3** (Option A/B/C below). Direction and
+the busy-spin finding were reviewer-approved, but the throughput-collapse
+discovery means the "minimal sweep-once" both reviewers green-lit is insufficient;
+re-review of Option B is warranted before implementing.
 
 ---
 
@@ -217,40 +223,48 @@ the Phase 3 fix depends on. All 11 unit-test suites pass.
 Split into two PRs (reviewer request) so the logic-defect fix is reviewed apart
 from the config redesign.
 
-#### Phase 3a — Minimal sweep-once fix (no config change)
+> **The "minimal sweep-once fix" was tried and REVERTED** (Discovery log #6): it
+> drops idle CPU to 12% but collapses under-load throughput by up to 97%, because
+> `relax()` sleeps on transient mid-pipeline starvation. The benchmark and the
+> root-cause analysis stand; the fix does not. Phase 3 is therefore a design
+> choice, below.
 
-Fix the logic defect only; touch no public config. Make each worker sweep its
-owned blocks **once** per pass, then reach the idle handler:
+#### Phase 3 design fork — reducing idle CPU without killing throughput
 
-```
-worker: forever:
-    did_work = false
-    for each owned block ONCE:
-        did_work |= run(block)
-    if !did_work: TaskPolicy::relax()    # now reachable
-```
+The tension (Discovery log #6, #7): under load, workers must poll hot for fast
+inter-stage handoff (SPSC has no notify-on-push); when the graph is globally
+idle, they should sleep. The discriminator must be **global graph activity**, not
+per-worker idleness. Options, for the owner to choose:
 
-Implementation: stop `get_next_block` auto-resetting and add a `rewind()` the
-worker calls at the top of each outer pass, so loop (A) terminates after one
-sweep and the existing `relax()` at (B) becomes reachable. With the default
-`adaptive_sleep=false`, the per-block `handle_adaptive_sleep()` is a no-op, so
-3a's net effect is exactly: idle workers `relax()` once per empty sweep instead
-of busy-spinning forever.
+- **Option A — accept busy-spin (no change).** Keep current behavior: FTP pegs
+  `num_workers` cores always. Simple, max throughput, but the idle-CPU cost the
+  target regime explicitly wants to avoid remains. Effectively "do nothing."
+- **Option B — global-activity-aware backoff (recommended).** A shared
+  `std::atomic<uint64_t>` activity epoch bumped whenever any block does work. A
+  worker that completes a no-work sweep checks time/epochs since last global
+  activity: still-recent → spin/yield (stay hot, pipeline active); quiet beyond a
+  threshold → sleep, escalating. When work resumes anywhere the epoch moves and
+  workers stop sleeping (one-time wake latency on the idle→active edge only).
+  Result: sustained load = busy-spin throughput; sustained idle = low CPU. Medium
+  change, lossless, fits the regime. Needs the sweep-once loop fix (so workers
+  reach the backoff) plus the shared epoch.
+- **Option C — event-driven wakeups.** Add notify-on-push to the channel (futex /
+  condvar / eventfd) so a blocked consumer wakes precisely when data arrives.
+  Best CPU + throughput + latency, but the largest change (touches the SPSC
+  channel hot path and every scheduler) and risks regressing the lock-free fast
+  path. Bigger project than this effort.
 
-**STATUS: code applied, uncommitted, NOT yet validated.** The fix is in the
-working tree (`get_next_block` no longer auto-resets; `rewind()` added; worker
-calls it per pass). It cannot be validated with the current benchmark because the
-`low_rate` graph (2 blocks) falls back to ThreadPerBlock (CORRECTION above) — the
-FTP path never runs. **Blocking prerequisite:** add a benchmark case with
-`blocks > workers` (e.g. M idle source→sink chains under `num_workers=2`), then
-measure idle `cpu_pct` before (git-stash the fix) vs after. Only then commit 3a.
+Recommendation: **Option B**. It directly targets "low CPU when the graph is
+idle" while preserving the busy-spin handoff that load needs. Validate with both
+`ftp_idle` (idle `cpu_pct` should drop) and `perf_simple_linear_flow` (under-load
+throughput must stay within noise of the busy-spin baseline) — the two-axis test
+that exposed the naive fix.
 
-Test/acceptance: in a `blocks > workers` idle scenario, FixedThreadPool
-`cpu_pct` drops from pegged (~`num_workers`×100) toward ~0; DSP throughput
-(`perf_simple_linear_flow`) unchanged within noise; zero sample loss; all tests
-pass. Trivially revertible.
+Acceptance: idle FTP `cpu_pct` drops substantially; `perf_simple_linear_flow`
+FTP throughput within noise of busy-spin baseline (1240–1821 MS); zero sample
+loss; all tests pass.
 
-#### Phase 3b — `IdlePolicy` + migrate/remove `adaptive_sleep`
+#### Later — `IdlePolicy` + migrate/remove `adaptive_sleep` (after the fork is settled)
 
 1. **`enum class IdlePolicy { BusySpin, SpinThenYield, Relax, AdaptiveSleep }`**
    governs the between-sweep backoff, applied **per worker** (sweep-level), NOT
@@ -346,9 +360,28 @@ Chronological record of non-obvious findings, so the plan stays honest.
    mislabeled; (b) FTP only runs at `blocks > workers` (the target regime), which
    the benchmark never set up; (c) the fallback is a usability footgun (asking for
    a pool and silently getting per-block threads) — candidate for a warning/log.
-5. **Open validation gap.** Phase 3a is applied but unproven. Must add a
-   `blocks > workers` idle benchmark and measure idle `cpu_pct` before/after
-   before committing 3a. ← current next step.
+5. **Validation gap closed — added `ftp_idle` benchmark** (16 Trickle→Drain
+   chains = 32 blocks, 2 workers; FTP engages since 32 > 2). Confirmed the
+   busy-spin defect empirically: idle FixedThreadPool pegs `cpu_pct=200`.
+6. **Naive Phase 3a fix REVERTED — it collapses under-load throughput.**
+   Before/after on `perf_simple_linear_flow` (6-block linear pipeline under FTP):
+   | idle backoff | under-load throughput | idle cpu |
+   | --- | --- | --- |
+   | busy-spin (original) | 1240–1821 MS | 200% |
+   | sweep-once + `relax()` | 38–500 MS (−97% at 4 workers) | 12% |
+   | sweep-once + `yield()` | 1318–1834 MS | 200% |
+   The busy-spin is **load-bearing**: a worker owning a downstream stage finds its
+   input momentarily empty while upstream is still producing, and `relax()`'s
+   ~50µs sleep on that transient starvation destroys pipeline handoff (worse with
+   more workers = more split points). `yield()` keeps throughput but does not
+   deschedule on an idle multicore, so it saves no idle CPU.
+7. **Root cause / design fork.** SPSC channels have **no notify-on-push**, so a
+   consumer can only poll: poll fast = CPU, poll slow = handoff latency =
+   throughput collapse. Per-worker "consecutive idle sweeps" backoff does NOT
+   help — a downstream worker legitimately sees many empty sweeps while the
+   pipeline is active. The real signal is **global**: "has the graph done any work
+   recently," not per-worker idleness. This makes Phase 3 a genuine design choice
+   (see reframed Phase 3 below), not a minimal fix. ← decision pending.
 
 ---
 
