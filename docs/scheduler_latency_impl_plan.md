@@ -76,7 +76,7 @@ Cases to implement (matches stress plan benchmarks 1–3):
   FixedThreadPool 2/4, FTP pinned}.
 - `contended`: busy pipes `0/1/2/4/8` × work `{none,memcpy,heavy}`, msg period 1ms.
 - `slow_sink`: sink modes × policy (initially only `fifo` — others arrive in
-  Phase 4).
+  Phase 3).
 
 Done when: builds under `-DCLER_BUILD_PERFORMANCE=ON`, runs all three cases on
 current `main` behavior, emits diffable lines. Commit the baseline numbers to the
@@ -141,11 +141,101 @@ contract touch, not a local add — keep the migration list reviewable.
 
 ---
 
-## Phase 3 — Idle policy (replace `adaptive_sleep` outright)
+## Strategic direction (revised after review)
+
+The original phase order led with idle policy, then freshness. That contradicts
+the stress plan's own "Initial Recommendation" — *prioritize freshness channel
+methods over sophisticated scheduler changes* — and the Phase 0 numbers settle
+it by magnitude:
+
+- idle-policy effect (low_rate): busy-spin 0.14us p50 vs adaptive 70us–3.5ms.
+  Real, but micro-to-millisecond scale, and CPU is the actual axis (busy = 200%).
+- freshness effect (slow_sink, FIFO): **p50 staleness 162ms** at a 100us sink,
+  ~1.1s at 1ms, ~3s at 10ms.
+
+The freshness problem is ~1000x larger and is the literal user pain ("stale worse
+than dropped"). So freshness moves ahead of idle policy. Item **age** is the
+shared substrate — it powers TTL freshness now and any future deadline-aware
+scheduler — so age instrumentation is pulled forward into the freshness phase.
+
+North-star (not near-term): turn Cler into an opt-in **real-time dataflow mode**
+on top of the throughput-optimized core — channel freshness policies + per-block
+timing metadata (period/deadline/max_age/priority) + an age/deadline-aware
+scheduler. Two cautions keep this honest and late:
+
+1. An age/deadline "choose among ready blocks" scheduler only matters when
+   **blocks >> cores**. In the default `ThreadPerBlock` mode every block owns a
+   thread, so there is no scheduling *choice* to make — the sampled-scheduler
+   idea is irrelevant there and only earns its keep in a core-constrained
+   `FixedThreadPool` with heterogeneous deadlines.
+2. Typical fusion graphs are low-volume (IMU ~1kHz, GNSS ~10Hz, 10–20 blocks).
+   With enough cores, thread-per-block already gives sub-us wake latency (Phase 0
+   confirms). Don't build a clever scheduler for a problem the default mode
+   doesn't have; build freshness, which every mode needs.
+
+Revised order: `measure → fix no-work → expose age → enforce freshness →
+channel stats → tune idle → timing hints → age/deadline schedule → OS pinning`.
+
+---
+
+## Phase 3 — Freshness channel methods + item age (additive, SPSC-safe)
+
+Goal: bound message age under sink stall. This is the highest-ROI change and the
+direct fix for the 162ms staleness Phase 0 measured. Respect SPSC ownership.
+
+Safe set (implement these):
+- `bool try_push_drop_newest(const T&)` — producer-side; if full, drop the
+  incoming item, bump a counter. Pure producer state.
+- `size_t pop_latest(T&)` / `drain_to_latest(T&)` — consumer-side; drain all but
+  the newest, return count dropped. Pure consumer state.
+
+Add to `cler_spsc-queue.hpp` and expose through `ChannelBase<T>`. Do NOT add
+producer-initiated `drop_oldest`/`overwrite_oldest` to the SPSC queue — it mutates
+the consumer-owned read index and breaks the invariant. Defer those to a separate
+`OverwriteSPSCChannel<T>` type with its own tested design (note as future work).
+
+Item age (pulled forward from the old instrumentation phase, because TTL needs
+it and so will the future deadline scheduler):
+- `template<typename T> struct TimedItem { T value; uint64_t enqueue_ticks; };`
+  — a thin wrapper stamping a steady-clock tick at enqueue.
+- TTL-drop = consumer-side check on `TimedItem` age, NOT a queue mutation: on
+  pop, discard items older than `ttl_us`, count them as `stale_dropped`.
+
+Test: `slow_sink` case gains policies `drop_newest`, `keep_latest`, `ttl`.
+Compare vs `fifo`. Assert FIFO unchanged by default; freshness policies bound
+`max_enqueue_to_pop_us`; drop counts match expectations.
+
+Done when: freshness policies bound `max_enqueue_to_pop_us` under sink stalls;
+drop counters match expected losses; existing FIFO behavior unchanged by default;
+SPSC tests (`tests/spsc-queue/`) still green; new methods covered by unit tests.
+
+---
+
+## Phase 4 — Channel stats / drop counters
+
+Goal: cheap visibility into queue pressure, separate from the per-item age above.
+
+Deliverables:
+- `struct ChannelStats { size_t high_watermark, dropped_newest, dropped_oldest,
+  failed_pushes, stale_dropped; }`. Updated only when a compile-time/flag stats
+  mode is on; zero cost when disabled (mirror `collect_detailed_stats`).
+- Wire counters into the Phase 3 freshness methods.
+
+Test: unit tests assert counters; wire stats into all `perf_scheduler_latency`
+output lines (`channel_high_watermark`, `dropped_*`, `stale_dropped`).
+
+Done when: stats add negligible overhead disabled (verify
+`perf_simple_linear_flow` throughput unchanged); benchmarks emit the stat fields.
+
+---
+
+## Phase 5 — Idle policy (replace `adaptive_sleep` outright)
 
 Goal: explicit spin/yield/sleep control. **Hard replace** — `adaptive_sleep` bool
-is removed, not retained. Breaking API change is accepted: if a policy is cleaner
-and faster, we do not carry the old field.
+is removed, not retained. Breaking API change accepted. Demoted below freshness:
+this is a CPU-vs-tail-latency tuning knob, not the headline. The Phase 0 CPU
+metric now makes the tradeoff measurable, which is the precondition for doing
+this well.
 
 Deliverables:
 
@@ -173,68 +263,69 @@ Deliverables:
    - `ai-bringup.md` — doc reference.
 4. New preset `low_latency()` in `cler_utils.hpp` (BusySpin or SpinThenYield).
 
-Test: `perf_scheduler_latency low_rate` + `contended` across all four policies.
-Full build of examples + perf to catch every dropped-field compile error (the
-compiler is the migration checklist here).
+Test: `perf_scheduler_latency low_rate` + `contended` across all four policies,
+reading the `cpu_pct` column as a first-class result.
 
 Done when: BusySpin/SpinThenYield keep p99 low without one-full-core-per-idle-block
-where avoidable; adaptive sleep's tail-latency cost is quantified; default DSP
-throughput (`perf_simple_linear_flow`) unchanged within noise; all examples +
-perf + tests compile against the new field.
+where avoidable; adaptive sleep's tail-latency cost is quantified against its CPU
+saving; default DSP throughput unchanged within noise; all examples + perf +
+tests compile against the new field.
 
 ---
 
-## Phase 4 — Freshness channel methods (additive, SPSC-safe only)
+## Phase 6 — Block timing metadata (opt-in RT substrate)
 
-Goal: bound message age under sink stall. Respect SPSC ownership — this is the
-trap the stress plan now calls out.
+North-star groundwork; build only after 3–5 land and a fusion-shaped benchmark
+exists. Optional per-block hints, ignored by the default schedulers:
 
-Safe set (implement these):
-- `bool try_push_drop_newest(const T&)` — producer-side; if full, drop the
-  incoming item, bump a counter. Pure producer state.
-- `size_t pop_latest(T&)` / `drain_to_latest(T&)` — consumer-side; drain all but
-  the newest, return count dropped. Pure consumer state.
+```cpp
+struct BlockTimingHint {
+    uint32_t period_us = 0;
+    uint32_t deadline_us = 0;
+    uint32_t max_input_age_us = 0;
+    int priority = 0;
+};
+```
 
-Add to `cler_spsc-queue.hpp` and expose through `ChannelBase<T>`. Do NOT add
-producer-initiated `drop_oldest`/`overwrite_oldest` to the SPSC queue — it mutates
-the consumer-owned read index and breaks the invariant. Defer those to a separate
-`OverwriteSPSCChannel<T>` type with its own tested design (out of scope here;
-note it as future work).
+Carried alongside `BlockRunner` or as a `FlowGraphConfig` array indexed by block
+order. No scheduler consumes it yet — this phase just establishes the metadata
+and a fusion-shaped benchmark graph (high-rate IMU + medium baro/mag + low-rate
+GNSS + slow bursty vision) that measures end-to-end state age and deadline
+misses. Without that benchmark, Phase 7 has nothing to validate against.
 
-TTL-drop: implement as consumer-side check using the `TimedItem` enqueue
-timestamp (Phase 5 wrapper), not as a queue mutation.
-
-Test: `slow_sink` case gains policies `drop_newest`, `keep_latest`, `ttl`. Compare
-vs `fifo`. Assert FIFO unchanged by default; freshness policies bound
-`max_enqueue_to_pop_us`; drop counts match expectations.
-
-Done when: acceptance bullets in stress plan §C met for the safe subset; SPSC
-tests (`tests/spsc-queue/`) still green; new methods covered by unit tests.
+Done when: hints attach without affecting default-mode behavior; the fusion
+benchmark reports per-stage data age and deadline-miss counts.
 
 ---
 
-## Phase 5 — Channel instrumentation
+## Phase 7 — Age/deadline-aware sampled scheduler (FixedThreadPool only)
 
-Deliverables:
-- `struct ChannelStats { size_t high_watermark, dropped_newest, dropped_oldest,
-  failed_pushes; }`. Updated only when a compile-time/flag stats mode is on; zero
-  cost when disabled (mirror `collect_detailed_stats` pattern).
-- `template<typename T> struct TimedItem { T value; uint64_t enqueue_ticks; };`
-  for latency measurement and TTL.
+The "biggest idea" from the architecture review — but scoped honestly. A new
+`FixedThreadPool` scheduling mode that, when a worker is free, samples k runnable
+blocks (k=2 or 4, "power of two choices") and runs the best by:
 
-Test: unit tests assert counters; wire stats into all `perf_scheduler_latency`
-output lines (`channel_high_watermark`, `dropped_*`, `stale_dropped`).
+```text
+score = priority + oldest_input_age/ttl + input_depth - downstream_full_penalty
+        + deadline_urgency
+```
 
-Done when: stats add negligible overhead disabled (verify with
-`perf_simple_linear_flow` throughput unchanged); benchmarks emit the stat fields.
+Explicitly NOT for `ThreadPerBlock` (no scheduling choice exists there — every
+block owns a thread). Only relevant when blocks >> workers with heterogeneous
+deadlines. Random sampling avoids global scan cost while beating round-robin.
+
+Test: fusion benchmark (Phase 6), compare current FixedThreadPool round-robin vs
+sample_k=2/4. Track p99/max enqueue-to-pop age, deadline misses, throughput, CPU.
+
+Done when: sampled scheduler lowers tail age / deadline misses under
+core-constrained fusion load without materially hurting throughput; clearly
+documented as a FixedThreadPool-only mode.
 
 ---
 
-## Phase 6 — Block priority / pinning hints (last, only if needed)
+## Phase 8 — OS priority / pinning hints (last, only if needed)
 
-Only after 0–5 are measured. `struct BlockScheduleHint { int priority; bool pin;
-size_t core; }`. Integrate via `BlockRunner` or a `FlowGraphConfig` array indexed
-by block order. Note today pinning is FixedThreadPool-only (`cler.hpp:615`);
+`BlockScheduleHint { int priority; bool pin; size_t core; }` mapped to OS thread
+priority / affinity. Today pinning is FixedThreadPool-only (`cler.hpp:615`);
 ThreadPerBlock never pins. Realistic OS priority needs RT scheduling/privileges —
 document the limitation rather than over-promise.
 
@@ -255,13 +346,16 @@ gates later.
 ## Suggested PR slicing
 
 One PR per phase, each independently reviewable and revertible:
-1. PR: benchmark scaffold + baseline numbers.
-2. PR: idle audit test + block fixes.
-3. PR (maybe): `Error::NoWork` + migration.
-4. PR: `IdlePolicy`.
-5. PR: freshness methods (safe subset).
-6. PR: channel stats + `TimedItem`.
-7. PR: schedule hints.
+1. PR: benchmark scaffold + baseline numbers. (done)
+2. PR: idle audit test + block fixes. (done)
+3. PR: freshness methods + `TimedItem` age + TTL.
+4. PR: channel stats / drop counters.
+5. PR: `IdlePolicy` (breaking; deletes `adaptive_sleep`).
+6. PR: block timing metadata + fusion benchmark.
+7. PR: age/deadline-aware sampled scheduler (FixedThreadPool).
+8. PR: OS priority / pinning hints.
 
-Phases 3–6 are independent given Phase 0–1; can reorder by which benchmark result
-is most compelling. Phase 2 gates only on Phase 1's finding.
+Phases 3–5 are independent given Phase 0–1 and can be reordered by which result
+is most compelling, but freshness (3) leads on evidence. Phases 6–7 are the
+opt-in RT-mode north-star and should not start before a fusion-shaped benchmark
+exists. (Phase 2, `Error::NoWork`, was skipped — see above.)
