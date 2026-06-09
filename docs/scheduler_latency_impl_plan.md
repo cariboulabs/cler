@@ -132,29 +132,46 @@ contract touch, not a local add — keep the migration list reviewable.
 
 ---
 
-## Phase 3 — Idle policy (replace `adaptive_sleep` bool)
+## Phase 3 — Idle policy (replace `adaptive_sleep` outright)
 
-Goal: explicit spin/yield/sleep control. Keep `adaptive_sleep` working as a named
-preset so nothing breaks.
+Goal: explicit spin/yield/sleep control. **Hard replace** — `adaptive_sleep` bool
+is removed, not retained. Breaking API change is accepted: if a policy is cleaner
+and faster, we do not carry the old field.
 
 Deliverables:
 
 1. `enum class IdlePolicy { BusySpin, SpinThenYield, Relax, AdaptiveSleep }` in
    `cler.hpp`. Add to `FlowGraphConfig`: `idle_policy`,
-   `spin_iterations_before_yield=64`, `idle_sleep_us=1`.
-2. Back-compat: if `adaptive_sleep==true`, force `idle_policy=AdaptiveSleep`.
-   Default `idle_policy=BusySpin` reproduces today's TPB default exactly. Keep the
-   old field for one cycle; presets in `cler_utils.hpp` set the new field.
-3. Replace the no-work handling in both schedulers to dispatch on `idle_policy`.
-   `Relax` calls `TaskPolicy::relax()`; `SpinThenYield` spins then
-   `std::this_thread::yield()`; `AdaptiveSleep` keeps current growth logic.
+   `spin_iterations_before_yield=64`, `idle_sleep_us=1`. The
+   `adaptive_sleep_multiplier/_max_us/_fail_threshold` fields stay (now read only
+   when `idle_policy==AdaptiveSleep`).
+2. Delete the `adaptive_sleep` bool. Default `idle_policy=BusySpin` reproduces
+   today's TPB default behavior. `handle_adaptive_sleep()` (`cler.hpp:297`)
+   becomes `handle_idle(block_idx, did_work)` dispatching on `idle_policy`:
+   `Relax`→`TaskPolicy::relax()`, `SpinThenYield`→spin then
+   `std::this_thread::yield()`, `AdaptiveSleep`→current growth logic,
+   `BusySpin`→no-op.
+3. Migrate every call site (clean break — no shim). Scoped set:
+   - `include/cler.hpp` — definition + both scheduler loops.
+   - `include/cler_utils.hpp` — `thread_per_block_adaptive_sleep()` preset → set
+     `idle_policy=AdaptiveSleep`; other presets set explicit policy.
+   - `include/cler_desktop_utils.hpp` — refs updated.
+   - `performance/perf_simple_linear_flow.cpp`,
+     `performance/perf_fanout_workloads.cpp` — `*.adaptive_sleep = true` →
+     `*.idle_policy = IdlePolicy::AdaptiveSleep`.
+   - `desktop_examples/{cariboulite_recorder,polyphase_channelizer,cariboulite_spectrum}.cpp`
+     — same substitution.
+   - `ai-bringup.md` — doc reference.
 4. New preset `low_latency()` in `cler_utils.hpp` (BusySpin or SpinThenYield).
 
 Test: `perf_scheduler_latency low_rate` + `contended` across all four policies.
+Full build of examples + perf to catch every dropped-field compile error (the
+compiler is the migration checklist here).
 
 Done when: BusySpin/SpinThenYield keep p99 low without one-full-core-per-idle-block
 where avoidable; adaptive sleep's tail-latency cost is quantified; default DSP
-throughput (`perf_simple_linear_flow`) unchanged within noise.
+throughput (`perf_simple_linear_flow`) unchanged within noise; all examples +
+perf + tests compile against the new field.
 
 ---
 
