@@ -15,10 +15,14 @@
 #include "cler_utils.hpp"
 #include "cler_desktop_utils.hpp"
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 using steady = std::chrono::steady_clock;
@@ -190,11 +194,150 @@ static void case_low_rate() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Case 2: CPU-contended message pipeline.
+//
+// A 1ms message pipeline runs alongside N busy DSP pipelines
+// (BusySource -> BusyCopy -> BusySink). The question is whether the unrelated
+// hot blocks delay message delivery (p99/max latency).
+// ---------------------------------------------------------------------------
+enum class BusyWork { None, Memcpy, Heavy };
+
+static const char* work_label(BusyWork w) {
+    switch (w) {
+        case BusyWork::None:   return "none";
+        case BusyWork::Memcpy: return "memcpy";
+        case BusyWork::Heavy:  return "heavy";
+    }
+    return "?";
+}
+
+constexpr size_t BUSY_CH = 512;
+
+// Burn the configured amount of work, then return one float of "result".
+static inline float do_busy_work(BusyWork w, float in, float* scratch, size_t n) {
+    switch (w) {
+        case BusyWork::None:
+            return in;
+        case BusyWork::Memcpy:
+            std::memset(scratch, 0, n * sizeof(float));
+            scratch[0] = in;
+            return scratch[0];
+        case BusyWork::Heavy: {
+            float acc = in;
+            for (size_t i = 0; i < 256; ++i) acc = std::sqrt(acc * 1.0001f + 1.0f);
+            return acc;
+        }
+    }
+    return in;
+}
+
+struct BusySource : public cler::BlockBase {
+    BusyWork work = BusyWork::None;
+    BusySource() : BlockBase("busy_src") {}
+
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
+        if (!out->try_push(_v)) return cler::Error::NotEnoughSpace;
+        _v += 1.0f;
+        return cler::Empty{};
+    }
+private:
+    float _v = 1.0f;
+};
+
+struct BusyCopy : public cler::BlockBase {
+    cler::Channel<float, BUSY_CH> in;
+    BusyWork work = BusyWork::None;
+    BusyCopy() : BlockBase("busy_copy") {}
+
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
+        float v;
+        if (!in.try_pop(v)) return cler::Error::NotEnoughSamples;
+        v = do_busy_work(work, v, _scratch, 256);
+        if (!out->try_push(v)) return cler::Error::NotEnoughSpace;
+        return cler::Empty{};
+    }
+private:
+    float _scratch[256] = {};
+};
+
+struct BusySink : public cler::BlockBase {
+    cler::Channel<float, BUSY_CH> in;
+    BusySink() : BlockBase("busy_sink") {}
+
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        float v;
+        if (!in.try_pop(v)) return cler::Error::NotEnoughSamples;
+        _sink += v;  // keep the optimizer honest
+        return cler::Empty{};
+    }
+private:
+    volatile float _sink = 0.0f;
+};
+
+template <size_t N, size_t... I>
+static void run_contended_impl(BusyWork work, uint64_t period_us,
+                               std::chrono::seconds duration,
+                               std::index_sequence<I...>) {
+    PeriodicMessageSource msrc("MsgSrc", period_us);
+    MessageSink msink("MsgSink");
+    std::array<BusySource, N> bsrc;
+    std::array<BusyCopy, N> bcopy;
+    std::array<BusySink, N> bsink;
+    for (size_t i = 0; i < N; ++i) { bsrc[i].work = work; bcopy[i].work = work; }
+    (void)bsrc; (void)bcopy; (void)bsink;  // silence unused warning for N=0
+
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&msrc, &msink.in),
+        cler::BlockRunner(&msink),
+        cler::BlockRunner(&bsrc[I], &bcopy[I].in)...,
+        cler::BlockRunner(&bcopy[I], &bsink[I].in)...,
+        cler::BlockRunner(&bsink[I])...
+    );
+
+    fg.run_for(duration);  // default ThreadPerBlock, busy idle
+
+    msink.stats.finalize();
+    double secs = static_cast<double>(duration.count());
+    double thr = secs > 0.0 ? msink.stats.count() / secs : 0.0;
+
+    printf("case=contended scheduler=thread_per_block idle=busy busy_pipes=%zu "
+           "work=%s period_us=%llu items=%zu thr_ips=%.1f "
+           "p50_us=%.2f p90_us=%.2f p99_us=%.2f max_us=%.2f\n",
+           N, work_label(work), static_cast<unsigned long long>(period_us),
+           msink.stats.count(), thr,
+           msink.stats.percentile(50), msink.stats.percentile(90),
+           msink.stats.percentile(99), msink.stats.percentile(100));
+    fflush(stdout);
+}
+
+template <size_t N>
+static void run_contended(BusyWork work, uint64_t period_us,
+                          std::chrono::seconds duration) {
+    run_contended_impl<N>(work, period_us, duration, std::make_index_sequence<N>{});
+}
+
+static void case_contended() {
+    const std::chrono::seconds duration(3);
+    const uint64_t period_us = 1000;  // 1ms message rate
+
+    for (BusyWork w : {BusyWork::None, BusyWork::Memcpy, BusyWork::Heavy}) {
+        run_contended<0>(w, period_us, duration);
+        run_contended<1>(w, period_us, duration);
+        run_contended<2>(w, period_us, duration);
+        run_contended<4>(w, period_us, duration);
+        run_contended<8>(w, period_us, duration);
+    }
+}
+
 int main(int argc, char** argv) {
     std::string which = (argc > 1) ? argv[1] : "all";
 
     if (which == "low_rate" || which == "all") {
         case_low_rate();
+    }
+    if (which == "contended" || which == "all") {
+        case_contended();
     }
 
     return 0;
