@@ -239,15 +239,29 @@ per-worker idleness. Options, for the owner to choose:
 - **Option A — accept busy-spin (no change).** Keep current behavior: FTP pegs
   `num_workers` cores always. Simple, max throughput, but the idle-CPU cost the
   target regime explicitly wants to avoid remains. Effectively "do nothing."
-- **Option B — global-activity-aware backoff (recommended).** A shared
-  `std::atomic<uint64_t>` activity epoch bumped whenever any block does work. A
-  worker that completes a no-work sweep checks time/epochs since last global
-  activity: still-recent → spin/yield (stay hot, pipeline active); quiet beyond a
-  threshold → sleep, escalating. When work resumes anywhere the epoch moves and
-  workers stop sleeping (one-time wake latency on the idle→active edge only).
-  Result: sustained load = busy-spin throughput; sustained idle = low CPU. Medium
-  change, lossless, fits the regime. Needs the sweep-once loop fix (so workers
-  reach the backoff) plus the shared epoch.
+- **Option B — global-activity-aware backoff (recommended, with a contention
+  caveat).** A worker that completes a no-work sweep should spin/yield while the
+  *graph* is recently active and only sleep once the graph is globally quiet.
+
+  **Caveat (raised in review):** the obvious implementation — one shared
+  `std::atomic<uint64_t>` epoch `fetch_add`-ed on *every* successful block run —
+  is **worse than the existing adaptive sleep on the contention axis**. Adaptive
+  sleep's atomics are per-block (each run by one worker, own cache line,
+  uncontended); a single global counter written by all workers on every run is a
+  hot cache line bouncing across all cores — it would throttle the very
+  throughput B is meant to preserve. Do NOT implement B that way.
+
+  **Contention-free design:** per-worker activity slots. Each worker owns one
+  cache-line-aligned `std::atomic<uint64_t> last_active[worker]` and writes only
+  its own slot, at most once per sweep (not per block) — uncontended, same cost
+  class as adaptive sleep's per-block atomic. A worker that just went idle *reads*
+  all N slots (read-mostly, off the hot path, only at backoff frequency); if every
+  slot is stale beyond a threshold, the graph is globally quiet → sleep, else
+  spin/yield. Active workers never read; idle workers never block the hot path.
+  Result: sustained load = busy-spin throughput (no global contention); sustained
+  idle = low CPU; one-time wake latency only on the idle→active edge. Needs the
+  sweep-once loop fix plus the per-worker slots. Lossless. Validate on BOTH axes
+  (`ftp_idle` cpu drop + `perf_simple_linear_flow` throughput within noise).
 - **Option C — event-driven wakeups.** Add notify-on-push to the channel (futex /
   condvar / eventfd) so a blocked consumer wakes precisely when data arrives.
   Best CPU + throughput + latency, but the largest change (touches the SPSC
@@ -381,7 +395,17 @@ Chronological record of non-obvious findings, so the plan stays honest.
    help — a downstream worker legitimately sees many empty sweeps while the
    pipeline is active. The real signal is **global**: "has the graph done any work
    recently," not per-worker idleness. This makes Phase 3 a genuine design choice
-   (see reframed Phase 3 below), not a minimal fix. ← decision pending.
+   (see reframed Phase 3 below), not a minimal fix.
+8. **The existing per-block adaptive sleep has the SAME flaw — measured.**
+   `perf_simple_linear_flow`'s `FixedThreadPool (with adaptive sleep)` row =
+   **16.4 MS, −98.9%** vs the 1240–1821 MS busy-spin baseline — *worse* than the
+   naive `relax()` fix (38 MS). Reason is identical: adaptive sleep counts
+   `consecutive_fails` **per block**, so a transiently-starved downstream block
+   sleeps even while the pipeline is active. So "the adaptive sleep we already
+   have" does not solve this; enabled on a FTP pipeline it is the worst option on
+   throughput. Per-block and per-worker signals are both wrong; only a
+   cross-worker (global) activity signal works — see Option B below and its
+   contention caveat.
 
 ---
 
