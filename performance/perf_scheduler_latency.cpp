@@ -559,11 +559,92 @@ static void case_ftp_idle() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Case 5: adaptive-sleep salvageability check.
+//
+// Claim under test: on FixedThreadPool, no adaptive-sleep parameter setting
+// gives BOTH low idle CPU AND no pipeline-throughput collapse. A single 6-block
+// chain (Source -> 4x Copy -> Sink) under num_workers=2 splits the chain across
+// workers (worker0={src,c0,c1}, worker1={c2,c3,sink}), so the c1->c2 handoff is
+// cross-worker — exactly where per-block adaptive sleep misfires on transient
+// starvation. Run each adaptive setting LOADED (period=0, throughput axis) and
+// IDLE (sparse, CPU axis). If the settings that cut idle CPU collapse throughput
+// and vice versa, adaptive sleep is unsalvageable and gets deleted.
+// ---------------------------------------------------------------------------
+struct PassCopy : public cler::BlockBase {
+    cler::Channel<float, IDLE_CH> in;
+    PassCopy() : BlockBase("copy") {}
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
+        float v;
+        if (!in.try_pop(v)) return cler::Error::NotEnoughSamples;
+        if (!out->try_push(v)) return cler::Error::NotEnoughSpace;
+        return cler::Empty{};
+    }
+};
+
+struct AdaptiveCfg {
+    const char* label;
+    bool on;
+    double mult;
+    double max_us;
+    size_t thresh;
+};
+
+static void run_adaptive_verify(const AdaptiveCfg& a, uint64_t period_us,
+                                std::chrono::seconds duration) {
+    TrickleSource src;  src.period_us = period_us;  // period_us=0 => floods
+    PassCopy c0, c1, c2, c3;
+    DrainSink sink;
+
+    cler::FlowGraphConfig cfg;
+    cfg.scheduler = cler::SchedulerType::FixedThreadPool;
+    cfg.num_workers = 2;  // 6 blocks > 2 -> real FTP, chain split across workers
+    cfg.adaptive_sleep = a.on;
+    cfg.adaptive_sleep_multiplier = a.mult;
+    cfg.adaptive_sleep_max_us = a.max_us;
+    cfg.adaptive_sleep_fail_threshold = a.thresh;
+
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&src, &c0.in),
+        cler::BlockRunner(&c0, &c1.in),
+        cler::BlockRunner(&c1, &c2.in),
+        cler::BlockRunner(&c2, &c3.in),
+        cler::BlockRunner(&c3, &sink.in),
+        cler::BlockRunner(&sink)
+    );
+
+    CpuMeter cpu;
+    cpu.start();
+    fg.run_for(duration, cfg);
+    double cpu_pct = cpu.cpu_percent();
+    double thr = sink.received / static_cast<double>(duration.count());
+
+    printf("case=adaptive_verify mode=%s adaptive=%-12s items=%llu thr_ips=%.0f cpu_pct=%.0f\n",
+           period_us == 0 ? "loaded" : "idle  ", a.label,
+           static_cast<unsigned long long>(sink.received), thr, cpu_pct);
+    fflush(stdout);
+}
+
+static void case_adaptive_verify() {
+    const std::chrono::seconds duration(3);
+    const AdaptiveCfg cfgs[] = {
+        {"off",          false, 1.5, 5000.0,  10},
+        {"conservative", true,  2.0, 1000.0,  20},
+        {"default",      true,  1.5, 5000.0,  10},
+        {"aggressive",   true,  2.0, 10000.0, 5},
+    };
+    for (const auto& a : cfgs) run_adaptive_verify(a, /*period_us=*/0, duration);     // loaded
+    for (const auto& a : cfgs) run_adaptive_verify(a, /*period_us=*/10000, duration); // idle
+}
+
 int main(int argc, char** argv) {
     std::string which = (argc > 1) ? argv[1] : "all";
 
     if (which == "low_rate" || which == "all") {
         case_low_rate();
+    }
+    if (which == "adaptive_verify" || which == "all") {
+        case_adaptive_verify();
     }
     if (which == "contended" || which == "all") {
         case_contended();
