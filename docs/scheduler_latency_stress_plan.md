@@ -1,5 +1,15 @@
 # Cler Scheduler Latency Stress Plan
 
+> **DECISION UPDATE (supersedes parts of this note):** Cler is **lossless** — it
+> never drops, overwrites, or reorders samples; all measurements are critical.
+> The premise below ("stale queued messages worse than dropped") and the entire
+> freshness/drop direction (§C — Add Freshness Channel Policies, drop counters,
+> TTL, keep-latest) are therefore **out of scope**. The answer to a slow consumer
+> is backpressure (`push` busy-waits, `try_push` fails) or a faster consumer, not
+> dropping. The benchmarks, idle-contract audit, idle policy, backpressure
+> instrumentation, and *lossless* contention-aware scheduling remain in scope.
+> See `scheduler_latency_impl_plan.md` for the current, authoritative plan.
+
 This note is about Cler itself, not any downstream application. The goal is to
 test whether Cler can support low-latency message pipelines where stale queued
 messages are worse than dropped messages.
