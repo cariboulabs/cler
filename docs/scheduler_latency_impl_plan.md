@@ -20,19 +20,27 @@ Audience: external reviewer approving direction before further implementation.
 - **Done & pushed:** Phase 0 (latency/CPU/throughput benchmark) and Phase 1
   (idle-contract audit + fix of 11 shipped blocks, with tests). Both lossless,
   both foundational.
-- **Key finding (needs reviewer eyes):** the `FixedThreadPool` worker loop
-  **busy-spins worker cores unconditionally, even when fully idle** — the
-  intended `relax()` on no-work is dead code. This is the direct cause of the
-  idle-CPU churn in the target regime. Fixing it is the next change (Phase 3).
+- **Key finding (code defect, reviewer-confirmed):** the `FixedThreadPool` worker
+  loop **busy-spins worker cores unconditionally** — `get_next_block` auto-resets
+  so the inner loop never exits and the intended `relax()` is dead code.
+- **Two corrections discovered while implementing (see CORRECTION + Discovery
+  log):** (a) a *second* defect — `run_fixed_thread_pool` silently falls back to
+  ThreadPerBlock when `num_workers >= blocks` (`cler.hpp:590`); (b) consequently
+  the Phase 0 `fixed_pool_*` numbers were **mislabeled** — they ran ThreadPerBlock,
+  so FixedThreadPool was never actually measured. The busy-spin finding stands on
+  code reading + review but is **empirically unvalidated** pending a
+  `blocks > workers` benchmark.
+- **Current work:** Phase 3a fix (sweep-once + `rewind`) is applied in the working
+  tree, **uncommitted and unvalidated**. Next concrete step: add a
+  `blocks > workers` idle benchmark and measure idle `cpu_pct` before/after.
 - **Proposed remaining:** Phase 3 worker-loop fix + `IdlePolicy`; Phase 4
   backpressure instrumentation; Phase 5 lossless contention-aware run order;
   Phase 6 priority/pinning. All lossless.
 
-**Status: reviewed & approved** by two independent reviews — direction and the
-`FixedThreadPool` busy-spin finding confirmed; Phase 3 endorsed as next. Their
-edits are folded in below (see "Reviewer sign-off"): D1 wording softened, Phase 3
-split into 3a/3b, per-worker (not per-block) backoff, `Relax`/`BusySpin` defaults
-(AdaptiveSleep is an opt-in preset), Phase 5 made opt-in. Implementing 3a next.
+**Status: direction reviewed & approved** by two independent reviews (D1 softened,
+Phase 3 split 3a/3b, per-worker backoff, `Relax`/`BusySpin` defaults, Phase 5
+opt-in — see "Reviewer sign-off"). Implementation of 3a is in progress and blocked
+on building a benchmark that actually exercises FixedThreadPool.
 
 ---
 
@@ -117,11 +125,27 @@ true**. Therefore loop (A) never terminates and the `relax()` at (B) is
 **unreachable**. A worker sweeps its blocks round-robin forever, calling
 `procedure()` on every idle block, pinning its core at 100% regardless of load.
 
-Evidence (Phase 0, `low_rate`, near-idle 10 items/s): `fixed_pool_4` reports
-`cpu_pct=200` — two worker cores fully burned doing essentially nothing. With
-`blocks >> cores` this is `num_workers` cores burned continuously. This is the
-idle-CPU churn the target regime must avoid, and it is a logic defect, not a
-tuning choice.
+Status of this finding: the **code defect is real and reviewer-confirmed** (two
+independent reviews), but it is **not yet empirically validated** — see the
+correction below.
+
+> **CORRECTION (discovered while implementing Phase 3a).** The Phase 0
+> `fixed_pool_*` benchmark rows did **not** actually run FixedThreadPool. A second
+> defect, the silent fallback in `run_fixed_thread_pool` (`cler.hpp:590`):
+> ```cpp
+> if (num_workers >= _N) { run_thread_per_block(config); }  // more workers than blocks
+> ```
+> means a graph with `blocks <= num_workers` runs ThreadPerBlock instead. The
+> benchmark's `low_rate` graph has only 2 blocks, so `fixed_pool_2`/`fixed_pool_4`
+> (workers ≥ 2) silently fell back. Proven with a stderr marker: zero FTP workers
+> started. Therefore every "FixedThreadPool" `cpu_pct=200` number in Phase 0 was
+> actually ThreadPerBlock busy-spinning, and the FTP idle path was never exercised.
+>
+> Consequences: (1) the busy-spin claim still holds by code reading + review, but
+> must be confirmed by a benchmark with **`blocks > workers`** (the target
+> `blocks >> cores` regime — exactly when FTP engages); (2) the fallback itself is
+> a footgun — users who set `num_workers >= blocks` silently get ThreadPerBlock,
+> not the pool they asked for. Worth a warning/log at minimum.
 
 (`ThreadPerBlock` separately busy-spins by design when `adaptive_sleep=false`,
 which is correct for its latency-first use but not the target regime.)
@@ -133,10 +157,13 @@ which is correct for its latency-first use but not the target regime.)
 `performance/perf_scheduler_latency.cpp`, line-oriented output, three cases.
 Representative numbers (28-core dev box, indicative not gated):
 
-`low_rate` (PeriodicSource → Sink), enqueue-to-pop latency + CPU:
+`low_rate` (PeriodicSource → Sink, **2 blocks**), enqueue-to-pop latency + CPU:
 - ThreadPerBlock busy-spin: p50 ~0.14us, p99 sub-us, **cpu_pct=200** at all rates.
 - ThreadPerBlock adaptive: p50 70us–3.5ms (worse tail), **cpu_pct ~0–11** (cheap).
-- FixedThreadPool: sub-us latency, **cpu_pct=200 even when ~idle** (the finding).
+- ~~FixedThreadPool: cpu_pct=200 even when idle~~ — **INVALID**: with only 2 blocks
+  these configs fell back to ThreadPerBlock (`num_workers >= _N`, see CORRECTION
+  above). FixedThreadPool was never measured; a `blocks > workers` benchmark is
+  required and is the immediate next step.
 
 `contended` (1ms message pipeline + N busy DSP pipelines, ThreadPerBlock):
 - message p99 stays sub-us until `busy_pipes=8` saturates cores, then p99 jumps
@@ -203,16 +230,25 @@ worker: forever:
     if !did_work: TaskPolicy::relax()    # now reachable
 ```
 
-Implementation: stop `get_next_block` auto-resetting (or reset the queue at the
-top of the outer loop) so loop (A) terminates after one sweep, making the
-existing `relax()` at (B) reachable. With the default `adaptive_sleep=false`,
-the per-block `handle_adaptive_sleep()` is a no-op, so 3a's net effect is exactly:
-idle workers `relax()` once per empty sweep instead of busy-spinning forever.
+Implementation: stop `get_next_block` auto-resetting and add a `rewind()` the
+worker calls at the top of each outer pass, so loop (A) terminates after one
+sweep and the existing `relax()` at (B) becomes reachable. With the default
+`adaptive_sleep=false`, the per-block `handle_adaptive_sleep()` is a no-op, so
+3a's net effect is exactly: idle workers `relax()` once per empty sweep instead
+of busy-spinning forever.
 
-Test/acceptance: idle FixedThreadPool `cpu_pct` drops from ~200 (per active
-worker) toward ~0; DSP throughput (`perf_simple_linear_flow`) unchanged within
-noise; zero sample loss; all tests pass. This alone resolves the target regime's
-idle-CPU churn and is trivially revertible.
+**STATUS: code applied, uncommitted, NOT yet validated.** The fix is in the
+working tree (`get_next_block` no longer auto-resets; `rewind()` added; worker
+calls it per pass). It cannot be validated with the current benchmark because the
+`low_rate` graph (2 blocks) falls back to ThreadPerBlock (CORRECTION above) — the
+FTP path never runs. **Blocking prerequisite:** add a benchmark case with
+`blocks > workers` (e.g. M idle source→sink chains under `num_workers=2`), then
+measure idle `cpu_pct` before (git-stash the fix) vs after. Only then commit 3a.
+
+Test/acceptance: in a `blocks > workers` idle scenario, FixedThreadPool
+`cpu_pct` drops from pegged (~`num_workers`×100) toward ~0; DSP throughput
+(`perf_simple_linear_flow`) unchanged within noise; zero sample loss; all tests
+pass. Trivially revertible.
 
 #### Phase 3b — `IdlePolicy` + migrate/remove `adaptive_sleep`
 
@@ -288,6 +324,31 @@ Freshness / dropping of any kind (D1). If a future channel genuinely carries
 "latest-wins" control/state data, it would be a separate, loudly-named, opt-in
 type — never a default channel capability, so measurements can't be dropped by
 accident. Not part of this effort.
+
+---
+
+## Discovery log
+
+Chronological record of non-obvious findings, so the plan stays honest.
+
+1. **`Empty{}` = progress (Phase 1).** Idle blocks returning `Empty{}` read as
+   "did work"; 11 shipped blocks fixed to report no-progress. Done.
+2. **Freshness cut (D1).** Owner decision: Cler is lossless; the entire
+   freshness/drop direction was prototyped then reverted.
+3. **FixedThreadPool busy-spin (code reading).** `get_next_block` auto-resets →
+   inner loop never exits → `relax()` unreachable → workers peg cores even idle.
+   Reviewer-confirmed. Phase 3a fix applied (sweep-once + `rewind`).
+4. **Silent ThreadPerBlock fallback (`cler.hpp:590`).** `run_fixed_thread_pool`
+   runs ThreadPerBlock when `num_workers >= blocks`. Discovered when a stderr
+   marker showed **zero FTP workers** started for the `fixed_pool_*` benchmark
+   rows — the `low_rate` graph has 2 blocks, workers ≥ 2, so it fell back.
+   Implications: (a) Phase 0's FTP `cpu_pct` numbers were ThreadPerBlock,
+   mislabeled; (b) FTP only runs at `blocks > workers` (the target regime), which
+   the benchmark never set up; (c) the fallback is a usability footgun (asking for
+   a pool and silently getting per-block threads) — candidate for a warning/log.
+5. **Open validation gap.** Phase 3a is applied but unproven. Must add a
+   `blocks > workers` idle benchmark and measure idle `cpu_pct` before/after
+   before committing 3a. ← current next step.
 
 ---
 
