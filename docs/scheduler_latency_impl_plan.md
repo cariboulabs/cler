@@ -112,7 +112,16 @@ after the audit, Phase 2 may be skipped — that is an explicit decision point.
 
 ---
 
-## Phase 2 — `Error::NoWork` (conditional on Phase 1 finding)
+## Phase 2 — `Error::NoWork` (conditional on Phase 1 finding) — SKIPPED
+
+DECISION (after Phase 1 audit): **skipped.** All 11 violating blocks had a
+natural `NotEnoughSamples` / `NotEnoughSpace` meaning for their idle path; none
+needed a generic "no concept of samples but nothing to do" signal. The existing
+no-progress vocabulary was sufficient and unambiguous, so adding `Error::NoWork`
+would be churn without benefit. Revisit only if a future block genuinely has no
+sample/space semantics yet must signal idle.
+
+Original rationale retained below for reference.
 
 Only if the audit shows the `NotEnough*` vocabulary is genuinely ambiguous
 (e.g. a block that has no concept of samples/space still needs to say "nothing to
