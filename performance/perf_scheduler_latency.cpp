@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -330,6 +331,95 @@ static void case_contended() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Case 3: Slow terminal sink.
+//
+// A burst source that pushes as fast as it can feeds a slow sink through a
+// bounded queue. Models a blocking socket / slow file / stalled downstream.
+// Phase 0 measures only the current FIFO-with-backpressure behavior: high
+// delivery, but item age grows to (queue_depth * sink_period) under stall.
+// Freshness policies (drop-newest / keep-latest / TTL) are compared in Phase 4.
+// ---------------------------------------------------------------------------
+struct BurstMessageSource : public cler::BlockBase {
+    BurstMessageSource() : BlockBase("BurstSrc") {}
+
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<Msg>* out) {
+        Msg m;
+        m.sequence = _sequence;
+        m.enqueue_ts = steady::now();
+        if (!out->try_push(m)) return cler::Error::NotEnoughSpace;  // backpressure
+        _sequence++;
+        return cler::Empty{};
+    }
+private:
+    uint64_t _sequence = 0;
+};
+
+struct SlowSink : public cler::BlockBase {
+    cler::Channel<Msg> in;
+    LatencyStats stats;
+
+    SlowSink(uint64_t sleep_us, bool periodic_stall, size_t channel_size = 1024)
+        : BlockBase("SlowSink"), in(channel_size),
+          _sleep(std::chrono::microseconds(sleep_us)),
+          _periodic_stall(periodic_stall) {}
+
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        Msg m;
+        if (!in.try_pop(m)) return cler::Error::NotEnoughSamples;
+
+        auto now = steady::now();
+        stats.record(std::chrono::duration<double, std::micro>(now - m.enqueue_ts).count());
+
+        _popped++;
+        if (_periodic_stall && (_popped % 500 == 0)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } else if (_sleep.count() > 0) {
+            std::this_thread::sleep_for(_sleep);
+        }
+        return cler::Empty{};
+    }
+
+    uint64_t popped() const { return _popped; }
+private:
+    std::chrono::microseconds _sleep;
+    bool _periodic_stall;
+    uint64_t _popped = 0;
+};
+
+static void run_slow_sink(uint64_t sleep_us, bool stall, std::chrono::seconds duration) {
+    BurstMessageSource source;
+    SlowSink sink(sleep_us, stall);
+
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, &sink.in),
+        cler::BlockRunner(&sink)
+    );
+
+    fg.run_for(duration);
+
+    sink.stats.finalize();
+    double secs = static_cast<double>(duration.count());
+    double thr = secs > 0.0 ? sink.stats.count() / secs : 0.0;
+
+    printf("case=slow_sink policy=fifo sink_sleep_us=%llu stall=%s items=%zu "
+           "thr_ips=%.1f p50_us=%.2f p99_us=%.2f max_us=%.2f drops=0\n",
+           static_cast<unsigned long long>(sleep_us), stall ? "on" : "off",
+           sink.stats.count(), thr,
+           sink.stats.percentile(50), sink.stats.percentile(99),
+           sink.stats.percentile(100));
+    fflush(stdout);
+}
+
+static void case_slow_sink() {
+    const std::chrono::seconds duration(3);
+    for (uint64_t s : {uint64_t(0), uint64_t(100), uint64_t(1000), uint64_t(10000)}) {
+        run_slow_sink(s, /*stall=*/false, duration);
+    }
+    // Periodic 100ms stall on top of a light 100us per-item sink.
+    run_slow_sink(100, /*stall=*/true, duration);
+}
+
 int main(int argc, char** argv) {
     std::string which = (argc > 1) ? argv[1] : "all";
 
@@ -338,6 +428,9 @@ int main(int argc, char** argv) {
     }
     if (which == "contended" || which == "all") {
         case_contended();
+    }
+    if (which == "slow_sink" || which == "all") {
+        case_slow_sink();
     }
 
     return 0;
