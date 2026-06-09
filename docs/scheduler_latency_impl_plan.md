@@ -9,6 +9,48 @@ Audience: external reviewer approving direction before further implementation.
 
 ---
 
+## LATEST UPDATE — real deployment context reframes the objective (READ FIRST)
+
+The target deployment was clarified late and it **changes the conclusion**, so
+this supersedes the framing below where they differ.
+
+**Deployment:** a Raspberry Pi running a continuous **~4 MHz SDR stream**, on a
+box that **also runs other jobs**. The goal is NOT max throughput, NOT
+idle-sleep, NOT min latency. It is: **sustain a fixed 4 MHz stream, losslessly,
+using minimum CPU, so the RPi's other work gets cores.** A rate-constrained,
+CPU-minimizing objective.
+
+Consequences:
+
+1. **Option B (global-activity backoff) is RULED OUT.** A 4 MHz stream is never
+   "globally idle," so B never backs off → pegs cores → no benefit. B only helps
+   a graph that actually goes quiet. Do not build it for this deployment.
+2. **Adaptive sleep is REHABILITATED as a candidate.** Earlier it was judged
+   against a throughput-maximizing benchmark and slated for deletion (old D4).
+   Against the *rate-constrained* objective that judgement was wrong: the
+   `adaptive_verify` benchmark shows that under load adaptive sleep caps
+   throughput (~2.8 M/s vs 30.7 M busy-spin) **but holds CPU at ~19% (vs 200%) and
+   stays lossless**. The throughput *ceiling* is irrelevant if it still clears
+   4 MHz — and with batched DSP blocks (`read_dbf`, 1024+ samples/call, ~1000× the
+   single-float verify) it clears 4 MHz easily at low CPU. So adaptive sleep may
+   be the cheap, near-zero-code answer. **Do NOT delete it (old D4 retracted).**
+3. **The live options are now `adaptive-sleep (tuned)` vs `3D event-driven`** —
+   not B, not busy-spin. See revised Phase 3.
+4. **Sharp edge for adaptive:** bounded max-sleep must stay `< SDR hardware buffer
+   drain time`, or the *device* (not a Cler channel) overflows and drops samples —
+   real loss, outside the framework. 3D avoids this edge (prompt wake).
+
+**Recommended next step: measure adaptive sleep on the actual RPi.** If a bounded
+adaptive sleep sustains 4 MHz at ~20% CPU without SDR overflow, the work is
+essentially done with no new code, and 3D becomes a nice-to-have rather than a
+necessity. Only if adaptive can't hold the rate safely does 3D become required.
+
+Everything below predates this reframe; read it as the investigation that led
+here. The Decisions, Discovery log, and Phase 3 sections are annotated where the
+reframe overrides them.
+
+---
+
 ## TL;DR
 
 - **Decision: Cler is lossless.** Never drop / overwrite / reorder samples. The
@@ -94,15 +136,20 @@ The Phase 1 audit found every idle block had a natural `NotEnoughSamples` /
 `NotEnoughSpace` meaning. The existing no-progress vocabulary is sufficient;
 adding `Error::NoWork` would be churn without benefit.
 
-### D4 — Delete adaptive sleep
+### D4 — ~~Delete adaptive sleep~~ RETRACTED (see LATEST UPDATE)
 
-Adaptive sleep is removed, not kept as an `IdlePolicy` option. Measured harmful:
+> **RETRACTED.** This decision was made against a throughput-maximizing benchmark
+> (the −98.9% in Discovery log #8). The real deployment objective is
+> rate-constrained min-CPU streaming (LATEST UPDATE), and against *that* objective
+> adaptive sleep is a candidate, not a footgun: it holds a fixed rate losslessly
+> at ~19% CPU. **Do not delete it** pending an on-RPi measurement. Original text
+> kept below for the record.
+
+~~Adaptive sleep is removed, not kept as an `IdlePolicy` option. Measured harmful:
 `FixedThreadPool (with adaptive sleep)` throughput is 16.4 MS, −98.9% vs the
 1240–1821 MS busy-spin baseline (Discovery log #8), because it sleeps on transient
-per-block starvation that is constant under healthy pipeline load. It adds config
-surface and per-block atomic state for negative value. Breaking change, no shim
-(repo is pre-stable). Its role — cutting idle CPU — is taken over by the global
-idle-backoff in Phase 3, which uses the correct (graph-global) signal.
+per-block starvation that is constant under healthy pipeline load.~~ — true only
+for the throughput-max objective; irrelevant to a fixed-rate stream.
 
 ---
 
@@ -233,9 +280,19 @@ the Phase 3 fix depends on. All 11 unit-test suites pass.
 
 ## Proposed remaining work (all lossless)
 
-### Phase 3 — Delete adaptive sleep + global-activity idle backoff (Option B)
+### Phase 3 — idle/CPU backoff  (SUPERSEDED by LATEST UPDATE)
 
-**Decided** (owner): (1) **delete adaptive sleep** outright — it is measurably
+> **SUPERSEDED.** This section was written before the RPi 4 MHz / shared-box
+> objective was known. Under that rate-constrained objective: **Option B is ruled
+> out** (stream never globally idle) and **adaptive sleep is NOT deleted** (it's a
+> candidate). The two live options are **adaptive-sleep (tuned)** vs **3D
+> event-driven readiness**, with "measure adaptive on the real RPi first" as the
+> recommended next step (see LATEST UPDATE). The argument below — why a *global*
+> idle signal beats a *local* one — is still valid scheduler theory and still
+> applies to 3D's design; only the choice of Option B and the deletion of adaptive
+> sleep are overridden.
+
+**[Historical — pre-reframe] Decided** (owner): (1) **delete adaptive sleep** outright — it is measurably
 harmful (Discovery log #8: −98.9% FTP throughput) and nobody should enable it;
 (2) pursue **Option B** (global-activity backoff) to cut idle CPU, because the
 owner does not want FTP burning cores when the graph is idle; (3) **FixedThreadPool
@@ -417,6 +474,17 @@ Chronological record of non-obvious findings, so the plan stays honest.
    pipeline is active. The real signal is **global**: "has the graph done any work
    recently," not per-worker idleness. This makes Phase 3 a genuine design choice
    (see reframed Phase 3 below), not a minimal fix.
+9. **Objective reframe (RPi 4 MHz, shared box) — see LATEST UPDATE.** The real
+   deployment is rate-constrained min-CPU streaming, not throughput-max/idle. This
+   rules out Option B (a stream is never globally idle) and rehabilitates adaptive
+   sleep. The `adaptive_verify` benchmark (6-block chain, 2 FTP workers): loaded
+   busy-spin = 30.7 M/s @ 200% CPU; loaded adaptive = ~2.8 M/s @ **19% CPU**,
+   lossless; idle adaptive = **1–4% CPU**. Throughput ceiling drops but CPU does
+   too, and the ceiling is irrelevant if it still clears the target rate (batched
+   blocks clear 4 MHz easily). D4 (delete adaptive) retracted. Live options now:
+   adaptive-tuned vs 3D event-driven; recommended next step is to measure adaptive
+   on the actual RPi (bounded max-sleep < SDR hardware buffer drain time).
+
 8. **The existing per-block adaptive sleep has the SAME flaw — measured.**
    `perf_simple_linear_flow`'s `FixedThreadPool (with adaptive sleep)` row =
    **16.4 MS, −98.9%** vs the 1240–1821 MS busy-spin baseline — *worse* than the
