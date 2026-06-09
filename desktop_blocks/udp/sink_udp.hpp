@@ -30,7 +30,8 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
 
         size_t available = in.size();
         if (available == 0) {
-            return cler::Empty{};
+            // Nothing buffered: did no work.
+            return cler::Error::NotEnoughSamples;
         }
 
         T buffer[available];

@@ -46,16 +46,18 @@ struct SourceFileBlock : public cler::BlockBase {
             if (_file.eof() && _repeat) {
                 _file.clear(); // Clear EOF flag
                 _file.seekg(0, std::ios::beg);
-                return cler::Empty{}; // Don't return an error, just let the flowgraph/loop call this again
+                // Rewound but wrote nothing this call: no work done.
+                return cler::Error::NotEnoughSamples;
             } else {
                 if (_callback) {
                     _callback(_filename);
                 }
                 if (_file.is_open()) {_file.close();}
-                return cler::Empty{};
+                // End of stream, wrote nothing: no work done.
+                return cler::Error::NotEnoughSamples;
             }
         }
-        
+
         out->commit_write(samples_read);
         return cler::Empty{};
     }

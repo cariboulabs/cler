@@ -76,23 +76,24 @@ struct SinkAudioBlock : public cler::BlockBase {
 
         // Use zero-copy doubly-mapped buffer path
         auto [read_ptr, read_size] = in.read_dbf();
-
-        if (read_size > 0) {
-            // Write directly to PortAudio stream
-            PaError err = Pa_WriteStream(_stream, read_ptr, read_size);
-
-            // Handle errors
-            if (err == paOutputUnderflowed) {
-                // Underflow is expected during startup/low data scenarios
-                in.commit_read(read_size);
-                return cler::Empty{};
-            } else if (err != paNoError) {
-                return cler::Error::TERM_IOError;
-            }
-
-            in.commit_read(read_size);
+        if (read_size == 0) {
+            // Nothing buffered: did no work.
+            return cler::Error::NotEnoughSamples;
         }
 
+        // Write directly to PortAudio stream
+        PaError err = Pa_WriteStream(_stream, read_ptr, read_size);
+
+        // Handle errors
+        if (err == paOutputUnderflowed) {
+            // Underflow is expected during startup/low data scenarios
+            in.commit_read(read_size);
+            return cler::Empty{};
+        } else if (err != paNoError) {
+            return cler::Error::TERM_IOError;
+        }
+
+        in.commit_read(read_size);
         return cler::Empty{};
     }
 

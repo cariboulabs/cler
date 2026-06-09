@@ -16,6 +16,10 @@ struct SinkNullBlock : public cler::BlockBase {
          _callback(callback), _callback_context(callback_context) {}
 
     cler::Result<cler::Empty, cler::Error> procedure() {
+        // Track consumption across the whole call. A callback may drain the
+        // channel itself (via try_pop) and return 0 to avoid a double commit,
+        // so we measure the net size delta rather than trusting to_commit alone.
+        size_t before = in.size();
         size_t to_commit;
         if (_callback) {
             to_commit = _callback(&in, _callback_context);
@@ -23,6 +27,11 @@ struct SinkNullBlock : public cler::BlockBase {
             to_commit = in.size();
         }
         in.commit_read(to_commit);
+
+        if (before - in.size() == 0) {
+            // Consumed nothing: did no work.
+            return cler::Error::NotEnoughSamples;
+        }
         return cler::Empty{};
     }
 

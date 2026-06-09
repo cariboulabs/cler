@@ -52,7 +52,7 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
 
                 if (bytes == 0) {
                     blob.release();
-                    return cler::Empty{};
+                    break;  // no more data this round; flush what we have
                 }
 
                 if (bytes < 0) {
@@ -64,11 +64,11 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
 #endif
                         case EINTR:
                             blob.release();
-                            return cler::Empty{};
+                            goto flush;  // socket empty; flush buffered items
 
                         case EMSGSIZE:
                             blob.release();
-                            return cler::Empty{};
+                            goto flush;  // oversized datagram dropped; flush
 
                         default:
                             blob.release();
@@ -105,10 +105,12 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
             }
         }
 
-        if (count > 0) {
-            out->writeN(buffer, count);
+    flush:
+        if (count == 0) {
+            // Socket had no data this round: did no work.
+            return cler::Error::NotEnoughSamples;
         }
-
+        out->writeN(buffer, count);
         return cler::Empty{};
     }
 

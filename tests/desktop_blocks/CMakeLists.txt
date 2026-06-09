@@ -38,6 +38,16 @@ target_link_libraries(noise_blocks_test
     cler::desktop_blocks
 )
 
+# Idle-contract audit tests
+add_executable(idle_contract_test
+    test_idle_contract.cpp
+)
+
+target_link_libraries(idle_contract_test
+    gtest_main
+    cler::desktop_blocks
+)
+
 if (CLER_BUILD_BLOCKS_LIQUID)
     # Resampler blocks tests
     add_executable(resampler_blocks_test
@@ -64,6 +74,7 @@ endif()
 add_test(NAME math_blocks_test COMMAND math_blocks_test)
 add_test(NAME utility_blocks_test COMMAND utility_blocks_test)
 add_test(NAME sink_blocks_test COMMAND sink_blocks_test)
+add_test(NAME idle_contract_test COMMAND idle_contract_test)
 add_test(NAME noise_blocks_test COMMAND noise_blocks_test)
 
 if (CLER_BUILD_BLOCKS_LIQUID)

@@ -316,10 +316,11 @@ TEST_F(SinkBlocksTest, SinkFileBlockEmptyInput) {
     {
         SinkFileBlock<float> sink_block("test_sink_file_empty", test_filename.c_str(), buffer_size);
         
-        // Run with empty input
+        // Run with empty input: nothing written, must report no progress
+        // (idle contract) rather than a spurious success.
         auto result = sink_block.procedure();
-        EXPECT_TRUE(result.is_ok());
-        
+        EXPECT_TRUE(result.is_err());
+
         // Verify input is still empty
         EXPECT_EQ(sink_block.in.size(), 0);
         

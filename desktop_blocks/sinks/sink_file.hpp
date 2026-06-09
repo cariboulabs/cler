@@ -51,13 +51,15 @@ struct SinkFileBlock : public cler::BlockBase {
 
         // Use zero-copy path
         auto [span_ptr, span_size] = in.read_dbf();
-        
-        if (span_size > 0) {
-            // Single write, no copy
-            size_t written = std::fwrite(span_ptr, sizeof(T), span_size, _fp);
-            if (written != span_size) return cler::Error::TERM_IOError;
-            in.commit_read(written);
+        if (span_size == 0) {
+            // Nothing buffered: did no work.
+            return cler::Error::NotEnoughSamples;
         }
+
+        // Single write, no copy
+        size_t written = std::fwrite(span_ptr, sizeof(T), span_size, _fp);
+        if (written != span_size) return cler::Error::TERM_IOError;
+        in.commit_read(written);
         return cler::Empty{};
     }
 

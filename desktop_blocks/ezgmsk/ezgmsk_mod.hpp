@@ -43,7 +43,11 @@ struct EZGmskModBlock : public cler::BlockBase {
         const Blob* ptr1, *ptr2;
         size_t size1, size2;
         size_t available = in.peek_read(ptr1, size1, ptr2, size2);
-        
+        if (available == 0) {
+            return cler::Error::NotEnoughSamples;
+        }
+
+        size_t processed = 0;
         for (size_t i = 0; i < available; ++i) {
             Blob* blob = const_cast<Blob*>(
                 (i < size1) ? (ptr1 + i) : (ptr2 + i - size1)
@@ -68,6 +72,12 @@ struct EZGmskModBlock : public cler::BlockBase {
 
             blob->release();
             in.commit_read(1); // Commit the read of the blob
+            processed++;
+        }
+
+        if (processed == 0) {
+            // Had input blobs but no output space for even one frame.
+            return cler::Error::NotEnoughSpace;
         }
         return cler::Empty{};
     }

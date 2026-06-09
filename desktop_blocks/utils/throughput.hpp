@@ -27,12 +27,14 @@ struct ThroughputBlock : public cler::BlockBase {
         auto [write_ptr, write_size] = out->write_dbf();
         
         size_t to_transfer = std::min(read_size, write_size);
-        if (to_transfer > 0) {
-            std::memcpy(write_ptr, read_ptr, to_transfer * sizeof(T));
-            in.commit_read(to_transfer);
-            out->commit_write(to_transfer);
-            _samples_passed += to_transfer;
+        if (to_transfer == 0) {
+            // No samples to read or no space to write: did no work.
+            return cler::Error::NotEnoughSpaceOrSamples;
         }
+        std::memcpy(write_ptr, read_ptr, to_transfer * sizeof(T));
+        in.commit_read(to_transfer);
+        out->commit_write(to_transfer);
+        _samples_passed += to_transfer;
         return cler::Empty{};
     }
 

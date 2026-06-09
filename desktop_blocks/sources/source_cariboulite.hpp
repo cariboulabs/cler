@@ -106,12 +106,14 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
 
             size_t to_read = std::min(space, _max_samples_to_read);
             int ret = _radio->ReadSamples(ptr, to_read);
-            if (ret > 0) {
-                out->commit_write(ret);
-            }
             if (ret < 0) {
                 return cler::Error::ProcedureError;
             }
+            if (ret == 0) {
+                // Radio returned no samples: did no work.
+                return cler::Error::NotEnoughSamples;
+            }
+            out->commit_write(ret);
             return cler::Empty{};
         }
 

@@ -40,17 +40,20 @@ struct FanoutBlock : public cler::BlockBase {
         };
         (check_write_space(outs), ...);
         
-        if (min_write_size > 0) {
-            // Copy to all outputs
-            auto copy_to_output = [read_ptr, min_write_size](auto* out) {
-                auto [write_ptr, write_size] = out->write_dbf();
-                std::memcpy(write_ptr, read_ptr, min_write_size * sizeof(T));
-                out->commit_write(min_write_size);
-            };
-            (copy_to_output(outs), ...);
-            
-            in.commit_read(min_write_size);
+        if (min_write_size == 0) {
+            // Either no input samples or no space in some output: did no work.
+            return cler::Error::NotEnoughSpaceOrSamples;
         }
+
+        // Copy to all outputs
+        auto copy_to_output = [read_ptr, min_write_size](auto* out) {
+            auto [write_ptr, write_size] = out->write_dbf();
+            std::memcpy(write_ptr, read_ptr, min_write_size * sizeof(T));
+            out->commit_write(min_write_size);
+        };
+        (copy_to_output(outs), ...);
+
+        in.commit_read(min_write_size);
 
         return cler::Empty{};
     }
