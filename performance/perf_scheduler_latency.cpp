@@ -469,6 +469,96 @@ static void case_slow_sink() {
     run_slow_sink(100, /*stall=*/true, duration);
 }
 
+// ---------------------------------------------------------------------------
+// Case 4: FixedThreadPool idle CPU.
+//
+// This is the case that actually exercises FixedThreadPool: it needs
+// blocks > num_workers, otherwise run_fixed_thread_pool silently falls back to
+// ThreadPerBlock (cler.hpp:590). M independent Trickle->Drain chains (2M blocks)
+// run under a small worker pool while mostly idle (sparse emit). The metric is
+// cpu_pct: with the FixedThreadPool busy-spin defect, idle workers peg their
+// cores (~num_workers*100); with the sweep-once fix they should back off.
+//
+// Default-constructible blocks with fixed-size channels so they can live in
+// std::array (the flowgraph is compile-time sized).
+// ---------------------------------------------------------------------------
+constexpr size_t IDLE_CH = 512;
+
+struct TrickleSource : public cler::BlockBase {
+    uint64_t period_us = 10000;
+    TrickleSource() : BlockBase("trickle") {}
+
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
+        auto now = steady::now();
+        if (!_started) { _next = now; _started = true; }
+        if (now < _next) return cler::Error::NotEnoughSamples;  // idle between emits
+        if (!out->try_push(1.0f)) return cler::Error::NotEnoughSpace;
+        _next += std::chrono::microseconds(period_us);
+        return cler::Empty{};
+    }
+private:
+    bool _started = false;
+    steady::time_point _next{};
+};
+
+struct DrainSink : public cler::BlockBase {
+    cler::Channel<float, IDLE_CH> in;
+    uint64_t received = 0;
+    DrainSink() : BlockBase("drain") {}
+
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        float v;
+        if (!in.try_pop(v)) return cler::Error::NotEnoughSamples;
+        received++;
+        return cler::Empty{};
+    }
+};
+
+template <size_t M, size_t... I>
+static void run_ftp_idle_impl(size_t num_workers, uint64_t period_us,
+                              std::chrono::seconds duration,
+                              std::index_sequence<I...>) {
+    std::array<TrickleSource, M> srcs;
+    std::array<DrainSink, M> sinks;
+    for (size_t i = 0; i < M; ++i) srcs[i].period_us = period_us;
+
+    cler::FlowGraphConfig cfg;
+    cfg.scheduler = cler::SchedulerType::FixedThreadPool;
+    cfg.num_workers = num_workers;  // < 2M, so FixedThreadPool actually engages
+
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&srcs[I], &sinks[I].in)...,
+        cler::BlockRunner(&sinks[I])...
+    );
+
+    CpuMeter cpu;
+    cpu.start();
+    fg.run_for(duration, cfg);
+    double cpu_pct = cpu.cpu_percent();
+
+    uint64_t total = 0;
+    for (auto& s : sinks) total += s.received;
+
+    printf("case=ftp_idle blocks=%zu workers=%zu period_us=%llu items=%llu cpu_pct=%.0f\n",
+           2 * M, num_workers, static_cast<unsigned long long>(period_us),
+           static_cast<unsigned long long>(total), cpu_pct);
+    fflush(stdout);
+}
+
+template <size_t M>
+static void run_ftp_idle(size_t num_workers, uint64_t period_us,
+                         std::chrono::seconds duration) {
+    run_ftp_idle_impl<M>(num_workers, period_us, duration, std::make_index_sequence<M>{});
+}
+
+static void case_ftp_idle() {
+    const std::chrono::seconds duration(3);
+    // 16 chains = 32 blocks, 2 workers -> FixedThreadPool engages (32 > 2).
+    for (uint64_t p : {uint64_t(1000), uint64_t(10000), uint64_t(100000)}) {
+        run_ftp_idle<16>(/*num_workers=*/2, p, duration);
+    }
+}
+
 int main(int argc, char** argv) {
     std::string which = (argc > 1) ? argv[1] : "all";
 
@@ -480,6 +570,9 @@ int main(int argc, char** argv) {
     }
     if (which == "slow_sink" || which == "all") {
         case_slow_sink();
+    }
+    if (which == "ftp_idle" || which == "all") {
+        case_ftp_idle();
     }
 
     return 0;
