@@ -25,6 +25,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <sys/resource.h>
 
 using steady = std::chrono::steady_clock;
 
@@ -41,11 +42,23 @@ struct Msg {
 // ---------------------------------------------------------------------------
 // Latency histogram: collect raw samples, compute percentiles at the end.
 // Single-threaded ownership (the sink block) — no locking needed.
+//
+// Samples are capped (and the buffer reserved up front) so a fast pipeline
+// pushing tens of millions of items does not realloc inside the sink loop and
+// perturb the very tail latency we are trying to measure. `total` tracks the
+// true delivered count for throughput; percentiles use the capped sample set,
+// which is representative for these constant-rate benchmarks.
 // ---------------------------------------------------------------------------
 struct LatencyStats {
+    static constexpr size_t CAP = 2'000'000;  // ~16 MB of doubles
     std::vector<double> samples_us;
+    uint64_t total = 0;
 
-    void record(double us) { samples_us.push_back(us); }
+    void record(double us) {
+        if (samples_us.capacity() == 0) samples_us.reserve(CAP);
+        total++;
+        if (samples_us.size() < CAP) samples_us.push_back(us);
+    }
 
     double percentile(double p) {
         if (samples_us.empty()) return 0.0;
@@ -55,7 +68,34 @@ struct LatencyStats {
     }
 
     void finalize() { std::sort(samples_us.begin(), samples_us.end()); }
-    size_t count() const { return samples_us.size(); }
+    uint64_t count() const { return total; }
+};
+
+// ---------------------------------------------------------------------------
+// Process-wide CPU meter. Reports CPU-core-seconds consumed per wall second,
+// i.e. cpu_pct=100 means one full core, 800 means eight. This is the axis the
+// idle-policy tradeoff lives on: busy-spin buys low latency by burning cores,
+// and latency numbers alone cannot see that cost. RUSAGE_SELF aggregates all
+// threads (Linux/desktop perf target).
+// ---------------------------------------------------------------------------
+struct CpuMeter {
+    static double proc_cpu_s() {
+        rusage r{};
+        getrusage(RUSAGE_SELF, &r);
+        auto tv = [](const timeval& t) { return t.tv_sec + t.tv_usec * 1e-6; };
+        return tv(r.ru_utime) + tv(r.ru_stime);
+    }
+
+    void start() { _cpu0 = proc_cpu_s(); _wall0 = steady::now(); }
+
+    double cpu_percent() const {
+        double cpu = proc_cpu_s() - _cpu0;
+        double wall = std::chrono::duration<double>(steady::now() - _wall0).count();
+        return wall > 0.0 ? (cpu / wall) * 100.0 : 0.0;
+    }
+private:
+    double _cpu0 = 0.0;
+    steady::time_point _wall0{};
 };
 
 // ---------------------------------------------------------------------------
@@ -144,17 +184,20 @@ static void run_low_rate(const CaseConfig& cc, uint64_t period_us,
         cler::BlockRunner(&sink)
     );
 
+    CpuMeter cpu;
+    cpu.start();
     fg.run_for(duration, cc.cfg);
+    double cpu_pct = cpu.cpu_percent();
 
     sink.stats.finalize();
     double secs = static_cast<double>(duration.count());
     double thr = secs > 0.0 ? sink.stats.count() / secs : 0.0;
 
-    printf("case=low_rate scheduler=%s idle=%s period_us=%llu items=%zu "
-           "thr_ips=%.1f p50_us=%.2f p90_us=%.2f p99_us=%.2f max_us=%.2f\n",
+    printf("case=low_rate scheduler=%s idle=%s period_us=%llu items=%llu "
+           "thr_ips=%.1f cpu_pct=%.0f p50_us=%.2f p90_us=%.2f p99_us=%.2f max_us=%.2f\n",
            cc.sched_label, cc.idle_label,
            static_cast<unsigned long long>(period_us),
-           sink.stats.count(), thr,
+           static_cast<unsigned long long>(sink.stats.count()), thr, cpu_pct,
            sink.stats.percentile(50), sink.stats.percentile(90),
            sink.stats.percentile(99), sink.stats.percentile(100));
     fflush(stdout);
@@ -296,17 +339,20 @@ static void run_contended_impl(BusyWork work, uint64_t period_us,
         cler::BlockRunner(&bsink[I])...
     );
 
+    CpuMeter cpu;
+    cpu.start();
     fg.run_for(duration);  // default ThreadPerBlock, busy idle
+    double cpu_pct = cpu.cpu_percent();
 
     msink.stats.finalize();
     double secs = static_cast<double>(duration.count());
     double thr = secs > 0.0 ? msink.stats.count() / secs : 0.0;
 
     printf("case=contended scheduler=thread_per_block idle=busy busy_pipes=%zu "
-           "work=%s period_us=%llu items=%zu thr_ips=%.1f "
+           "work=%s period_us=%llu items=%llu thr_ips=%.1f cpu_pct=%.0f "
            "p50_us=%.2f p90_us=%.2f p99_us=%.2f max_us=%.2f\n",
            N, work_label(work), static_cast<unsigned long long>(period_us),
-           msink.stats.count(), thr,
+           static_cast<unsigned long long>(msink.stats.count()), thr, cpu_pct,
            msink.stats.percentile(50), msink.stats.percentile(90),
            msink.stats.percentile(99), msink.stats.percentile(100));
     fflush(stdout);
@@ -396,16 +442,19 @@ static void run_slow_sink(uint64_t sleep_us, bool stall, std::chrono::seconds du
         cler::BlockRunner(&sink)
     );
 
+    CpuMeter cpu;
+    cpu.start();
     fg.run_for(duration);
+    double cpu_pct = cpu.cpu_percent();
 
     sink.stats.finalize();
     double secs = static_cast<double>(duration.count());
     double thr = secs > 0.0 ? sink.stats.count() / secs : 0.0;
 
-    printf("case=slow_sink policy=fifo sink_sleep_us=%llu stall=%s items=%zu "
-           "thr_ips=%.1f p50_us=%.2f p99_us=%.2f max_us=%.2f drops=0\n",
+    printf("case=slow_sink policy=fifo sink_sleep_us=%llu stall=%s items=%llu "
+           "thr_ips=%.1f cpu_pct=%.0f p50_us=%.2f p99_us=%.2f max_us=%.2f drops=0\n",
            static_cast<unsigned long long>(sleep_us), stall ? "on" : "off",
-           sink.stats.count(), thr,
+           static_cast<unsigned long long>(sink.stats.count()), thr, cpu_pct,
            sink.stats.percentile(50), sink.stats.percentile(99),
            sink.stats.percentile(100));
     fflush(stdout);
