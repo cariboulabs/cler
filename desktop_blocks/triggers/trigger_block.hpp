@@ -391,8 +391,12 @@ private:
             std::memcpy(_snap_buf, _capture, _capture_len * sizeof(T));
             _snap_len      = _capture_len;
             _snap_trig_idx = _capture_trig;
-            _snap_pre_ms   = static_cast<float>(_capture_trig) * dt_ms;
-            _snap_post_ms  = static_cast<float>(_capture_len - _capture_trig) * dt_ms;
+            // Axis extents come from the CONFIGURED window, not the captured
+            // geometry, so the trigger line stays fixed at the pre-trigger
+            // fraction regardless of cold-start or capture-length variations.
+            _snap_pre_ms   = static_cast<float>(_active.pretrigger_samples) * dt_ms;
+            _snap_post_ms  = static_cast<float>(_active.window_samples
+                                                - _active.pretrigger_samples) * dt_ms;
             _snap_level    = _active.threshold;
             ++_frame_count;
         }

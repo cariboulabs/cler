@@ -21,6 +21,13 @@ Notable changes to Cler. Newest first.
   - Display decimation: large windows are drawn as a peak-preserving min/max
     envelope (≤8000 points), so multi-second windows render smoothly. Capture
     buffers are bounded by a memory ceiling (~256 MB) regardless of sample rate.
+  - Scope axis is fixed to the configured window, so the trigger marker stays
+    pinned at the pre-trigger fraction across frames (no per-capture jitter).
+- **`spike` settings persistence**: control-panel values (frequency, gain, and all
+  trigger parameters) are saved to `~/.cler_spike.conf` on exit and restored on the
+  next launch; window layout persists via `~/.cler_spike_imgui.ini`.
+- **`spike` typeable controls**: numeric fields accept click/Ctrl+Click to type an
+  exact value (drag still adjusts), with clamping to valid ranges.
 
 ### Changed
 - **`SourceUHDBlock`**: added `request_configure()` for thread-safe live retune.

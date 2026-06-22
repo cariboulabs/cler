@@ -18,6 +18,8 @@
 #include "power_detector.hpp"
 
 #include <chrono>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -87,6 +89,33 @@ struct ControlPanel {
           _rate_hz(a.rate),
           _max_window_ms(trig->max_window_ms()) {}
 
+    // A slider (or drag) that turns into a typed input box on double-click.
+    // Returns true on the frames the value changed.
+    bool editable(const char* label, float* v, float vmin, float vmax,
+                  const char* fmt, bool use_slider, float drag_speed = 1.0f) {
+        bool changed = false;
+        if (_editing == label) {
+            if (_editing_start) { ImGui::SetKeyboardFocusHere(); _editing_start = false; }
+            changed = ImGui::InputFloat(label, v, 0.0f, 0.0f, fmt,
+                                        ImGuiInputTextFlags_EnterReturnsTrue);
+            if (ImGui::IsItemDeactivated()) {        // Enter or clicked away: commit
+                *v = std::min(std::max(*v, vmin), vmax);
+                _editing = nullptr;
+                changed = true;
+            }
+        } else {
+            if (use_slider)
+                changed = ImGui::SliderFloat(label, v, vmin, vmax, fmt, ImGuiSliderFlags_AlwaysClamp);
+            else
+                changed = ImGui::DragFloat(label, v, drag_speed, vmin, vmax, fmt, ImGuiSliderFlags_AlwaysClamp);
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                _editing = label;        // string literals have stable addresses
+                _editing_start = true;
+            }
+        }
+        return changed;
+    }
+
     void render() {
         ImGui::SetNextWindowSize(ImVec2(360, 520), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
@@ -97,12 +126,13 @@ struct ControlPanel {
         ImGui::Text("Sample rate (span): %.3f MS/s  [fixed]", _rate_hz / 1e6);
 
         // Apply freq/gain only when the user finishes editing, not every tick,
-        // so we don't spam the USRP with retunes.
+        // so we don't spam the USRP with retunes. Drag to adjust, or double-click
+        // to type an exact value. Center freq drags (a 0-6 GHz slider is too coarse).
         ImGui::SetNextItemWidth(180);
-        ImGui::DragFloat("Center (MHz)", &_freq_mhz, 0.1f, 0.0f, 6000.0f, "%.3f");
+        editable("Center (MHz)", &_freq_mhz, 0.0f, 6000.0f, "%.3f", /*slider=*/false, 0.1f);
         bool freq_done = ImGui::IsItemDeactivatedAfterEdit();
         ImGui::SetNextItemWidth(180);
-        ImGui::SliderFloat("Gain (dB)", &_gain_db, 0.0f, 76.0f, "%.1f");
+        editable("Gain (dB)", &_gain_db, 0.0f, 76.0f, "%.1f", /*slider=*/true);
         bool gain_done = ImGui::IsItemDeactivatedAfterEdit();
         if (freq_done || gain_done) push_radio_config();
 
@@ -110,23 +140,26 @@ struct ControlPanel {
         ImGui::TextUnformatted("Trigger");
         ImGui::Separator();
 
+        // All numeric fields: drag the slider to adjust, or double-click to type.
         bool changed = false;
-        changed |= ImGui::SliderFloat("Level (dB)", &_threshold_db, -120.0f, 0.0f, "%.1f");
+        changed |= editable("Level (dB)", &_threshold_db, -120.0f, 0.0f, "%.1f", true);
         help("Power level the signal must cross to fire a trigger.");
-        changed |= ImGui::SliderFloat("Hysteresis (dB)", &_hysteresis_db, 0.0f, 30.0f, "%.1f");
+        changed |= editable("Hysteresis (dB)", &_hysteresis_db, 0.0f, 30.0f, "%.1f", true);
         help("Dead-band. After a rising trigger fires, the signal must drop below "
              "(Level - Hysteresis) before it can fire again. Stops chatter when the "
              "signal hovers right at the Level.");
-        changed |= ImGui::SliderFloat("Window (ms)", &_window_ms, 1.0f, _max_window_ms, "%.1f");
+        changed |= editable("Window (ms)", &_window_ms, 1.0f, _max_window_ms, "%.1f", true);
         help("Total time span captured and displayed per trigger (pre + post). "
-             "This is the scope timebase.");
-        changed |= ImGui::SliderFloat("Pre-trigger (%)", &_pretrigger_pct, 0.0f, 90.0f, "%.0f");
+             "This is the scope timebase. To see a whole repeating burst locked in "
+             "place, set Window a bit LESS than the burst period and >= the burst span.");
+        changed |= editable("Pre-trigger (%)", &_pretrigger_pct, 0.0f, 90.0f, "%.0f", true);
         help("How much of the Window is shown BEFORE the trigger instant (t=0). "
              "e.g. 10% puts the trigger 10% in from the left.");
-        changed |= ImGui::SliderFloat("Holdoff (ms)", &_holdoff_ms, 0.0f, 1000.0f, "%.0f");
-        help("Minimum time after a trigger before another can fire. Suppresses "
-             "re-triggering on ringing or the same burst.");
-        changed |= ImGui::SliderFloat("Auto timeout (ms)", &_auto_ms, 10.0f, 2000.0f, "%.0f");
+        changed |= editable("Holdoff (ms)", &_holdoff_ms, 0.0f, 5000.0f, "%.0f", true);
+        help("Minimum time AFTER a capture finishes before another trigger can fire "
+             "(added on top of the Window time, not overlapping). To lock a repeating "
+             "burst, set Window < burst period, then keep Holdoff small.");
+        changed |= editable("Auto timeout (ms)", &_auto_ms, 10.0f, 2000.0f, "%.0f", true);
         help("Auto mode only: if no edge arrives within this time, fire anyway so the "
              "display keeps refreshing. Ignored in Normal/Single.");
 
@@ -149,6 +182,47 @@ struct ControlPanel {
         ImGui::Text("State: %s", state_str(_trig->state()));
 
         ImGui::End();
+    }
+
+    // Push current panel state to the radio and the trigger (used at startup
+    // after loading saved settings).
+    void apply_all() { push_radio_config(); push_trigger_config(); }
+
+    bool load(const std::string& path) {
+        std::ifstream f(path);
+        if (!f) return false;
+        std::string key;
+        while (f >> key) {
+            if      (key == "freq_mhz")       f >> _freq_mhz;
+            else if (key == "gain_db")        f >> _gain_db;
+            else if (key == "threshold_db")   f >> _threshold_db;
+            else if (key == "hysteresis_db")  f >> _hysteresis_db;
+            else if (key == "window_ms")      f >> _window_ms;
+            else if (key == "pretrigger_pct") f >> _pretrigger_pct;
+            else if (key == "holdoff_ms")     f >> _holdoff_ms;
+            else if (key == "auto_ms")        f >> _auto_ms;
+            else if (key == "edge")           f >> _edge_idx;
+            else if (key == "mode")           f >> _mode_idx;
+            else { std::string skip; std::getline(f, skip); }
+        }
+        // A saved window may exceed this session's allocated max (different rate).
+        if (_window_ms > _max_window_ms) _window_ms = _max_window_ms;
+        return true;
+    }
+
+    void save(const std::string& path) const {
+        std::ofstream f(path);
+        if (!f) return;
+        f << "freq_mhz "       << _freq_mhz       << "\n"
+          << "gain_db "        << _gain_db        << "\n"
+          << "threshold_db "   << _threshold_db   << "\n"
+          << "hysteresis_db "  << _hysteresis_db  << "\n"
+          << "window_ms "      << _window_ms      << "\n"
+          << "pretrigger_pct " << _pretrigger_pct << "\n"
+          << "holdoff_ms "     << _holdoff_ms     << "\n"
+          << "auto_ms "        << _auto_ms        << "\n"
+          << "edge "           << _edge_idx       << "\n"
+          << "mode "           << _mode_idx       << "\n";
     }
 
 private:
@@ -197,7 +271,17 @@ private:
     float _max_window_ms  = 200.0f;
     int   _edge_idx       = 0;  // Rising
     int   _mode_idx       = 2;  // Auto
+
+    // Double-click-to-type state: which field (by label pointer) is being typed.
+    const char* _editing  = nullptr;
+    bool        _editing_start = false;
 };
+
+static std::string config_path(const char* leaf) {
+    const char* home = std::getenv("HOME");
+    std::string dir = home ? std::string(home) : std::string(".");
+    return dir + "/" + leaf;
+}
 
 int main(int argc, char** argv) {
     SpikeArgs args = parse_args(argc, argv);
@@ -216,6 +300,11 @@ int main(int argc, char** argv) {
         args.device_address, args.gain, 1);
 
     cler::GuiManager gui(1500, 900, "CLER Spike - USRP");
+
+    // Persist window layout to a stable location (independent of working dir).
+    ImGuiIO& io = ImGui::GetIO();
+    static std::string imgui_ini = config_path(".cler_spike_imgui.ini");
+    io.IniFilename = imgui_ini.c_str();
 
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
     PowerDetectorBlock<std::complex<float>> power("PowerDetector", -120.0f);
@@ -237,6 +326,8 @@ int main(int argc, char** argv) {
     spectrum.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);
 
     ControlPanel panel(&usrp, &trigger, args);
+    const std::string settings_file = config_path(".cler_spike.conf");
+    panel.load(settings_file);   // restore last session's settings if present
 
     // Trigger is a sink: it consumes the power stream and renders the captured
     // window itself (oscilloscope style), so it has no downstream channel.
@@ -249,6 +340,7 @@ int main(int argc, char** argv) {
     );
 
     flowgraph.run();
+    panel.apply_all();   // sync radio + trigger to loaded/initial settings
     std::cout << "CLER Spike running at " << args.freq / 1e6 << " MHz, "
               << args.rate / 1e6 << " MS/s. Close window to exit." << std::endl;
 
@@ -262,6 +354,7 @@ int main(int argc, char** argv) {
     }
 
     flowgraph.stop();
+    panel.save(settings_file);   // remember settings for next session
     std::cout << "Overflows: " << usrp.get_overflow_count() << std::endl;
     return 0;
 }
