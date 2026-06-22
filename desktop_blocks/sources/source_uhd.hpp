@@ -18,6 +18,8 @@
 #include <string>
 #include <iostream>
 #include <numeric>
+#include <atomic>
+#include <mutex>
 
 template<typename T>
 struct SourceUHDBlock : public cler::BlockBase {
@@ -123,10 +125,31 @@ struct SourceUHDBlock : public cler::BlockBase {
         }
     }
 
+    // Thread-safe live reconfigure: callable from any thread (e.g. the GUI).
+    // The request is only STAGED here; it is actually applied by the streaming
+    // thread itself at the top of procedure(), so we never touch the USRP from
+    // two threads at once (UHD multi_usrp is not safe against a concurrent recv).
+    void request_configure(const UHDConfig& cfg) {
+        std::lock_guard<std::mutex> lk(_cfg_mutex);
+        _pending_cfg = cfg;
+        _pending_cfg_gen.fetch_add(1, std::memory_order_release);
+    }
+
     template<typename... OChannels>
     cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
         constexpr size_t num_outs = sizeof...(OChannels);
         assert(num_outs == _num_channels && "Number of output channels defined in block constructor must match the number of channels");
+
+        // Apply any staged reconfigure in this (the streaming) thread.
+        if (_pending_cfg_gen.load(std::memory_order_acquire) != _applied_cfg_gen) {
+            UHDConfig cfg;
+            {
+                std::lock_guard<std::mutex> lk(_cfg_mutex);
+                cfg = _pending_cfg;
+                _applied_cfg_gen = _pending_cfg_gen.load(std::memory_order_acquire);
+            }
+            configure(cfg, 0);
+        }
 
         if (_configuring.load(std::memory_order_acquire)) {
             return cler::Empty{};  // Skip this iteration
@@ -186,6 +209,12 @@ private:
     std::string wire_format;
     std::atomic<bool> _configuring;
     size_t overflow_count = 0;
+
+    // Live-reconfigure staging (written by any thread, applied by streaming thread)
+    std::mutex _cfg_mutex;
+    UHDConfig _pending_cfg;
+    std::atomic<size_t> _pending_cfg_gen{0};
+    size_t _applied_cfg_gen{0};
 };
 
 using SourceUHDBlockCF32 = SourceUHDBlock<std::complex<float>>;
