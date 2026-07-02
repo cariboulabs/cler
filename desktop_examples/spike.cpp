@@ -1,18 +1,22 @@
 // Slim "Spike-like" spectrum analyzer GUI for USRP on CLER.
 //
-// Milestone 1: reliable zero-span (power-vs-time) capture with a real trigger,
-// plus a spectrum view for context, all driven from one live control panel.
+// Reliable zero-span (power-vs-time) capture with a real trigger, plus spectrum
+// and spectrogram (waterfall) views, all driven from one live control panel.
 //
-//   USRP --> Fanout(2) --+--> PowerDetector --> Trigger --> PlotTimeSeries (zero-span)
-//                        +--> PlotCSpectrum                  (spectrum context)
+//   USRP --> Fanout(3) --+--> PowerDetector --> Trigger --> PlotTimeSeries (zero-span)
+//                        +--> PlotCSpectrum                  (spectrum)
+//                        +--> PlotCSpectrogram               (waterfall)
 //
-// Sample rate (span) is fixed at startup; center frequency and gain are live.
+// Single superset flowgraph: every block always runs; the "View" checkboxes only
+// choose which windows are drawn. Sample rate (span) is fixed at startup; center
+// frequency and gain are live.
 
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/sources/source_uhd.hpp"
 #include "desktop_blocks/utils/fanout.hpp"
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
+#include "desktop_blocks/plots/plot_cspectrogram.hpp"
 #include "desktop_blocks/triggers/trigger_block.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include "power_detector.hpp"
@@ -121,6 +125,16 @@ struct ControlPanel {
         ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
         ImGui::Begin("Control");
 
+        ImGui::TextUnformatted("View");
+        ImGui::Separator();
+        ImGui::Checkbox("Zero-span scope", &show_scope);
+        ImGui::SameLine();
+        ImGui::Checkbox("Spectrum", &show_spectrum);
+        ImGui::Checkbox("Spectrogram (waterfall)", &show_spectrogram);
+        help("Which windows to display. All views run continuously; these only "
+             "toggle visibility, so nothing needs restarting.");
+
+        ImGui::Dummy(ImVec2(0, 8));
         ImGui::TextUnformatted("Radio");
         ImGui::Separator();
         ImGui::Text("Sample rate (span): %.3f MS/s  [fixed]", _rate_hz / 1e6);
@@ -188,6 +202,12 @@ struct ControlPanel {
     // after loading saved settings).
     void apply_all() { push_radio_config(); push_trigger_config(); }
 
+    // Which windows to draw (read by the main render loop). Public so main() can
+    // gate the render() calls; toggled by the "View" checkboxes above.
+    bool show_scope       = true;
+    bool show_spectrum    = true;
+    bool show_spectrogram = false;
+
     bool load(const std::string& path) {
         std::ifstream f(path);
         if (!f) return false;
@@ -203,6 +223,9 @@ struct ControlPanel {
             else if (key == "auto_ms")        f >> _auto_ms;
             else if (key == "edge")           f >> _edge_idx;
             else if (key == "mode")           f >> _mode_idx;
+            else if (key == "show_scope")     f >> show_scope;
+            else if (key == "show_spectrum")  f >> show_spectrum;
+            else if (key == "show_spectrogram") f >> show_spectrogram;
             else { std::string skip; std::getline(f, skip); }
         }
         // A saved window may exceed this session's allocated max (different rate).
@@ -222,7 +245,10 @@ struct ControlPanel {
           << "holdoff_ms "     << _holdoff_ms     << "\n"
           << "auto_ms "        << _auto_ms        << "\n"
           << "edge "           << _edge_idx       << "\n"
-          << "mode "           << _mode_idx       << "\n";
+          << "mode "           << _mode_idx       << "\n"
+          << "show_scope "       << show_scope       << "\n"
+          << "show_spectrum "    << show_spectrum    << "\n"
+          << "show_spectrogram " << show_spectrogram << "\n";
     }
 
 private:
@@ -306,7 +332,7 @@ int main(int argc, char** argv) {
     static std::string imgui_ini = config_path(".cler_spike_imgui.ini");
     io.IniFilename = imgui_ini.c_str();
 
-    FanoutBlock<std::complex<float>> fanout("Fanout", 2);
+    FanoutBlock<std::complex<float>> fanout("Fanout", 3);
     PowerDetectorBlock<std::complex<float>> power("PowerDetector", -120.0f);
 
     Trig trigger("Trigger", static_cast<size_t>(args.rate),
@@ -322,8 +348,18 @@ int main(int argc, char** argv) {
 
     PlotCSpectrumBlock spectrum("Spectrum", {"I/Q"}, static_cast<size_t>(args.rate), args.fft);
 
+    // Waterfall: 2000 rows of history, each row peak-holding several FFT frames
+    // (adjustable live via "frames/row" in the window). Drains its whole input
+    // each call so it never stalls the shared fanout (which commits the min
+    // space across all branches). When its window is hidden it is paused (see
+    // set_active in the loop) so it costs nothing and can't perturb the trigger.
+    PlotCSpectrogramBlock spectrogram("Spectrogram", {"I/Q"},
+        static_cast<size_t>(args.rate), args.fft, /*tall*/ 2000);
+    spectrogram.set_frames_per_row(8);   // ~32 s history at 1 MS/s, 2048-pt FFT
+
     trigger.set_initial_window(380.0f, 10.0f, 1100.0f, 430.0f);
     spectrum.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);
+    spectrogram.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);
 
     ControlPanel panel(&usrp, &trigger, args);
     const std::string settings_file = config_path(".cler_spike.conf");
@@ -333,10 +369,11 @@ int main(int argc, char** argv) {
     // window itself (oscilloscope style), so it has no downstream channel.
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&usrp,    &fanout.in),
-        cler::BlockRunner(&fanout,  &power.in, &spectrum.in[0]),
+        cler::BlockRunner(&fanout,  &power.in, &spectrum.in[0], &spectrogram.in[0]),
         cler::BlockRunner(&power,   &trigger.in),
         cler::BlockRunner(&trigger),
-        cler::BlockRunner(&spectrum)
+        cler::BlockRunner(&spectrum),
+        cler::BlockRunner(&spectrogram)
     );
 
     flowgraph.run();
@@ -345,10 +382,16 @@ int main(int argc, char** argv) {
               << args.rate / 1e6 << " MS/s. Close window to exit." << std::endl;
 
     while (!gui.should_close()) {
+        // Pause the spectrogram whenever it isn't shown: it keeps draining its
+        // input (so the fanout never stalls) but does no FFT work and cannot
+        // steal cycles from or add jitter to the trigger path.
+        spectrogram.set_active(panel.show_spectrogram);
+
         gui.begin_frame();
         panel.render();
-        trigger.render();
-        spectrum.render();
+        if (panel.show_scope)       trigger.render();
+        if (panel.show_spectrum)    spectrum.render();
+        if (panel.show_spectrogram) spectrogram.render();
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
