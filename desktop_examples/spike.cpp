@@ -1,11 +1,13 @@
 // Slim "Spike-like" spectrum analyzer GUI for USRP on CLER.
 //
-// Reliable zero-span (power-vs-time) capture with a real trigger, plus spectrum
-// and spectrogram (waterfall) views, all driven from one live control panel.
+// Reliable zero-span (power-vs-time) capture with a real trigger, plus
+// spectrum, spectrogram (waterfall) and polyphase-channelizer views, all
+// driven from one live control panel.
 //
-//   USRP --> Fanout(3) --+--> PowerDetector --> Trigger --> PlotTimeSeries (zero-span)
+//   USRP --> Fanout(4) --+--> PowerDetector --> Trigger --> PlotTimeSeries (zero-span)
 //                        +--> PlotCSpectrum                  (spectrum)
 //                        +--> PlotCSpectrogram               (waterfall)
+//                        +--> ChannelizerPanel                (per-channel strips)
 //
 // Single superset flowgraph: every block always runs; the "View" checkboxes only
 // choose which windows are drawn. Center frequency, gain and sample rate (span)
@@ -22,6 +24,7 @@
 #include "desktop_blocks/triggers/trigger_block.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include "power_detector.hpp"
+#include "channelizer_panel.hpp"
 
 #include <cfloat>
 #include <chrono>
@@ -99,8 +102,10 @@ struct ControlPanel {
                  PlotCSpectrumBlock* spectrum,
                  PlotCSpectrogramBlock* sgram,
                  PowerDetectorBlock<std::complex<float>>* power,
+                 ChannelizerPanelBlock* chan,
                  size_t sgram_tall, const SpikeArgs& a)
         : _src(src), _trig(trig), _spectrum(spectrum), _sgram(sgram), _power(power),
+          _chan(chan),
           _freq_mhz(static_cast<float>(a.freq / 1e6)),
           _freq_anchor_mhz(_freq_mhz),
           _gain_db(static_cast<float>(a.gain)),
@@ -177,6 +182,8 @@ struct ControlPanel {
         ImGui::SameLine();
         ImGui::Checkbox("Spectrum", &show_spectrum);
         ImGui::Checkbox("Spectrogram (waterfall)", &show_spectrogram);
+        ImGui::SameLine();
+        ImGui::Checkbox("Channelizer", &show_channelizer);
         help("Which windows to display. All views run continuously; these only "
              "toggle visibility, so nothing needs restarting.");
 
@@ -257,7 +264,11 @@ struct ControlPanel {
         editable("Center (MHz)", &_freq_mhz, freq_lo, freq_hi, "%.3f",
                  /*slider=*/true, 0.1f, /*tmin=*/0.0f, /*tmax=*/6000.0f);
         bool freq_done = ImGui::IsItemDeactivatedAfterEdit();
-        if (freq_done) _freq_anchor_mhz = _freq_mhz;   // recenter for next time
+        if (freq_done) {
+            _freq_anchor_mhz = _freq_mhz;   // recenter for next time
+            // Channelizer strips are labeled with ABSOLUTE channel centers.
+            _chan->set_center_freq(static_cast<double>(_freq_mhz) * 1e6);
+        }
         ImGui::SetNextItemWidth(180);
         editable("Gain (dB)", &_gain_db, 0.0f, 76.0f, "%.1f", /*slider=*/true);
         bool gain_done = ImGui::IsItemDeactivatedAfterEdit();
@@ -365,6 +376,43 @@ struct ControlPanel {
         ImGui::Dummy(ImVec2(0, 6));
         ImGui::Text("State: %s", state_str(_trig->state()));
 
+        ImGui::Dummy(ImVec2(0, 8));
+        ImGui::TextUnformatted("Channelizer");
+        ImGui::Separator();
+
+        // Channel width: number entry like Rate / Zero-span BW. The block
+        // snaps the request to N = rate/width integer channels; the actual
+        // (effective) width and N are mirrored next to the control.
+        ImGui::SetNextItemWidth(180);
+        editable("Channel width (MHz)", &_chan_width_mhz, min_chan_width_mhz(),
+                 static_cast<float>(_rate_hz / 2e6), "%.3f",
+                 /*slider=*/false, /*drag_speed=*/0.01f);
+        const bool chan_width_committed = ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::SameLine();
+        {
+            const size_t n = ChannelizerPanelBlock::channels_for(
+                chan_width_hz(), _rate_hz);
+            const double eff = ChannelizerPanelBlock::effective_width(
+                chan_width_hz(), _rate_hz);
+            ImGui::TextDisabled("N=%zu eff. %.3f MHz", n, eff / 1e6);
+        }
+        help("Width of each channelizer strip. The device rate is split into "
+             "N = rate/width equal channels (N snaps to an integer in [2, 64]; "
+             "'eff.' shows the width actually applied). Each strip is a "
+             "scrolling peak-power-vs-time trace of one channel; strips are "
+             "labeled with their absolute center frequency. A width or rate "
+             "change restarts the strip history.");
+        ImGui::SetNextItemWidth(180);
+        editable("Span (s)", &_chan_span_s, 1.0f, 600.0f, "%.1f",
+                 /*slider=*/false, /*drag_speed=*/0.1f);
+        const bool chan_span_committed = ImGui::IsItemDeactivatedAfterEdit();
+        help("Time depth of the channelizer strips (shared X axis). Longer "
+             "spans peak-hold more samples into each on-screen point.");
+        if (chan_width_committed || chan_span_committed) {
+            clamp_chan_width();
+            push_chan_config();
+        }
+
         // Record the panel's ACTUAL rect for the main loop's tiling code (the
         // window auto-sizes, so its width is content-driven, not a constant).
         window_pos  = ImGui::GetWindowPos();
@@ -407,6 +455,11 @@ struct ControlPanel {
         push_power_config();
         refresh_trigger_window();
         push_trigger_config();
+        // Channelizer: derive N from the saved/default width at the current
+        // rate and stage the analyzer (runs unconditionally; the block only
+        // does work while its window is shown -- see set_active in the loop).
+        clamp_chan_width();
+        push_chan_config();
         // Waterfall depth: seed the spectrogram's frames-per-row once from the
         // saved (or default) seconds value. From here on the depth is owned by
         // the History slider in the spectrogram window itself; the panel only
@@ -428,6 +481,7 @@ struct ControlPanel {
     bool show_scope       = true;
     bool show_spectrum    = true;
     bool show_spectrogram = false;
+    bool show_channelizer = false;
 
     // One-shot request from the "Arrange windows" button; consumed (cleared)
     // by the main loop, which owns the tiling computation.
@@ -462,6 +516,9 @@ struct ControlPanel {
             else if (key == "show_scope")     f >> show_scope;
             else if (key == "show_spectrum")  f >> show_spectrum;
             else if (key == "show_spectrogram") f >> show_spectrogram;
+            else if (key == "show_channelizer") f >> show_channelizer;
+            else if (key == "chan_width_mhz")   f >> _chan_width_mhz;
+            else if (key == "chan_span_s")      f >> _chan_span_s;
             else if (key == "history_s")      f >> _history_s;
             else if (key == "zs_bw_hz") {
                 // Stored in Hz for backward compatibility; the widget is MHz.
@@ -488,6 +545,9 @@ struct ControlPanel {
         // is only derivable once the bandwidth is applied; apply_all() (and
         // every on_rate_changed) runs the clamp at the right time.
         clamp_zs_bw();
+        // Channelizer width is re-clamped/snapped against the live rate by
+        // apply_all() and every on_rate_changed(); only sanitize the span.
+        _chan_span_s = std::min(std::max(_chan_span_s, 1.0f), 600.0f);
         _freq_anchor_mhz = _freq_mhz;   // center the freq slider on the saved value
         return true;
     }
@@ -511,6 +571,9 @@ struct ControlPanel {
           << "history_s "        << fpr_to_history(_sgram->frames_per_row()) << "\n"
           << "zs_bw_hz "         << static_cast<double>(_zs_bw_mhz) * 1e6 << "\n"
           << "zs_filter_on "     << _zs_filter_on    << "\n"
+          << "show_channelizer " << show_channelizer << "\n"
+          << "chan_width_mhz "   << _chan_width_mhz  << "\n"
+          << "chan_span_s "      << _chan_span_s     << "\n"
           << "rate_hz "          << _rate_hz         << "\n";
         if (!_snapshot_dir.empty())
             f << "snapshot_dir " << _snapshot_dir << "\n";
@@ -578,6 +641,12 @@ private:
         refresh_trigger_window();
         push_trigger_config();
 
+        // Channelizer: recompute N from the REQUESTED width at the new rate
+        // (the request is kept; only the snap changes) and re-stage the
+        // analyzer + bin sizing as one generation.
+        clamp_chan_width();
+        push_chan_config();
+
         // Frequency axes of both FFT views (GUI-thread setters; the
         // spectrogram also clears its ring -- old rows would be mislabeled).
         const size_t sps = static_cast<size_t>(actual_hz + 0.5);
@@ -639,6 +708,28 @@ private:
         _power->set_channel_bandwidth(bw, _rate_hz);
     }
 
+    // Requested channelizer channel width in Hz (the widget shows MHz).
+    double chan_width_hz() const { return static_cast<double>(_chan_width_mhz) * 1e6; }
+
+    // Achievable width floor at the current rate: N is capped at N_MAX, so a
+    // narrower request would silently snap far from what was typed -- clamp
+    // the widget instead (mirrors min_zs_bw_mhz above).
+    float min_chan_width_mhz() const {
+        return static_cast<float>(
+            _rate_hz / static_cast<double>(ChannelizerPanelBlock::N_MAX) / 1e6);
+    }
+
+    void clamp_chan_width() {
+        const float hi = static_cast<float>(_rate_hz / 2e6);   // N >= 2
+        _chan_width_mhz = std::min(std::max(_chan_width_mhz, min_chan_width_mhz()), hi);
+    }
+
+    void push_chan_config() {
+        _chan->set_config(chan_width_hz(), _rate_hz,
+                          static_cast<double>(_chan_span_s),
+                          static_cast<double>(_freq_mhz) * 1e6);
+    }
+
     void push_trigger_config() {
         _trig->set_config(_threshold_db, _window_ms, _pretrigger_pct,
                           _holdoff_ms,
@@ -655,6 +746,7 @@ private:
     PlotCSpectrumBlock* _spectrum;
     PlotCSpectrogramBlock* _sgram;
     PowerDetectorBlock<std::complex<float>>* _power;
+    ChannelizerPanelBlock* _chan;
 
     float  _freq_mhz;
     // Center of the freq slider's +/- 25 MHz window; moved only on commit (see
@@ -672,6 +764,9 @@ private:
     float  _zs_bw_mhz;          // zero-span channel bandwidth (MHz); rate = bypass
     bool   _zs_filter_on = false;   // filter engages ONLY when this is checked
                                     // (conf key zs_filter_on; old confs = off)
+    float  _chan_width_mhz = 1.0f;  // requested channelizer width (conf key
+                                    // chan_width_mhz); snapped to rate/N live
+    float  _chan_span_s    = 10.0f; // channelizer strip time depth (chan_span_s)
 
     // Trigger UI state (defaults mirror the TriggerBlock constructor below).
     float _threshold_db   = -40.0f;
@@ -900,7 +995,7 @@ int main(int argc, char** argv) {
     static std::string imgui_ini = config_path(".cler_spike_imgui.ini");
     io.IniFilename = imgui_ini.c_str();
 
-    FanoutBlock<std::complex<float>> fanout("Fanout", 3);
+    FanoutBlock<std::complex<float>> fanout("Fanout", 4);
     PowerDetectorBlock<std::complex<float>> power("PowerDetector", -120.0f);
 
     Trig trigger("Trigger", static_cast<size_t>(args.rate),
@@ -929,12 +1024,19 @@ int main(int argc, char** argv) {
     // overridden by the `history_s` conf key) via panel.apply_all() and reads
     // it back at save() time.
 
+    // Polyphase channelizer strips (4th fanout arm). Superset pattern like
+    // the other views: the block always runs, but while its window is hidden
+    // set_active(false) makes it drain-without-work, so it can never steal
+    // cycles from or add jitter to the trigger path.
+    ChannelizerPanelBlock channelizer("Channelizer");
+
     trigger.set_initial_window(380.0f, 10.0f, 1100.0f, 430.0f);
     spectrum.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);
     spectrogram.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);
+    channelizer.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);
 
     ControlPanel panel(&usrp, &trigger, &spectrum, &spectrogram, &power,
-                       waterfall_tall, args);
+                       &channelizer, waterfall_tall, args);
     const std::string settings_file = config_path(".cler_spike.conf");
     panel.load(settings_file);   // restore last session's settings if present
 
@@ -942,11 +1044,13 @@ int main(int argc, char** argv) {
     // window itself (oscilloscope style), so it has no downstream channel.
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&usrp,    &fanout.in),
-        cler::BlockRunner(&fanout,  &power.in, &spectrum.in[0], &spectrogram.in[0]),
+        cler::BlockRunner(&fanout,  &power.in, &spectrum.in[0], &spectrogram.in[0],
+                                    &channelizer.in),
         cler::BlockRunner(&power,   &trigger.in),
         cler::BlockRunner(&trigger),
         cler::BlockRunner(&spectrum),
-        cler::BlockRunner(&spectrogram)
+        cler::BlockRunner(&spectrogram),
+        cler::BlockRunner(&channelizer)
     );
 
     flowgraph.run();
@@ -961,6 +1065,7 @@ int main(int argc, char** argv) {
     // applies its rect exactly once (apply_window_rect), so the user can
     // still move/resize freely afterward.
     bool prev_scope = false, prev_spectrum = false, prev_spectrogram = false;
+    bool prev_channelizer = false;
     bool first_layout = true;
     // Debounce for the resize-triggered retile: only fire once the viewport
     // work size has been STABLE for kResizeSettleFrames frames (so we never
@@ -979,6 +1084,7 @@ int main(int argc, char** argv) {
         // trigger engine and must keep running even when the scope is hidden.
         spectrogram.set_active(panel.show_spectrogram);
         spectrum.set_active(panel.show_spectrum);
+        channelizer.set_active(panel.show_channelizer);
 
         gui.begin_frame();
         panel.render();
@@ -1005,12 +1111,14 @@ int main(int argc, char** argv) {
         bool retile = first_layout || panel.arrange_requested || resize_retile ||
                       panel.show_scope       != prev_scope ||
                       panel.show_spectrum    != prev_spectrum ||
-                      panel.show_spectrogram != prev_spectrogram;
+                      panel.show_spectrogram != prev_spectrogram ||
+                      panel.show_channelizer != prev_channelizer;
         first_layout = false;
         panel.arrange_requested = false;
         prev_scope       = panel.show_scope;
         prev_spectrum    = panel.show_spectrum;
         prev_spectrogram = panel.show_spectrogram;
+        prev_channelizer = panel.show_channelizer;
 
         if (retile) {
             // Plot area: main viewport minus the control panel on the left
@@ -1027,7 +1135,8 @@ int main(int argc, char** argv) {
             const float total_h = vp->WorkSize.y - 20.0f;
             const int n = (panel.show_scope ? 1 : 0) +
                           (panel.show_spectrum ? 1 : 0) +
-                          (panel.show_spectrogram ? 1 : 0);
+                          (panel.show_spectrogram ? 1 : 0) +
+                          (panel.show_channelizer ? 1 : 0);
             if (n > 0 && w > 50.0f && total_h > 50.0f) {
                 const float row_h = (total_h - gap * static_cast<float>(n - 1))
                                     / static_cast<float>(n);
@@ -1036,12 +1145,14 @@ int main(int argc, char** argv) {
                 if (panel.show_scope)       trigger.apply_window_rect(x, row_y(row++), w, row_h);
                 if (panel.show_spectrum)    spectrum.apply_window_rect(x, row_y(row++), w, row_h);
                 if (panel.show_spectrogram) spectrogram.apply_window_rect(x, row_y(row++), w, row_h);
+                if (panel.show_channelizer) channelizer.apply_window_rect(x, row_y(row++), w, row_h);
             }
         }
 
         if (panel.show_scope)       trigger.render();
         if (panel.show_spectrum)    spectrum.render();
         if (panel.show_spectrogram) spectrogram.render();
+        if (panel.show_channelizer) channelizer.render();
 
         // Snapshot: consumed here (after the plot renders, so the exported
         // data matches this frame) and before end_frame(), whose screenshot
