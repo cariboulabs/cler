@@ -4,6 +4,7 @@
 #include <numeric>
 #include <random>
 #include <chrono>
+#include <algorithm>
 #include "cler_spsc-queue.hpp"
 
 class SPSCQueueBasicTest : public ::testing::Test {
