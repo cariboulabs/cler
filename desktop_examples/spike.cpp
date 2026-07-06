@@ -87,15 +87,17 @@ static SpikeArgs parse_args(int argc, char** argv) {
 // (mutex-guarded config snapshot applied at a safe point).
 struct ControlPanel {
     ControlPanel(SourceUHDBlock<std::complex<float>>* src, Trig* trig,
-                 PlotCSpectrogramBlock* sgram, size_t sgram_tall,
-                 const SpikeArgs& a)
-        : _src(src), _trig(trig), _sgram(sgram),
+                 PlotCSpectrogramBlock* sgram,
+                 PowerDetectorBlock<std::complex<float>>* power,
+                 size_t sgram_tall, const SpikeArgs& a)
+        : _src(src), _trig(trig), _sgram(sgram), _power(power),
           _freq_mhz(static_cast<float>(a.freq / 1e6)),
           _freq_anchor_mhz(_freq_mhz),
           _gain_db(static_cast<float>(a.gain)),
           _rate_hz(a.rate),
           _n_fft(a.fft),
           _sgram_tall(sgram_tall),
+          _zs_bw_hz(static_cast<float>(a.rate)),   // full rate = bypass (old behavior)
           _max_window_ms(trig->max_window_ms()) {
         _history_s = fpr_to_history(8);   // default depth; conf key history_s overrides
     }
@@ -229,6 +231,26 @@ struct ControlPanel {
 
         if (changed) push_trigger_config();
 
+        // Zero-span detection ("video") bandwidth: a complex lowpass ahead of
+        // the power detector. Applied on edit-commit like freq/gain (typed
+        // exact values matter more than dragging here, hence a drag box).
+        ImGui::SetNextItemWidth(180);
+        editable("Zero-span BW (Hz)", &_zs_bw_hz, 1000.0f,
+                 static_cast<float>(_rate_hz), "%.0f",
+                 /*slider=*/false, /*drag_speed=*/1000.0f);
+        if (ImGui::IsItemDeactivatedAfterEdit()) push_power_config();
+        ImGui::SameLine();
+        if (_zs_bw_hz >= static_cast<float>(_rate_hz))
+            ImGui::TextDisabled("(bypass)");
+        else
+            ImGui::TextDisabled("eff. %.1f kHz", effective_zs_bw_hz() / 1e3f);
+        help("Detection (video) bandwidth of the zero-span power trace: the I/Q "
+             "stream is lowpass-filtered to this two-sided width before the "
+             "power is computed, rejecting off-channel energy. Set to the full "
+             "sample rate (default) to bypass the filter entirely. The achieved "
+             "value is quantized by the filter design range -- 'eff.' shows "
+             "what is actually applied.");
+
         ImGui::Dummy(ImVec2(0, 6));
         if (ImGui::Button("Arm / Re-arm")) _trig->rearm();
         ImGui::SameLine();
@@ -246,6 +268,7 @@ struct ControlPanel {
         push_radio_config();
         push_trigger_config();
         push_spectrogram_config();
+        push_power_config();
     }
 
     // Which windows to draw (read by the main render loop). Public so main() can
@@ -277,10 +300,14 @@ struct ControlPanel {
             else if (key == "show_spectrum")  f >> show_spectrum;
             else if (key == "show_spectrogram") f >> show_spectrogram;
             else if (key == "history_s")      f >> _history_s;
+            else if (key == "zs_bw_hz")       f >> _zs_bw_hz;
             else { std::string skip; std::getline(f, skip); }
         }
         // A saved window may exceed this session's allocated max (different rate).
         if (_window_ms > _max_window_ms) _window_ms = _max_window_ms;
+        // A saved bandwidth may exceed this session's sample rate.
+        if (_zs_bw_hz > static_cast<float>(_rate_hz)) _zs_bw_hz = static_cast<float>(_rate_hz);
+        if (_zs_bw_hz < 1000.0f) _zs_bw_hz = 1000.0f;
         _freq_anchor_mhz = _freq_mhz;   // center the freq slider on the saved value
         return true;
     }
@@ -301,7 +328,8 @@ struct ControlPanel {
           << "show_scope "       << show_scope       << "\n"
           << "show_spectrum "    << show_spectrum    << "\n"
           << "show_spectrogram " << show_spectrogram << "\n"
-          << "history_s "        << _history_s       << "\n";
+          << "history_s "        << _history_s       << "\n"
+          << "zs_bw_hz "         << _zs_bw_hz        << "\n";
     }
 
 private:
@@ -343,6 +371,20 @@ private:
         _sgram->set_frames_per_row(history_to_fpr(_history_s));
     }
 
+    // Mirror of PowerDetectorBlock::set_video_bandwidth()'s clamping so the
+    // panel can display the bandwidth that will actually be applied.
+    float effective_zs_bw_hz() const {
+        if (_zs_bw_hz >= static_cast<float>(_rate_hz))
+            return static_cast<float>(_rate_hz);          // bypass
+        double fc = (static_cast<double>(_zs_bw_hz) / 2.0) / _rate_hz;
+        fc = std::min(std::max(fc, 1e-3), 0.4999);
+        return static_cast<float>(2.0 * fc * _rate_hz);
+    }
+
+    void push_power_config() {
+        _power->set_video_bandwidth(static_cast<double>(_zs_bw_hz), _rate_hz);
+    }
+
     void push_trigger_config() {
         _trig->set_config(_threshold_db, _window_ms, _pretrigger_pct,
                           _holdoff_ms,
@@ -356,6 +398,7 @@ private:
     SourceUHDBlock<std::complex<float>>* _src;
     Trig* _trig;
     PlotCSpectrogramBlock* _sgram;
+    PowerDetectorBlock<std::complex<float>>* _power;
 
     float  _freq_mhz;
     // Center of the freq slider's +/- 25 MHz window; moved only on commit (see
@@ -366,6 +409,7 @@ private:
     size_t _n_fft;
     size_t _sgram_tall;
     float  _history_s = 0.0f;   // waterfall depth in seconds (set in ctor)
+    float  _zs_bw_hz;           // zero-span (video) bandwidth; rate = bypass
 
     // Trigger UI state (defaults mirror the TriggerBlock constructor below).
     float _threshold_db   = -40.0f;
@@ -443,7 +487,7 @@ int main(int argc, char** argv) {
     spectrum.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);
     spectrogram.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);
 
-    ControlPanel panel(&usrp, &trigger, &spectrogram, waterfall_tall, args);
+    ControlPanel panel(&usrp, &trigger, &spectrogram, &power, waterfall_tall, args);
     const std::string settings_file = config_path(".cler_spike.conf");
     panel.load(settings_file);   // restore last session's settings if present
 
