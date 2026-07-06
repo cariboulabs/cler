@@ -449,6 +449,15 @@ private:
         if (avail == 0) return cler::Error::NotEnoughSamples;
         size_t need = _capture_len - _capture_fill;
         size_t got  = in.readN(_capture + _capture_fill, std::min(avail, need));
+        // Keep the pre-trigger ring CONTINUOUS through the capture phase.
+        // Without this, the ring only advances while Armed/Idle (holdoff +
+        // wait-for-edge/auto), so whenever pretrigger_samples exceeds that
+        // span the next frame's pre-segment is mostly the PREVIOUS frame's
+        // data shifted by a few samples, with a hidden time gap at the seam:
+        // the pre-trigger part of the scope visibly "slides" frame to frame
+        // while the post part repaints fully. Cost: one store per sample.
+        for (size_t i = 0; i < got; ++i)
+            ring_push(_capture[_capture_fill + i]);
         _capture_fill += got;
         if (_capture_fill >= _capture_len) publish_frame();
         return cler::Empty{};
