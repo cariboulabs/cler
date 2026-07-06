@@ -222,6 +222,16 @@ void PlotCSpectrogramBlock::render() {
         ImGui::Text("~%.1f s history", span_s);
     }
 
+    // Seconds per waterfall row at the CURRENT frames/row setting. Rows already
+    // in the ring may have been produced under a different setting, so the time
+    // axis is exact only for rows written since the last change -- the same
+    // caveat as the "~N s history" text above. Falls back to row units if the
+    // sample rate is unknown.
+    const double row_dt = (_sps > 0)
+        ? static_cast<double>(fpr) * static_cast<double>(_n_fft_samples)
+              / static_cast<double>(_sps)
+        : 1.0;
+
     {
         // Reorder the chronological ring into display order (newest row first).
         // This is the only O(tall * n_fft) copy, and it happens at render rate
@@ -243,9 +253,14 @@ void PlotCSpectrogramBlock::render() {
 
     for (size_t i = 0; i < _num_inputs; ++i) {
         if (ImPlot::BeginPlot(_signal_labels[i].c_str(), ImVec2(-1, -1))) {
-            ImPlot::SetupAxes("Frequency (Hz)", "Time (frames)", x_flags, y_flags);
+            ImPlot::SetupAxes("Frequency (Hz)", "Time (s)", x_flags, y_flags);
             ImPlot::SetupAxisLimits(ImAxis_X1, -static_cast<double>(_sps)/2.0, static_cast<double>(_sps)/2.0);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, static_cast<double>(_tall), 0.0);
+            // Elapsed time in seconds, 0 s (newest) at the top. frames/row can
+            // change live, which rescales the axis, so this must be
+            // ImPlotCond_Always -- safe here because the axis is Lock'ed, so
+            // Always cannot fight user pan/zoom.
+            ImPlot::SetupAxisLimits(ImAxis_Y1, static_cast<double>(_tall) * row_dt, 0.0,
+                                    ImPlotCond_Always);
             ImPlot::PushColormap(ImPlotColormap_Plasma);
 
             std::string label = "##" + std::string(_signal_labels[i]);
@@ -256,7 +271,7 @@ void PlotCSpectrogramBlock::render() {
                 _n_fft_samples,
                 0.0, 0.0,
                 nullptr,
-                ImPlotPoint(-static_cast<double>(_sps)/2.0, static_cast<double>(_tall)),
+                ImPlotPoint(-static_cast<double>(_sps)/2.0, static_cast<double>(_tall) * row_dt),
                 ImPlotPoint(static_cast<double>(_sps)/2.0, 0)
             );
             ImPlot::PopColormap();
