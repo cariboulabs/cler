@@ -23,6 +23,7 @@
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include "power_detector.hpp"
 
+#include <cfloat>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -159,9 +160,16 @@ struct ControlPanel {
             if (std::abs(actual - _rate_hz) > 0.5) on_rate_changed(actual);
         }
 
-        ImGui::SetNextWindowSize(ImVec2(360, 520), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Control");
+        // Auto-size the panel to fit ALL its content: the old fixed 520 px
+        // default height hid the bottom sections below the fold (nobody ever
+        // found Snapshot down there). Width stays constrained so long labels
+        // or status lines can't blow the panel wide; the tiling code reads
+        // the ACTUAL rect (window_pos/window_size below) instead of assuming
+        // a fixed strip.
+        ImGui::SetNextWindowSizeConstraints(ImVec2(360.0f, 0.0f),
+                                            ImVec2(420.0f, FLT_MAX));
+        ImGui::Begin("Control", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
 
         ImGui::TextUnformatted("View");
         ImGui::Separator();
@@ -175,7 +183,47 @@ struct ControlPanel {
         if (ImGui::Button("Arrange windows")) arrange_requested = true;
         help("Re-tile the visible plot windows into equal-height rows next to "
              "the control panel. Also happens automatically when the View "
-             "checkboxes change. You can still move/resize windows afterward.");
+             "checkboxes change or the main window is resized. You can still "
+             "move/resize windows afterward.");
+
+        // Snapshot lives near the top on purpose: buried at the bottom of the
+        // panel it was below the fold and users never found it.
+        ImGui::Dummy(ImVec2(0, 8));
+        ImGui::TextUnformatted("Snapshot");
+        ImGui::Separator();
+        if (ImGui::Button("Snapshot")) {
+            if (_snapshot_dir.empty()) {
+                const char* home = std::getenv("HOME");
+                std::snprintf(_snapdir_edit, sizeof(_snapdir_edit), "%s",
+                              home ? home : ".");
+                ImGui::OpenPopup("Snapshot directory");
+            } else {
+                snapshot_requested = true;
+            }
+        }
+        help("Save a screenshot of the whole window (.bmp) plus the data behind "
+             "the currently visible plots (.dat, self-describing text with a "
+             "binary spectrogram blob) into the snapshot directory. The "
+             "directory is asked for once and remembered in the conf file.");
+        // First-use modal: ask for the snapshot directory, then never again.
+        if (ImGui::BeginPopupModal("Snapshot directory", nullptr,
+                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextUnformatted("Directory to save snapshots into:");
+            ImGui::SetNextItemWidth(400);
+            ImGui::InputText("##snapdir", _snapdir_edit, sizeof(_snapdir_edit));
+            if (ImGui::Button("OK", ImVec2(120, 0))) {
+                _snapshot_dir = trimmed(_snapdir_edit);
+                if (!_snapshot_dir.empty()) snapshot_requested = true;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        if (!_status.empty() &&
+            std::chrono::steady_clock::now() < _status_until) {
+            ImGui::TextWrapped("%s", _status.c_str());
+        }
 
         ImGui::Dummy(ImVec2(0, 8));
         ImGui::TextUnformatted("Radio");
@@ -305,42 +353,10 @@ struct ControlPanel {
         ImGui::Dummy(ImVec2(0, 6));
         ImGui::Text("State: %s", state_str(_trig->state()));
 
-        ImGui::Dummy(ImVec2(0, 8));
-        ImGui::TextUnformatted("Snapshot");
-        ImGui::Separator();
-        if (ImGui::Button("Snapshot")) {
-            if (_snapshot_dir.empty()) {
-                const char* home = std::getenv("HOME");
-                std::snprintf(_snapdir_edit, sizeof(_snapdir_edit), "%s",
-                              home ? home : ".");
-                ImGui::OpenPopup("Snapshot directory");
-            } else {
-                snapshot_requested = true;
-            }
-        }
-        help("Save a screenshot of the whole window (.bmp) plus the data behind "
-             "the currently visible plots (.dat, self-describing text with a "
-             "binary spectrogram blob) into the snapshot directory. The "
-             "directory is asked for once and remembered in the conf file.");
-        // First-use modal: ask for the snapshot directory, then never again.
-        if (ImGui::BeginPopupModal("Snapshot directory", nullptr,
-                                   ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::TextUnformatted("Directory to save snapshots into:");
-            ImGui::SetNextItemWidth(400);
-            ImGui::InputText("##snapdir", _snapdir_edit, sizeof(_snapdir_edit));
-            if (ImGui::Button("OK", ImVec2(120, 0))) {
-                _snapshot_dir = trimmed(_snapdir_edit);
-                if (!_snapshot_dir.empty()) snapshot_requested = true;
-                ImGui::CloseCurrentPopup();
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
-        }
-        if (!_status.empty() &&
-            std::chrono::steady_clock::now() < _status_until) {
-            ImGui::TextWrapped("%s", _status.c_str());
-        }
+        // Record the panel's ACTUAL rect for the main loop's tiling code (the
+        // window auto-sizes, so its width is content-driven, not a constant).
+        window_pos  = ImGui::GetWindowPos();
+        window_size = ImGui::GetWindowSize();
 
         ImGui::End();
     }
@@ -405,6 +421,13 @@ struct ControlPanel {
     // One-shot request from the "Snapshot" button; consumed by the main loop,
     // which has the blocks and the GuiManager in scope.
     bool snapshot_requested = false;
+
+    // Actual panel rect as of the last render() (the window auto-sizes, so
+    // its width is content-driven). Read by the main loop so the plot tiling
+    // starts right of wherever the panel really ends; the defaults mirror the
+    // initial pos and old fixed strip until the first render() lands.
+    ImVec2 window_pos  = ImVec2(10.0f, 10.0f);
+    ImVec2 window_size = ImVec2(360.0f, 520.0f);
 
     bool load(const std::string& path) {
         std::ifstream f(path);
@@ -906,12 +929,21 @@ int main(int argc, char** argv) {
               << args.rate / 1e6 << " MS/s. Close window to exit." << std::endl;
 
     // Auto-layout: on the first frame, whenever the set of visible views
-    // changes, or on the panel's "Arrange windows" button, tile the visible
-    // plot windows as equal-height rows in the area right of the control
-    // panel. Each block applies its rect exactly once (apply_window_rect), so
-    // the user can still move/resize freely afterward.
+    // changes, on the panel's "Arrange windows" button, or after the main
+    // window is resized (debounced, see below), tile the visible plot windows
+    // as equal-height rows in the area right of the control panel. Each block
+    // applies its rect exactly once (apply_window_rect), so the user can
+    // still move/resize freely afterward.
     bool prev_scope = false, prev_spectrum = false, prev_spectrogram = false;
     bool first_layout = true;
+    // Debounce for the resize-triggered retile: only fire once the viewport
+    // work size has been STABLE for kResizeSettleFrames frames (so we never
+    // fight the user mid-drag) AND it differs from the size the last tiling
+    // used. Manual per-plot-window moves/resizes otherwise stick.
+    constexpr int kResizeSettleFrames = 15;
+    ImVec2 tiled_work_size(0.0f, 0.0f);     // WorkSize used by the last tiling
+    ImVec2 pending_work_size(0.0f, 0.0f);   // last observed WorkSize
+    int    work_size_stable = 0;            // frames it has been unchanged
 
     while (!gui.should_close()) {
         // Pause the spectrogram/spectrum whenever they aren't shown: they keep
@@ -925,10 +957,26 @@ int main(int argc, char** argv) {
         gui.begin_frame();
         panel.render();
 
+        // Debounced main-window resize detection (see the declarations above):
+        // refresh the debounce while the size keeps changing, then retile once
+        // it has settled on something the last tiling didn't use.
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        if (vp->WorkSize.x != pending_work_size.x ||
+            vp->WorkSize.y != pending_work_size.y) {
+            pending_work_size = vp->WorkSize;
+            work_size_stable  = 0;
+        } else if (work_size_stable < kResizeSettleFrames) {
+            ++work_size_stable;
+        }
+        const bool resize_retile =
+            work_size_stable >= kResizeSettleFrames &&
+            (vp->WorkSize.x != tiled_work_size.x ||
+             vp->WorkSize.y != tiled_work_size.y);
+
         // Detect visibility changes AFTER panel.render() (so a checkbox toggle
         // takes effect this frame) but stage the rects BEFORE the view renders
         // below consume them.
-        bool retile = first_layout || panel.arrange_requested ||
+        bool retile = first_layout || panel.arrange_requested || resize_retile ||
                       panel.show_scope       != prev_scope ||
                       panel.show_spectrum    != prev_spectrum ||
                       panel.show_spectrogram != prev_spectrogram;
@@ -939,14 +987,15 @@ int main(int argc, char** argv) {
         prev_spectrogram = panel.show_spectrogram;
 
         if (retile) {
-            // Plot area: main viewport minus the control panel strip on the
-            // left (panel sits in x < 370; plots start at +380) and 10 px
-            // outer margins, split into N equal-height rows with small gaps.
+            // Plot area: main viewport minus the control panel on the left
+            // (its ACTUAL rect, recorded by panel.render() -- the panel
+            // auto-sizes to its content) and 10 px outer margins, split into
+            // N equal-height rows with small gaps.
             // Note: a hidden view keeps its pending rect until it is next
             // shown (its render() isn't called), which is what we want.
-            const ImGuiViewport* vp = ImGui::GetMainViewport();
+            tiled_work_size = vp->WorkSize;
             const float gap = 8.0f;
-            const float x = vp->WorkPos.x + 380.0f;
+            const float x = panel.window_pos.x + panel.window_size.x + 10.0f;
             const float w = vp->WorkPos.x + vp->WorkSize.x - 10.0f - x;
             const float y0 = vp->WorkPos.y + 10.0f;
             const float total_h = vp->WorkSize.y - 20.0f;
