@@ -966,7 +966,7 @@ int main(int argc, char** argv) {
     // work size has been STABLE for kResizeSettleFrames frames (so we never
     // fight the user mid-drag) AND it differs from the size the last tiling
     // used. Manual per-plot-window moves/resizes otherwise stick.
-    constexpr int kResizeSettleFrames = 15;
+    constexpr int kResizeSettleFrames = 5;
     ImVec2 tiled_work_size(0.0f, 0.0f);     // WorkSize used by the last tiling
     ImVec2 pending_work_size(0.0f, 0.0f);   // last observed WorkSize
     int    work_size_stable = 0;            // frames it has been unchanged
