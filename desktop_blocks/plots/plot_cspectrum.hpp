@@ -31,6 +31,17 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
     // thread (procedure() never touches these), so plain members are fine.
     void apply_window_rect(float x, float y, float w, float h);
 
+    // Enable/disable this block's work from outside (e.g. when its window is
+    // hidden). While INACTIVE, procedure() still fully drains its input
+    // channels each call -- so an upstream fanout never stalls on this branch
+    // -- but the samples are DROPPED, never copied into the internal plot
+    // ring. This is distinct from the Pause button (_gui_pause), which only
+    // freezes the displayed snapshot while data keeps flowing underneath.
+    // Defaults to active, so existing users of this block are unaffected.
+    void set_active(bool active) {
+        _external_pause.store(!active, std::memory_order_release);
+    }
+
     // GUI-THREAD-ONLY export of the currently displayed (averaged) spectrum
     // for one channel: freq_hz gets the frequency axis (baseband Hz, size
     // n_fft), mag_db the averaged magnitudes. No lock is needed: _freq_bins
@@ -78,4 +89,8 @@ private:
     size_t _snapshot_ready_size = 0;
 
     std::atomic<bool> _gui_pause = false;
+
+    // set_active(false): drop (drain) input instead of plotting it. See the
+    // comment on set_active() for how this differs from _gui_pause.
+    std::atomic<bool> _external_pause{false};
 };

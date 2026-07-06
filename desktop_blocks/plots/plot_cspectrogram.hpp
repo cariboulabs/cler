@@ -95,6 +95,14 @@ private:
     // only; lets export_display() answer "any data yet?" without locking).
     size_t  _display_valid_rows = 0;
 
+    // Row generation counter: bumped once per new ring row, inside the same
+    // _spectrogram_mutex critical section as the row write in procedure().
+    // render() compares it (under the mutex) against its last-seen value and
+    // skips the O(tall * n_fft) ring->_display reorder when no new row landed
+    // since the previous frame (PlotHeatmap still draws _display every frame).
+    size_t  _row_gen = 0;                             // guarded by _spectrogram_mutex
+    size_t  _row_gen_seen = static_cast<size_t>(-1);  // GUI thread only
+
     // Peak-hold accumulator: several incoming FFT frames are max-combined here
     // and flushed to one ring row every _frames_per_row frames. This lets the
     // waterfall cover a long time span (controllable, no reallocation) while

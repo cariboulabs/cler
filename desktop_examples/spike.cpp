@@ -754,10 +754,13 @@ int main(int argc, char** argv) {
     bool first_layout = true;
 
     while (!gui.should_close()) {
-        // Pause the spectrogram whenever it isn't shown: it keeps draining its
-        // input (so the fanout never stalls) but does no FFT work and cannot
-        // steal cycles from or add jitter to the trigger path.
+        // Pause the spectrogram/spectrum whenever they aren't shown: they keep
+        // draining their input (so the fanout never stalls) but do no FFT or
+        // copy work and cannot steal cycles from or add jitter to the trigger
+        // path. The trigger itself has no equivalent: its procedure() IS the
+        // trigger engine and must keep running even when the scope is hidden.
         spectrogram.set_active(panel.show_spectrogram);
+        spectrum.set_active(panel.show_spectrum);
 
         gui.begin_frame();
         panel.render();
@@ -832,7 +835,12 @@ int main(int argc, char** argv) {
         }
 
         gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        // Vsync (glfwSwapInterval(1) in GuiManager) already paces this loop at
+        // the monitor's refresh rate; the extra 16 ms sleep on top of it
+        // capped the UI at ~30 fps. Keep a tiny sleep so CPU stays low if
+        // vsync is off or bypassed by the compositor, without halving the
+        // frame rate.
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 
     flowgraph.stop();

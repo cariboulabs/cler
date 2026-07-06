@@ -124,6 +124,23 @@ PlotCSpectrumBlock::~PlotCSpectrumBlock() {
 }
 
 cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
+    // Inactive (window hidden): fully drain every input channel WITHOUT
+    // copying into _signal_channels, so a shared upstream fanout (which can
+    // only advance by the slowest branch) never stalls on us, and skip all
+    // other work. Note the distinction from _gui_pause: pause freezes the
+    // displayed snapshot in render() while data keeps flowing through here;
+    // inactive drops the data entirely.
+    if (_external_pause.load(std::memory_order_acquire)) {
+        size_t drained = 0;
+        for (size_t i = 0; i < _num_inputs; ++i) {
+            size_t n = in[i].size();
+            if (n > 0) in[i].commit_read(n);
+            drained += n;
+        }
+        if (drained == 0) return cler::Error::NotEnoughSamples;
+        return cler::Empty{};
+    }
+
     size_t work_size = in[0].size();
     for (size_t i = 1; i < _num_inputs; ++i) {
         if (in[i].size() < work_size) {

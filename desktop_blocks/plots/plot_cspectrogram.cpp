@@ -186,6 +186,7 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
             }
             _ring_pos = (_ring_pos + 1) % _tall;
             if (_ring_count < _tall) ++_ring_count;
+            ++_row_gen;   // tell render() the ring changed (we hold the mutex)
             _accum_count = 0;
         }
     }
@@ -243,18 +244,25 @@ void PlotCSpectrogramBlock::render() {
     {
         // Reorder the chronological ring into display order (newest row first).
         // This is the only O(tall * n_fft) copy, and it happens at render rate
-        // (~50 Hz) rather than on the data path per incoming FFT frame.
+        // rather than on the data path per incoming FFT frame -- and only when
+        // a new row actually landed since the last render (_row_gen, bumped
+        // under this same mutex). Skipping it also covers the paused/hidden
+        // cases; _display always holds the last assembled image (filled with
+        // the floor value at construction, so it is valid before any reorder).
         std::lock_guard<std::mutex> lock(_spectrogram_mutex);
-        _display_valid_rows = _ring_count;
-        for (size_t i = 0; i < _num_inputs; ++i) {
-            for (size_t k = 0; k < _tall; ++k) {
-                float* dst = _display[i] + k * _n_fft_samples;
-                if (k < _ring_count) {
-                    size_t src_row = (_ring_pos + _tall - 1 - k) % _tall;
-                    memcpy(dst, _spectrograms[i] + src_row * _n_fft_samples,
-                           _n_fft_samples * sizeof(float));
-                } else {
-                    std::fill_n(dst, _n_fft_samples, -147.0f);
+        if (_row_gen != _row_gen_seen) {
+            _row_gen_seen = _row_gen;
+            _display_valid_rows = _ring_count;
+            for (size_t i = 0; i < _num_inputs; ++i) {
+                for (size_t k = 0; k < _tall; ++k) {
+                    float* dst = _display[i] + k * _n_fft_samples;
+                    if (k < _ring_count) {
+                        size_t src_row = (_ring_pos + _tall - 1 - k) % _tall;
+                        memcpy(dst, _spectrograms[i] + src_row * _n_fft_samples,
+                               _n_fft_samples * sizeof(float));
+                    } else {
+                        std::fill_n(dst, _n_fft_samples, -147.0f);
+                    }
                 }
             }
         }
