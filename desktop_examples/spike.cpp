@@ -473,6 +473,10 @@ struct ControlPanel {
         if (!_rate_from_cli && _loaded_rate_hz > 0.0 &&
             std::abs(_loaded_rate_hz - _rate_hz) > 0.5) {
             push_rate_config(_loaded_rate_hz);
+            // The frames-per-row seed above was computed at the CONSTRUCTION
+            // rate; mark it stale so on_rate_changed() re-derives it from the
+            // saved history_s once the saved rate actually lands.
+            _history_seed_pending = true;
         }
     }
 
@@ -623,6 +627,7 @@ private:
     // device rate differs from what the panel last synced to. Re-derives
     // every rate-dependent piece of state in one place.
     void on_rate_changed(double actual_hz) {
+        const double old_rate_hz = _rate_hz;   // for seconds-preserving rescales
         _rate_hz   = actual_hz;
         _rate_msps = static_cast<float>(actual_hz / 1e6);   // widget display
 
@@ -652,8 +657,27 @@ private:
         const size_t sps = static_cast<size_t>(actual_hz + 0.5);
         _spectrum->set_sample_rate(sps);
         _sgram->set_sample_rate(sps);
-        // The spectrogram's own History slider (seconds) rescales itself from
-        // the new rate; frames-per-row is left as-is on purpose.
+
+        // Waterfall depth: PRESERVE THE SECONDS THE USER SET across rate
+        // changes. Startup case: apply_all() seeds frames-per-row from the
+        // saved history_s BEFORE the saved rate_hz lands, i.e. at the
+        // construction rate -- at 1 MS/s a 20 MS/s-session depth maps to
+        // fpr = round(history_s/4.096 s) which collapses to 1 and then reads
+        // as 2000*2048/20e6 = 0.2 s once the real rate arrives. If that seed
+        // is still pending, redo it now at the real rate. Otherwise rescale
+        // the CURRENT frames-per-row by new/old rate so the on-screen depth
+        // in seconds stays put (reads the live value, so a History-slider
+        // change made since startup is honored, not stomped).
+        if (_history_seed_pending) {
+            _sgram->set_frames_per_row(history_to_fpr(_history_s));
+            _history_seed_pending = false;
+        } else if (old_rate_hz > 0.0) {
+            double fpr = std::round(static_cast<double>(_sgram->frames_per_row())
+                                    * actual_hz / old_rate_hz);
+            if (fpr < 1.0)   fpr = 1.0;
+            if (fpr > 256.0) fpr = 256.0;
+            _sgram->set_frames_per_row(static_cast<size_t>(fpr));
+        }
     }
 
     // History depth (s) <-> spectrogram frames/row, used only to translate the
@@ -761,6 +785,10 @@ private:
     size_t _sgram_tall;
     float  _history_s = 0.0f;   // waterfall depth (s) from conf/default; only
                                 // used to seed the spectrogram in apply_all()
+    bool   _history_seed_pending = false;   // apply_all() seeded fpr at the
+                                // construction rate while a saved rate_hz was
+                                // staged; on_rate_changed() must redo the seed
+                                // from _history_s when that rate lands
     float  _zs_bw_mhz;          // zero-span channel bandwidth (MHz); rate = bypass
     bool   _zs_filter_on = false;   // filter engages ONLY when this is checked
                                     // (conf key zs_filter_on; old confs = off)
