@@ -198,8 +198,7 @@ void PlotCSpectrumBlock::render() {
     }
 
     if (_snapshot_ready_size < _n_fft_samples) {
-        ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
+        next_window_geometry();
         ImGui::Begin(name());
         ImGui::Text("Not enough samples for FFT. Need at least %zu, got %zu.",
                     _n_fft_samples, _snapshot_ready_size);
@@ -207,8 +206,7 @@ void PlotCSpectrumBlock::render() {
         return;
     }
 
-    ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
+    next_window_geometry();
     ImGui::Begin(name());
 
     if (ImGui::Button(_gui_pause.load() ? "Resume" : "Pause")) {
@@ -280,4 +278,25 @@ void PlotCSpectrumBlock::render() {
 void PlotCSpectrumBlock::set_initial_window(float x, float y, float w, float h) {
     _initial_window_position = ImVec2(x, y);
     _initial_window_size = ImVec2(w, h);
+}
+
+void PlotCSpectrumBlock::apply_window_rect(float x, float y, float w, float h) {
+    _pending_rect_pos  = ImVec2(x, y);
+    _pending_rect_size = ImVec2(w, h);
+    _pending_rect      = true;
+}
+
+// Applies a pending programmatic rect exactly once (ImGuiCond_Always, then
+// clears the flag): setting Always every frame would reintroduce the old
+// "window snaps back, can't be resized" bug. Otherwise the initial geometry
+// is suggested with FirstUseEver as before.
+void PlotCSpectrumBlock::next_window_geometry() {
+    if (_pending_rect) {
+        ImGui::SetNextWindowPos(_pending_rect_pos, ImGuiCond_Always);
+        ImGui::SetNextWindowSize(_pending_rect_size, ImGuiCond_Always);
+        _pending_rect = false;
+    } else {
+        ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
+    }
 }

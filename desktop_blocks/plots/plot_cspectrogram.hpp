@@ -33,6 +33,16 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
     void render();
     void set_initial_window(float x, float y, float w, float h);
 
+    // One-shot programmatic window rect: the next render() applies it with
+    // ImGuiCond_Always and clears the request, so the user can still move or
+    // resize the window afterward. Both the setter and render() run on the GUI
+    // thread (procedure() never touches these), so plain members are fine.
+    void apply_window_rect(float x, float y, float w, float h) {
+        _pending_rect_pos  = ImVec2(x, y);
+        _pending_rect_size = ImVec2(w, h);
+        _pending_rect      = true;
+    }
+
     // Enable/disable heavy processing from outside (e.g. when the window is
     // hidden). While inactive the block still fully drains its input each call
     // (so it never stalls an upstream fanout) but does no FFT / row work.
@@ -88,6 +98,11 @@ private:
     // GUI
     ImVec2 _initial_window_position = ImVec2(200, 200);
     ImVec2 _initial_window_size = ImVec2(600, 400);
+
+    // One-shot rect request (GUI thread only; see apply_window_rect()).
+    bool   _pending_rect = false;
+    ImVec2 _pending_rect_pos  = ImVec2(0, 0);
+    ImVec2 _pending_rect_size = ImVec2(0, 0);
 
     std::atomic<bool> _gui_pause = false;
 };

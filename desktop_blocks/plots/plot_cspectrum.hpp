@@ -25,7 +25,15 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
     void render();
     void set_initial_window(float x, float y, float w, float h);
 
+    // One-shot programmatic window rect: the next render() applies it with
+    // ImGuiCond_Always and clears the request, so the user can still move or
+    // resize the window afterward. Both the setter and render() run on the GUI
+    // thread (procedure() never touches these), so plain members are fine.
+    void apply_window_rect(float x, float y, float w, float h);
+
 private:
+    void next_window_geometry();   // SetNextWindowPos/Size before Begin()
+
     size_t _samples_counter = 0;
 
     size_t _num_inputs;
@@ -51,6 +59,11 @@ private:
 
     ImVec2 _initial_window_position {0.0f, 0.0f};
     ImVec2 _initial_window_size {600.0f, 300.0f};
+
+    // One-shot rect request (GUI thread only; see apply_window_rect()).
+    bool   _pending_rect = false;
+    ImVec2 _pending_rect_pos {0.0f, 0.0f};
+    ImVec2 _pending_rect_size {0.0f, 0.0f};
 
     std::mutex _snapshot_mutex;
     size_t _snapshot_ready_size = 0;

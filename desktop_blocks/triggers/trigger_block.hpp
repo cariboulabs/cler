@@ -129,6 +129,16 @@ struct TriggerBlock : public cler::BlockBase {
         _win_size = ImVec2(w, h);
     }
 
+    // One-shot programmatic window rect: the next render() applies it with
+    // ImGuiCond_Always and clears the request, so the user can still move or
+    // resize the window afterward. Both the setter and render() run on the GUI
+    // thread (procedure() never touches these), so plain members are fine.
+    void apply_window_rect(float x, float y, float w, float h) {
+        _pending_rect_pos  = ImVec2(x, y);
+        _pending_rect_size = ImVec2(w, h);
+        _pending_rect      = true;
+    }
+
     cler::Result<cler::Empty, cler::Error> procedure() {
         State st = _state.load(std::memory_order_relaxed);
         if (st == State::Armed || st == State::Idle) {
@@ -144,8 +154,17 @@ struct TriggerBlock : public cler::BlockBase {
     }
 
     void render() {
-        ImGui::SetNextWindowSize(_win_size, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowPos(_win_pos, ImGuiCond_FirstUseEver);
+        // Apply a pending programmatic rect exactly once (Always, then clear
+        // the flag): setting Always every frame would reintroduce the old
+        // "window snaps back, can't be resized" bug.
+        if (_pending_rect) {
+            ImGui::SetNextWindowPos(_pending_rect_pos, ImGuiCond_Always);
+            ImGui::SetNextWindowSize(_pending_rect_size, ImGuiCond_Always);
+            _pending_rect = false;
+        } else {
+            ImGui::SetNextWindowSize(_win_size, ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowPos(_win_pos, ImGuiCond_FirstUseEver);
+        }
         ImGui::Begin(name());
 
         // Pull the latest frame (cheap copy under lock; never blocks the DSP thread long).
@@ -454,4 +473,9 @@ private:
 
     ImVec2 _win_pos{380.0f, 10.0f};
     ImVec2 _win_size{1100.0f, 430.0f};
+
+    // One-shot rect request (GUI thread only; see apply_window_rect()).
+    bool   _pending_rect = false;
+    ImVec2 _pending_rect_pos{0.0f, 0.0f};
+    ImVec2 _pending_rect_size{0.0f, 0.0f};
 };

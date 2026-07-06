@@ -194,10 +194,18 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
 }
 
 void PlotCSpectrogramBlock::render() {
-    // FirstUseEver (not Always) so the user can freely resize the window; Always
-    // snapped it back to the initial size on every frame.
-    ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
+    // Apply a pending programmatic rect exactly once (Always, then clear the
+    // flag) so the user can still move/resize afterward. The default path
+    // stays FirstUseEver (not Always): Always every frame snapped the window
+    // back to the initial size and blocked manual resizing.
+    if (_pending_rect) {
+        ImGui::SetNextWindowPos(_pending_rect_pos, ImGuiCond_Always);
+        ImGui::SetNextWindowSize(_pending_rect_size, ImGuiCond_Always);
+        _pending_rect = false;
+    } else {
+        ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
+    }
     ImGui::Begin(name());
 
     const ImPlotAxisFlags x_flags = ImPlotAxisFlags_Lock;

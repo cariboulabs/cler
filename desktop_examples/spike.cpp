@@ -163,6 +163,11 @@ struct ControlPanel {
              "frames into each row, so long histories keep catching short bursts "
              "but with coarser time resolution per row.");
 
+        if (ImGui::Button("Arrange windows")) arrange_requested = true;
+        help("Re-tile the visible plot windows into equal-height rows next to "
+             "the control panel. Also happens automatically when the View "
+             "checkboxes change. You can still move/resize windows afterward.");
+
         ImGui::Dummy(ImVec2(0, 8));
         ImGui::TextUnformatted("Radio");
         ImGui::Separator();
@@ -248,6 +253,10 @@ struct ControlPanel {
     bool show_scope       = true;
     bool show_spectrum    = true;
     bool show_spectrogram = false;
+
+    // One-shot request from the "Arrange windows" button; consumed (cleared)
+    // by the main loop, which owns the tiling computation.
+    bool arrange_requested = false;
 
     bool load(const std::string& path) {
         std::ifstream f(path);
@@ -454,6 +463,14 @@ int main(int argc, char** argv) {
     std::cout << "CLER Spike running at " << args.freq / 1e6 << " MHz, "
               << args.rate / 1e6 << " MS/s. Close window to exit." << std::endl;
 
+    // Auto-layout: on the first frame, whenever the set of visible views
+    // changes, or on the panel's "Arrange windows" button, tile the visible
+    // plot windows as equal-height rows in the area right of the control
+    // panel. Each block applies its rect exactly once (apply_window_rect), so
+    // the user can still move/resize freely afterward.
+    bool prev_scope = false, prev_spectrum = false, prev_spectrogram = false;
+    bool first_layout = true;
+
     while (!gui.should_close()) {
         // Pause the spectrogram whenever it isn't shown: it keeps draining its
         // input (so the fanout never stalls) but does no FFT work and cannot
@@ -462,6 +479,46 @@ int main(int argc, char** argv) {
 
         gui.begin_frame();
         panel.render();
+
+        // Detect visibility changes AFTER panel.render() (so a checkbox toggle
+        // takes effect this frame) but stage the rects BEFORE the view renders
+        // below consume them.
+        bool retile = first_layout || panel.arrange_requested ||
+                      panel.show_scope       != prev_scope ||
+                      panel.show_spectrum    != prev_spectrum ||
+                      panel.show_spectrogram != prev_spectrogram;
+        first_layout = false;
+        panel.arrange_requested = false;
+        prev_scope       = panel.show_scope;
+        prev_spectrum    = panel.show_spectrum;
+        prev_spectrogram = panel.show_spectrogram;
+
+        if (retile) {
+            // Plot area: main viewport minus the control panel strip on the
+            // left (panel sits in x < 370; plots start at +380) and 10 px
+            // outer margins, split into N equal-height rows with small gaps.
+            // Note: a hidden view keeps its pending rect until it is next
+            // shown (its render() isn't called), which is what we want.
+            const ImGuiViewport* vp = ImGui::GetMainViewport();
+            const float gap = 8.0f;
+            const float x = vp->WorkPos.x + 380.0f;
+            const float w = vp->WorkPos.x + vp->WorkSize.x - 10.0f - x;
+            const float y0 = vp->WorkPos.y + 10.0f;
+            const float total_h = vp->WorkSize.y - 20.0f;
+            const int n = (panel.show_scope ? 1 : 0) +
+                          (panel.show_spectrum ? 1 : 0) +
+                          (panel.show_spectrogram ? 1 : 0);
+            if (n > 0 && w > 50.0f && total_h > 50.0f) {
+                const float row_h = (total_h - gap * static_cast<float>(n - 1))
+                                    / static_cast<float>(n);
+                int row = 0;
+                auto row_y = [&](int r) { return y0 + static_cast<float>(r) * (row_h + gap); };
+                if (panel.show_scope)       trigger.apply_window_rect(x, row_y(row++), w, row_h);
+                if (panel.show_spectrum)    spectrum.apply_window_rect(x, row_y(row++), w, row_h);
+                if (panel.show_spectrogram) spectrogram.apply_window_rect(x, row_y(row++), w, row_h);
+            }
+        }
+
         if (panel.show_scope)       trigger.render();
         if (panel.show_spectrum)    spectrum.render();
         if (panel.show_spectrogram) spectrogram.render();
