@@ -35,6 +35,7 @@
 #include <vector>
 
 using Trig = TriggerBlock<float>;
+using PowerDet = PowerDetectorBlock<std::complex<float>>;
 
 // Small "(?)" hover help, like ImGui's demo HelpMarker.
 static void help(const char* text) {
@@ -107,7 +108,7 @@ struct ControlPanel {
           _rate_from_cli(a.rate_from_cli),
           _n_fft(a.fft),
           _sgram_tall(sgram_tall),
-          _zs_bw_hz(static_cast<float>(a.rate)),   // full rate = bypass (old behavior)
+          _zs_bw_mhz(static_cast<float>(a.rate / 1e6)),   // full rate = bypass (old behavior)
           _max_window_ms(trig->max_window_ms()) {
         _history_s = fpr_to_history(8);   // default depth; conf key history_s overrides
     }
@@ -274,25 +275,42 @@ struct ControlPanel {
 
         if (changed) push_trigger_config();
 
-        // Zero-span detection ("video") bandwidth: a complex lowpass ahead of
+        // Zero-span channel bandwidth: a decimating channel selector ahead of
         // the power detector. Applied on edit-commit like freq/gain (typed
-        // exact values matter more than dragging here, hence a drag box).
+        // exact values matter more than dragging here, hence a drag box). A
+        // commit is treated exactly like a rate change for the trigger path:
+        // the trigger runs at the DECIMATED rate, so push the decimator config
+        // FIRST, then re-push the trigger with the new detection rate.
         ImGui::SetNextItemWidth(180);
-        editable("Zero-span BW (Hz)", &_zs_bw_hz, 1000.0f,
-                 static_cast<float>(_rate_hz), "%.0f",
-                 /*slider=*/false, /*drag_speed=*/1000.0f);
-        if (ImGui::IsItemDeactivatedAfterEdit()) push_power_config();
+        editable("Zero-span BW (MHz)", &_zs_bw_mhz, min_zs_bw_mhz(),
+                 static_cast<float>(_rate_hz / 1e6), "%.4f",
+                 /*slider=*/false, /*drag_speed=*/0.01f);
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            clamp_zs_bw();
+            push_power_config();
+            refresh_trigger_window();
+            push_trigger_config();
+        }
         ImGui::SameLine();
-        if (_zs_bw_hz >= static_cast<float>(_rate_hz))
-            ImGui::TextDisabled("(bypass)");
-        else
-            ImGui::TextDisabled("eff. %.1f kHz", effective_zs_bw_hz() / 1e3f);
-        help("Detection (video) bandwidth of the zero-span power trace: the I/Q "
-             "stream is lowpass-filtered to this two-sided width before the "
-             "power is computed, rejecting off-channel energy. Set to the full "
-             "sample rate (default) to bypass the filter entirely. The achieved "
-             "value is quantized by the filter design range -- 'eff.' shows "
-             "what is actually applied.");
+        {
+            const size_t R = PowerDet::decimation_for(zs_bw_hz(), _rate_hz);
+            if (R <= 1) {
+                ImGui::TextDisabled("(bypass)");
+            } else {
+                const double eff = _rate_hz / static_cast<double>(R);
+                if (eff < 1e6) ImGui::TextDisabled("eff. %.1f kHz", eff / 1e3);
+                else           ImGui::TextDisabled("eff. %.3f MHz", eff / 1e6);
+            }
+        }
+        help("Channel (detection) bandwidth of the zero-span power trace: the "
+             "I/Q stream is decimated by an integer factor R with an 80 dB "
+             "anti-alias lowpass, so exactly this two-sided width around the "
+             "center survives and off-channel bursts are rejected before the "
+             "power is computed. The achieved value snaps to sample_rate/R -- "
+             "'eff.' shows what is actually applied. Set to the full sample "
+             "rate (default) to bypass. The trigger then runs at the decimated "
+             "rate, so narrower bandwidths allow LONGER capture windows. A "
+             "capture straddling a bandwidth change may be garbled once.");
 
         ImGui::Dummy(ImVec2(0, 6));
         if (ImGui::Button("Arm / Re-arm")) _trig->rearm();
@@ -352,13 +370,28 @@ struct ControlPanel {
     float  freq_mhz() const { return _freq_mhz; }
     double rate_hz()  const { return _rate_hz; }
 
+    // The rate of the power stream the TRIGGER sees: device rate / decimation.
+    // All trigger-side ms<->samples math must use this, not the device rate.
+    size_t detection_rate() const {
+        const size_t R = PowerDet::decimation_for(zs_bw_hz(), _rate_hz);
+        double det = std::round(_rate_hz / static_cast<double>(R));
+        if (det < 1.0) det = 1.0;
+        return static_cast<size_t>(det);
+    }
+
     // Push current panel state to the radio, the trigger and the spectrogram
     // (used at startup after loading saved settings).
     void apply_all() {
         push_radio_config();
+        // Decimator before trigger: the trigger's time base is the DECIMATED
+        // rate, so the detection rate must be established (and the saved
+        // window clamp run against it -- max window in ms GROWS at decimated
+        // rates) before the trigger config is derived.
+        clamp_zs_bw();
+        push_power_config();
+        refresh_trigger_window();
         push_trigger_config();
         push_spectrogram_config();
-        push_power_config();
         // Saved sample rate (conf key rate_hz): staged LAST through the same
         // live path as a typed change, so it lands as the newest pending
         // config (request_configure keeps only the latest) and the per-frame
@@ -403,7 +436,12 @@ struct ControlPanel {
             else if (key == "show_spectrum")  f >> show_spectrum;
             else if (key == "show_spectrogram") f >> show_spectrogram;
             else if (key == "history_s")      f >> _history_s;
-            else if (key == "zs_bw_hz")       f >> _zs_bw_hz;
+            else if (key == "zs_bw_hz") {
+                // Stored in Hz for backward compatibility; the widget is MHz.
+                float bw_hz = 0.0f;
+                f >> bw_hz;
+                _zs_bw_mhz = bw_hz / 1e6f;
+            }
             else if (key == "rate_hz")        f >> _loaded_rate_hz;
             else if (key == "snapshot_dir") {
                 // Value is the REST OF THE LINE (may contain spaces), not one
@@ -414,11 +452,12 @@ struct ControlPanel {
             }
             else { std::string skip; std::getline(f, skip); }
         }
-        // A saved window may exceed this session's allocated max (different rate).
-        if (_window_ms > _max_window_ms) _window_ms = _max_window_ms;
-        // A saved bandwidth may exceed this session's sample rate.
-        if (_zs_bw_hz > static_cast<float>(_rate_hz)) _zs_bw_hz = static_cast<float>(_rate_hz);
-        if (_zs_bw_hz < 1000.0f) _zs_bw_hz = 1000.0f;
+        // A saved bandwidth may exceed this session's sample rate (or sit
+        // below the achievable floor). NOTE: the saved WINDOW is deliberately
+        // NOT clamped here -- its limit depends on the DECIMATED rate, which
+        // is only derivable once the bandwidth is applied; apply_all() (and
+        // every on_rate_changed) runs the clamp at the right time.
+        clamp_zs_bw();
         _freq_anchor_mhz = _freq_mhz;   // center the freq slider on the saved value
         return true;
     }
@@ -440,7 +479,7 @@ struct ControlPanel {
           << "show_spectrum "    << show_spectrum    << "\n"
           << "show_spectrogram " << show_spectrogram << "\n"
           << "history_s "        << _history_s       << "\n"
-          << "zs_bw_hz "         << _zs_bw_hz        << "\n"
+          << "zs_bw_hz "         << static_cast<double>(_zs_bw_mhz) * 1e6 << "\n"
           << "rate_hz "          << _rate_hz         << "\n";
         if (!_snapshot_dir.empty())
             f << "snapshot_dir " << _snapshot_dir << "\n";
@@ -493,14 +532,19 @@ private:
         _rate_hz   = actual_hz;
         _rate_msps = static_cast<float>(actual_hz / 1e6);   // widget display
 
+        // Zero-span channel bandwidth: keep the REQUESTED value, re-clamped
+        // to the new rate's achievable range; the decimation factor R is
+        // re-derived from it. Push the decimator FIRST -- the trigger's time
+        // base below is the DECIMATED rate.
+        clamp_zs_bw();
+        push_power_config();
+
         // Trigger: capture memory never reallocates, so the max window in ms
-        // shrinks at higher rates. Re-clamp, then push ONE config carrying the
-        // new rate (sample counts are derived from it inside set_config, so
-        // the rate and its counts land on the block thread as a single
-        // generation).
-        _max_window_ms = 1000.0f * static_cast<float>(_trig->max_window_samples())
-                       / static_cast<float>(actual_hz);
-        if (_window_ms > _max_window_ms) _window_ms = _max_window_ms;
+        // shrinks at higher detection rates (and grows at narrow bandwidths).
+        // Re-clamp, then push ONE config carrying the new detection rate
+        // (sample counts are derived from it inside set_config, so the rate
+        // and its counts land on the block thread as a single generation).
+        refresh_trigger_window();
         push_trigger_config();
 
         // Frequency axes of both FFT views (GUI-thread setters; the
@@ -508,13 +552,6 @@ private:
         const size_t sps = static_cast<size_t>(actual_hz + 0.5);
         _spectrum->set_sample_rate(sps);
         _sgram->set_sample_rate(sps);
-
-        // Zero-span video bandwidth: the filter cutoff is NORMALIZED to the
-        // sample rate, so it must be re-designed even when the Hz value is
-        // unchanged. Also re-clamp to the new rate.
-        if (_zs_bw_hz > static_cast<float>(_rate_hz)) _zs_bw_hz = static_cast<float>(_rate_hz);
-        if (_zs_bw_hz < 1000.0f) _zs_bw_hz = 1000.0f;
-        push_power_config();
 
         // History(s) -> frames/row mapping depends on the rate.
         push_spectrogram_config();
@@ -540,18 +577,33 @@ private:
         _sgram->set_frames_per_row(history_to_fpr(_history_s));
     }
 
-    // Mirror of PowerDetectorBlock::set_video_bandwidth()'s clamping so the
-    // panel can display the bandwidth that will actually be applied.
-    float effective_zs_bw_hz() const {
-        if (_zs_bw_hz >= static_cast<float>(_rate_hz))
-            return static_cast<float>(_rate_hz);          // bypass
-        double fc = (static_cast<double>(_zs_bw_hz) / 2.0) / _rate_hz;
-        fc = std::min(std::max(fc, 1e-3), 0.4999);
-        return static_cast<float>(2.0 * fc * _rate_hz);
+    // Requested zero-span bandwidth in Hz (the widget shows MHz).
+    double zs_bw_hz() const { return static_cast<double>(_zs_bw_mhz) * 1e6; }
+
+    // Achievable bandwidth floor at the current rate: the decimation factor
+    // is capped (rate/Rmax), so requests below this would silently snap 10x
+    // away from what was typed -- clamp the widget instead.
+    float min_zs_bw_mhz() const {
+        const double floor_hz = std::max(PowerDet::MIN_OUTPUT_RATE_HZ,
+                                         _rate_hz / static_cast<double>(PowerDet::MAX_DECIMATION));
+        return static_cast<float>(std::min(floor_hz, _rate_hz) / 1e6);
+    }
+
+    void clamp_zs_bw() {
+        const float hi = static_cast<float>(_rate_hz / 1e6);
+        _zs_bw_mhz = std::min(std::max(_zs_bw_mhz, min_zs_bw_mhz()), hi);
+    }
+
+    // Re-derive the reachable capture window (fixed sample capacity expressed
+    // in ms at the current DETECTION rate) and re-clamp the widget.
+    void refresh_trigger_window() {
+        _max_window_ms = 1000.0f * static_cast<float>(_trig->max_window_samples())
+                       / static_cast<float>(detection_rate());
+        if (_window_ms > _max_window_ms) _window_ms = _max_window_ms;
     }
 
     void push_power_config() {
-        _power->set_video_bandwidth(static_cast<double>(_zs_bw_hz), _rate_hz);
+        _power->set_channel_bandwidth(zs_bw_hz(), _rate_hz);
     }
 
     void push_trigger_config() {
@@ -562,7 +614,7 @@ private:
                                          : (_mode_idx == 1 ? Trig::Mode::Single
                                                            : Trig::Mode::Auto),
                           _hysteresis_db, _auto_ms,
-                          static_cast<size_t>(_rate_hz + 0.5));
+                          detection_rate());
     }
 
     SourceUHDBlock<std::complex<float>>* _src;
@@ -583,7 +635,7 @@ private:
     size_t _n_fft;
     size_t _sgram_tall;
     float  _history_s = 0.0f;   // waterfall depth in seconds (set in ctor)
-    float  _zs_bw_hz;           // zero-span (video) bandwidth; rate = bypass
+    float  _zs_bw_mhz;          // zero-span channel bandwidth (MHz); rate = bypass
 
     // Trigger UI state (defaults mirror the TriggerBlock constructor below).
     float _threshold_db   = -40.0f;
@@ -666,7 +718,8 @@ static std::string snapshot_base_path(const std::string& dir) {
 //                 Nothing follows the blob.
 static bool write_snapshot_dat(const std::string& path,
                                bool want_trig, bool want_spec, bool want_sgram,
-                               double rate_hz, double freq_mhz,
+                               double rate_hz, double detection_rate_hz,
+                               double freq_mhz,
                                Trig& trig, PlotCSpectrumBlock& spec,
                                PlotCSpectrogramBlock& sgram,
                                std::string& err) {
@@ -714,6 +767,10 @@ static bool write_snapshot_dat(const std::string& path,
       << "#                 at the very end of the file\n";
     char line[96];
     std::snprintf(line, sizeof(line), "# sample_rate_hz %.0f\n", rate_hz);
+    f << line;
+    // Rate of the zero-span power/trigger stream (device rate / decimation);
+    // the [trigger] section's own time axis uses the capture-time rate.
+    std::snprintf(line, sizeof(line), "# detection_rate_hz %.0f\n", detection_rate_hz);
     f << line;
     std::snprintf(line, sizeof(line), "# center_freq_mhz %.6f\n", freq_mhz);
     f << line;
@@ -936,7 +993,9 @@ int main(int argc, char** argv) {
                 bool dat_ok = write_snapshot_dat(
                     base + ".dat",
                     panel.show_scope, panel.show_spectrum, panel.show_spectrogram,
-                    panel.rate_hz(), static_cast<double>(panel.freq_mhz()),
+                    panel.rate_hz(),
+                    static_cast<double>(panel.detection_rate()),
+                    static_cast<double>(panel.freq_mhz()),
                     trigger, spectrum, spectrogram, err);
                 gui.request_screenshot(base + ".bmp");   // written in end_frame()
                 std::string leaf = base.substr(base.find_last_of('/') + 1);
