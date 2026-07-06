@@ -185,6 +185,22 @@ struct TriggerBlock : public cler::BlockBase {
 
     cler::Result<cler::Empty, cler::Error> procedure() {
         State st = _state.load(std::memory_order_relaxed);
+        // Abort an in-flight capture when a reconfig (or explicit re-arm) is
+        // pending. The capture length was derived under the OLD config -- in
+        // particular the old SAMPLE RATE -- and configs only apply at
+        // Armed/Idle. Without this, dropping the detection rate mid-capture
+        // (e.g. re-enabling the zero-span filter, 20 MS/s -> 100 kS/s) leaves
+        // a capture that still needs up to window_ms * old_rate samples but
+        // now receives them R times slower: a 150 ms window at R = 200 takes
+        // up to 30 s (~15 s on average) to finish, freezing the scope until
+        // then. Discard the partial capture (never published) and fall
+        // through so the new config applies immediately.
+        if (st == State::Capturing &&
+            (_pending_gen.load(std::memory_order_acquire) != _applied_gen ||
+             _rearm.load(std::memory_order_acquire))) {
+            _state.store(State::Armed, std::memory_order_release);
+            st = State::Armed;
+        }
         if (st == State::Armed || st == State::Idle) {
             maybe_apply_config();
             if (_rearm.exchange(false, std::memory_order_acq_rel)) { arm(); st = State::Armed; }
