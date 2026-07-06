@@ -32,6 +32,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -998,17 +999,21 @@ int main(int argc, char** argv) {
     SpikeArgs args = parse_args(argc, argv);
 
     // Probe the device once so a failure is reported cleanly before we build
-    // the rest of the graph (mirrors the pattern in uhd_device.cpp).
+    // the rest of the graph (mirrors the pattern in uhd_device.cpp). Both
+    // constructions are quiet: the ctor's freq/rate are just the CLI defaults
+    // and get replaced by the saved settings right after startup, so printing
+    // them (twice) only misleads. The accurate values are printed below once
+    // the panel has loaded.
     try {
         SourceUHDBlock<std::complex<float>> probe("USRP", args.freq, args.rate,
-            args.device_address, args.gain, 1);
+            args.device_address, args.gain, 1, "sc16", /*quiet=*/true);
     } catch (const std::exception& e) {
         std::cerr << "Failed to initialize USRP: " << e.what() << std::endl;
         return 1;
     }
 
     SourceUHDBlock<std::complex<float>> usrp("USRP", args.freq, args.rate,
-        args.device_address, args.gain, 1);
+        args.device_address, args.gain, 1, "sc16", /*quiet=*/true);
 
     // The hardware may snap the requested rate (e.g. B2xx clock dividers);
     // everything rate-derived below (trigger timing, FFT axes, panel math)
@@ -1083,8 +1088,10 @@ int main(int argc, char** argv) {
 
     flowgraph.run();
     panel.apply_all();   // sync radio + trigger to loaded/initial settings
-    std::cout << "CLER Spike running at " << args.freq / 1e6 << " MHz, "
-              << args.rate / 1e6 << " MS/s. Close window to exit." << std::endl;
+    // Report the values the panel actually applied (saved settings restored
+    // by load(), or the CLI/defaults on first run) -- args.* may be stale.
+    std::cout << "CLER Spike running at " << panel.freq_mhz() << " MHz, "
+              << panel.rate_hz() / 1e6 << " MS/s. Close window to exit." << std::endl;
 
     // Auto-layout: on the first frame, whenever the set of visible views
     // changes, on the panel's "Arrange windows" button, or after the main
@@ -1201,11 +1208,14 @@ int main(int argc, char** argv) {
                     static_cast<double>(panel.freq_mhz()),
                     trigger, spectrum, spectrogram, err);
                 gui.request_screenshot(base + ".bmp");   // written in end_frame()
-                std::string leaf = base.substr(base.find_last_of('/') + 1);
+                // Full absolute path so the files are easy to locate (the
+                // snapshot dir may have been entered as a relative path).
+                std::string full =
+                    std::filesystem::absolute(base).lexically_normal().string();
                 if (dat_ok) {
-                    panel.set_status("Saved " + leaf + ".bmp/.dat");
+                    panel.set_status("Saved " + full + ".bmp/.dat");
                 } else {
-                    panel.set_status("Saved " + leaf + ".bmp; .dat failed: " + err);
+                    panel.set_status("Saved " + full + ".bmp; .dat failed: " + err);
                 }
             }
         }

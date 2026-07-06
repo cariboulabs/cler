@@ -30,7 +30,8 @@ struct SourceUHDBlock : public cler::BlockBase {
                    const std::string& dvc_adrs = "",
                    double gain = 20.0,
                    size_t num_channels = 1,
-                   const std::string& otw_format = "sc16")
+                   const std::string& otw_format = "sc16",
+                   bool quiet = false)
         : BlockBase(name),
           center_freq(freq),
           sample_rate(rate),
@@ -38,6 +39,7 @@ struct SourceUHDBlock : public cler::BlockBase {
           gain_db(gain),
           _num_channels(num_channels),
           wire_format(otw_format),
+          _quiet(quiet),
           _configuring(false) {
 
         usrp = uhd::usrp::multi_usrp::make(device_address);
@@ -73,12 +75,17 @@ struct SourceUHDBlock : public cler::BlockBase {
         uhd::stream_cmd_t stream_cmd(uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS);
         stream_cmd.stream_now = true;
         rx_stream->issue_stream_cmd(stream_cmd);
-        std::cout << "SourceUHDBlock: Initialized " << usrp->get_mboard_name() << std::endl;
-        std::cout << "  Channels: " << num_channels << std::endl;
-        std::cout << "  Frequency: " << center_freq/1e6 << " MHz" << std::endl;
-        std::cout << "  Sample rate: " << sample_rate/1e6 << " MSPS" << std::endl;
-        std::cout << "  Gain: " << gain_db << " dB" << std::endl;
-        std::cout << "  Format: CPU=" << get_uhd_format<T>() << ", OTW=" << wire_format << std::endl;
+        // Apps that retune/reconfigure right after construction (e.g. spike
+        // restoring saved settings) pass quiet=true: these values would only
+        // describe the constructor arguments, not what the app ends up using.
+        if (!_quiet) {
+            std::cout << "SourceUHDBlock: Initialized " << usrp->get_mboard_name() << std::endl;
+            std::cout << "  Channels: " << num_channels << std::endl;
+            std::cout << "  Frequency: " << center_freq/1e6 << " MHz" << std::endl;
+            std::cout << "  Sample rate: " << sample_rate/1e6 << " MSPS" << std::endl;
+            std::cout << "  Gain: " << gain_db << " dB" << std::endl;
+            std::cout << "  Format: CPU=" << get_uhd_format<T>() << ", OTW=" << wire_format << std::endl;
+        }
     }
 
     ~SourceUHDBlock() {
@@ -231,6 +238,7 @@ private:
     double gain_db;
     size_t _num_channels;
     std::string wire_format;
+    bool _quiet;
     std::atomic<bool> _configuring;
     size_t overflow_count = 0;
 
