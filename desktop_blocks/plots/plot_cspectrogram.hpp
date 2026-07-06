@@ -65,15 +65,16 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
     void   set_frames_per_row(size_t n) { _frames_per_row.store(n < 1 ? 1 : n); }
     size_t frames_per_row() const { return _frames_per_row.load(); }
 
-    // GUI-THREAD-ONLY export of one channel's waterfall as last displayed:
-    // `data` gets rows*cols floats (dB), row-major, NEWEST row first, exactly
-    // the buffer render() drew (rows beyond the fill level are padded with the
-    // floor value). No lock is needed: _display is written only by render(),
-    // which runs on the same (GUI) thread as this accessor. Also reports the
-    // current frames-per-row and sample rate so one row's time span can be
-    // computed as frames_per_row * cols / sps seconds. Returns false if
-    // render() has not assembled any rows yet or `channel` is out of range.
-    // May allocate (resizes `data`); do not call from the DSP thread.
+    // GUI-THREAD-ONLY export of one channel's waterfall: `data` gets rows*cols
+    // floats (dB), row-major, NEWEST row first (rows beyond the fill level are
+    // padded with the floor value) -- the same image the plot shows. The
+    // chronological ring is reordered on demand here, under _spectrogram_mutex
+    // (snapshots are rare; the per-frame render path no longer reorders at
+    // all). Also reports the current frames-per-row and sample rate so one
+    // row's time span can be computed as frames_per_row * cols / sps seconds.
+    // Returns false if no row has been recorded yet or `channel` is out of
+    // range. May allocate (resizes `data`); GUI thread only (_sps is a plain
+    // member owned by that thread).
     bool export_display(size_t channel, std::vector<float>& data,
                         size_t& rows, size_t& cols,
                         size_t& frames_per_row_out, size_t& sps_out) const;
@@ -93,25 +94,54 @@ private:
 
     // Row-major ring of waterfall rows: [num_inputs][tall * n_fft_samples].
     // New rows are written at _ring_pos (mod _tall) on the data path in O(n_fft)
-    // with no full-buffer memmove. The expensive reorder into display order is
-    // done once per render (see _display) instead of once per incoming frame.
+    // with no full-buffer memmove. render() mirrors new rows into a GL texture
+    // (same ring layout) and draws it seam-split, so nothing ever reorders the
+    // ring on the frame path; export_display() reorders on demand for snapshots.
     float** _spectrograms;
     size_t  _ring_pos   = 0;   // next row to overwrite (chronological write head)
     size_t  _ring_count = 0;   // valid rows so far (saturates at _tall)
 
-    // Display buffers assembled at render time, newest row first (row 0).
-    float** _display; // [num_inputs][tall * n_fft_samples]
-    // How many display rows held real data at the last render() (GUI thread
-    // only; lets export_display() answer "any data yet?" without locking).
-    size_t  _display_valid_rows = 0;
-
     // Row generation counter: bumped once per new ring row, inside the same
     // _spectrogram_mutex critical section as the row write in procedure().
     // render() compares it (under the mutex) against its last-seen value and
-    // skips the O(tall * n_fft) ring->_display reorder when no new row landed
-    // since the previous frame (PlotHeatmap still draws _display every frame).
+    // only copies out / colorizes / uploads texture rows when new rows landed
+    // since the previous frame; on the steady path with no new rows the frame
+    // is just two PlotImage quads.
     size_t  _row_gen = 0;                             // guarded by _spectrogram_mutex
     size_t  _row_gen_seen = static_cast<size_t>(-1);  // GUI thread only
+
+    // ---- GL-texture waterfall renderer (GUI thread only, incl. all GL) ----
+    // One RGBA8 texture per input, n_fft wide x tall high, rows stored at
+    // their RING positions (chronological order, same layout as
+    // _spectrograms). render() copies rows that arrived since the last frame
+    // out under _spectrogram_mutex (into _stage), then -- after unlocking --
+    // colorizes them through a 256-entry colormap LUT and glTexSubImage2D's
+    // only those rows in place. The plot draws the ring as up to two
+    // ImPlot::PlotImage quads split at the ring seam, so the old
+    // O(tall * n_fft) ring->display reorder and the per-frame per-cell
+    // PlotHeatmap rasterization are both gone from the render path.
+    //
+    // Color scale: the old PlotHeatmap call used scale_min == scale_max == 0,
+    // i.e. ImPlot's auto-scale from the data min/max each frame. Exact
+    // per-frame auto-scale would force a full recolor+re-upload whenever the
+    // min/max drifts (practically every frame), so the texture bakes the scale
+    // with a small dB margin and hysteresis: it is re-derived (full recolor)
+    // only when the data leaves the baked range or the range shrinks
+    // materially. Per-ring-row min/max are tracked to make that decision O(tall).
+    static constexpr float DB_FLOOR = -147.0f;  // empty-row fill value (dB)
+    unsigned int* _tex = nullptr;  // [num_inputs] GL texture names (0 until created)
+    bool          _lut_built = false;
+    ImU32         _lut[256];       // Plasma LUT (same colormap PlotHeatmap used)
+    float**       _stage;          // [num_inputs][tall * n_fft] rows copied out under the mutex
+    ImU32*        _pixels;         // [tall * n_fft] RGBA8 upload staging (shared across inputs)
+    float**       _row_min;        // [num_inputs][tall] per-ring-row dB min (DB_FLOOR if unwritten)
+    float**       _row_max;        // [num_inputs][tall] per-ring-row dB max
+    float*        _scale_min;      // [num_inputs] dB->color scale baked into the texture
+    float*        _scale_max;      //   (min == max means "flat": solid colormap color 0)
+    bool*         _needs_full;     // [num_inputs] per-frame scratch: full recolor this frame?
+    bool          _tex_full_dirty = true;  // force full recolor+upload on next render()
+    size_t        _tex_ring_pos   = 0;     // ring snapshot the texture contents reflect;
+    size_t        _tex_ring_count = 0;     //   also used to place the two seam quads
 
     // Peak-hold accumulator: several incoming FFT frames are max-combined here
     // and flushed to one ring row every _frames_per_row frames. This lets the
@@ -127,7 +157,10 @@ private:
 
     fftplan _fftplan;
 
-    std::mutex _spectrogram_mutex;
+    // mutable: export_display() is const but must lock against the DSP thread
+    // now that it reads the ring directly (render() no longer keeps a
+    // GUI-owned reordered copy).
+    mutable std::mutex _spectrogram_mutex;
 
     // GUI
     ImVec2 _initial_window_position = ImVec2(200, 200);
