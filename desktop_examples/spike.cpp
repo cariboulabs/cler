@@ -23,11 +23,14 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
 
 using Trig = TriggerBlock<float>;
 
@@ -259,8 +262,54 @@ struct ControlPanel {
         ImGui::Dummy(ImVec2(0, 6));
         ImGui::Text("State: %s", state_str(_trig->state()));
 
+        ImGui::Dummy(ImVec2(0, 8));
+        ImGui::TextUnformatted("Snapshot");
+        ImGui::Separator();
+        if (ImGui::Button("Snapshot")) {
+            if (_snapshot_dir.empty()) {
+                const char* home = std::getenv("HOME");
+                std::snprintf(_snapdir_edit, sizeof(_snapdir_edit), "%s",
+                              home ? home : ".");
+                ImGui::OpenPopup("Snapshot directory");
+            } else {
+                snapshot_requested = true;
+            }
+        }
+        help("Save a screenshot of the whole window (.bmp) plus the data behind "
+             "the currently visible plots (.dat, self-describing text with a "
+             "binary spectrogram blob) into the snapshot directory. The "
+             "directory is asked for once and remembered in the conf file.");
+        // First-use modal: ask for the snapshot directory, then never again.
+        if (ImGui::BeginPopupModal("Snapshot directory", nullptr,
+                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextUnformatted("Directory to save snapshots into:");
+            ImGui::SetNextItemWidth(400);
+            ImGui::InputText("##snapdir", _snapdir_edit, sizeof(_snapdir_edit));
+            if (ImGui::Button("OK", ImVec2(120, 0))) {
+                _snapshot_dir = trimmed(_snapdir_edit);
+                if (!_snapshot_dir.empty()) snapshot_requested = true;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        if (!_status.empty() &&
+            std::chrono::steady_clock::now() < _status_until) {
+            ImGui::TextWrapped("%s", _status.c_str());
+        }
+
         ImGui::End();
     }
+
+    // Transient status line under the Snapshot button (auto-hides).
+    void set_status(const std::string& s) {
+        _status = s;
+        _status_until = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    }
+
+    const std::string& snapshot_dir() const { return _snapshot_dir; }
+    float freq_mhz() const { return _freq_mhz; }
 
     // Push current panel state to the radio, the trigger and the spectrogram
     // (used at startup after loading saved settings).
@@ -280,6 +329,10 @@ struct ControlPanel {
     // One-shot request from the "Arrange windows" button; consumed (cleared)
     // by the main loop, which owns the tiling computation.
     bool arrange_requested = false;
+
+    // One-shot request from the "Snapshot" button; consumed by the main loop,
+    // which has the blocks and the GuiManager in scope.
+    bool snapshot_requested = false;
 
     bool load(const std::string& path) {
         std::ifstream f(path);
@@ -301,6 +354,13 @@ struct ControlPanel {
             else if (key == "show_spectrogram") f >> show_spectrogram;
             else if (key == "history_s")      f >> _history_s;
             else if (key == "zs_bw_hz")       f >> _zs_bw_hz;
+            else if (key == "snapshot_dir") {
+                // Value is the REST OF THE LINE (may contain spaces), not one
+                // whitespace-delimited token like every other key.
+                std::string rest;
+                std::getline(f, rest);
+                _snapshot_dir = trimmed(rest.c_str());
+            }
             else { std::string skip; std::getline(f, skip); }
         }
         // A saved window may exceed this session's allocated max (different rate).
@@ -330,9 +390,19 @@ struct ControlPanel {
           << "show_spectrogram " << show_spectrogram << "\n"
           << "history_s "        << _history_s       << "\n"
           << "zs_bw_hz "         << _zs_bw_hz        << "\n";
+        if (!_snapshot_dir.empty())
+            f << "snapshot_dir " << _snapshot_dir << "\n";
     }
 
 private:
+    static std::string trimmed(const char* s) {
+        std::string v(s);
+        size_t b = v.find_first_not_of(" \t\r\n");
+        if (b == std::string::npos) return std::string();
+        size_t e = v.find_last_not_of(" \t\r\n");
+        return v.substr(b, e - b + 1);
+    }
+
     static const char* state_str(Trig::State s) {
         switch (s) {
             case Trig::State::Idle:      return "IDLE (single done - re-arm)";
@@ -425,12 +495,180 @@ private:
     // Double-click-to-type state: which field (by label pointer) is being typed.
     const char* _editing  = nullptr;
     bool        _editing_start = false;
+
+    // Snapshot: destination directory (conf key snapshot_dir; asked for once
+    // via the modal above), the modal's edit buffer, and the transient status.
+    std::string _snapshot_dir;
+    char        _snapdir_edit[512] = {0};
+    std::string _status;
+    std::chrono::steady_clock::time_point _status_until{};
 };
 
 static std::string config_path(const char* leaf) {
     const char* home = std::getenv("HOME");
     std::string dir = home ? std::string(home) : std::string(".");
     return dir + "/" + leaf;
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot support: <base>.bmp (screenshot, written by GuiManager) and
+// <base>.dat (plot data). All of this runs on the GUI thread; allocation and
+// file IO are fine here.
+
+static bool file_exists(const std::string& p) {
+    std::ifstream f(p);
+    return f.good();
+}
+
+// dir/spike_YYYYmmdd_HHMMSS, suffixed _1, _2, ... until BOTH <base>.bmp and
+// <base>.dat are free (the two files always share the suffix). Empty string
+// if nothing is free (pathological).
+static std::string snapshot_base_path(const std::string& dir) {
+    char ts[32];
+    std::time_t t = std::time(nullptr);
+    std::tm tmv{};
+    localtime_r(&t, &tmv);
+    std::strftime(ts, sizeof(ts), "%Y%m%d_%H%M%S", &tmv);
+    const std::string stem = dir + "/spike_" + ts;
+    std::string base = stem;
+    for (int i = 1; file_exists(base + ".bmp") || file_exists(base + ".dat"); ++i) {
+        if (i > 999) return std::string();
+        base = stem + "_" + std::to_string(i);
+    }
+    return base;
+}
+
+// Snapshot data file (.dat) format -- self-describing; this description is
+// also written into the file header itself. Line-oriented text, '\n' endings,
+// with at most one raw binary blob at the very END of the file:
+//   '#' lines: comments/global metadata ("# spike snapshot <local time>",
+//   "# sample_rate_hz N", "# center_freq_mhz F", plus this format doc).
+//   Then one section per plot that was VISIBLE and had data when the snapshot
+//   was taken (a hidden plot gets no section):
+//   [trigger]     metadata lines "n <samples>", "pre_ms <f>", "post_ms <f>",
+//                 "frame <trigger frame counter>", then n CSV lines
+//                 "time_ms,power_db" -- time axis reconstructed exactly as the
+//                 scope renders it: trigger instant at t=0, pre-trigger
+//                 samples negative.
+//   [spectrum]    metadata "n_fft <bins>", then n_fft CSV lines
+//                 "freq_hz,mag_db" (baseband Hz; the averaged display trace).
+//   [spectrogram] metadata "rows <r>", "cols <c>", "row_seconds <s>" (time
+//                 span of one row = frames_per_row * n_fft / sps),
+//                 "freq_min_hz", "freq_max_hz" (baseband),
+//                 "order newest_row_first", "encoding binary_float32_le",
+//                 then "BINARY <nbytes>" followed by exactly that many raw
+//                 bytes: rows*cols little-endian float32 dB values, row-major
+//                 (binary on purpose -- ~16 MB as text would hang the GUI).
+//                 Nothing follows the blob.
+static bool write_snapshot_dat(const std::string& path,
+                               bool want_trig, bool want_spec, bool want_sgram,
+                               double rate_hz, double freq_mhz,
+                               Trig& trig, PlotCSpectrumBlock& spec,
+                               PlotCSpectrogramBlock& sgram,
+                               std::string& err) {
+    // Copy everything out of the blocks FIRST (cheap GUI-thread copies) so no
+    // block state or lock is held while the file is written.
+    std::vector<float> trig_y;
+    float pre_ms = 0.0f, post_ms = 0.0f;
+    size_t trig_idx = 0;
+    unsigned long frame = 0;
+    bool have_trig = want_trig &&
+                     trig.export_frame(trig_y, pre_ms, post_ms, trig_idx, frame);
+
+    std::vector<float> sp_freq, sp_mag;
+    bool have_spec = want_spec && spec.export_spectrum(0, sp_freq, sp_mag);
+
+    std::vector<float> sg;
+    size_t sg_rows = 0, sg_cols = 0, sg_fpr = 0, sg_sps = 0;
+    bool have_sgram = want_sgram &&
+                      sgram.export_display(0, sg, sg_rows, sg_cols, sg_fpr, sg_sps);
+
+    if (!have_trig && !have_spec && !have_sgram) {
+        err = "no visible plot has data yet";
+        return false;
+    }
+
+    std::ofstream f(path, std::ios::binary);
+    if (!f) {
+        err = "cannot open " + path;
+        return false;
+    }
+
+    char ts[64];
+    std::time_t t = std::time(nullptr);
+    std::tm tmv{};
+    localtime_r(&t, &tmv);
+    std::strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &tmv);
+
+    f << "# spike snapshot " << ts << "\n"
+      << "# format: text sections for the plots visible at snapshot time;\n"
+      << "#   [trigger]     n/pre_ms/post_ms/frame, then CSV time_ms,power_db (trigger at t=0)\n"
+      << "#   [spectrum]    n_fft, then CSV freq_hz,mag_db (baseband)\n"
+      << "#   [spectrogram] rows/cols/row_seconds/freq range, then 'BINARY <nbytes>'\n"
+      << "#                 + raw little-endian float32 dB, row-major, newest row first,\n"
+      << "#                 at the very end of the file\n";
+    char line[96];
+    std::snprintf(line, sizeof(line), "# sample_rate_hz %.0f\n", rate_hz);
+    f << line;
+    std::snprintf(line, sizeof(line), "# center_freq_mhz %.6f\n", freq_mhz);
+    f << line;
+
+    if (have_trig) {
+        const double dt_ms = 1000.0 / rate_hz;
+        f << "[trigger]\n"
+          << "n " << trig_y.size() << "\n";
+        std::snprintf(line, sizeof(line), "pre_ms %.6f\npost_ms %.6f\n",
+                      static_cast<double>(pre_ms), static_cast<double>(post_ms));
+        f << line;
+        f << "frame " << frame << "\n"
+          << "# columns: time_ms,power_db\n";
+        for (size_t i = 0; i < trig_y.size(); ++i) {
+            double tm = (static_cast<double>(i) - static_cast<double>(trig_idx)) * dt_ms;
+            std::snprintf(line, sizeof(line), "%.4f,%.3f\n",
+                          tm, static_cast<double>(trig_y[i]));
+            f << line;
+        }
+    }
+
+    if (have_spec) {
+        f << "[spectrum]\n"
+          << "n_fft " << sp_mag.size() << "\n"
+          << "# columns: freq_hz,mag_db\n";
+        for (size_t i = 0; i < sp_mag.size(); ++i) {
+            std::snprintf(line, sizeof(line), "%.1f,%.3f\n",
+                          static_cast<double>(sp_freq[i]),
+                          static_cast<double>(sp_mag[i]));
+            f << line;
+        }
+    }
+
+    if (have_sgram) {
+        const double row_seconds = (sg_sps > 0)
+            ? static_cast<double>(sg_fpr) * static_cast<double>(sg_cols)
+                  / static_cast<double>(sg_sps)
+            : 0.0;
+        f << "[spectrogram]\n"
+          << "rows " << sg_rows << "\n"
+          << "cols " << sg_cols << "\n";
+        std::snprintf(line, sizeof(line), "row_seconds %.9f\n", row_seconds);
+        f << line;
+        std::snprintf(line, sizeof(line), "freq_min_hz %.1f\nfreq_max_hz %.1f\n",
+                      -static_cast<double>(sg_sps) / 2.0,
+                      static_cast<double>(sg_sps) / 2.0);
+        f << line;
+        f << "order newest_row_first\n"
+          << "encoding binary_float32_le\n"
+          << "BINARY " << sg.size() * sizeof(float) << "\n";
+        f.write(reinterpret_cast<const char*>(sg.data()),
+                static_cast<std::streamsize>(sg.size() * sizeof(float)));
+    }
+
+    f.flush();
+    if (!f) {
+        err = "write to " + path + " failed";
+        return false;
+    }
+    return true;
 }
 
 int main(int argc, char** argv) {
@@ -566,6 +804,33 @@ int main(int argc, char** argv) {
         if (panel.show_scope)       trigger.render();
         if (panel.show_spectrum)    spectrum.render();
         if (panel.show_spectrogram) spectrogram.render();
+
+        // Snapshot: consumed here (after the plot renders, so the exported
+        // data matches this frame) and before end_frame(), whose screenshot
+        // pass captures the frame being drawn right now.
+        if (panel.snapshot_requested) {
+            panel.snapshot_requested = false;
+            std::string base = snapshot_base_path(panel.snapshot_dir());
+            if (base.empty()) {
+                panel.set_status("Snapshot failed: no free filename in " +
+                                 panel.snapshot_dir());
+            } else {
+                std::string err;
+                bool dat_ok = write_snapshot_dat(
+                    base + ".dat",
+                    panel.show_scope, panel.show_spectrum, panel.show_spectrogram,
+                    args.rate, static_cast<double>(panel.freq_mhz()),
+                    trigger, spectrum, spectrogram, err);
+                gui.request_screenshot(base + ".bmp");   // written in end_frame()
+                std::string leaf = base.substr(base.find_last_of('/') + 1);
+                if (dat_ok) {
+                    panel.set_status("Saved " + leaf + ".bmp/.dat");
+                } else {
+                    panel.set_status("Saved " + leaf + ".bmp; .dat failed: " + err);
+                }
+            }
+        }
+
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }

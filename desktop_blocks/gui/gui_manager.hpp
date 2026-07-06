@@ -1,6 +1,7 @@
 #pragma once
 
 #include <GLFW/glfw3.h>
+#include <string>
 #include <string_view>
 #include <stdexcept>
 
@@ -23,8 +24,17 @@ public:
     void end_frame();
     bool should_close() const;
 
+    // Request a one-shot screenshot of the next completed frame. The capture
+    // happens inside end_frame() after the UI is drawn but before the buffer
+    // swap, and is written as a 24-bit uncompressed BMP to `path`. Failures
+    // are reported on stderr. GUI-thread only (same thread as end_frame()).
+    void request_screenshot(const std::string& path);
+
 private:
     GLFWwindow* window = nullptr;
+
+    std::string _screenshot_path;
+    bool        _screenshot_pending = false;
 };
 
 } // namespace cler

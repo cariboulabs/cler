@@ -7,6 +7,7 @@
 #include <atomic>
 #include <mutex>
 #include <cstring>
+#include <vector>
 
 // Zero-span style capture trigger for a real-valued (e.g. dB power) stream,
 // rendered as an OSCILLOSCOPE: every trigger paints one fixed-width window with
@@ -127,6 +128,26 @@ struct TriggerBlock : public cler::BlockBase {
     void set_initial_window(float x, float y, float w, float h) {
         _win_pos  = ImVec2(x, y);
         _win_size = ImVec2(w, h);
+    }
+
+    // Copy the latest published capture (the same frame render() draws) into
+    // caller-provided storage. GUI-thread helper for data export/snapshots;
+    // takes _snap_mutex briefly, mirroring what render() reads. The time axis
+    // can be reconstructed exactly as render() does:
+    //   t_ms[i] = (i - trig_idx) * 1000 / sample_rate()   (trigger at t=0).
+    // Returns false (leaving the outputs untouched) if no frame has been
+    // published yet. May allocate (resizes `samples`); do not call from the
+    // DSP thread.
+    bool export_frame(std::vector<float>& samples, float& pre_ms, float& post_ms,
+                      size_t& trig_idx, unsigned long& frame_count) {
+        std::lock_guard<std::mutex> lk(_snap_mutex);
+        if (_snap_len == 0) return false;
+        samples.assign(_snap_buf, _snap_buf + _snap_len);
+        pre_ms      = _snap_pre_ms;
+        post_ms     = _snap_post_ms;
+        trig_idx    = _snap_trig_idx;
+        frame_count = _frame_count;
+        return true;
     }
 
     // One-shot programmatic window rect: the next render() applies it with

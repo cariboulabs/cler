@@ -55,6 +55,19 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
     void   set_frames_per_row(size_t n) { _frames_per_row.store(n < 1 ? 1 : n); }
     size_t frames_per_row() const { return _frames_per_row.load(); }
 
+    // GUI-THREAD-ONLY export of one channel's waterfall as last displayed:
+    // `data` gets rows*cols floats (dB), row-major, NEWEST row first, exactly
+    // the buffer render() drew (rows beyond the fill level are padded with the
+    // floor value). No lock is needed: _display is written only by render(),
+    // which runs on the same (GUI) thread as this accessor. Also reports the
+    // current frames-per-row and sample rate so one row's time span can be
+    // computed as frames_per_row * cols / sps seconds. Returns false if
+    // render() has not assembled any rows yet or `channel` is out of range.
+    // May allocate (resizes `data`); do not call from the DSP thread.
+    bool export_display(size_t channel, std::vector<float>& data,
+                        size_t& rows, size_t& cols,
+                        size_t& frames_per_row_out, size_t& sps_out) const;
+
 private:
     size_t _num_inputs;
     std::vector<std::string> _signal_labels;
@@ -78,6 +91,9 @@ private:
 
     // Display buffers assembled at render time, newest row first (row 0).
     float** _display; // [num_inputs][tall * n_fft_samples]
+    // How many display rows held real data at the last render() (GUI thread
+    // only; lets export_display() answer "any data yet?" without locking).
+    size_t  _display_valid_rows = 0;
 
     // Peak-hold accumulator: several incoming FFT frames are max-combined here
     // and flushed to one ring row every _frames_per_row frames. This lets the

@@ -31,6 +31,15 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
     // thread (procedure() never touches these), so plain members are fine.
     void apply_window_rect(float x, float y, float w, float h);
 
+    // GUI-THREAD-ONLY export of the currently displayed (averaged) spectrum
+    // for one channel: freq_hz gets the frequency axis (baseband Hz, size
+    // n_fft), mag_db the averaged magnitudes. No lock is needed: _freq_bins
+    // and _spectrum_avg are written only in the constructor and in render(),
+    // which runs on the same (GUI) thread as this accessor. Returns false if
+    // render() has not produced a spectrum yet or `channel` is out of range.
+    bool export_spectrum(size_t channel, std::vector<float>& freq_hz,
+                         std::vector<float>& mag_db) const;
+
 private:
     void next_window_geometry();   // SetNextWindowPos/Size before Begin()
 

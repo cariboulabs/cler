@@ -280,6 +280,16 @@ void PlotCSpectrumBlock::set_initial_window(float x, float y, float w, float h) 
     _initial_window_size = ImVec2(w, h);
 }
 
+// GUI-thread-only; see header. _spectrum_avg holds valid data once the first
+// spectrum frame has been folded in (_first_spectrum cleared by render()).
+bool PlotCSpectrumBlock::export_spectrum(size_t channel, std::vector<float>& freq_hz,
+                                         std::vector<float>& mag_db) const {
+    if (channel >= _num_inputs || _first_spectrum) return false;
+    freq_hz.assign(_freq_bins, _freq_bins + _n_fft_samples);
+    mag_db.assign(_spectrum_avg[channel], _spectrum_avg[channel] + _n_fft_samples);
+    return true;
+}
+
 void PlotCSpectrumBlock::apply_window_rect(float x, float y, float w, float h) {
     _pending_rect_pos  = ImVec2(x, y);
     _pending_rect_size = ImVec2(w, h);

@@ -245,6 +245,7 @@ void PlotCSpectrogramBlock::render() {
         // This is the only O(tall * n_fft) copy, and it happens at render rate
         // (~50 Hz) rather than on the data path per incoming FFT frame.
         std::lock_guard<std::mutex> lock(_spectrogram_mutex);
+        _display_valid_rows = _ring_count;
         for (size_t i = 0; i < _num_inputs; ++i) {
             for (size_t k = 0; k < _tall; ++k) {
                 float* dst = _display[i] + k * _n_fft_samples;
@@ -287,6 +288,20 @@ void PlotCSpectrogramBlock::render() {
         }
     }
     ImGui::End();
+}
+
+// GUI-thread-only; see header. _display and _display_valid_rows are owned by
+// the GUI thread (written only in render()), so no lock is taken here.
+bool PlotCSpectrogramBlock::export_display(size_t channel, std::vector<float>& data,
+                                           size_t& rows, size_t& cols,
+                                           size_t& frames_per_row_out, size_t& sps_out) const {
+    if (channel >= _num_inputs || _display_valid_rows == 0) return false;
+    data.assign(_display[channel], _display[channel] + _tall * _n_fft_samples);
+    rows               = _tall;
+    cols               = _n_fft_samples;
+    frames_per_row_out = _frames_per_row.load(std::memory_order_relaxed);
+    sps_out            = _sps;
+    return true;
 }
 
 void PlotCSpectrogramBlock::set_initial_window(float x, float y, float w, float h) {
