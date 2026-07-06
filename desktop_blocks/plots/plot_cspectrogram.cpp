@@ -271,7 +271,13 @@ void PlotCSpectrogramBlock::render() {
     for (size_t i = 0; i < _num_inputs; ++i) {
         if (ImPlot::BeginPlot(_signal_labels[i].c_str(), ImVec2(-1, -1))) {
             ImPlot::SetupAxes("Frequency (Hz)", "Time (s)", x_flags, y_flags);
-            ImPlot::SetupAxisLimits(ImAxis_X1, -static_cast<double>(_sps)/2.0, static_cast<double>(_sps)/2.0);
+            // Default cond is Once, which would pin the axis to the span at
+            // first render; after set_sample_rate() a one-shot Always re-fits
+            // it to the new span (safe: the axis is Lock'ed, so Always cannot
+            // fight user pan/zoom).
+            ImPlot::SetupAxisLimits(ImAxis_X1, -static_cast<double>(_sps)/2.0,
+                                    static_cast<double>(_sps)/2.0,
+                                    _axis_refit ? ImPlotCond_Always : ImPlotCond_Once);
             // Elapsed time in seconds, 0 s (newest) at the top. frames/row can
             // change live, which rescales the axis, so this must be
             // ImPlotCond_Always -- safe here because the axis is Lock'ed, so
@@ -295,7 +301,33 @@ void PlotCSpectrogramBlock::render() {
             ImPlot::EndPlot();
         }
     }
+    _axis_refit = false;   // one-shot consumed (all input plots saw it)
     ImGui::End();
+}
+
+// GUI-THREAD-ONLY (see header). The ring clear is safe against the DSP
+// thread because the row flush in procedure() runs under _spectrogram_mutex.
+// The peak-hold accumulator (_accum_count) is deliberately NOT reset: its
+// reset on the paused path in procedure() is not mutex-guarded, so touching
+// it here would race. Consequence: at most one transitional row may mix
+// frames recorded at the old and new rates.
+void PlotCSpectrogramBlock::set_sample_rate(size_t sps) {
+    _sps = sps;
+    for (size_t i = 0; i < _n_fft_samples; ++i) {
+        _freq_bins[i] = (_sps * (static_cast<float>(i) / static_cast<float>(_n_fft_samples))) - (_sps / 2.0f);
+    }
+    {
+        std::lock_guard<std::mutex> lock(_spectrogram_mutex);
+        _ring_pos   = 0;
+        _ring_count = 0;
+        for (size_t i = 0; i < _num_inputs; ++i) {
+            std::fill_n(_spectrograms[i], _tall * _n_fft_samples, -147.0f);
+        }
+        // Bump the row generation so the next render() rebuilds _display from
+        // the (now empty) ring instead of keeping the stale image.
+        ++_row_gen;
+    }
+    _axis_refit = true;   // re-fit the X axis to the new span on next render()
 }
 
 // GUI-thread-only; see header. _display and _display_valid_rows are owned by

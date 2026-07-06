@@ -42,6 +42,15 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
         _external_pause.store(!active, std::memory_order_release);
     }
 
+    // GUI-THREAD-ONLY: retune the frequency axis to a new sample rate.
+    // Recomputes _freq_bins and requests a one-shot X-axis re-fit on the next
+    // render() (so the display isn't stuck on the old span). No lock is
+    // needed because _sps/_freq_bins are consumed only in render(), which
+    // runs on the same (GUI) thread as this setter -- call from the GUI
+    // thread only. procedure() never reads the sample rate, so the data path
+    // is unaffected.
+    void set_sample_rate(size_t sps);
+
     // GUI-THREAD-ONLY export of the currently displayed (averaged) spectrum
     // for one channel: freq_hz gets the frequency axis (baseband Hz, size
     // n_fft), mag_db the averaged magnitudes. No lock is needed: _freq_bins
@@ -84,6 +93,9 @@ private:
     bool   _pending_rect = false;
     ImVec2 _pending_rect_pos {0.0f, 0.0f};
     ImVec2 _pending_rect_size {0.0f, 0.0f};
+
+    // One-shot X-axis re-fit after set_sample_rate() (GUI thread only).
+    bool   _axis_refit = false;
 
     std::mutex _snapshot_mutex;
     size_t _snapshot_ready_size = 0;

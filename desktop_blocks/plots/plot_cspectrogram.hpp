@@ -50,6 +50,16 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
         _external_pause.store(!active, std::memory_order_release);
     }
 
+    // GUI-THREAD-ONLY: retune the frequency/time axes to a new sample rate.
+    // _sps is consumed only in render()/export_display(), which run on the
+    // same (GUI) thread as this setter, so its plain write is safe -- call
+    // from the GUI thread only. Rows already in the ring were recorded at the
+    // OLD rate and would be silently mislabeled on the new frequency axis, so
+    // the ring is CLEARED here (under _spectrogram_mutex, which also guards
+    // the row flush in procedure()); the waterfall restarts empty. Also
+    // requests a one-shot X-axis re-fit on the next render().
+    void set_sample_rate(size_t sps);
+
     // How many FFT frames are collapsed (peak-held) into one waterfall row.
     // Larger => each row spans more time => longer total history on screen.
     void   set_frames_per_row(size_t n) { _frames_per_row.store(n < 1 ? 1 : n); }
@@ -127,6 +137,9 @@ private:
     bool   _pending_rect = false;
     ImVec2 _pending_rect_pos  = ImVec2(0, 0);
     ImVec2 _pending_rect_size = ImVec2(0, 0);
+
+    // One-shot X-axis re-fit after set_sample_rate() (GUI thread only).
+    bool   _axis_refit = false;
 
     std::atomic<bool> _gui_pause = false;
 };

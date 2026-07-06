@@ -8,8 +8,10 @@
 //                        +--> PlotCSpectrogram               (waterfall)
 //
 // Single superset flowgraph: every block always runs; the "View" checkboxes only
-// choose which windows are drawn. Sample rate (span) is fixed at startup; center
-// frequency and gain are live.
+// choose which windows are drawn. Center frequency, gain and sample rate (span)
+// are all live; a rate change is staged into the source's streaming thread and
+// every rate-derived consumer re-syncs when the ACTUAL hardware rate lands
+// (see ControlPanel::on_rate_changed).
 
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
@@ -52,6 +54,7 @@ struct SpikeArgs {
     double rate = 1e6;
     double gain = 30.0;
     size_t fft  = 2048;
+    bool   rate_from_cli = false;   // -r given explicitly: overrides saved rate_hz
     std::string device_address;
 };
 
@@ -59,7 +62,8 @@ static void print_usage(const char* prog) {
     std::cout << "\nSlim Spike-like analyzer for USRP\n"
               << "Usage: " << prog << " [OPTIONS]\n"
               << "  -f, --freq FREQ   Center frequency Hz (default 915e6)\n"
-              << "  -r, --rate RATE   Sample rate S/s, fixed at startup (default 1e6)\n"
+              << "  -r, --rate RATE   Initial sample rate S/s (default 1e6; live-tunable\n"
+              << "                    in the GUI; if given, overrides the saved rate)\n"
               << "  -g, --gain GAIN   Gain dB (default 30)\n"
               << "  -F, --fft  SIZE   FFT size for spectrum view (default 2048)\n"
               << "  -d, --dev  ADDR   USRP device address (default auto)\n"
@@ -76,7 +80,7 @@ static SpikeArgs parse_args(int argc, char** argv) {
         };
         if (arg == "-h" || arg == "--help") { print_usage(argv[0]); exit(0); }
         else if (arg == "-f" || arg == "--freq") a.freq = std::stod(next());
-        else if (arg == "-r" || arg == "--rate") a.rate = std::stod(next());
+        else if (arg == "-r" || arg == "--rate") { a.rate = std::stod(next()); a.rate_from_cli = true; }
         else if (arg == "-g" || arg == "--gain") a.gain = std::stod(next());
         else if (arg == "-F" || arg == "--fft")  a.fft  = std::stoul(next());
         else if (arg == "-d" || arg == "--dev" || arg == "--device") a.device_address = next();
@@ -90,14 +94,17 @@ static SpikeArgs parse_args(int argc, char** argv) {
 // (mutex-guarded config snapshot applied at a safe point).
 struct ControlPanel {
     ControlPanel(SourceUHDBlock<std::complex<float>>* src, Trig* trig,
+                 PlotCSpectrumBlock* spectrum,
                  PlotCSpectrogramBlock* sgram,
                  PowerDetectorBlock<std::complex<float>>* power,
                  size_t sgram_tall, const SpikeArgs& a)
-        : _src(src), _trig(trig), _sgram(sgram), _power(power),
+        : _src(src), _trig(trig), _spectrum(spectrum), _sgram(sgram), _power(power),
           _freq_mhz(static_cast<float>(a.freq / 1e6)),
           _freq_anchor_mhz(_freq_mhz),
           _gain_db(static_cast<float>(a.gain)),
           _rate_hz(a.rate),
+          _rate_msps(static_cast<float>(a.rate / 1e6)),
+          _rate_from_cli(a.rate_from_cli),
           _n_fft(a.fft),
           _sgram_tall(sgram_tall),
           _zs_bw_hz(static_cast<float>(a.rate)),   // full rate = bypass (old behavior)
@@ -140,6 +147,17 @@ struct ControlPanel {
     }
 
     void render() {
+        // Rate-change choke point, polled every frame (cheap atomic read). The
+        // source applies a requested rate asynchronously on its streaming
+        // thread, and the hardware may snap it -- so instead of assuming, we
+        // watch the ACTUAL rate and re-sync every rate-derived consumer the
+        // moment it changes. This one path covers typed changes, the saved
+        // conf rate staged at startup, and any initial hardware snap alike.
+        {
+            const double actual = _src->actual_sample_rate();
+            if (std::abs(actual - _rate_hz) > 0.5) on_rate_changed(actual);
+        }
+
         ImGui::SetNextWindowSize(ImVec2(360, 520), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
         ImGui::Begin("Control");
@@ -176,7 +194,21 @@ struct ControlPanel {
         ImGui::Dummy(ImVec2(0, 8));
         ImGui::TextUnformatted("Radio");
         ImGui::Separator();
-        ImGui::Text("Sample rate (span): %.3f MS/s  [fixed]", _rate_hz / 1e6);
+
+        // Sample rate (span), live. Number entry (double-click to type an
+        // exact value); committed on edit-end like freq/gain. The new rate is
+        // only REQUESTED here -- the source applies it on its streaming
+        // thread, and the poll above re-syncs everything (including this
+        // widget's value) when the actual rate lands.
+        ImGui::SetNextItemWidth(180);
+        editable("Rate (MS/s)", &_rate_msps, 0.1f, 61.44f, "%.3f",
+                 /*slider=*/false, /*drag_speed=*/0.01f);
+        if (ImGui::IsItemDeactivatedAfterEdit())
+            push_rate_config(static_cast<double>(_rate_msps) * 1e6);
+        help("Sample rate = displayed span, applied live. The hardware may "
+             "snap the request to what its clocking supports; the shown value "
+             "follows the ACTUAL device rate. Note: a capture straddling the "
+             "switch may be garbled once, and the waterfall restarts.");
 
         // Apply freq/gain only when the user finishes editing, not every tick,
         // so we don't spam the USRP with retunes. Center frequency is a slider
@@ -209,10 +241,18 @@ struct ControlPanel {
         help("Dead-band. After a rising trigger fires, the signal must drop below "
              "(Level - Hysteresis) before it can fire again. Stops chatter when the "
              "signal hovers right at the Level.");
+        ImGui::SetNextItemWidth(150);
         changed |= editable("Window (ms)", &_window_ms, 1.0f, _max_window_ms, "%.1f", true);
+        ImGui::SameLine();
+        // Capture memory is fixed at startup, so the reachable window shrinks
+        // at higher sample rates; refreshed by on_rate_changed().
+        ImGui::TextDisabled("max %.0f", _max_window_ms);
         help("Total time span captured and displayed per trigger (pre + post). "
              "This is the scope timebase. To see a whole repeating burst locked in "
-             "place, set Window a bit LESS than the burst period and >= the burst span.");
+             "place, set Window a bit LESS than the burst period and >= the burst "
+             "span. 'max' is the largest window at the CURRENT sample rate: the "
+             "capture buffer is sized once at startup, so raising the rate "
+             "shrinks the reachable window (in ms).");
         changed |= editable("Pre-trigger (%)", &_pretrigger_pct, 0.0f, 90.0f, "%.0f", true);
         help("How much of the Window is shown BEFORE the trigger instant (t=0). "
              "e.g. 10% puts the trigger 10% in from the left.");
@@ -309,7 +349,8 @@ struct ControlPanel {
     }
 
     const std::string& snapshot_dir() const { return _snapshot_dir; }
-    float freq_mhz() const { return _freq_mhz; }
+    float  freq_mhz() const { return _freq_mhz; }
+    double rate_hz()  const { return _rate_hz; }
 
     // Push current panel state to the radio, the trigger and the spectrogram
     // (used at startup after loading saved settings).
@@ -318,6 +359,15 @@ struct ControlPanel {
         push_trigger_config();
         push_spectrogram_config();
         push_power_config();
+        // Saved sample rate (conf key rate_hz): staged LAST through the same
+        // live path as a typed change, so it lands as the newest pending
+        // config (request_configure keeps only the latest) and the per-frame
+        // poll runs on_rate_changed() once the streaming thread applies it.
+        // An explicit CLI -r wins over the saved value.
+        if (!_rate_from_cli && _loaded_rate_hz > 0.0 &&
+            std::abs(_loaded_rate_hz - _rate_hz) > 0.5) {
+            push_rate_config(_loaded_rate_hz);
+        }
     }
 
     // Which windows to draw (read by the main render loop). Public so main() can
@@ -354,6 +404,7 @@ struct ControlPanel {
             else if (key == "show_spectrogram") f >> show_spectrogram;
             else if (key == "history_s")      f >> _history_s;
             else if (key == "zs_bw_hz")       f >> _zs_bw_hz;
+            else if (key == "rate_hz")        f >> _loaded_rate_hz;
             else if (key == "snapshot_dir") {
                 // Value is the REST OF THE LINE (may contain spaces), not one
                 // whitespace-delimited token like every other key.
@@ -389,7 +440,8 @@ struct ControlPanel {
           << "show_spectrum "    << show_spectrum    << "\n"
           << "show_spectrogram " << show_spectrogram << "\n"
           << "history_s "        << _history_s       << "\n"
-          << "zs_bw_hz "         << _zs_bw_hz        << "\n";
+          << "zs_bw_hz "         << _zs_bw_hz        << "\n"
+          << "rate_hz "          << _rate_hz         << "\n";
         if (!_snapshot_dir.empty())
             f << "snapshot_dir " << _snapshot_dir << "\n";
     }
@@ -415,10 +467,57 @@ private:
     void push_radio_config() {
         UHDConfig cfg;
         cfg.center_freq_Hz = static_cast<double>(_freq_mhz) * 1e6;
-        cfg.sample_rate_Hz = _rate_hz;          // unchanged: span is fixed
+        cfg.sample_rate_Hz = _rate_hz;   // current rate: the source skips this no-op
         cfg.gain           = static_cast<double>(_gain_db);
         cfg.bandwidth_Hz   = _rate_hz;
         _src->request_configure(cfg);
+    }
+
+    // Stage a NEW sample rate into the source (freq/gain carried unchanged;
+    // analog bandwidth tracks the rate). Applied asynchronously on the
+    // source's streaming thread; the poll in render() picks up the resulting
+    // actual rate and runs on_rate_changed().
+    void push_rate_config(double rate_hz) {
+        UHDConfig cfg;
+        cfg.center_freq_Hz = static_cast<double>(_freq_mhz) * 1e6;
+        cfg.sample_rate_Hz = rate_hz;
+        cfg.gain           = static_cast<double>(_gain_db);
+        cfg.bandwidth_Hz   = rate_hz;
+        _src->request_configure(cfg);
+    }
+
+    // Single choke point for a sample-rate change: runs when the ACTUAL
+    // device rate differs from what the panel last synced to. Re-derives
+    // every rate-dependent piece of state in one place.
+    void on_rate_changed(double actual_hz) {
+        _rate_hz   = actual_hz;
+        _rate_msps = static_cast<float>(actual_hz / 1e6);   // widget display
+
+        // Trigger: capture memory never reallocates, so the max window in ms
+        // shrinks at higher rates. Re-clamp, then push ONE config carrying the
+        // new rate (sample counts are derived from it inside set_config, so
+        // the rate and its counts land on the block thread as a single
+        // generation).
+        _max_window_ms = 1000.0f * static_cast<float>(_trig->max_window_samples())
+                       / static_cast<float>(actual_hz);
+        if (_window_ms > _max_window_ms) _window_ms = _max_window_ms;
+        push_trigger_config();
+
+        // Frequency axes of both FFT views (GUI-thread setters; the
+        // spectrogram also clears its ring -- old rows would be mislabeled).
+        const size_t sps = static_cast<size_t>(actual_hz + 0.5);
+        _spectrum->set_sample_rate(sps);
+        _sgram->set_sample_rate(sps);
+
+        // Zero-span video bandwidth: the filter cutoff is NORMALIZED to the
+        // sample rate, so it must be re-designed even when the Hz value is
+        // unchanged. Also re-clamp to the new rate.
+        if (_zs_bw_hz > static_cast<float>(_rate_hz)) _zs_bw_hz = static_cast<float>(_rate_hz);
+        if (_zs_bw_hz < 1000.0f) _zs_bw_hz = 1000.0f;
+        push_power_config();
+
+        // History(s) -> frames/row mapping depends on the rate.
+        push_spectrogram_config();
     }
 
     // History depth (s) <-> spectrogram frames/row. One waterfall row spans
@@ -462,11 +561,13 @@ private:
                           _mode_idx == 0 ? Trig::Mode::Normal
                                          : (_mode_idx == 1 ? Trig::Mode::Single
                                                            : Trig::Mode::Auto),
-                          _hysteresis_db, _auto_ms);
+                          _hysteresis_db, _auto_ms,
+                          static_cast<size_t>(_rate_hz + 0.5));
     }
 
     SourceUHDBlock<std::complex<float>>* _src;
     Trig* _trig;
+    PlotCSpectrumBlock* _spectrum;
     PlotCSpectrogramBlock* _sgram;
     PowerDetectorBlock<std::complex<float>>* _power;
 
@@ -475,7 +576,10 @@ private:
     // render()). Re-seeded after load() so it starts on the saved frequency.
     float  _freq_anchor_mhz;
     float  _gain_db;
-    double _rate_hz;
+    double _rate_hz;                // the ACTUAL device rate last synced to
+    float  _rate_msps;              // rate widget value (MS/s), follows _rate_hz
+    double _loaded_rate_hz = 0.0;   // conf key rate_hz (0 = not present)
+    bool   _rate_from_cli;          // -r given: CLI wins over the saved rate
     size_t _n_fft;
     size_t _sgram_tall;
     float  _history_s = 0.0f;   // waterfall depth in seconds (set in ctor)
@@ -570,10 +674,11 @@ static bool write_snapshot_dat(const std::string& path,
     // block state or lock is held while the file is written.
     std::vector<float> trig_y;
     float pre_ms = 0.0f, post_ms = 0.0f;
-    size_t trig_idx = 0;
+    size_t trig_idx = 0, trig_rate = 0;
     unsigned long frame = 0;
     bool have_trig = want_trig &&
-                     trig.export_frame(trig_y, pre_ms, post_ms, trig_idx, frame);
+                     trig.export_frame(trig_y, pre_ms, post_ms, trig_idx, frame,
+                                       trig_rate);
 
     std::vector<float> sp_freq, sp_mag;
     bool have_spec = want_spec && spec.export_spectrum(0, sp_freq, sp_mag);
@@ -614,7 +719,9 @@ static bool write_snapshot_dat(const std::string& path,
     f << line;
 
     if (have_trig) {
-        const double dt_ms = 1000.0 / rate_hz;
+        // Use the rate the frame was CAPTURED at (part of the trigger's
+        // snapshot metadata) -- the current device rate may already differ.
+        const double dt_ms = 1000.0 / static_cast<double>(trig_rate);
         f << "[trigger]\n"
           << "n " << trig_y.size() << "\n";
         std::snprintf(line, sizeof(line), "pre_ms %.6f\npost_ms %.6f\n",
@@ -687,6 +794,12 @@ int main(int argc, char** argv) {
     SourceUHDBlock<std::complex<float>> usrp("USRP", args.freq, args.rate,
         args.device_address, args.gain, 1);
 
+    // The hardware may snap the requested rate (e.g. B2xx clock dividers);
+    // everything rate-derived below (trigger timing, FFT axes, panel math)
+    // must be built from the ACTUAL rate, not the request -- previously the
+    // requested args.rate was used, silently mis-scaling all axes on a snap.
+    args.rate = usrp.actual_sample_rate();
+
     cler::GuiManager gui(1500, 900, "CLER Spike - USRP");
 
     // Persist window layout to a stable location (independent of working dir).
@@ -725,7 +838,8 @@ int main(int argc, char** argv) {
     spectrum.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);
     spectrogram.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);
 
-    ControlPanel panel(&usrp, &trigger, &spectrogram, &power, waterfall_tall, args);
+    ControlPanel panel(&usrp, &trigger, &spectrum, &spectrogram, &power,
+                       waterfall_tall, args);
     const std::string settings_file = config_path(".cler_spike.conf");
     panel.load(settings_file);   // restore last session's settings if present
 
@@ -822,7 +936,7 @@ int main(int argc, char** argv) {
                 bool dat_ok = write_snapshot_dat(
                     base + ".dat",
                     panel.show_scope, panel.show_spectrum, panel.show_spectrogram,
-                    args.rate, static_cast<double>(panel.freq_mhz()),
+                    panel.rate_hz(), static_cast<double>(panel.freq_mhz()),
                     trigger, spectrum, spectrogram, err);
                 gui.request_screenshot(base + ".bmp");   // written in end_frame()
                 std::string leaf = base.substr(base.find_last_of('/') + 1);

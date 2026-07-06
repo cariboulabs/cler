@@ -67,7 +67,12 @@ struct TriggerBlock : public cler::BlockBase {
         _plot_x   = new float[MAX_PLOT_POINTS];
         _plot_y   = new float[MAX_PLOT_POINTS];
 
+        _cfg_rate.store(_sample_rate, std::memory_order_release);
+        _snap_rate = _sample_rate;
+        _render_rate = _sample_rate;
+
         Config c;
+        c.sample_rate        = _sample_rate;
         c.threshold          = threshold;
         c.window_samples     = clamp_window(ms_to_samples(window_ms));
         c.pretrigger_samples = clamp_pre(static_cast<size_t>(c.window_samples * (pretrigger_pct / 100.0f)),
@@ -97,19 +102,29 @@ struct TriggerBlock : public cler::BlockBase {
     }
 
     // ---- live control surface (called from the GUI/render thread) ----
+    // sample_rate is part of the config: every ms->samples conversion below is
+    // done at THAT rate, so a rate change and its derived sample counts always
+    // land on the block thread as one generation -- there is no transient
+    // where counts computed at the old rate run against a new rate. The
+    // capture buffers are still sized once from the CONSTRUCTOR's rate and
+    // never reallocate, so at a higher live rate the achievable window in
+    // milliseconds shrinks (window_samples is clamped to that fixed capacity).
     void set_config(float threshold, float window_ms, float pretrigger_pct,
                     float holdoff_ms, Edge edge, Mode mode,
-                    float hysteresis, float auto_ms) {
+                    float hysteresis, float auto_ms, size_t sample_rate) {
+        if (sample_rate < 1) sample_rate = 1;
         Config c;
+        c.sample_rate        = sample_rate;
         c.threshold          = threshold;
-        c.window_samples     = clamp_window(ms_to_samples(window_ms));
+        c.window_samples     = clamp_window(ms_to_samples_at(window_ms, sample_rate));
         c.pretrigger_samples = clamp_pre(static_cast<size_t>(c.window_samples * (pretrigger_pct / 100.0f)),
                                          c.window_samples);
-        c.holdoff_samples    = ms_to_samples(holdoff_ms);
-        c.auto_samples       = ms_to_samples(auto_ms);
+        c.holdoff_samples    = ms_to_samples_at(holdoff_ms, sample_rate);
+        c.auto_samples       = ms_to_samples_at(auto_ms, sample_rate);
         c.edge               = edge;
         c.mode               = mode;
         c.hysteresis         = std::max(0.0f, hysteresis);
+        _cfg_rate.store(sample_rate, std::memory_order_release);
         std::lock_guard<std::mutex> lk(_cfg_mutex);
         _pending = c;
         ++_pending_gen;
@@ -119,10 +134,15 @@ struct TriggerBlock : public cler::BlockBase {
     void rearm()         { _rearm.store(true, std::memory_order_release); }
 
     State  state()       const { return _state.load(std::memory_order_acquire); }
-    size_t sample_rate() const { return _sample_rate; }
+    // Sample rate of the most recently REQUESTED config (the ctor rate until
+    // set_config is first called). max_window_ms() reports the fixed sample
+    // CAPACITY expressed at that rate: buffers never grow, so the max window
+    // in milliseconds shrinks as the rate rises.
+    size_t sample_rate() const { return _cfg_rate.load(std::memory_order_acquire); }
     size_t max_window_samples() const { return _max_window; }
     float  max_window_ms() const {
-        return 1000.0f * static_cast<float>(_max_window) / static_cast<float>(_sample_rate);
+        return 1000.0f * static_cast<float>(_max_window)
+             / static_cast<float>(_cfg_rate.load(std::memory_order_acquire));
     }
 
     void set_initial_window(float x, float y, float w, float h) {
@@ -134,19 +154,22 @@ struct TriggerBlock : public cler::BlockBase {
     // caller-provided storage. GUI-thread helper for data export/snapshots;
     // takes _snap_mutex briefly, mirroring what render() reads. The time axis
     // can be reconstructed exactly as render() does:
-    //   t_ms[i] = (i - trig_idx) * 1000 / sample_rate()   (trigger at t=0).
-    // Returns false (leaving the outputs untouched) if no frame has been
-    // published yet. May allocate (resizes `samples`); do not call from the
-    // DSP thread.
+    //   t_ms[i] = (i - trig_idx) * 1000 / sample_rate_hz   (trigger at t=0),
+    // where sample_rate_hz is the rate the frame was CAPTURED at (rates can
+    // change live, so it is part of the snapshot metadata). Returns false
+    // (leaving the outputs untouched) if no frame has been published yet.
+    // May allocate (resizes `samples`); do not call from the DSP thread.
     bool export_frame(std::vector<float>& samples, float& pre_ms, float& post_ms,
-                      size_t& trig_idx, unsigned long& frame_count) {
+                      size_t& trig_idx, unsigned long& frame_count,
+                      size_t& sample_rate_hz) {
         std::lock_guard<std::mutex> lk(_snap_mutex);
         if (_snap_len == 0) return false;
         samples.assign(_snap_buf, _snap_buf + _snap_len);
-        pre_ms      = _snap_pre_ms;
-        post_ms     = _snap_post_ms;
-        trig_idx    = _snap_trig_idx;
-        frame_count = _frame_count;
+        pre_ms         = _snap_pre_ms;
+        post_ms        = _snap_post_ms;
+        trig_idx       = _snap_trig_idx;
+        frame_count    = _frame_count;
+        sample_rate_hz = _snap_rate;
         return true;
     }
 
@@ -189,7 +212,7 @@ struct TriggerBlock : public cler::BlockBase {
         ImGui::Begin(name());
 
         // Pull the latest frame (cheap copy under lock; never blocks the DSP thread long).
-        size_t len = 0, trig_idx = 0;
+        size_t len = 0, trig_idx = 0, rate = _sample_rate;
         float  pre_ms = 0.0f, post_ms = 0.0f, level = 0.0f;
         unsigned long frame = 0;
         if (_snap_mutex.try_lock()) {
@@ -199,6 +222,7 @@ struct TriggerBlock : public cler::BlockBase {
             post_ms  = _snap_post_ms;
             level    = _snap_level;
             frame    = _frame_count;
+            rate     = _snap_rate;
             if (len > 0) std::memcpy(_render_y, _snap_buf, len * sizeof(float));
             _snap_mutex.unlock();
         } else {
@@ -209,9 +233,11 @@ struct TriggerBlock : public cler::BlockBase {
             post_ms  = _render_post_ms;
             level    = _render_level;
             frame    = _render_frame;
+            rate     = _render_rate;
         }
         _render_len = len; _render_trig = trig_idx; _render_pre_ms = pre_ms;
         _render_post_ms = post_ms; _render_level = level; _render_frame = frame;
+        _render_rate = rate;
 
         ImGui::Text("Frames: %lu", frame);
         ImGui::SameLine();
@@ -225,8 +251,10 @@ struct TriggerBlock : public cler::BlockBase {
 
         // Build the trigger-relative time axis (ms). Trigger sample sits at t=0.
         // For windows larger than the screen can resolve, draw a min/max envelope
-        // so the plot stays smooth AND transient peaks are preserved.
-        const float dt_ms = 1000.0f / static_cast<float>(_sample_rate);
+        // so the plot stays smooth AND transient peaks are preserved. The rate
+        // comes from the snapshot (the rate the frame was captured at), so a
+        // live rate change never mislabels an already-published frame.
+        const float dt_ms = 1000.0f / static_cast<float>(rate);
         const float* plot_x;
         const float* plot_y;
         int          plot_n;
@@ -276,6 +304,7 @@ struct TriggerBlock : public cler::BlockBase {
 
 private:
     struct Config {
+        size_t sample_rate        = 1;   // rate the sample counts below were derived at
         float  threshold          = 0.0f;
         size_t window_samples     = 1;
         size_t pretrigger_samples = 0;
@@ -286,10 +315,11 @@ private:
         float  hysteresis         = 0.0f;
     };
 
-    size_t ms_to_samples(float ms) const {
-        long n = static_cast<long>((ms / 1000.0f) * static_cast<float>(_sample_rate));
+    static size_t ms_to_samples_at(float ms, size_t rate) {
+        long n = static_cast<long>((ms / 1000.0f) * static_cast<float>(rate));
         return n < 0 ? 0 : static_cast<size_t>(n);
     }
+    size_t ms_to_samples(float ms) const { return ms_to_samples_at(ms, _sample_rate); }
     size_t clamp_window(size_t w) const {
         if (w < 1) w = 1;
         return std::min(w, _max_window);
@@ -425,12 +455,17 @@ private:
     }
 
     void publish_frame() {
-        const float dt_ms = 1000.0f / static_cast<float>(_sample_rate);
+        // Time metadata is derived from the ACTIVE config's rate (the rate
+        // this frame was captured at), not the ctor rate: the rate can change
+        // live. render()/export_frame() read only snapshot metadata, so they
+        // follow automatically.
+        const float dt_ms = 1000.0f / static_cast<float>(_active.sample_rate);
         {
             std::lock_guard<std::mutex> lk(_snap_mutex);
             std::memcpy(_snap_buf, _capture, _capture_len * sizeof(T));
             _snap_len      = _capture_len;
             _snap_trig_idx = _capture_trig;
+            _snap_rate     = _active.sample_rate;
             // Axis extents come from the CONFIGURED window, not the captured
             // geometry, so the trigger line stays fixed at the pre-trigger
             // fraction regardless of cold-start or capture-length variations.
@@ -457,7 +492,11 @@ private:
     std::atomic<State>    _state{State::Armed};
 
     // ---- fixed params / buffers ----
+    // _sample_rate is the CONSTRUCTOR rate: used for capacity sizing and as
+    // the initial config rate. The live rate travels inside Config (see
+    // set_config); _cfg_rate mirrors the latest requested one for accessors.
     size_t  _sample_rate;
+    std::atomic<size_t> _cfg_rate{1};
     size_t  _max_window = 0;
     T*      _capture = nullptr;
     T*      _ring    = nullptr;
@@ -470,6 +509,7 @@ private:
     float         _snap_pre_ms = 0.0f;
     float         _snap_post_ms = 0.0f;
     float         _snap_level = 0.0f;
+    size_t        _snap_rate = 1;   // rate the published frame was captured at
     unsigned long _frame_count = 0;
 
     // Display is bounded by screen resolution; large windows are decimated to
@@ -483,6 +523,7 @@ private:
     float*        _plot_x = nullptr;            // decimated envelope x (large windows)
     float*        _plot_y = nullptr;            // decimated envelope y
     size_t        _render_len = 0, _render_trig = 0;
+    size_t        _render_rate = 1;
     float         _render_pre_ms = 0.0f, _render_post_ms = 0.0f, _render_level = 0.0f;
     unsigned long _render_frame = 0;
 

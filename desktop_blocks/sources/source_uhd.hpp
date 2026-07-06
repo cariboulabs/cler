@@ -57,6 +57,11 @@ struct SourceUHDBlock : public cler::BlockBase {
             usrp->set_rx_freq(uhd::tune_request_t(center_freq), ch);
             usrp->set_rx_gain(gain_db, ch);
         }
+        // The hardware may have snapped the requested rate (sample_rate now
+        // holds the actual value); expose it and remember it as the last
+        // applied rate so configure() can skip redundant set_rx_rate calls.
+        _actual_rate.store(sample_rate, std::memory_order_release);
+        _last_applied_rate = sample_rate;
         uhd::stream_args_t stream_args(get_uhd_format<T>(), wire_format);
         stream_args.channels.resize(num_channels);
         std::iota(stream_args.channels.begin(), stream_args.channels.end(), 0);
@@ -87,12 +92,20 @@ struct SourceUHDBlock : public cler::BlockBase {
         
         //We want to avoid try-catch but UHD API crashes on errors
         try {
-            // Set sample rate
-            usrp->set_rx_rate(config.sample_rate_Hz, channel);
-            double actual_rate = usrp->get_rx_rate(channel);
-            if (std::abs(actual_rate - config.sample_rate_Hz) > 1.0) {
-                std::cout << "Warning: Requested " << config.sample_rate_Hz/1e6 
-                          << " MSPS, got " << actual_rate/1e6 << " MSPS" << std::endl;
+            // Set sample rate -- skipped when the requested rate equals the
+            // last-applied request: callers that reconfigure freq/gain re-send
+            // an unchanged rate every time, and set_rx_rate mid-stream can
+            // glitch some devices (e.g. B2xx). Skipping a true no-op is
+            // behavior-preserving for callers that do change the rate.
+            if (std::abs(config.sample_rate_Hz - _last_applied_rate) > RATE_EPSILON_HZ) {
+                usrp->set_rx_rate(config.sample_rate_Hz, channel);
+                double actual_rate = usrp->get_rx_rate(channel);
+                if (std::abs(actual_rate - config.sample_rate_Hz) > 1.0) {
+                    std::cout << "Warning: Requested " << config.sample_rate_Hz/1e6
+                              << " MSPS, got " << actual_rate/1e6 << " MSPS" << std::endl;
+                }
+                _last_applied_rate = config.sample_rate_Hz;
+                _actual_rate.store(actual_rate, std::memory_order_release);
             }
 
             // Set frequency
@@ -111,9 +124,12 @@ struct SourceUHDBlock : public cler::BlockBase {
             }
             usrp->set_rx_gain(config.gain, channel);
 
-            // Set bandwidth (if specified)
-            if (config.bandwidth_Hz > 0) {
+            // Set bandwidth (if specified) -- skipped when unchanged for the
+            // same reason as the rate above (callers tie it to the rate).
+            if (config.bandwidth_Hz > 0 &&
+                std::abs(config.bandwidth_Hz - _last_applied_bw) > RATE_EPSILON_HZ) {
                 usrp->set_rx_bandwidth(config.bandwidth_Hz, channel);
+                _last_applied_bw = config.bandwidth_Hz;
             }
             _configuring = false;
             return true;
@@ -123,6 +139,14 @@ struct SourceUHDBlock : public cler::BlockBase {
             _configuring = false;
             return false;
         }
+    }
+
+    // Rate the hardware is ACTUALLY running at: the driver may snap a
+    // requested rate to what its clocking supports. Written at construction
+    // and by configure() (streaming thread) after a rate change; readable
+    // from any thread (e.g. a GUI polling for the change to land).
+    double actual_sample_rate() const {
+        return _actual_rate.load(std::memory_order_acquire);
     }
 
     // Thread-safe live reconfigure: callable from any thread (e.g. the GUI).
@@ -209,6 +233,16 @@ private:
     std::string wire_format;
     std::atomic<bool> _configuring;
     size_t overflow_count = 0;
+
+    // Requested rates/bandwidths closer than this are treated as identical.
+    static constexpr double RATE_EPSILON_HZ = 0.5;
+
+    // Actual device rate (see actual_sample_rate()). The last-applied REQUESTED
+    // values let configure() skip redundant set_rx_rate/set_rx_bandwidth calls;
+    // they are touched only by the ctor and configure() (streaming thread).
+    std::atomic<double> _actual_rate{0.0};
+    double _last_applied_rate = 0.0;
+    double _last_applied_bw   = -1.0;   // <0: never set (ctor doesn't set it)
 
     // Live-reconfigure staging (written by any thread, applied by streaming thread)
     std::mutex _cfg_mutex;

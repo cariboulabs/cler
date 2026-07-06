@@ -239,6 +239,16 @@ void PlotCSpectrumBlock::render() {
 
     if (ImPlot::BeginPlot(name())) {
         ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]");
+        // One-shot X re-fit after a sample-rate change: SetupAxes alone keeps
+        // whatever limits the user (or the initial auto-fit) established, so
+        // without this the plot would stay zoomed to the OLD span.
+        if (_axis_refit) {
+            ImPlot::SetupAxisLimits(ImAxis_X1,
+                                    -static_cast<double>(_sps) / 2.0,
+                                     static_cast<double>(_sps) / 2.0,
+                                    ImPlotCond_Always);
+            _axis_refit = false;
+        }
 
         for (size_t i = 0; i < _num_inputs; ++i) {
             memcpy(_liquid_inout,
@@ -290,6 +300,17 @@ void PlotCSpectrumBlock::render() {
     }
 
     ImGui::End();
+}
+
+// GUI-THREAD-ONLY (see header): _sps and _freq_bins are consumed only in
+// render(), which runs on the same thread as this setter.
+void PlotCSpectrumBlock::set_sample_rate(size_t sps) {
+    _sps = sps;
+    for (size_t i = 0; i < _n_fft_samples; ++i) {
+        _freq_bins[i] = (_sps * (static_cast<float>(i) / static_cast<float>(_n_fft_samples)))
+                      - (_sps / 2.0f);
+    }
+    _axis_refit = true;   // re-fit the X axis to the new span on next render()
 }
 
 void PlotCSpectrumBlock::set_initial_window(float x, float y, float w, float h) {
