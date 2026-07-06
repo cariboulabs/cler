@@ -2,6 +2,17 @@
 #include "implot.h"
 #include <cmath>
 #include <cstring>
+#include <cfloat>
+
+// Raw GL for the waterfall texture. Same idiom as gui_manager.cpp: the GLFW
+// header pulls in the platform's GL 1.1 headers (all we need: glGenTextures /
+// glTexSubImage2D / glDeleteTextures), and blocks_gui links OpenGL::GL.
+// glfwGetCurrentContext() is also used to guard texture deletion at shutdown.
+#include <GLFW/glfw3.h>
+
+#ifndef GL_CLAMP_TO_EDGE   // GL 1.2 enum; not in every bare gl.h
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
 
 PlotCSpectrogramBlock::PlotCSpectrogramBlock(const char*name,
     const std::vector<std::string> signal_labels,
@@ -53,15 +64,25 @@ PlotCSpectrogramBlock::PlotCSpectrogramBlock(const char*name,
     _tmp_mag_buffer = new float[_n_fft_samples];
 
     _spectrograms = new float*[_num_inputs];
-    _display      = new float*[_num_inputs];
     _accum        = new float*[_num_inputs];
+    _stage        = new float*[_num_inputs];
+    _row_min      = new float*[_num_inputs];
+    _row_max      = new float*[_num_inputs];
     for (size_t i = 0; i < _num_inputs; ++i) {
         _spectrograms[i] = new float[_tall * _n_fft_samples];
-        std::fill_n(_spectrograms[i], _tall * _n_fft_samples, -147.0f);
-        _display[i] = new float[_tall * _n_fft_samples];
-        std::fill_n(_display[i], _tall * _n_fft_samples, -147.0f);
+        std::fill_n(_spectrograms[i], _tall * _n_fft_samples, DB_FLOOR);
         _accum[i] = new float[_n_fft_samples];
+        _stage[i] = new float[_tall * _n_fft_samples];
+        _row_min[i] = new float[_tall];
+        _row_max[i] = new float[_tall];
+        std::fill_n(_row_min[i], _tall, DB_FLOOR);
+        std::fill_n(_row_max[i], _tall, DB_FLOOR);
     }
+    _pixels     = new ImU32[_tall * _n_fft_samples];
+    _tex        = new unsigned int[_num_inputs]();  // 0 = not created yet
+    _scale_min  = new float[_num_inputs]();
+    _scale_max  = new float[_num_inputs]();
+    _needs_full = new bool[_num_inputs]();
 
     _freq_bins = new float[_n_fft_samples];
     for (size_t i = 0; i < _n_fft_samples; ++i) {
@@ -87,12 +108,33 @@ PlotCSpectrogramBlock::~PlotCSpectrogramBlock() {
 
     for (size_t i = 0; i < _num_inputs; ++i) {
         delete[] _spectrograms[i];
-        delete[] _display[i];
         delete[] _accum[i];
+        delete[] _stage[i];
+        delete[] _row_min[i];
+        delete[] _row_max[i];
     }
     delete[] _spectrograms;
-    delete[] _display;
     delete[] _accum;
+    delete[] _stage;
+    delete[] _row_min;
+    delete[] _row_max;
+    delete[] _pixels;
+    delete[] _scale_min;
+    delete[] _scale_max;
+    delete[] _needs_full;
+
+    // GL textures may only be deleted while a GL context is current on this
+    // thread. Some examples construct this block BEFORE GuiManager (e.g.
+    // hackrf_spectrum), so at scope exit the context -- and GLFW itself -- may
+    // already be gone; glfwGetCurrentContext() then returns NULL (it is safe
+    // to call even after glfwTerminate) and we deliberately leak the textures
+    // at process exit rather than crash on a dead context.
+    if (glfwGetCurrentContext() != nullptr) {
+        for (size_t i = 0; i < _num_inputs; ++i) {
+            if (_tex[i] != 0) glDeleteTextures(1, &_tex[i]);
+        }
+    }
+    delete[] _tex;
 
     delete[] _freq_bins;
     fft_destroy_plan(_fftplan);
@@ -262,32 +304,225 @@ void PlotCSpectrogramBlock::render() {
               / static_cast<double>(_sps)
         : 1.0;
 
+    // ---- Waterfall texture maintenance (all GL strictly on this thread) ----
+
+    // 256-entry colormap LUT, built once. ImPlot::SampleColormap() goes
+    // through the exact same ColormapData::LerpTable() the old PlotHeatmap
+    // per-cell colorizer used, so colors match up to the 1/256 quantization.
+    // ImGui packs the ImU32 as R,G,B,A bytes in memory, which is precisely
+    // what GL_RGBA + GL_UNSIGNED_BYTE consumes.
+    if (!_lut_built) {
+        for (int j = 0; j < 256; ++j) {
+            ImVec4 c = ImPlot::SampleColormap(static_cast<float>(j) / 255.0f,
+                                              ImPlotColormap_Plasma);
+            _lut[j] = ImGui::ColorConvertFloat4ToU32(c);
+        }
+        _lut_built = true;
+    }
+
+    // Lazy texture creation (the GUI thread owns GL; the constructor may run
+    // before a context exists).
+    if (_tex[0] == 0) {
+        GLint prev_tex = 0;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_tex);
+        for (size_t i = 0; i < _num_inputs; ++i) {
+            glGenTextures(1, &_tex[i]);
+            glBindTexture(GL_TEXTURE_2D, _tex[i]);
+            // NEAREST matches PlotHeatmap's hard per-cell rectangles.
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8,
+                         static_cast<GLsizei>(_n_fft_samples),
+                         static_cast<GLsizei>(_tall),
+                         0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        }
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prev_tex));
+        _tex_full_dirty = true;   // populate the fresh (undefined) texels
+    }
+
+    // Plan + copy-out under the ring mutex; colorize/upload AFTER unlocking
+    // (never hold the DSP-facing lock across GL calls). On the steady path
+    // only the rows that arrived since the last frame are touched.
+    bool   any_work = false;   // anything to colorize/upload this frame?
+    size_t up_start = 0;       // first incremental ring row
+    size_t up_count = 0;       // number of incremental rows (0 on full path)
     {
-        // Reorder the chronological ring into display order (newest row first).
-        // This is the only O(tall * n_fft) copy, and it happens at render rate
-        // rather than on the data path per incoming FFT frame -- and only when
-        // a new row actually landed since the last render (_row_gen, bumped
-        // under this same mutex). Skipping it also covers the paused/hidden
-        // cases; _display always holds the last assembled image (filled with
-        // the floor value at construction, so it is valid before any reorder).
         std::lock_guard<std::mutex> lock(_spectrogram_mutex);
-        if (_row_gen != _row_gen_seen) {
-            _row_gen_seen = _row_gen;
-            _display_valid_rows = _ring_count;
+        const size_t unseen = _row_gen - _row_gen_seen;
+        if (unseen != 0 || _tex_full_dirty) {
+            _row_gen_seen   = _row_gen;
+            any_work        = true;
+            _tex_ring_pos   = _ring_pos;
+            _tex_ring_count = _ring_count;
+
+            // Full recolor+re-upload only on: texture (re)create, ring clear
+            // (set_sample_rate), color-scale rebake (below), or when more
+            // rows arrived than the ring holds.
+            const bool full_all = _tex_full_dirty || unseen >= _tall;
+            _tex_full_dirty = false;
+
+            // Refresh per-row min/max stats (scale decisions are O(tall)).
+            if (full_all) {
+                for (size_t i = 0; i < _num_inputs; ++i) {
+                    for (size_t r = 0; r < _tall; ++r) {
+                        if (r < _ring_count) {
+                            const float* src = _spectrograms[i] + r * _n_fft_samples;
+                            float mn = src[0], mx = src[0];
+                            for (size_t x = 1; x < _n_fft_samples; ++x) {
+                                mn = std::min(mn, src[x]);
+                                mx = std::max(mx, src[x]);
+                            }
+                            _row_min[i][r] = mn;
+                            _row_max[i][r] = mx;
+                        } else {
+                            _row_min[i][r] = DB_FLOOR;
+                            _row_max[i][r] = DB_FLOOR;
+                        }
+                    }
+                }
+            } else {
+                up_count = unseen;
+                up_start = (_ring_pos + _tall - unseen) % _tall;
+                for (size_t j = 0; j < up_count; ++j) {
+                    const size_t r = (up_start + j) % _tall;
+                    for (size_t i = 0; i < _num_inputs; ++i) {
+                        const float* src = _spectrograms[i] + r * _n_fft_samples;
+                        float mn = src[0], mx = src[0];
+                        for (size_t x = 1; x < _n_fft_samples; ++x) {
+                            mn = std::min(mn, src[x]);
+                            mx = std::max(mx, src[x]);
+                        }
+                        _row_min[i][r] = mn;
+                        _row_max[i][r] = mx;
+                    }
+                }
+            }
+
+            // Color scale: PlotHeatmap auto-scaled to the data min/max every
+            // frame (scale_min == scale_max == 0). Baked texels cannot follow
+            // a per-frame drift without a full re-upload each frame, so the
+            // scale gets a MARGIN_DB pad and hysteresis: rebake (full recolor)
+            // only when data leaves the baked range or the range shrank by
+            // more than the slack. Unwritten rows count as DB_FLOOR, exactly
+            // like the old padded display buffer did.
+            constexpr float MARGIN_DB = 3.0f;
+            constexpr float SHRINK_SLACK_DB = 6.0f;
             for (size_t i = 0; i < _num_inputs; ++i) {
-                for (size_t k = 0; k < _tall; ++k) {
-                    float* dst = _display[i] + k * _n_fft_samples;
-                    if (k < _ring_count) {
-                        size_t src_row = (_ring_pos + _tall - 1 - k) % _tall;
-                        memcpy(dst, _spectrograms[i] + src_row * _n_fft_samples,
+                float gmin = FLT_MAX, gmax = -FLT_MAX;
+                for (size_t r = 0; r < _tall; ++r) {
+                    gmin = std::min(gmin, _row_min[i][r]);
+                    gmax = std::max(gmax, _row_max[i][r]);
+                }
+                bool rescale;
+                float new_min, new_max;
+                if (gmin == gmax) {
+                    // All data equal (e.g. empty ring): PlotHeatmap drew a
+                    // solid rect in colormap color 0; flat scale does the same.
+                    rescale = !(_scale_min[i] == _scale_max[i] && _scale_min[i] == gmin);
+                    new_min = new_max = gmin;
+                } else {
+                    const bool was_flat = _scale_min[i] >= _scale_max[i];
+                    rescale = was_flat
+                           || gmax > _scale_max[i]
+                           || gmin < _scale_min[i]
+                           || (_scale_max[i] - _scale_min[i])
+                                > (gmax - gmin) + 2.0f * MARGIN_DB + SHRINK_SLACK_DB;
+                    new_min = gmin - MARGIN_DB;
+                    new_max = gmax + MARGIN_DB;
+                }
+                if (rescale) {
+                    _scale_min[i] = new_min;
+                    _scale_max[i] = new_max;
+                }
+                _needs_full[i] = full_all || rescale;
+            }
+
+            // Copy the needed dB rows out; colorization happens after unlock.
+            // Incremental rows keep their ring offsets inside _stage so the
+            // colorizer can index both the same way.
+            for (size_t i = 0; i < _num_inputs; ++i) {
+                if (_needs_full[i]) {
+                    memcpy(_stage[i], _spectrograms[i],
+                           _tall * _n_fft_samples * sizeof(float));
+                } else {
+                    for (size_t j = 0; j < up_count; ++j) {
+                        const size_t r = (up_start + j) % _tall;
+                        memcpy(_stage[i] + r * _n_fft_samples,
+                               _spectrograms[i] + r * _n_fft_samples,
                                _n_fft_samples * sizeof(float));
-                    } else {
-                        std::fill_n(dst, _n_fft_samples, -147.0f);
                     }
                 }
             }
         }
     }
+
+    if (any_work) {
+        // Colorize staged dB rows through the LUT and upload in place. A
+        // contiguous ring span [row0, row0+nrows) maps to the same rows of
+        // the texture (texture row == ring row).
+        auto colorize_upload = [&](size_t i, size_t row0, size_t nrows) {
+            const float smin = _scale_min[i];
+            const float smax = _scale_max[i];
+            if (smin >= smax) {
+                std::fill_n(_pixels, nrows * _n_fft_samples, _lut[0]);
+            } else {
+                const float inv = 255.0f / (smax - smin);
+                ImU32* dst = _pixels;
+                for (size_t r = row0; r < row0 + nrows; ++r) {
+                    const float* src = _stage[i] + r * _n_fft_samples;
+                    for (size_t x = 0; x < _n_fft_samples; ++x) {
+                        float t = (src[x] - smin) * inv + 0.5f;
+                        int idx = static_cast<int>(t);
+                        if (idx < 0)   idx = 0;
+                        if (idx > 255) idx = 255;
+                        *dst++ = _lut[idx];
+                    }
+                }
+            }
+            glTexSubImage2D(GL_TEXTURE_2D, 0,
+                            0, static_cast<GLint>(row0),
+                            static_cast<GLsizei>(_n_fft_samples),
+                            static_cast<GLsizei>(nrows),
+                            GL_RGBA, GL_UNSIGNED_BYTE, _pixels);
+        };
+
+        GLint prev_tex = 0;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_tex);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);  // rows in _pixels are packed
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);   // RGBA8 rows are 4-byte aligned
+        for (size_t i = 0; i < _num_inputs; ++i) {
+            glBindTexture(GL_TEXTURE_2D, _tex[i]);
+            if (_needs_full[i]) {
+                colorize_upload(i, 0, _tall);
+            } else {
+                // New rows are contiguous in ring space except for at most one
+                // wrap at the end of the buffer: at most two glTexSubImage2D.
+                const size_t first = std::min(up_count, _tall - up_start);
+                if (first > 0)             colorize_upload(i, up_start, first);
+                if (up_count - first > 0)  colorize_upload(i, 0, up_count - first);
+            }
+        }
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prev_tex));
+    }
+
+    // ---- Draw: the chronological ring as two quads split at the seam ----
+    // Ring row r has age k = (ring_pos - 1 - r) mod tall (k = 0 newest) and
+    // occupies y in [k, k+1] * row_dt -- identical to what PlotHeatmap drew
+    // from the reordered buffer (its row 0 sat against bounds_max.y = 0).
+    //   Rows [0, ring_pos)    = ages ring_pos-1 .. 0 -> y in [0, ring_pos*row_dt],
+    //                           texture v = 0 at the TOP of that span;
+    //   Rows [ring_pos, tall) = ages tall-1 .. ring_pos
+    //                           -> y in [ring_pos*row_dt, tall*row_dt],
+    //                           texture v = ring_pos/tall at the TOP.
+    // PlotImage anchors uv0 at (bounds_min.x, bounds_max.y), i.e. the top-left
+    // in plot coords, which is exactly that mapping. Unwritten rows hold
+    // DB_FLOOR texels, so they render as the same floor-colored padding the
+    // old display buffer had.
+    const double x_min = -static_cast<double>(_sps) / 2.0;
+    const double x_max =  static_cast<double>(_sps) / 2.0;
+    const float  seam_v = static_cast<float>(_tex_ring_pos) / static_cast<float>(_tall);
 
     for (size_t i = 0; i < _num_inputs; ++i) {
         if (ImPlot::BeginPlot(_signal_labels[i].c_str(), ImVec2(-1, -1))) {
@@ -296,29 +531,34 @@ void PlotCSpectrogramBlock::render() {
             // first render; after set_sample_rate() a one-shot Always re-fits
             // it to the new span (safe: the axis is Lock'ed, so Always cannot
             // fight user pan/zoom).
-            ImPlot::SetupAxisLimits(ImAxis_X1, -static_cast<double>(_sps)/2.0,
-                                    static_cast<double>(_sps)/2.0,
+            ImPlot::SetupAxisLimits(ImAxis_X1, x_min, x_max,
                                     _axis_refit ? ImPlotCond_Always : ImPlotCond_Once);
-            // Elapsed time in seconds, 0 s (newest) at the top. frames/row can
-            // change live, which rescales the axis, so this must be
-            // ImPlotCond_Always -- safe here because the axis is Lock'ed, so
-            // Always cannot fight user pan/zoom.
+            // Elapsed time in seconds. frames/row can change live, which
+            // rescales the axis, so this must be ImPlotCond_Always -- safe
+            // here because the axis is Lock'ed, so Always cannot fight user
+            // pan/zoom.
             ImPlot::SetupAxisLimits(ImAxis_Y1, static_cast<double>(_tall) * row_dt, 0.0,
                                     ImPlotCond_Always);
-            ImPlot::PushColormap(ImPlotColormap_Plasma);
 
-            std::string label = "##" + std::string(_signal_labels[i]);
-            ImPlot::PlotHeatmap(
-                label.c_str(),
-                _display[i],
-                _tall,
-                _n_fft_samples,
-                0.0, 0.0,
-                nullptr,
-                ImPlotPoint(-static_cast<double>(_sps)/2.0, static_cast<double>(_tall) * row_dt),
-                ImPlotPoint(static_cast<double>(_sps)/2.0, 0)
-            );
-            ImPlot::PopColormap();
+            if (_tex[i] != 0) {
+                // C-style: ImTextureID is ImU64 on current ImGui but has been
+                // void* historically; both accept an integer round-trip.
+                const ImTextureID tid = (ImTextureID)(intptr_t)_tex[i];
+                const std::string label = "##" + _signal_labels[i];
+                if (_tex_ring_pos > 0) {
+                    ImPlot::PlotImage(label.c_str(), tid,
+                        ImPlotPoint(x_min, 0.0),
+                        ImPlotPoint(x_max, static_cast<double>(_tex_ring_pos) * row_dt),
+                        ImVec2(0.0f, 0.0f), ImVec2(1.0f, seam_v));
+                }
+                if (_tex_ring_pos < _tall) {
+                    const std::string label2 = label + "wrap";
+                    ImPlot::PlotImage(label2.c_str(), tid,
+                        ImPlotPoint(x_min, static_cast<double>(_tex_ring_pos) * row_dt),
+                        ImPlotPoint(x_max, static_cast<double>(_tall) * row_dt),
+                        ImVec2(0.0f, seam_v), ImVec2(1.0f, 1.0f));
+                }
+            }
             ImPlot::EndPlot();
         }
     }
@@ -342,22 +582,43 @@ void PlotCSpectrogramBlock::set_sample_rate(size_t sps) {
         _ring_pos   = 0;
         _ring_count = 0;
         for (size_t i = 0; i < _num_inputs; ++i) {
-            std::fill_n(_spectrograms[i], _tall * _n_fft_samples, -147.0f);
+            std::fill_n(_spectrograms[i], _tall * _n_fft_samples, DB_FLOOR);
+            // Row stats must match the cleared ring so the next scale
+            // decision doesn't see stale peaks (GUI-thread data, but cheap to
+            // reset here under the same lock as the ring).
+            std::fill_n(_row_min[i], _tall, DB_FLOOR);
+            std::fill_n(_row_max[i], _tall, DB_FLOOR);
         }
-        // Bump the row generation so the next render() rebuilds _display from
-        // the (now empty) ring instead of keeping the stale image.
+        // Bump the row generation and force a full texture recolor+upload so
+        // the next render() rebuilds from the (now empty) ring instead of
+        // keeping the stale image.
         ++_row_gen;
+        _tex_full_dirty = true;
     }
     _axis_refit = true;   // re-fit the X axis to the new span on next render()
 }
 
-// GUI-thread-only; see header. _display and _display_valid_rows are owned by
-// the GUI thread (written only in render()), so no lock is taken here.
+// GUI-thread-only; see header. render() no longer keeps a reordered display
+// copy, so the newest-first image is assembled here on demand, straight from
+// the chronological ring under _spectrogram_mutex (snapshots are rare; this
+// O(tall * n_fft) copy is off the per-frame render path).
 bool PlotCSpectrogramBlock::export_display(size_t channel, std::vector<float>& data,
                                            size_t& rows, size_t& cols,
                                            size_t& frames_per_row_out, size_t& sps_out) const {
-    if (channel >= _num_inputs || _display_valid_rows == 0) return false;
-    data.assign(_display[channel], _display[channel] + _tall * _n_fft_samples);
+    if (channel >= _num_inputs) return false;
+    std::lock_guard<std::mutex> lock(_spectrogram_mutex);
+    if (_ring_count == 0) return false;
+    data.resize(_tall * _n_fft_samples);
+    for (size_t k = 0; k < _tall; ++k) {
+        float* dst = data.data() + k * _n_fft_samples;
+        if (k < _ring_count) {
+            size_t src_row = (_ring_pos + _tall - 1 - k) % _tall;
+            memcpy(dst, _spectrograms[channel] + src_row * _n_fft_samples,
+                   _n_fft_samples * sizeof(float));
+        } else {
+            std::fill_n(dst, _n_fft_samples, DB_FLOOR);
+        }
+    }
     rows               = _tall;
     cols               = _n_fft_samples;
     frames_per_row_out = _frames_per_row.load(std::memory_order_relaxed);
