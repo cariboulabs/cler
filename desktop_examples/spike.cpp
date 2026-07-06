@@ -22,6 +22,7 @@
 #include "power_detector.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -89,21 +90,29 @@ struct ControlPanel {
                  const SpikeArgs& a)
         : _src(src), _trig(trig),
           _freq_mhz(static_cast<float>(a.freq / 1e6)),
+          _freq_anchor_mhz(_freq_mhz),
           _gain_db(static_cast<float>(a.gain)),
           _rate_hz(a.rate),
           _max_window_ms(trig->max_window_ms()) {}
 
     // A slider (or drag) that turns into a typed input box on double-click.
     // Returns true on the frames the value changed.
+    // [vmin, vmax] bounds the slider/drag; the optional [tmin, tmax] bounds the
+    // TYPED value instead (defaults to vmin/vmax when NaN). This lets a control
+    // show a narrow slider window while still accepting any value by typing
+    // (used by the center-frequency slider below).
     bool editable(const char* label, float* v, float vmin, float vmax,
-                  const char* fmt, bool use_slider, float drag_speed = 1.0f) {
+                  const char* fmt, bool use_slider, float drag_speed = 1.0f,
+                  float tmin = NAN, float tmax = NAN) {
+        if (std::isnan(tmin)) tmin = vmin;
+        if (std::isnan(tmax)) tmax = vmax;
         bool changed = false;
         if (_editing == label) {
             if (_editing_start) { ImGui::SetKeyboardFocusHere(); _editing_start = false; }
             changed = ImGui::InputFloat(label, v, 0.0f, 0.0f, fmt,
                                         ImGuiInputTextFlags_EnterReturnsTrue);
             if (ImGui::IsItemDeactivated()) {        // Enter or clicked away: commit
-                *v = std::min(std::max(*v, vmin), vmax);
+                *v = std::min(std::max(*v, tmin), tmax);
                 _editing = nullptr;
                 changed = true;
             }
@@ -140,11 +149,19 @@ struct ControlPanel {
         ImGui::Text("Sample rate (span): %.3f MS/s  [fixed]", _rate_hz / 1e6);
 
         // Apply freq/gain only when the user finishes editing, not every tick,
-        // so we don't spam the USRP with retunes. Drag to adjust, or double-click
-        // to type an exact value. Center freq drags (a 0-6 GHz slider is too coarse).
+        // so we don't spam the USRP with retunes. Center frequency is a slider
+        // over a narrow window (anchor +/- 25 MHz) since a full 0-6 GHz slider is
+        // far too coarse; double-click to type ANY value in [0, 6000] MHz. The
+        // anchor (and thus the slider range) is recomputed ONLY when an edit
+        // commits -- recentering mid-drag would move the value->pixel mapping
+        // under the cursor and feed back on itself.
+        const float freq_lo = std::max(0.0f,    _freq_anchor_mhz - 25.0f);
+        const float freq_hi = std::min(6000.0f, _freq_anchor_mhz + 25.0f);
         ImGui::SetNextItemWidth(180);
-        editable("Center (MHz)", &_freq_mhz, 0.0f, 6000.0f, "%.3f", /*slider=*/false, 0.1f);
+        editable("Center (MHz)", &_freq_mhz, freq_lo, freq_hi, "%.3f",
+                 /*slider=*/true, 0.1f, /*tmin=*/0.0f, /*tmax=*/6000.0f);
         bool freq_done = ImGui::IsItemDeactivatedAfterEdit();
+        if (freq_done) _freq_anchor_mhz = _freq_mhz;   // recenter for next time
         ImGui::SetNextItemWidth(180);
         editable("Gain (dB)", &_gain_db, 0.0f, 76.0f, "%.1f", /*slider=*/true);
         bool gain_done = ImGui::IsItemDeactivatedAfterEdit();
@@ -230,6 +247,7 @@ struct ControlPanel {
         }
         // A saved window may exceed this session's allocated max (different rate).
         if (_window_ms > _max_window_ms) _window_ms = _max_window_ms;
+        _freq_anchor_mhz = _freq_mhz;   // center the freq slider on the saved value
         return true;
     }
 
@@ -284,6 +302,9 @@ private:
     Trig* _trig;
 
     float  _freq_mhz;
+    // Center of the freq slider's +/- 25 MHz window; moved only on commit (see
+    // render()). Re-seeded after load() so it starts on the saved frequency.
+    float  _freq_anchor_mhz;
     float  _gain_db;
     double _rate_hz;
 
