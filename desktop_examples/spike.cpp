@@ -308,24 +308,29 @@ struct ControlPanel {
 
         if (changed) push_trigger_config();
 
-        // Zero-span channel bandwidth: a decimating channel selector ahead of
-        // the power detector. Applied on edit-commit like freq/gain (typed
-        // exact values matter more than dragging here, hence a drag box). A
-        // commit is treated exactly like a rate change for the trigger path:
-        // the trigger runs at the DECIMATED rate, so push the decimator config
-        // FIRST, then re-push the trigger with the new detection rate.
+        // Zero-span channel filter: a decimating channel selector ahead of the
+        // power detector, OFF by default behind an explicit checkbox. While
+        // unchecked the detector sees the raw full-rate stream (true bypass,
+        // no filter object in the path, zero added CPU). Both the toggle and
+        // a BW commit are treated exactly like a rate change for the trigger
+        // path: the trigger runs at the DETECTION rate (decimated when the
+        // filter is on, the device rate when off), so push the decimator
+        // config FIRST, then re-push the trigger with the new detection rate.
+        const bool filter_toggled = ImGui::Checkbox("Filter", &_zs_filter_on);
+        help("Enable the zero-span channel-selection filter. Off (default): "
+             "the power trace sees the raw full-rate I/Q stream, exactly as "
+             "without a filter. On: the stream is decimated to the bandwidth "
+             "below before the power is computed.");
+        ImGui::BeginDisabled(!_zs_filter_on);
         ImGui::SetNextItemWidth(180);
         editable("Zero-span BW (MHz)", &_zs_bw_mhz, min_zs_bw_mhz(),
                  static_cast<float>(_rate_hz / 1e6), "%.4f",
                  /*slider=*/false, /*drag_speed=*/0.01f);
-        if (ImGui::IsItemDeactivatedAfterEdit()) {
-            clamp_zs_bw();
-            push_power_config();
-            refresh_trigger_window();
-            push_trigger_config();
-        }
+        const bool bw_committed = ImGui::IsItemDeactivatedAfterEdit();
         ImGui::SameLine();
-        {
+        if (!_zs_filter_on) {
+            ImGui::TextDisabled("(off)");
+        } else {
             const size_t R = PowerDet::decimation_for(zs_bw_hz(), _rate_hz);
             if (R <= 1) {
                 ImGui::TextDisabled("(bypass)");
@@ -335,15 +340,22 @@ struct ControlPanel {
                 else           ImGui::TextDisabled("eff. %.3f MHz", eff / 1e6);
             }
         }
+        ImGui::EndDisabled();
+        if (filter_toggled || bw_committed) {
+            clamp_zs_bw();
+            push_power_config();
+            refresh_trigger_window();
+            push_trigger_config();
+        }
         help("Channel (detection) bandwidth of the zero-span power trace: the "
              "I/Q stream is decimated by an integer factor R with an 80 dB "
              "anti-alias lowpass, so exactly this two-sided width around the "
              "center survives and off-channel bursts are rejected before the "
              "power is computed. The achieved value snaps to sample_rate/R -- "
-             "'eff.' shows what is actually applied. Set to the full sample "
-             "rate (default) to bypass. The trigger then runs at the decimated "
-             "rate, so narrower bandwidths allow LONGER capture windows. A "
-             "capture straddling a bandwidth change may be garbled once.");
+             "'eff.' shows what is actually applied. The trigger then runs at "
+             "the decimated rate, so narrower bandwidths allow LONGER capture "
+             "windows. A capture straddling a toggle or bandwidth change may "
+             "be garbled once.");
 
         ImGui::Dummy(ImVec2(0, 6));
         if (ImGui::Button("Arm / Re-arm")) _trig->rearm();
@@ -371,10 +383,13 @@ struct ControlPanel {
     float  freq_mhz() const { return _freq_mhz; }
     double rate_hz()  const { return _rate_hz; }
 
-    // The rate of the power stream the TRIGGER sees: device rate / decimation.
+    // The rate of the power stream the TRIGGER sees: device rate / decimation
+    // when the zero-span filter is enabled, the plain device rate otherwise.
     // All trigger-side ms<->samples math must use this, not the device rate.
     size_t detection_rate() const {
-        const size_t R = PowerDet::decimation_for(zs_bw_hz(), _rate_hz);
+        const size_t R = _zs_filter_on
+                       ? PowerDet::decimation_for(zs_bw_hz(), _rate_hz)
+                       : 1;
         double det = std::round(_rate_hz / static_cast<double>(R));
         if (det < 1.0) det = 1.0;
         return static_cast<size_t>(det);
@@ -450,10 +465,13 @@ struct ControlPanel {
             else if (key == "history_s")      f >> _history_s;
             else if (key == "zs_bw_hz") {
                 // Stored in Hz for backward compatibility; the widget is MHz.
+                // NOTE: this key alone never activates filtering -- only the
+                // zs_filter_on checkbox key does (old confs stay unfiltered).
                 float bw_hz = 0.0f;
                 f >> bw_hz;
                 _zs_bw_mhz = bw_hz / 1e6f;
             }
+            else if (key == "zs_filter_on")   f >> _zs_filter_on;
             else if (key == "rate_hz")        f >> _loaded_rate_hz;
             else if (key == "snapshot_dir") {
                 // Value is the REST OF THE LINE (may contain spaces), not one
@@ -492,6 +510,7 @@ struct ControlPanel {
           << "show_spectrogram " << show_spectrogram << "\n"
           << "history_s "        << fpr_to_history(_sgram->frames_per_row()) << "\n"
           << "zs_bw_hz "         << static_cast<double>(_zs_bw_mhz) * 1e6 << "\n"
+          << "zs_filter_on "     << _zs_filter_on    << "\n"
           << "rate_hz "          << _rate_hz         << "\n";
         if (!_snapshot_dir.empty())
             f << "snapshot_dir " << _snapshot_dir << "\n";
@@ -612,7 +631,12 @@ private:
     }
 
     void push_power_config() {
-        _power->set_channel_bandwidth(zs_bw_hz(), _rate_hz);
+        // Filter off = request the full rate: decimation_for() snaps that to
+        // R = 1, a true bypass (no decimator object in the DSP path). Both
+        // directions of the toggle go through the same staged/generation
+        // reconfig as a bandwidth change.
+        const double bw = _zs_filter_on ? zs_bw_hz() : _rate_hz;
+        _power->set_channel_bandwidth(bw, _rate_hz);
     }
 
     void push_trigger_config() {
@@ -646,6 +670,8 @@ private:
     float  _history_s = 0.0f;   // waterfall depth (s) from conf/default; only
                                 // used to seed the spectrogram in apply_all()
     float  _zs_bw_mhz;          // zero-span channel bandwidth (MHz); rate = bypass
+    bool   _zs_filter_on = false;   // filter engages ONLY when this is checked
+                                    // (conf key zs_filter_on; old confs = off)
 
     // Trigger UI state (defaults mirror the TriggerBlock constructor below).
     float _threshold_db   = -40.0f;
