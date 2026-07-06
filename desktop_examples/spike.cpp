@@ -172,21 +172,6 @@ struct ControlPanel {
         help("Which windows to display. All views run continuously; these only "
              "toggle visibility, so nothing needs restarting.");
 
-        // Waterfall depth in seconds. Mapped onto the spectrogram's frames/row
-        // (how many FFT frames are peak-held per row, clamped to [1, 256]), so
-        // the achieved depth is quantized -- show what was actually applied.
-        ImGui::SetNextItemWidth(120);
-        if (editable("History (s)", &_history_s,
-                     fpr_to_history(1), fpr_to_history(256), "%.1f",
-                     /*slider=*/false, /*drag_speed=*/1.0f)) {
-            push_spectrogram_config();
-        }
-        ImGui::SameLine();
-        ImGui::Text("(actual %.1f s)", fpr_to_history(history_to_fpr(_history_s)));
-        help("Total time span of the waterfall. Larger values peak-hold more FFT "
-             "frames into each row, so long histories keep catching short bursts "
-             "but with coarser time resolution per row.");
-
         if (ImGui::Button("Arrange windows")) arrange_requested = true;
         help("Re-tile the visible plot windows into equal-height rows next to "
              "the control panel. Also happens automatically when the View "
@@ -391,7 +376,11 @@ struct ControlPanel {
         push_power_config();
         refresh_trigger_window();
         push_trigger_config();
-        push_spectrogram_config();
+        // Waterfall depth: seed the spectrogram's frames-per-row once from the
+        // saved (or default) seconds value. From here on the depth is owned by
+        // the History slider in the spectrogram window itself; the panel only
+        // reads it back at save() time.
+        _sgram->set_frames_per_row(history_to_fpr(_history_s));
         // Saved sample rate (conf key rate_hz): staged LAST through the same
         // live path as a typed change, so it lands as the newest pending
         // config (request_configure keeps only the latest) and the per-frame
@@ -478,7 +467,7 @@ struct ControlPanel {
           << "show_scope "       << show_scope       << "\n"
           << "show_spectrum "    << show_spectrum    << "\n"
           << "show_spectrogram " << show_spectrogram << "\n"
-          << "history_s "        << _history_s       << "\n"
+          << "history_s "        << fpr_to_history(_sgram->frames_per_row()) << "\n"
           << "zs_bw_hz "         << static_cast<double>(_zs_bw_mhz) * 1e6 << "\n"
           << "rate_hz "          << _rate_hz         << "\n";
         if (!_snapshot_dir.empty())
@@ -552,12 +541,13 @@ private:
         const size_t sps = static_cast<size_t>(actual_hz + 0.5);
         _spectrum->set_sample_rate(sps);
         _sgram->set_sample_rate(sps);
-
-        // History(s) -> frames/row mapping depends on the rate.
-        push_spectrogram_config();
+        // The spectrogram's own History slider (seconds) rescales itself from
+        // the new rate; frames-per-row is left as-is on purpose.
     }
 
-    // History depth (s) <-> spectrogram frames/row. One waterfall row spans
+    // History depth (s) <-> spectrogram frames/row, used only to translate the
+    // conf key `history_s` at load/save time (the live control is the History
+    // slider inside the spectrogram window). One waterfall row spans
     // fpr * n_fft / sps seconds and the ring holds `tall` rows.
     size_t history_to_fpr(float history_s) const {
         double fpr = std::round(static_cast<double>(history_s) * _rate_hz
@@ -571,10 +561,6 @@ private:
         return static_cast<float>(static_cast<double>(fpr)
                                   * static_cast<double>(_n_fft)
                                   * static_cast<double>(_sgram_tall) / _rate_hz);
-    }
-
-    void push_spectrogram_config() {
-        _sgram->set_frames_per_row(history_to_fpr(_history_s));
     }
 
     // Requested zero-span bandwidth in Hz (the widget shows MHz).
@@ -634,7 +620,8 @@ private:
     bool   _rate_from_cli;          // -r given: CLI wins over the saved rate
     size_t _n_fft;
     size_t _sgram_tall;
-    float  _history_s = 0.0f;   // waterfall depth in seconds (set in ctor)
+    float  _history_s = 0.0f;   // waterfall depth (s) from conf/default; only
+                                // used to seed the spectrogram in apply_all()
     float  _zs_bw_mhz;          // zero-span channel bandwidth (MHz); rate = bypass
 
     // Trigger UI state (defaults mirror the TriggerBlock constructor below).
@@ -888,8 +875,10 @@ int main(int argc, char** argv) {
     const size_t waterfall_tall = 2000;   // rows of waterfall history
     PlotCSpectrogramBlock spectrogram("Spectrogram", {"I/Q"},
         static_cast<size_t>(args.rate), args.fft, waterfall_tall);
-    // History depth (frames/row) is owned by the panel: default ~8 frames/row,
-    // overridden by the `history_s` conf key, applied via panel.apply_all().
+    // History depth (frames/row) is owned by the History slider inside the
+    // spectrogram window; the panel only seeds it once (default ~8 frames/row,
+    // overridden by the `history_s` conf key) via panel.apply_all() and reads
+    // it back at save() time.
 
     trigger.set_initial_window(380.0f, 10.0f, 1100.0f, 430.0f);
     spectrum.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);

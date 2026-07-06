@@ -1,5 +1,6 @@
 #include "plot_cspectrogram.hpp"
 #include "implot.h"
+#include <cmath>
 #include <cstring>
 
 PlotCSpectrogramBlock::PlotCSpectrogramBlock(const char*name,
@@ -216,25 +217,45 @@ void PlotCSpectrogramBlock::render() {
         _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
     }
 
-    // Time-span control: how many FFT frames are peak-held into one row. This
-    // stretches the total history shown without reallocating the ring.
+    // Time-span (history) control, expressed in SECONDS. Under the hood it
+    // still sets frames-per-row (how many FFT frames are peak-held into one
+    // row, in [1, 256]) -- one row spans fpr * n_fft / sps seconds and the
+    // ring holds _tall rows, so the total on-screen history is
+    // fpr * n_fft * tall / sps. The committed slider value is quantized back
+    // onto the integer frames-per-row, so the grab snaps to representable
+    // depths. Bounds and the displayed value are recomputed every frame from
+    // the CURRENT frames-per-row and sample rate (both can change live).
     ImGui::SameLine();
     int fpr = static_cast<int>(_frames_per_row.load());
-    ImGui::SetNextItemWidth(140.0f);
-    if (ImGui::SliderInt("frames/row", &fpr, 1, 256, "%d", ImGuiSliderFlags_Logarithmic)) {
-        _frames_per_row.store(static_cast<size_t>(fpr < 1 ? 1 : fpr));
-    }
     if (_sps > 0) {
-        float span_s = static_cast<float>(_tall) * static_cast<float>(fpr)
-                     * static_cast<float>(_n_fft_samples) / static_cast<float>(_sps);
-        ImGui::SameLine();
-        ImGui::Text("~%.1f s history", span_s);
+        const float sec_per_step = static_cast<float>(_tall)
+                                 * static_cast<float>(_n_fft_samples)
+                                 / static_cast<float>(_sps);
+        float shown = static_cast<float>(fpr) * sec_per_step;
+        ImGui::SetNextItemWidth(180.0f);
+        if (ImGui::SliderFloat("History", &shown, sec_per_step,
+                               256.0f * sec_per_step, "%.1f s",
+                               ImGuiSliderFlags_Logarithmic)) {
+            long n = std::lround(shown / sec_per_step);
+            if (n < 1)   n = 1;
+            if (n > 256) n = 256;
+            fpr = static_cast<int>(n);
+            _frames_per_row.store(static_cast<size_t>(fpr));
+        }
+    } else {
+        // Sample rate unknown: seconds are meaningless, edit frames/row raw.
+        ImGui::SetNextItemWidth(140.0f);
+        if (ImGui::SliderInt("History (frames/row)", &fpr, 1, 256, "%d",
+                             ImGuiSliderFlags_Logarithmic)) {
+            if (fpr < 1) fpr = 1;
+            _frames_per_row.store(static_cast<size_t>(fpr));
+        }
     }
 
     // Seconds per waterfall row at the CURRENT frames/row setting. Rows already
     // in the ring may have been produced under a different setting, so the time
     // axis is exact only for rows written since the last change -- the same
-    // caveat as the "~N s history" text above. Falls back to row units if the
+    // caveat as the History slider above. Falls back to row units if the
     // sample rate is unknown.
     const double row_dt = (_sps > 0)
         ? static_cast<double>(fpr) * static_cast<double>(_n_fft_samples)
