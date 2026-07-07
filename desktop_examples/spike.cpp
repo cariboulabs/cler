@@ -154,6 +154,49 @@ struct ControlPanel {
         return changed;
     }
 
+    // A value with NO slider and NO drag: it is only displayed, and a
+    // double-click turns it into a typed input box (committed on Enter or when
+    // focus leaves). Same _editing token mechanism as editable(); the typed
+    // value is clamped to [vmin, vmax]. Returns true on the frame it commits.
+    bool grid_field(const char* label, float* v, const char* fmt,
+                    float vmin, float vmax) {
+        bool changed = false;
+        if (_editing == label) {
+            if (_editing_start) { ImGui::SetKeyboardFocusHere(); _editing_start = false; }
+            ImGui::SetNextItemWidth(120);
+            ImGui::InputFloat(label, v, 0.0f, 0.0f, fmt,
+                              ImGuiInputTextFlags_EnterReturnsTrue);
+            if (ImGui::IsItemDeactivated()) {        // Enter or clicked away: commit
+                *v = std::min(std::max(*v, vmin), vmax);
+                _editing = nullptr;
+                changed = true;
+            }
+        } else {
+            // Read-only display as a button; double-click it to start editing.
+            // The button's ID must DIFFER from the InputFloat's (whose ID is
+            // `label`): if they shared an ID, the button's mouse-down/active
+            // state would carry over to the InputFloat on the handoff frame and
+            // deactivate it instantly, so it could never be typed into. The
+            // "_btn" suffix after ### gives it a distinct, value-independent ID;
+            // SetKeyboardFocusHere() then activates the InputFloat purely via
+            // keyboard focus, independent of the (now-vanished) button.
+            char btn[96];
+            int n = std::snprintf(btn, sizeof(btn), fmt, static_cast<double>(*v));
+            if (n < 0) n = 0;
+            if (n > static_cast<int>(sizeof(btn)) - 1) n = sizeof(btn) - 1;
+            std::snprintf(btn + n, sizeof(btn) - static_cast<size_t>(n),
+                          "###%s_btn", label);
+            ImGui::Button(btn, ImVec2(120, 0));
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                _editing = label;        // string literals have stable addresses
+                _editing_start = true;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(label);
+        }
+        return changed;
+    }
+
     void render() {
         // Rate-change choke point, polled every frame (cheap atomic read). The
         // source applies a requested rate asynchronously on its streaming
@@ -414,6 +457,25 @@ struct ControlPanel {
             push_chan_config();
         }
 
+        ImGui::Dummy(ImVec2(0, 8));
+        ImGui::TextUnformatted("Spectrogram grid");
+        ImGui::Separator();
+        // Line spacing for the waterfall measurement grid. No slider/drag --
+        // double-click a field to type a value. The grid itself is toggled by
+        // the "Grid" checkbox in the Spectrogram window; these only set density.
+        if (grid_field("Grid time (ms)", &_grid_time_ms, "%.1f",
+                       0.1f, 100000.0f))
+            _sgram->set_grid_time_ms(_grid_time_ms);
+        help("Spacing between horizontal (time) grid lines on the waterfall, in "
+             "milliseconds. Double-click the field to type a value. Turn the "
+             "grid on/off with the 'Grid' checkbox in the Spectrogram window.");
+        if (grid_field("Grid freq (MHz)", &_grid_freq_mhz, "%.4f",
+                       0.0001f, 100000.0f))
+            _sgram->set_grid_freq_mhz(_grid_freq_mhz);
+        help("Spacing between vertical (frequency) grid lines on the waterfall, "
+             "in MHz, anchored at the band center (DC). Double-click to type a "
+             "value.");
+
         // Record the panel's ACTUAL rect for the main loop's tiling code (the
         // window auto-sizes, so its width is content-driven, not a constant).
         window_pos  = ImGui::GetWindowPos();
@@ -466,6 +528,12 @@ struct ControlPanel {
         // the History slider in the spectrogram window itself; the panel only
         // reads it back at save() time.
         _sgram->set_frames_per_row(history_to_fpr(_history_s));
+        // Grid overlay: seed the spectrogram from the saved/default settings.
+        // From here the "Grid" checkbox lives in the spectrogram window; the
+        // density stays owned by the control panel (pushed on edit above).
+        _sgram->set_show_grid(_show_grid);
+        _sgram->set_grid_time_ms(_grid_time_ms);
+        _sgram->set_grid_freq_mhz(_grid_freq_mhz);
         // Saved sample rate (conf key rate_hz): staged LAST through the same
         // live path as a typed change, so it lands as the newest pending
         // config (request_configure keeps only the latest) and the per-frame
@@ -525,6 +593,9 @@ struct ControlPanel {
             else if (key == "chan_width_mhz")   f >> _chan_width_mhz;
             else if (key == "chan_span_s")      f >> _chan_span_s;
             else if (key == "history_s")      f >> _history_s;
+            else if (key == "grid_on")        f >> _show_grid;
+            else if (key == "grid_time_ms")   f >> _grid_time_ms;
+            else if (key == "grid_freq_mhz")  f >> _grid_freq_mhz;
             else if (key == "zs_bw_hz") {
                 // Stored in Hz for backward compatibility; the widget is MHz.
                 // NOTE: this key alone never activates filtering -- only the
@@ -574,6 +645,9 @@ struct ControlPanel {
           << "show_spectrum "    << show_spectrum    << "\n"
           << "show_spectrogram " << show_spectrogram << "\n"
           << "history_s "        << fpr_to_history(_sgram->frames_per_row()) << "\n"
+          << "grid_on "          << _sgram->show_grid()  << "\n"
+          << "grid_time_ms "     << _grid_time_ms        << "\n"
+          << "grid_freq_mhz "    << _grid_freq_mhz       << "\n"
           << "zs_bw_hz "         << static_cast<double>(_zs_bw_mhz) * 1e6 << "\n"
           << "zs_filter_on "     << _zs_filter_on    << "\n"
           << "show_channelizer " << show_channelizer << "\n"
@@ -790,6 +864,13 @@ private:
                                 // construction rate while a saved rate_hz was
                                 // staged; on_rate_changed() must redo the seed
                                 // from _history_s when that rate lands
+    // Waterfall measurement grid (conf keys grid_on/grid_time_ms/grid_freq_mhz).
+    // The on/off flag lives in the spectrogram window at runtime; the panel
+    // seeds it in apply_all() and reads it back at save() time. The densities
+    // are owned by the panel and pushed to the block on edit.
+    bool   _show_grid      = false;
+    float  _grid_time_ms   = 100.0f;   // horizontal (time) line spacing, ms
+    float  _grid_freq_mhz  = 1.0f;     // vertical (frequency) line spacing, MHz
     float  _zs_bw_mhz;          // zero-span channel bandwidth (MHz); rate = bypass
     bool   _zs_filter_on = false;   // filter engages ONLY when this is checked
                                     // (conf key zs_filter_on; old confs = off)

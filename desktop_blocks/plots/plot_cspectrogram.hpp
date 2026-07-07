@@ -65,6 +65,19 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
     void   set_frames_per_row(size_t n) { _frames_per_row.store(n < 1 ? 1 : n); }
     size_t frames_per_row() const { return _frames_per_row.load(); }
 
+    // Measurement-grid overlay. All of these are read/written only on the GUI
+    // thread: the "Grid" checkbox lives in this block's own window (render()),
+    // while the line spacing is driven from the control panel. Plain members
+    // are therefore fine (no atomics needed). Spacing is in user units: time
+    // between horizontal lines in MILLISECONDS, frequency between vertical
+    // lines in MHz (anchored at DC / band center).
+    void  set_show_grid(bool on)       { _show_grid = on; }
+    bool  show_grid() const            { return _show_grid; }
+    void  set_grid_time_ms(float ms)   { _grid_time_ms = ms; }
+    float grid_time_ms() const         { return _grid_time_ms; }
+    void  set_grid_freq_mhz(float mhz) { _grid_freq_mhz = mhz; }
+    float grid_freq_mhz() const        { return _grid_freq_mhz; }
+
     // GUI-THREAD-ONLY export of one channel's waterfall: `data` gets rows*cols
     // floats (dB), row-major, NEWEST row first (rows beyond the fill level are
     // padded with the floor value) -- the same image the plot shows. The
@@ -173,6 +186,20 @@ private:
 
     // One-shot X-axis re-fit after set_sample_rate() (GUI thread only).
     bool   _axis_refit = false;
+
+    // Paused-view zoom (GUI thread only). While paused the image is drawn with
+    // the row_dt captured when pausing began, so the frozen capture stays fixed
+    // in true seconds while the Y axis keeps tracking the live History value --
+    // dragging History then zooms the viewport around the pinned data (and its
+    // grid) instead of scaling image and axis together into a static-looking
+    // picture. Reset implicitly whenever a fresh pause is entered.
+    bool   _was_paused    = false;
+    double _paused_row_dt = 0.0;
+
+    // Measurement-grid overlay state (GUI thread only; see the setters above).
+    bool   _show_grid     = false;   // "Grid" checkbox in this window
+    float  _grid_time_ms  = 100.0f;  // horizontal (time) line spacing, ms
+    float  _grid_freq_mhz = 1.0f;    // vertical (frequency) line spacing, MHz
 
     std::atomic<bool> _gui_pause = false;
 };

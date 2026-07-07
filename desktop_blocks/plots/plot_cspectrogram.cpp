@@ -294,6 +294,12 @@ void PlotCSpectrogramBlock::render() {
         }
     }
 
+    // Measurement-grid toggle, sat next to History. The line spacing (time in
+    // ms, frequency in MHz) is set from the control panel; here we only flip it
+    // on/off. The grid is drawn on TOP of the waterfall image below.
+    ImGui::SameLine();
+    ImGui::Checkbox("Grid", &_show_grid);
+
     // Seconds per waterfall row at the CURRENT frames/row setting. Rows already
     // in the ring may have been produced under a different setting, so the time
     // axis is exact only for rows written since the last change -- the same
@@ -303,6 +309,20 @@ void PlotCSpectrogramBlock::render() {
         ? static_cast<double>(fpr) * static_cast<double>(_n_fft_samples)
               / static_cast<double>(_sps)
         : 1.0;
+
+    // While PAUSED, freeze the row_dt the IMAGE is drawn with (captured at the
+    // instant of pausing) while the Y AXIS still tracks the LIVE History value.
+    // The image is thus pinned in true seconds and the viewport zooms around
+    // it: widening History (bigger axis span) shrinks the frozen capture into
+    // the top of a longer window (older time below is empty -- we have no data
+    // there), and shrinking zooms into the most recent slice. Because both the
+    // image and the measurement grid live in the same data-seconds space while
+    // only the axis zooms, the grid stays locked to the data and scales with
+    // it. Live, image and axis share row_dt so the picture just fills the plot.
+    const bool paused = _gui_pause.load(std::memory_order_acquire);
+    if (paused && !_was_paused) _paused_row_dt = row_dt;   // capture on entry
+    _was_paused = paused;
+    const double img_row_dt = paused ? _paused_row_dt : row_dt;
 
     // ---- Waterfall texture maintenance (all GL strictly on this thread) ----
 
@@ -548,16 +568,57 @@ void PlotCSpectrogramBlock::render() {
                 if (_tex_ring_pos > 0) {
                     ImPlot::PlotImage(label.c_str(), tid,
                         ImPlotPoint(x_min, 0.0),
-                        ImPlotPoint(x_max, static_cast<double>(_tex_ring_pos) * row_dt),
+                        ImPlotPoint(x_max, static_cast<double>(_tex_ring_pos) * img_row_dt),
                         ImVec2(0.0f, 0.0f), ImVec2(1.0f, seam_v));
                 }
                 if (_tex_ring_pos < _tall) {
                     const std::string label2 = label + "wrap";
                     ImPlot::PlotImage(label2.c_str(), tid,
-                        ImPlotPoint(x_min, static_cast<double>(_tex_ring_pos) * row_dt),
-                        ImPlotPoint(x_max, static_cast<double>(_tall) * row_dt),
+                        ImPlotPoint(x_min, static_cast<double>(_tex_ring_pos) * img_row_dt),
+                        ImPlotPoint(x_max, static_cast<double>(_tall) * img_row_dt),
                         ImVec2(0.0f, seam_v), ImVec2(1.0f, 1.0f));
                 }
+            }
+
+            // Measurement grid, drawn on top of the (opaque) waterfall image.
+            // Vertical lines mark frequency (spaced grid_freq MHz, anchored at
+            // DC = 0), horizontal lines mark time (spaced grid_time ms, anchored
+            // at t = 0 which is the top of the plot). PlotToPixels maps plot
+            // coords to screen; the per-axis span/count guard skips a
+            // pathologically dense grid (tiny spacing) so we never spam
+            // thousands of AddLine calls.
+            if (_show_grid) {
+                ImDrawList* dl = ImPlot::GetPlotDrawList();
+                const ImPlotRect lim = ImPlot::GetPlotLimits();
+                const ImU32 grid_col = IM_COL32(255, 255, 255, 70);
+                constexpr float thickness = 1.0f;
+                constexpr double MAX_LINES = 2000.0;   // per-axis sanity cap
+                ImPlot::PushPlotClipRect();
+
+                const double f_step = static_cast<double>(_grid_freq_mhz) * 1e6;
+                if (f_step > 0.0 && (lim.X.Max - lim.X.Min) / f_step < MAX_LINES) {
+                    for (double fx = 0.0; fx <= lim.X.Max; fx += f_step) {
+                        dl->AddLine(ImPlot::PlotToPixels(fx, lim.Y.Min),
+                                    ImPlot::PlotToPixels(fx, lim.Y.Max),
+                                    grid_col, thickness);
+                    }
+                    for (double fx = -f_step; fx >= lim.X.Min; fx -= f_step) {
+                        dl->AddLine(ImPlot::PlotToPixels(fx, lim.Y.Min),
+                                    ImPlot::PlotToPixels(fx, lim.Y.Max),
+                                    grid_col, thickness);
+                    }
+                }
+
+                const double t_step = static_cast<double>(_grid_time_ms) / 1e3;
+                const double t_max = std::max(lim.Y.Min, lim.Y.Max);
+                if (t_step > 0.0 && t_max / t_step < MAX_LINES) {
+                    for (double ty = 0.0; ty <= t_max; ty += t_step) {
+                        dl->AddLine(ImPlot::PlotToPixels(lim.X.Min, ty),
+                                    ImPlot::PlotToPixels(lim.X.Max, ty),
+                                    grid_col, thickness);
+                    }
+                }
+                ImPlot::PopPlotClipRect();
             }
             ImPlot::EndPlot();
         }
