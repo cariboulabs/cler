@@ -67,6 +67,17 @@ else()
     message(STATUS "Skipping hackrf_spectrum example because CLER_BUILD_BLOCKS_GUI is OFF")
 endif()
 
+if (CLER_BUILD_BLOCKS_GUI)
+    if (LIBIIO_FOUND)
+        add_executable(pluto_spectrum pluto_spectrum.cpp)
+        target_link_libraries(pluto_spectrum PRIVATE cler::desktop_blocks)
+    else()
+        message(STATUS "Skipping pluto_spectrum example because LIBIIO_FOUND is OFF")
+    endif()
+else()
+    message(STATUS "Skipping pluto_spectrum example because CLER_BUILD_BLOCKS_GUI is OFF")
+endif()
+
 add_executable(selectable_blocks selectable_blocks.cpp)
 target_link_libraries(selectable_blocks PRIVATE cler::desktop_blocks)
 

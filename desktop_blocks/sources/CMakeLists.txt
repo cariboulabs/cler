@@ -59,6 +59,21 @@ else()
   message(STATUS "  Install with: sudo apt-get install libuhd-dev (Ubuntu/Debian)")
 endif()
 
+# === libiio (PlutoSDR / AD936x) ===
+pkg_check_modules(LIBIIO libiio)
+if(LIBIIO_FOUND)
+  message(STATUS "libiio found: ${LIBIIO_LIBRARIES}")
+
+  target_include_directories(blocks_sources INTERFACE ${LIBIIO_INCLUDE_DIRS})
+  target_link_libraries(blocks_sources INTERFACE ${LIBIIO_LIBRARIES})
+  target_compile_definitions(blocks_sources INTERFACE CLER_HAS_LIBIIO)
+
+  set(LIBIIO_FOUND ${LIBIIO_FOUND} CACHE INTERNAL "libiio found")
+else()
+  message(WARNING "libiio not found: SourcePlutoBlock will not be available")
+  message(STATUS "  Install with: sudo apt-get install libiio-dev (Ubuntu/Debian)")
+endif()
+
 # === SoapySDR ===
 pkg_check_modules(SOAPYSDR SoapySDR)
 if(SOAPYSDR_FOUND)

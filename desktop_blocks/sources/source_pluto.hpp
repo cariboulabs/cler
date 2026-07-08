@@ -1,0 +1,162 @@
+#pragma once
+#include "cler.hpp"
+
+#ifdef __has_include
+    #if __has_include(<iio.h>)
+        #include <iio.h>
+    #else
+        #error "libiio header not found. Please install libiio-dev package."
+    #endif
+#endif
+
+#include <complex>
+#include <cstdint>
+#include <stdexcept>
+#include <string>
+#include <iostream>
+
+// PlutoSDR (and any AD936x/IIO device) RX source via libiio.
+// Works with the same code over any libiio URI:
+//   "ip:192.168.2.1"  - Pluto over USB-ethernet / network
+//   "usb:"            - Pluto over raw USB
+//   "local:"          - running ON the Pluto itself
+struct SourcePlutoBlock : public cler::BlockBase {
+    SourcePlutoBlock(const char* name,
+                     const char* uri,          // e.g. "ip:192.168.2.1"
+                     long long freq_hz,
+                     long long samp_rate_hz,
+                     double gain_db = -1.0,    // <0 => slow_attack AGC, >=0 => manual gain
+                     long long bandwidth_hz = 0, // 0 => same as sample rate
+                     size_t buffer_size = 1 << 14)
+        : cler::BlockBase(name),
+          _freq_hz(freq_hz),
+          _samp_rate_hz(samp_rate_hz),
+          _buffer_size(buffer_size)
+    {
+        if (bandwidth_hz == 0) bandwidth_hz = samp_rate_hz;
+
+        _ctx = iio_create_context_from_uri(uri);
+        if (!_ctx) {
+            throw std::runtime_error(std::string("Pluto: failed to create IIO context for uri: ") + uri);
+        }
+
+        iio_device* phy = iio_context_find_device(_ctx, "ad9361-phy");
+        iio_device* rx_dev = iio_context_find_device(_ctx, "cf-ad9361-lpc");
+        if (!phy || !rx_dev) {
+            iio_context_destroy(_ctx);
+            throw std::runtime_error("Pluto: ad9361-phy / cf-ad9361-lpc not found (not a Pluto?)");
+        }
+
+        // RX LO frequency lives on output channel altvoltage0 of the phy
+        iio_channel* lo = iio_device_find_channel(phy, "altvoltage0", true);
+        // RX chain config lives on input channel voltage0 of the phy
+        iio_channel* chn = iio_device_find_channel(phy, "voltage0", false);
+        if (!lo || !chn) {
+            iio_context_destroy(_ctx);
+            throw std::runtime_error("Pluto: phy channels not found");
+        }
+
+        if (iio_channel_attr_write_longlong(lo, "frequency", freq_hz) < 0 ||
+            iio_channel_attr_write_longlong(chn, "sampling_frequency", samp_rate_hz) < 0 ||
+            iio_channel_attr_write_longlong(chn, "rf_bandwidth", bandwidth_hz) < 0) {
+            iio_context_destroy(_ctx);
+            throw std::runtime_error("Pluto: failed to set freq/rate/bandwidth");
+        }
+
+        if (gain_db < 0.0) {
+            iio_channel_attr_write(chn, "gain_control_mode", "slow_attack");
+        } else {
+            iio_channel_attr_write(chn, "gain_control_mode", "manual");
+            iio_channel_attr_write_double(chn, "hardwaregain", gain_db);
+        }
+
+        // Enable the two RX streaming channels (I and Q) and create the buffer
+        _rx_i = iio_device_find_channel(rx_dev, "voltage0", false);
+        _rx_q = iio_device_find_channel(rx_dev, "voltage1", false);
+        if (!_rx_i || !_rx_q) {
+            iio_context_destroy(_ctx);
+            throw std::runtime_error("Pluto: RX streaming channels not found");
+        }
+        iio_channel_enable(_rx_i);
+        iio_channel_enable(_rx_q);
+
+        _buf = iio_device_create_buffer(rx_dev, buffer_size, false);
+        if (!_buf) {
+            iio_context_destroy(_ctx);
+            throw std::runtime_error("Pluto: failed to create RX buffer");
+        }
+
+        std::cout << "SourcePlutoBlock: Initialized (" << uri << ")\n"
+                  << "  Frequency: " << freq_hz / 1e6 << " MHz\n"
+                  << "  Sample rate: " << samp_rate_hz / 1e6 << " MSPS\n"
+                  << "  Bandwidth: " << bandwidth_hz / 1e6 << " MHz\n"
+                  << "  Gain: " << (gain_db < 0.0 ? std::string("AGC (slow_attack)")
+                                                  : std::to_string(gain_db) + " dB")
+                  << std::endl;
+    }
+
+    ~SourcePlutoBlock() {
+        if (_buf) iio_buffer_destroy(_buf);
+        if (_ctx) iio_context_destroy(_ctx);
+    }
+
+    SourcePlutoBlock(const SourcePlutoBlock&) = delete;
+    SourcePlutoBlock& operator=(const SourcePlutoBlock&) = delete;
+
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
+        // Refill from hardware when the previous buffer is fully consumed.
+        // iio_buffer_refill blocks for ~one buffer duration - fine, this block
+        // runs on its own flowgraph thread.
+        if (_consumed >= _available) {
+            ssize_t nbytes = iio_buffer_refill(_buf);
+            if (nbytes < 0) {
+                return cler::Error::ProcedureError;
+            }
+            _available = static_cast<size_t>(nbytes) / (2 * sizeof(int16_t));
+            _consumed = 0;
+        }
+
+        auto [write_ptr, write_size] = out->write_dbf();
+        if (write_ptr == nullptr || write_size == 0) {
+            return cler::Error::NotEnoughSpace;
+        }
+
+        const int16_t* samples = static_cast<const int16_t*>(iio_buffer_start(_buf));
+        size_t n = std::min(_available - _consumed, write_size);
+        for (size_t i = 0; i < n; ++i) {
+            // AD936x delivers 12-bit samples in int16 containers -> scale by 2^11
+            write_ptr[i] = std::complex<float>(
+                samples[2 * (_consumed + i)]     / 2048.0f,
+                samples[2 * (_consumed + i) + 1] / 2048.0f);
+        }
+        _consumed += n;
+        out->commit_write(n);
+        return cler::Empty{};
+    }
+
+    // Getters
+    long long get_frequency() const { return _freq_hz; }
+    long long get_sample_rate() const { return _samp_rate_hz; }
+
+    // Retune while streaming (phy attrs are safe to write at runtime)
+    void set_frequency(long long freq_hz) {
+        iio_device* phy = iio_context_find_device(_ctx, "ad9361-phy");
+        iio_channel* lo = iio_device_find_channel(phy, "altvoltage0", true);
+        if (lo && iio_channel_attr_write_longlong(lo, "frequency", freq_hz) >= 0) {
+            _freq_hz = freq_hz;
+        }
+    }
+
+private:
+    iio_context* _ctx = nullptr;
+    iio_buffer* _buf = nullptr;
+    iio_channel* _rx_i = nullptr;
+    iio_channel* _rx_q = nullptr;
+
+    long long _freq_hz;
+    long long _samp_rate_hz;
+    size_t _buffer_size;
+
+    size_t _available = 0; // samples in the current iio buffer
+    size_t _consumed = 0;  // samples already pushed downstream
+};
