@@ -5,10 +5,8 @@
 #include <cstring>
 #include <cfloat>
 
-// Raw GL for the waterfall texture. Same idiom as gui_manager.cpp: the GLFW
-// header pulls in the platform's GL 1.1 headers (all we need: glGenTextures /
-// glTexSubImage2D / glDeleteTextures), and blocks_gui links OpenGL::GL.
-// glfwGetCurrentContext() is also used to guard texture deletion at shutdown.
+// GLFW pulls in the platform GL headers needed for the waterfall texture
+// (glGenTextures/glTexSubImage2D/glDeleteTextures); blocks_gui links OpenGL::GL.
 #include <GLFW/glfw3.h>
 
 #ifndef GL_CLAMP_TO_EDGE   // GL 1.2 enum; not in every bare gl.h
@@ -121,12 +119,9 @@ PlotCSpectrogramBlock::~PlotCSpectrogramBlock() {
     delete[] _scale_max;
     delete[] _needs_full;
 
-    // GL textures may only be deleted while a GL context is current on this
-    // thread. Some examples construct this block BEFORE GuiManager (e.g.
-    // hackrf_spectrum), so at scope exit the context -- and GLFW itself -- may
-    // already be gone; glfwGetCurrentContext() then returns NULL (it is safe
-    // to call even after glfwTerminate) and we deliberately leak the textures
-    // at process exit rather than crash on a dead context.
+    // Deleting a GL texture needs a current context; some examples construct
+    // this block before GuiManager, so at exit the context may already be
+    // gone -- deliberately leak rather than crash on a dead context.
     if (glfwGetCurrentContext() != nullptr) {
         for (size_t i = 0; i < _num_inputs; ++i) {
             if (_tex[i] != 0) glDeleteTextures(1, &_tex[i]);
@@ -153,9 +148,8 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
         return cler::Error::NotEnoughSamples;
     }
 
-    // When paused (or hidden), just drain the inputs without updating the
-    // spectrogram so the upstream fanout never backs up (which would stall
-    // sibling branches, e.g. the trigger). Drop any partially-filled row.
+    // Paused: drain without updating the spectrogram so upstream fanout never
+    // backs up (would stall sibling branches, e.g. the trigger).
     if (paused) {
         for (size_t i = 0; i < _num_inputs; ++i) {
             in[i].commit_read(frames_avail * _n_fft_samples);
@@ -174,7 +168,6 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
     std::lock_guard<std::mutex> lock(_spectrogram_mutex);
 
     for (size_t frame = 0; frame < frames_avail; ++frame) {
-        // Load one frame from each input (dropping the oldest, then FFT the rest).
         bool do_fft = frame >= frames_to_drop;
         bool first_in_row = (_accum_count == 0);
 
@@ -203,7 +196,6 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
                 float scale = static_cast<float>(_n_fft_samples) * coherent_gain;
                 float scale2 = scale * scale;
 
-                // Peak-hold this frame into the accumulator row for this input.
                 float* acc = _accum[i];
                 for (size_t j = 0; j < _n_fft_samples; ++j) {
                     float re = _liquid_inout[j].real();
@@ -222,10 +214,10 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
             // Flush the peak-held accumulator into a new ring row (O(n_fft),
             // no memmove). All inputs share the same ring head.
             for (size_t i = 0; i < _num_inputs; ++i) {
-                memcpy(_spectrograms[i] + _ring_pos * _n_fft_samples,
+                memcpy(_spectrograms[i] + _ring_write_pos * _n_fft_samples,
                        _accum[i], _n_fft_samples * sizeof(float));
             }
-            _ring_pos = (_ring_pos + 1) % _tall;
+            _ring_write_pos = (_ring_write_pos + 1) % _tall;
             if (_ring_count < _tall) ++_ring_count;
             ++_row_gen;   // tell render() the ring changed (we hold the mutex)
             _accum_count = 0;
@@ -236,10 +228,8 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
 }
 
 void PlotCSpectrogramBlock::render() {
-    // Apply a pending programmatic rect exactly once (Always, then clear the
-    // flag) so the user can still move/resize afterward. The default path
-    // stays FirstUseEver (not Always): Always every frame snapped the window
-    // back to the initial size and blocked manual resizing.
+    // Applied once (Always, then flag cleared) so the user can still move or
+    // resize afterward; Always every frame would re-snap the window.
     if (_pending_rect) {
         ImGui::SetNextWindowPos(_pending_rect_pos, ImGuiCond_Always);
         ImGui::SetNextWindowSize(_pending_rect_size, ImGuiCond_Always);
@@ -257,14 +247,8 @@ void PlotCSpectrogramBlock::render() {
         _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
     }
 
-    // Time-span (history) control, expressed in SECONDS. Under the hood it
-    // still sets frames-per-row (how many FFT frames are peak-held into one
-    // row, in [1, 256]) -- one row spans fpr * n_fft / sps seconds and the
-    // ring holds _tall rows, so the total on-screen history is
-    // fpr * n_fft * tall / sps. The committed slider value is quantized back
-    // onto the integer frames-per-row, so the grab snaps to representable
-    // depths. Bounds and the displayed value are recomputed every frame from
-    // the CURRENT frames-per-row and sample rate (both can change live).
+    // History slider shows seconds but drives integer frames-per-row (1-256);
+    // one row spans fpr * n_fft / sps seconds, total history is that * _tall.
     ImGui::SameLine();
     int fpr = static_cast<int>(_frames_per_row.load());
     if (_sps > 0) {
@@ -292,43 +276,25 @@ void PlotCSpectrogramBlock::render() {
         }
     }
 
-    // Measurement-grid toggle, sat next to History. The line spacing (time in
-    // ms, frequency in MHz) is set from the control panel; here we only flip it
-    // on/off. The grid is drawn on TOP of the waterfall image below.
+    // Grid line spacing is set from the control panel; this only toggles it.
     ImGui::SameLine();
     ImGui::Checkbox("Grid", &_show_grid);
 
-    // Seconds per waterfall row at the CURRENT frames/row setting. Rows already
-    // in the ring may have been produced under a different setting, so the time
-    // axis is exact only for rows written since the last change -- the same
-    // caveat as the History slider above. Falls back to row units if the
-    // sample rate is unknown.
+    // Seconds per row at the CURRENT frames/row setting; exact only for rows
+    // written since the last change. Falls back to row units if sps unknown.
     const double row_dt = (_sps > 0)
         ? static_cast<double>(fpr) * static_cast<double>(_n_fft_samples)
               / static_cast<double>(_sps)
         : 1.0;
 
-    // While PAUSED, freeze the row_dt the IMAGE is drawn with (captured at the
-    // instant of pausing) while the Y AXIS still tracks the LIVE History value.
-    // The image is thus pinned in true seconds and the viewport zooms around
-    // it: widening History (bigger axis span) shrinks the frozen capture into
-    // the top of a longer window (older time below is empty -- we have no data
-    // there), and shrinking zooms into the most recent slice. Because both the
-    // image and the measurement grid live in the same data-seconds space while
-    // only the axis zooms, the grid stays locked to the data and scales with
-    // it. Live, image and axis share row_dt so the picture just fills the plot.
+    // Paused-view zoom contract: see header (_was_paused).
     const bool paused = _gui_pause.load(std::memory_order_acquire);
     if (paused && !_was_paused) _paused_row_dt = row_dt;   // capture on entry
     _was_paused = paused;
     const double img_row_dt = paused ? _paused_row_dt : row_dt;
 
-    // ---- Waterfall texture maintenance (all GL strictly on this thread) ----
-
-    // 256-entry colormap LUT, built once. ImPlot::SampleColormap() goes
-    // through the exact same ColormapData::LerpTable() the old PlotHeatmap
-    // per-cell colorizer used, so colors match up to the 1/256 quantization.
-    // ImGui packs the ImU32 as R,G,B,A bytes in memory, which is precisely
-    // what GL_RGBA + GL_UNSIGNED_BYTE consumes.
+    // ImGui packs ImU32 as R,G,B,A bytes, matching what GL_RGBA +
+    // GL_UNSIGNED_BYTE consumes.
     if (!_lut_built) {
         for (int j = 0; j < 256; ++j) {
             ImVec4 c = ImPlot::SampleColormap(static_cast<float>(j) / 255.0f,
@@ -346,7 +312,7 @@ void PlotCSpectrogramBlock::render() {
         for (size_t i = 0; i < _num_inputs; ++i) {
             glGenTextures(1, &_tex[i]);
             glBindTexture(GL_TEXTURE_2D, _tex[i]);
-            // NEAREST matches PlotHeatmap's hard per-cell rectangles.
+            // NEAREST: hard per-cell rectangles, no interpolation blur.
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -372,12 +338,10 @@ void PlotCSpectrogramBlock::render() {
         if (unseen != 0 || _tex_full_dirty) {
             _row_gen_seen   = _row_gen;
             any_work        = true;
-            _tex_ring_pos   = _ring_pos;
+            _tex_ring_pos   = _ring_write_pos;
             _tex_ring_count = _ring_count;
 
-            // Full recolor+re-upload only on: texture (re)create, ring clear
-            // (set_sample_rate), color-scale rebake (below), or when more
-            // rows arrived than the ring holds.
+            // Full recolor only on (re)create, ring clear, rebake, or overflow.
             const bool full_all = _tex_full_dirty || unseen >= _tall;
             _tex_full_dirty = false;
 
@@ -402,7 +366,7 @@ void PlotCSpectrogramBlock::render() {
                 }
             } else {
                 up_count = unseen;
-                up_start = (_ring_pos + _tall - unseen) % _tall;
+                up_start = (_ring_write_pos + _tall - unseen) % _tall;
                 for (size_t j = 0; j < up_count; ++j) {
                     const size_t r = (up_start + j) % _tall;
                     for (size_t i = 0; i < _num_inputs; ++i) {
@@ -418,13 +382,10 @@ void PlotCSpectrogramBlock::render() {
                 }
             }
 
-            // Color scale: PlotHeatmap auto-scaled to the data min/max every
-            // frame (scale_min == scale_max == 0). Baked texels cannot follow
-            // a per-frame drift without a full re-upload each frame, so the
-            // scale gets a MARGIN_DB pad and hysteresis: rebake (full recolor)
-            // only when data leaves the baked range or the range shrank by
-            // more than the slack. Unwritten rows count as DB_FLOOR, exactly
-            // like the old padded display buffer did.
+            // Baked texels can't follow a per-frame min/max drift without a
+            // full re-upload, so the scale gets a dB margin and hysteresis:
+            // rebake only when data leaves the baked range or shrinks by more
+            // than the slack.
             constexpr float MARGIN_DB = 3.0f;
             constexpr float SHRINK_SLACK_DB = 6.0f;
             for (size_t i = 0; i < _num_inputs; ++i) {
@@ -436,8 +397,7 @@ void PlotCSpectrogramBlock::render() {
                 bool rescale;
                 float new_min, new_max;
                 if (gmin == gmax) {
-                    // All data equal (e.g. empty ring): PlotHeatmap drew a
-                    // solid rect in colormap color 0; flat scale does the same.
+                    // Flat data (e.g. empty ring): draw solid colormap color 0.
                     rescale = !(_scale_min[i] == _scale_max[i] && _scale_min[i] == gmin);
                     new_min = new_max = gmin;
                 } else {
@@ -457,9 +417,7 @@ void PlotCSpectrogramBlock::render() {
                 _needs_full[i] = full_all || rescale;
             }
 
-            // Copy the needed dB rows out; colorization happens after unlock.
-            // Incremental rows keep their ring offsets inside _stage so the
-            // colorizer can index both the same way.
+            // Copy dB rows out here; colorization happens after unlock.
             for (size_t i = 0; i < _num_inputs; ++i) {
                 if (_needs_full[i]) {
                     memcpy(_stage[i], _spectrograms[i],
@@ -477,9 +435,8 @@ void PlotCSpectrogramBlock::render() {
     }
 
     if (any_work) {
-        // Colorize staged dB rows through the LUT and upload in place. A
-        // contiguous ring span [row0, row0+nrows) maps to the same rows of
-        // the texture (texture row == ring row).
+        // Texture row == ring row, so a contiguous ring span [row0, row0+nrows)
+        // maps directly onto the same texture rows.
         auto colorize_upload = [&](size_t i, size_t row0, size_t nrows) {
             const float smin = _scale_min[i];
             const float smax = _scale_max[i];
@@ -525,19 +482,9 @@ void PlotCSpectrogramBlock::render() {
         glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prev_tex));
     }
 
-    // ---- Draw: the chronological ring as two quads split at the seam ----
-    // Ring row r has age k = (ring_pos - 1 - r) mod tall (k = 0 newest) and
-    // occupies y in [k, k+1] * row_dt -- identical to what PlotHeatmap drew
-    // from the reordered buffer (its row 0 sat against bounds_max.y = 0).
-    //   Rows [0, ring_pos)    = ages ring_pos-1 .. 0 -> y in [0, ring_pos*row_dt],
-    //                           texture v = 0 at the TOP of that span;
-    //   Rows [ring_pos, tall) = ages tall-1 .. ring_pos
-    //                           -> y in [ring_pos*row_dt, tall*row_dt],
-    //                           texture v = ring_pos/tall at the TOP.
-    // PlotImage anchors uv0 at (bounds_min.x, bounds_max.y), i.e. the top-left
-    // in plot coords, which is exactly that mapping. Unwritten rows hold
-    // DB_FLOOR texels, so they render as the same floor-colored padding the
-    // old display buffer had.
+    // Draw: the chronological ring as two PlotImage quads split at the seam
+    // (_tex_ring_pos), since PlotImage's uv0 anchors at the plot's top-left
+    // and ring row age increases downward from the write head.
     const double x_min = -static_cast<double>(_sps) / 2.0;
     const double x_max =  static_cast<double>(_sps) / 2.0;
     const float  seam_v = static_cast<float>(_tex_ring_pos) / static_cast<float>(_tall);
@@ -545,16 +492,12 @@ void PlotCSpectrogramBlock::render() {
     for (size_t i = 0; i < _num_inputs; ++i) {
         if (ImPlot::BeginPlot(_signal_labels[i].c_str(), ImVec2(-1, -1))) {
             ImPlot::SetupAxes("Frequency (Hz)", "Time (s)", x_flags, y_flags);
-            // Default cond is Once, which would pin the axis to the span at
-            // first render; after set_sample_rate() a one-shot Always re-fits
-            // it to the new span (safe: the axis is Lock'ed, so Always cannot
-            // fight user pan/zoom).
+            // One-shot Always re-fit after set_sample_rate(); axis is Lock'ed so
+            // Always cannot fight user pan/zoom.
             ImPlot::SetupAxisLimits(ImAxis_X1, x_min, x_max,
                                     _axis_refit ? ImPlotCond_Always : ImPlotCond_Once);
-            // Elapsed time in seconds. frames/row can change live, which
-            // rescales the axis, so this must be ImPlotCond_Always -- safe
-            // here because the axis is Lock'ed, so Always cannot fight user
-            // pan/zoom.
+            // Always: frames/row can change live and rescales the axis (safe,
+            // axis is Lock'ed).
             ImPlot::SetupAxisLimits(ImAxis_Y1, static_cast<double>(_tall) * row_dt, 0.0,
                                     ImPlotCond_Always);
 
@@ -578,13 +521,8 @@ void PlotCSpectrogramBlock::render() {
                 }
             }
 
-            // Measurement grid, drawn on top of the (opaque) waterfall image.
-            // Vertical lines mark frequency (spaced grid_freq MHz, anchored at
-            // DC = 0), horizontal lines mark time (spaced grid_time ms, anchored
-            // at t = 0 which is the top of the plot). PlotToPixels maps plot
-            // coords to screen; the per-axis span/count guard skips a
-            // pathologically dense grid (tiny spacing) so we never spam
-            // thousands of AddLine calls.
+            // Frequency lines anchored at DC=0, time lines anchored at t=0 (top).
+            // MAX_LINES guards against a pathologically dense grid.
             if (_show_grid) {
                 ImDrawList* dl = ImPlot::GetPlotDrawList();
                 const ImPlotRect lim = ImPlot::GetPlotLimits();
@@ -625,12 +563,9 @@ void PlotCSpectrogramBlock::render() {
     ImGui::End();
 }
 
-// GUI-THREAD-ONLY (see header). The ring clear is safe against the DSP
-// thread because the row flush in procedure() runs under _spectrogram_mutex.
-// The peak-hold accumulator (_accum_count) is deliberately NOT reset: its
-// reset on the paused path in procedure() is not mutex-guarded, so touching
-// it here would race. Consequence: at most one transitional row may mix
-// frames recorded at the old and new rates.
+// _accum_count is deliberately NOT reset here: its reset on the paused path
+// in procedure() is not mutex-guarded, so touching it here would race. At
+// most one transitional row may mix frames recorded at the old and new rates.
 void PlotCSpectrogramBlock::set_sample_rate(size_t sps) {
     _sps = sps;
     for (size_t i = 0; i < _n_fft_samples; ++i) {
@@ -638,29 +573,21 @@ void PlotCSpectrogramBlock::set_sample_rate(size_t sps) {
     }
     {
         std::lock_guard<std::mutex> lock(_spectrogram_mutex);
-        _ring_pos   = 0;
+        _ring_write_pos   = 0;
         _ring_count = 0;
         for (size_t i = 0; i < _num_inputs; ++i) {
             std::fill_n(_spectrograms[i], _tall * _n_fft_samples, DB_FLOOR);
-            // Row stats must match the cleared ring so the next scale
-            // decision doesn't see stale peaks (GUI-thread data, but cheap to
-            // reset here under the same lock as the ring).
             std::fill_n(_row_min[i], _tall, DB_FLOOR);
             std::fill_n(_row_max[i], _tall, DB_FLOOR);
         }
-        // Bump the row generation and force a full texture recolor+upload so
-        // the next render() rebuilds from the (now empty) ring instead of
-        // keeping the stale image.
         ++_row_gen;
         _tex_full_dirty = true;
     }
     _axis_refit = true;   // re-fit the X axis to the new span on next render()
 }
 
-// GUI-thread-only; see header. render() no longer keeps a reordered display
-// copy, so the newest-first image is assembled here on demand, straight from
-// the chronological ring under _spectrogram_mutex (snapshots are rare; this
-// O(tall * n_fft) copy is off the per-frame render path).
+// See header. Newest-first image assembled on demand from the ring (snapshots
+// are rare; O(tall * n_fft) is fine off the per-frame render path).
 bool PlotCSpectrogramBlock::export_display(size_t channel, std::vector<float>& data,
                                            size_t& rows, size_t& cols,
                                            size_t& frames_per_row_out, size_t& sps_out) const {
@@ -671,7 +598,7 @@ bool PlotCSpectrogramBlock::export_display(size_t channel, std::vector<float>& d
     for (size_t k = 0; k < _tall; ++k) {
         float* dst = data.data() + k * _n_fft_samples;
         if (k < _ring_count) {
-            size_t src_row = (_ring_pos + _tall - 1 - k) % _tall;
+            size_t src_row = (_ring_write_pos + _tall - 1 - k) % _tall;
             memcpy(dst, _spectrograms[channel] + src_row * _n_fft_samples,
                    _n_fft_samples * sizeof(float));
         } else {

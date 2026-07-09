@@ -113,12 +113,7 @@ PlotCSpectrumBlock::~PlotCSpectrumBlock() {
 }
 
 cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
-    // Inactive (window hidden): fully drain every input channel WITHOUT
-    // copying into _signal_channels, so a shared upstream fanout (which can
-    // only advance by the slowest branch) never stalls on us, and skip all
-    // other work. Note the distinction from _gui_pause: pause freezes the
-    // displayed snapshot in render() while data keeps flowing through here;
-    // inactive drops the data entirely.
+    // Inactive: drain without copying into _signal_channels (see set_active()).
     if (_external_pause.load(std::memory_order_acquire)) {
         size_t drained = 0;
         for (size_t i = 0; i < _num_inputs; ++i) {
@@ -224,9 +219,8 @@ void PlotCSpectrumBlock::render() {
 
     if (ImPlot::BeginPlot(name())) {
         ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]");
-        // One-shot X re-fit after a sample-rate change: SetupAxes alone keeps
-        // whatever limits the user (or the initial auto-fit) established, so
-        // without this the plot would stay zoomed to the OLD span.
+        // One-shot re-fit after a sample-rate change (SetupAxes alone keeps
+        // the old limits).
         if (_axis_refit) {
             ImPlot::SetupAxisLimits(ImAxis_X1,
                                     -static_cast<double>(_sps) / 2.0,
@@ -284,8 +278,6 @@ void PlotCSpectrumBlock::render() {
     ImGui::End();
 }
 
-// GUI-THREAD-ONLY (see header): _sps and _freq_bins are consumed only in
-// render(), which runs on the same thread as this setter.
 void PlotCSpectrumBlock::set_sample_rate(size_t sps) {
     _sps = sps;
     for (size_t i = 0; i < _n_fft_samples; ++i) {
@@ -300,8 +292,6 @@ void PlotCSpectrumBlock::set_initial_window(float x, float y, float w, float h) 
     _initial_window_size = ImVec2(w, h);
 }
 
-// GUI-thread-only; see header. _spectrum_avg holds valid data once the first
-// spectrum frame has been folded in (_first_spectrum cleared by render()).
 bool PlotCSpectrumBlock::export_spectrum(size_t channel, std::vector<float>& freq_hz,
                                          std::vector<float>& mag_db) const {
     if (channel >= _num_inputs || _first_spectrum) return false;
@@ -316,10 +306,8 @@ void PlotCSpectrumBlock::apply_window_rect(float x, float y, float w, float h) {
     _pending_rect      = true;
 }
 
-// Applies a pending programmatic rect exactly once (ImGuiCond_Always, then
-// clears the flag): setting Always every frame would reintroduce the old
-// "window snaps back, can't be resized" bug. Otherwise the initial geometry
-// is suggested with FirstUseEver as before.
+// Applied once (Always, then flag cleared); Always every frame would prevent
+// manual resizing.
 void PlotCSpectrumBlock::next_window_geometry() {
     if (_pending_rect) {
         ImGui::SetNextWindowPos(_pending_rect_pos, ImGuiCond_Always);

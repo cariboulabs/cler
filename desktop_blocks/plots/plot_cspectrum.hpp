@@ -25,38 +25,25 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
     void render();
     void set_initial_window(float x, float y, float w, float h);
 
-    // One-shot programmatic window rect: the next render() applies it with
-    // ImGuiCond_Always and clears the request, so the user can still move or
-    // resize the window afterward. Both the setter and render() run on the GUI
-    // thread (procedure() never touches these), so plain members are fine.
+    // One-shot: next render() applies this rect (ImGuiCond_Always) then clears
+    // the request, so the user can still move/resize afterward.
     void apply_window_rect(float x, float y, float w, float h);
 
-    // Enable/disable this block's work from outside (e.g. when its window is
-    // hidden). While INACTIVE, procedure() still fully drains its input
-    // channels each call -- so an upstream fanout never stalls on this branch
-    // -- but the samples are DROPPED, never copied into the internal plot
-    // ring. This is distinct from the Pause button (_gui_pause), which only
-    // freezes the displayed snapshot while data keeps flowing underneath.
-    // Defaults to active, so existing users of this block are unaffected.
+    // While INACTIVE, procedure() still drains input each call (no upstream
+    // stall) but DROPS the samples instead of ringing them. Distinct from the
+    // Pause button (_gui_pause), which freezes the display while data still
+    // flows through.
     void set_active(bool active) {
         _external_pause.store(!active, std::memory_order_release);
     }
 
-    // GUI-THREAD-ONLY: retune the frequency axis to a new sample rate.
-    // Recomputes _freq_bins and requests a one-shot X-axis re-fit on the next
-    // render() (so the display isn't stuck on the old span). No lock is
-    // needed because _sps/_freq_bins are consumed only in render(), which
-    // runs on the same (GUI) thread as this setter -- call from the GUI
-    // thread only. procedure() never reads the sample rate, so the data path
-    // is unaffected.
+    // GUI-THREAD-ONLY: retunes the frequency axis and requests a one-shot
+    // X-axis re-fit on the next render(). procedure() never reads _sps.
     void set_sample_rate(size_t sps);
 
-    // GUI-THREAD-ONLY export of the currently displayed (averaged) spectrum
-    // for one channel: freq_hz gets the frequency axis (baseband Hz, size
-    // n_fft), mag_db the averaged magnitudes. No lock is needed: _freq_bins
-    // and _spectrum_avg are written only in the constructor and in render(),
-    // which runs on the same (GUI) thread as this accessor. Returns false if
-    // render() has not produced a spectrum yet or `channel` is out of range.
+    // GUI-THREAD-ONLY export of the currently displayed (averaged) spectrum:
+    // freq_hz is baseband Hz (size n_fft), mag_db the averaged magnitudes.
+    // False if render() hasn't produced a spectrum yet or channel is invalid.
     bool export_spectrum(size_t channel, std::vector<float>& freq_hz,
                          std::vector<float>& mag_db) const;
 
@@ -82,7 +69,7 @@ private:
     float* _tmp_mag_buffer = nullptr;
     float** _spectrum_avg = nullptr;  // Averaged spectrum for each input
     float _avg_alpha = 0.7f;          // Exponential averaging factor (0=frozen, 1=no averaging)
-    bool _first_spectrum = true;      // First spectrum frame flag
+    bool _first_spectrum = true;
 
     fftplan _fftplan;
 
@@ -102,7 +89,5 @@ private:
 
     std::atomic<bool> _gui_pause = false;
 
-    // set_active(false): drop (drain) input instead of plotting it. See the
-    // comment on set_active() for how this differs from _gui_pause.
     std::atomic<bool> _external_pause{false};
 };

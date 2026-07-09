@@ -11,38 +11,14 @@
 #include <type_traits>
 #include <vector>
 
-// Converts complex I/Q samples to instantaneous power in dB, optionally after
-// an integer DECIMATING channel selector (anti-alias lowpass + downsample).
+// Complex I/Q -> instantaneous power in dB, optionally after an integer
+// DECIMATING channel selector (anti-alias lowpass + downsample); output runs at rate/R.
 //
-// Backpressure-safe: it only ever processes as many samples as can fit in the
-// output channel this call (min of input available, output space, scratch
-// size). It never calls a blocking push() and never consumes input it cannot
-// emit, so a slow downstream consumer simply throttles it instead of corrupting
-// or dropping samples.
+// Backpressure-safe: never blocks on push(); a slow consumer throttles it.
+// Decimating (vs. filtering at full rate) keeps log10f off the input-rate hot path.
 //
-// Channel bandwidth: by default the detection bandwidth equals the full sample
-// rate (bypass -- identical to the historical behavior). Calling
-// set_channel_bandwidth() from the GUI thread stages a firdecim_crcf decimator
-// with factor R ~= rate/bw whose fc = 0.5/R Kaiser anti-alias filter (80 dB
-// stopband) IS the channel selection: the effective two-sided bandwidth is
-// exactly rate/R and out-of-band energy is rejected before the power
-// computation. The output (detection) stream then runs at rate/R.
-//
-// Why decimate instead of filtering at the full rate: a polyphase decimator
-// only computes the outputs it keeps, so the cost is ~(2*m + 1/R) MACs per
-// INPUT sample regardless of how narrow the channel is (m = FILTER_SEMI_LENGTH
-// below), and the per-sample log10f runs at the decimated rate. A same-quality
-// non-decimating lowpass at narrow cutoffs needs thousands of taps at the full
-// rate and saturates the DSP thread.
-//
-// Threading/lifecycle (all liquid objects created AND destroyed on the GUI
-// thread; procedure() never allocates or frees):
-//   - set_channel_bandwidth() designs the taps on the heap, creates the new
-//     firdecim, and stages it in _pending under _cfg_mutex, bumping _gen.
-//   - procedure() notices the generation change and, under the mutex, moves
-//     active->retired and pending->active (pointer swaps only).
-//   - the NEXT set_channel_bandwidth() call (and the destructor) destroys
-//     whatever sits in the retired slot, plus any never-consumed pending.
+// All liquid objects are created/destroyed on the GUI thread; procedure()
+// only pointer-swaps active/pending/retired under _cfg_mutex.
 template<typename T = std::complex<float>>
 struct PowerDetectorBlock : public cler::BlockBase {
     static_assert(std::is_same<T, std::complex<float>>::value,
@@ -53,11 +29,8 @@ struct PowerDetectorBlock : public cler::BlockBase {
     // Anti-alias filter semi-length in OUTPUT samples: h_len = 2*R*m + 1 taps,
     // group delay = m output samples (negligible for a power trace).
     static constexpr unsigned int FILTER_SEMI_LENGTH = 12;
-    // Hard cap on the decimation factor. CRITICAL deadlock ceiling: the input
-    // channel is buffer_size (32768) samples deep and procedure() must gather
-    // R inputs per output; R must stay well below that or the block could
-    // never make progress and would stall the shared fanout. 4096 keeps us 8x
-    // under the default depth.
+    // Deadlock ceiling: `in` is buffer_size (32768) deep and procedure()
+    // must gather R inputs per output, so R must stay well under that.
     static constexpr size_t MAX_DECIMATION = 4096;
     // Output (detection) rate floor: R is chosen so rate/R >= this.
     static constexpr double MIN_OUTPUT_RATE_HZ = 10e3;
@@ -87,7 +60,6 @@ struct PowerDetectorBlock : public cler::BlockBase {
         if (_retired) firdecim_crcf_destroy(_retired);
     }
 
-    // Decimation factor for a requested two-sided bandwidth at a given rate:
     // R = clamp(round(rate/bw), 1, min(floor(rate/MIN_OUTPUT_RATE_HZ),
     // MAX_DECIMATION)). Static so the GUI panel can mirror the snapping.
     static size_t decimation_for(double bw_hz, double rate_hz) {
@@ -101,8 +73,6 @@ struct PowerDetectorBlock : public cler::BlockBase {
         return static_cast<size_t>(r);
     }
 
-    // The bandwidth actually achieved for a request (two-sided passband of
-    // the fc = 0.5/R anti-alias filter): rate / R.
     static double effective_bandwidth(double bw_hz, double rate_hz) {
         if (rate_hz <= 0.0) return 0.0;
         return rate_hz / static_cast<double>(decimation_for(bw_hz, rate_hz));
@@ -112,14 +82,12 @@ struct PowerDetectorBlock : public cler::BlockBase {
     // picks it up at the top of its next procedure() call).
     size_t decimation() const { return _decim_staged.load(std::memory_order_acquire); }
 
-    // Stage a new channel (detection) bandwidth. GUI-thread only. bw_hz is the
-    // TWO-SIDED bandwidth around DC; the request snaps to rate/R for integer R
-    // (see decimation_for). R == 1 bypasses the filter entirely.
+    // Stages a new TWO-SIDED channel bandwidth around DC; snaps to rate/R for
+    // integer R (see decimation_for). R == 1 bypasses the filter. GUI-thread only.
     void set_channel_bandwidth(double bw_hz, double sample_rate_hz) {
         const size_t R = decimation_for(bw_hz, sample_rate_hz);
 
-        // Drain the retired slot (an active object procedure() swapped out
-        // earlier) -- destruction always happens HERE, on the GUI thread.
+        // Retired-slot destruction always happens here, on the GUI thread.
         firdecim_crcf retired = nullptr;
         {
             std::lock_guard<std::mutex> lk(_cfg_mutex);
@@ -131,11 +99,8 @@ struct PowerDetectorBlock : public cler::BlockBase {
         if (R == _requested_R) return;   // taps depend only on R; nothing to do
         _requested_R = R;
 
-        // Design the new decimator on the heap (firdecim_crcf_create_kaiser
-        // would put two h_len VLAs on the stack -- ~3.8 MB at large R -- so we
-        // design the taps ourselves). liquid_firdes_kaiser taps are
-        // UNNORMALIZED (DC gain ~= 2*fc*h_len != 1); scale by 1/sum(taps) for
-        // unity DC gain so the reported power level is calibrated.
+        // liquid_firdes_kaiser taps are UNNORMALIZED (DC gain ~= 2*fc*h_len != 1);
+        // scale by 1/sum(taps) for unity DC gain so the reported power is calibrated.
         firdecim_crcf q = nullptr;
         if (R >= 2) {
             const unsigned int h_len =
@@ -158,7 +123,7 @@ struct PowerDetectorBlock : public cler::BlockBase {
             _pending_R      = R;
             _pending_bypass = (R == 1);
         }
-        _gen.fetch_add(1, std::memory_order_release);
+        _config_generation.fetch_add(1, std::memory_order_release);
         _decim_staged.store(R, std::memory_order_release);
         if (stale_pending) firdecim_crcf_destroy(stale_pending);
     }
@@ -166,18 +131,17 @@ struct PowerDetectorBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out_base) {
         auto* out = static_cast<cler::Channel<float>*>(out_base);
 
-        // Swap in a staged decimator (rare, GUI-driven). Pointer moves only:
-        // the old active object is parked in the retired slot for the GUI
-        // thread to destroy; nothing is freed or allocated here.
-        uint64_t gen = _gen.load(std::memory_order_acquire);
-        if (gen != _gen_applied) {
+        // Decimator create/destroy always happens on the GUI thread; here we
+        // only pointer-swap active/pending/retired under _cfg_mutex.
+        uint64_t gen = _config_generation.load(std::memory_order_acquire);
+        if (gen != _config_generation_applied) {
             std::lock_guard<std::mutex> lk(_cfg_mutex);
-            if (_active) _retired = _active;   // GUI drained this slot before staging
+            if (_active) _retired = _active;   // GUI drains and destroys this slot
             _active  = _pending;
             _pending = nullptr;
             _decim   = _pending_R;
             _bypass  = _pending_bypass;
-            _gen_applied = _gen.load(std::memory_order_relaxed);
+            _config_generation_applied = _config_generation.load(std::memory_order_relaxed);
         }
 
         if (_bypass) {
@@ -228,22 +192,21 @@ private:
     T*     _filt_scratch = nullptr;   // decimator output (channel-selector path)
     float* _out_scratch  = nullptr;
 
-    // Decimator slots. All create/destroy on the GUI thread; procedure() only
-    // moves pointers between slots under _cfg_mutex (see header comment).
-    std::mutex    _cfg_mutex;
+    // Decimator slots: created/destroyed on the GUI thread; procedure() only
+    // moves pointers under _cfg_mutex.
+    std::mutex    _cfg_mutex;   // guards _active/_pending/_retired and _pending_R/_pending_bypass
     firdecim_crcf _active  = nullptr;   // owned by the DSP thread's hot path
     firdecim_crcf _pending = nullptr;   // staged by GUI, not yet consumed
     firdecim_crcf _retired = nullptr;   // swapped out; awaiting GUI destroy
     size_t        _pending_R      = 1;
     bool          _pending_bypass = true;
 
-    // DSP-thread copies of the applied config (plain members: only touched by
-    // procedure()).
+    // DSP-thread copies of the applied config (only touched by procedure()).
     size_t _decim  = 1;
     bool   _bypass = true;
 
-    std::atomic<uint64_t> _gen{0};
-    uint64_t              _gen_applied = 0;
+    std::atomic<uint64_t> _config_generation{0};
+    uint64_t              _config_generation_applied = 0;
 
     size_t                _requested_R = 1;    // GUI-thread only
     std::atomic<size_t>   _decim_staged{1};
