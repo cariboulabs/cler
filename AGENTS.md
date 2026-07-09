@@ -842,7 +842,7 @@ out->commit_write(to_process);
 - **Heavy implementations in `.cpp`** when dealing with single data types
 
 ### Style Rules (mandatory)
-- **No throw/try/catch in our code.** Recoverable runtime errors → `cler::Result`. Unrecoverable init/invariant failures → `cler::panic(msg)` (`cler_utils.hpp`; prints + aborts). try/catch only when an external library forces it.
+- **No throw/try/catch in our code.** Recoverable runtime errors → `cler::Result`. Unrecoverable init/invariant failures → `cler::panic(msg)` (`cler_desktop_utils.hpp`; prints + aborts; desktop-only — embedded targets lack printf). try/catch is fine at the boundary with external libraries whose intended API is exception-based (UHD, SoapySDR) — catch their exceptions, never our own.
 - **Minimal comments.** Prefer self-evident code. Keep a comment only for non-obvious constraints: hardware quirks, units, protocol/timing requirements, DSP math rationale.
 - **Prefer `read_dbf`/`write_dbf` over `readN`/`writeN`** in `procedure()` when the channel is heap-allocated and >= 4KB (always true for desktop_blocks defaults). Mandatory for hardware interfaces. `readN`/`writeN` acceptable when an external API needs a separate contiguous buffer anyway.
 - **Never push/pop in hot paths.**

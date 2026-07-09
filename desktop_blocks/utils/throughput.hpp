@@ -1,8 +1,7 @@
 #pragma once
 #include "cler.hpp"
-#include "cler_utils.hpp"
+#include "cler_desktop_utils.hpp"
 #include <chrono>
-#include <iostream>
 
 template <typename T>
 struct ThroughputBlock : public cler::BlockBase {

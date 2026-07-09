@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
-#include "cler_utils.hpp"
+#include "cler_desktop_utils.hpp"
 #include "desktop_blocks/misc/uhd_common.hpp"
 
 #ifdef __has_include
@@ -18,7 +18,6 @@
 
 #include <vector>
 #include <string>
-#include <iostream>
 #include <sstream>
 #include <numeric>
 

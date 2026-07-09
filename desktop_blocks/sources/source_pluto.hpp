@@ -1,6 +1,6 @@
 #pragma once
 #include "cler.hpp"
-#include "cler_utils.hpp"
+#include "cler_desktop_utils.hpp"
 
 #ifdef __has_include
     #if __has_include(<iio.h>)
@@ -13,7 +13,6 @@
 #include <complex>
 #include <cstdint>
 #include <string>
-#include <iostream>
 
 // PlutoSDR (and any AD936x/IIO device) RX source via libiio.
 // Works with the same code over any libiio URI:

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
-#include "cler_utils.hpp"
+#include "cler_desktop_utils.hpp"
 
 struct ComplexToMagPhaseBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;

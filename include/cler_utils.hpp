@@ -5,15 +5,7 @@
 
 #include "cler.hpp"
 
-#include <cstdio>
-#include <cstdlib>
-
 namespace cler {
-
-[[noreturn]] inline void panic(const char* msg) {
-    std::fprintf(stderr, "cler panic: %s\n", msg);
-    std::abort();
-}
 
 // Fast bit manipulation utility - finds largest power of 2 <= x
 // Useful for buffer sizing and alignment calculations

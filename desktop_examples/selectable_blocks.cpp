@@ -1,7 +1,6 @@
 #include "cler.hpp"
-#include "cler_utils.hpp"
+#include "cler_desktop_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
-#include <iostream>
 #include <cstring> // for memcpy
 
 const size_t CHANNEL_SIZE = 512;

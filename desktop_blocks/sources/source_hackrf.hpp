@@ -1,6 +1,6 @@
 #pragma once
 #include "cler.hpp"
-#include "cler_utils.hpp"
+#include "cler_desktop_utils.hpp"
 
 #ifdef __has_include
     #if __has_include(<libhackrf/hackrf.h>)
@@ -14,7 +14,6 @@
 
 #include <atomic>
 #include <cstring>
-#include <iostream>
 
 struct SourceHackRFBlock : public cler::BlockBase {
     SourceHackRFBlock(const char* name,

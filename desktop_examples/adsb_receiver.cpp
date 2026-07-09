@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include <optional>
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include "desktop_blocks/sources/source_soapysdr.hpp"
@@ -173,14 +174,27 @@ int main(int argc, char** argv) {
         device_args_or_filename = source_arg;
     }
 
-    SelectableSourceBlock source(
-        "Source",
-        use_soapy,
-        use_soapy ? "" : source_arg,  // Empty string for auto-detect, or filename
-        ADSB_FREQ_HZ,
-        SAMPLE_RATE_HZ,
-        GAIN_DB
-    );
+    // SoapySDR reports device failures via exceptions by design
+    std::optional<SelectableSourceBlock> source;
+    try {
+        source.emplace(
+            "Source",
+            use_soapy,
+            use_soapy ? "" : source_arg,  // Empty string for auto-detect, or filename
+            ADSB_FREQ_HZ,
+            SAMPLE_RATE_HZ,
+            GAIN_DB
+        );
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        if (use_soapy) {
+            std::cerr << "Make sure:" << std::endl;
+            std::cerr << "  1. SoapySDR device is connected" << std::endl;
+            std::cerr << "  2. SoapySDR drivers are installed for your device" << std::endl;
+            std::cerr << "  3. You have permissions to access USB devices" << std::endl;
+        }
+        return 1;
+    }
 
     IQToMagnitudeBlock iq2mag("IQ to Magnitude", SAMPLE_RATE_HZ);
 
@@ -202,7 +216,7 @@ int main(int argc, char** argv) {
     aggregator.set_initial_window(0.0f, 0.0f, 1400.0f, 800.0f);
 
     auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&source, &iq2mag.in),
+        cler::BlockRunner(&*source, &iq2mag.in),
         cler::BlockRunner(&iq2mag, &decoder.in),
         cler::BlockRunner(&decoder, &aggregator.in),
         cler::BlockRunner(&aggregator)

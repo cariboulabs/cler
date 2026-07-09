@@ -1,7 +1,7 @@
 #pragma once
 #include <CaribouLite.hpp>
 #include "cler.hpp"
-#include "cler_utils.hpp"
+#include "cler_desktop_utils.hpp"
 
 inline bool detect_cariboulite_board()
 {
