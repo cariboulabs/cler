@@ -1,8 +1,9 @@
 #pragma once
 
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include <fstream>
-#include <stdexcept>
+#include <string>
 
 template <typename T>
 struct SourceFileBlock : public cler::BlockBase {
@@ -16,7 +17,8 @@ struct SourceFileBlock : public cler::BlockBase {
     {
         _file.open(_filename, std::ios::binary);
         if (!_file.is_open()) {
-            throw std::runtime_error("Failed to open file: " + std::string(filename));
+            std::string msg = "Failed to open file: " + std::string(filename);
+            cler::panic(msg.c_str());
         }
     }
 
@@ -32,19 +34,17 @@ struct SourceFileBlock : public cler::BlockBase {
             return cler::Error::TERM_IOError;
         }
 
-        // Use zero-copy path
         auto [write_ptr, write_size] = out->write_dbf();
         if (write_ptr == nullptr || write_size == 0) {
             return cler::Error::NotEnoughSpace;
         }
-        
-        // Direct read into output buffer
+
         _file.read(reinterpret_cast<char*>(write_ptr), write_size * sizeof(T));
         size_t samples_read = _file.gcount() / sizeof(T);
         
         if (samples_read == 0) {
             if (_file.eof() && _repeat) {
-                _file.clear(); // Clear EOF flag
+                _file.clear();
                 _file.seekg(0, std::ios::beg);
                 return cler::Empty{}; // Don't return an error, just let the flowgraph/loop call this again
             } else {

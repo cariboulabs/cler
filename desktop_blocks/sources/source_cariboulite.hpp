@@ -1,6 +1,7 @@
 #pragma once
 #include <CaribouLite.hpp>
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 
 inline bool detect_cariboulite_board()
 {
@@ -39,15 +40,15 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
         float bw_hz      = 0.0f
         ) : cler::BlockBase(name) {
             bool freq_valid = false;
-            
+
             if (!detect_cariboulite_board()) {
-                throw std::runtime_error("CaribouLite board not detected!");
+                cler::panic("CaribouLite board not detected!");
             }
-            
+
             CaribouLite& cl = CaribouLite::GetInstance(false);
             _radio = cl.GetRadioChannel(radio_type);
             if (!_radio) {
-                throw std::runtime_error("Failed to get radio channel for selected radio type");
+                cler::panic("Failed to get radio channel for selected radio type");
             }
 
             std::vector<CaribouLiteFreqRange> ranges = _radio->GetFrequencyRange();
@@ -57,28 +58,26 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
                 }
             }
             if (!freq_valid) {
-                throw std::invalid_argument("Freqeuncy is out of range for the selected radio type.");
+                cler::panic("Frequency is out of range for the selected radio type.");
             }
 
             if (samp_rate_hz > _radio->GetRxSampleRateMax() || samp_rate_hz < _radio->GetRxSampleRateMin()) {
-                throw std::invalid_argument(
-                    "samp_rate_hz must be between " +
-                    std::to_string(_radio->GetRxSampleRateMin()) + " and " +
-                    std::to_string(_radio->GetRxSampleRateMax()) + " Hz, but got " +
-                    std::to_string(samp_rate_hz)
-                    );
+                char msg[160];
+                std::snprintf(msg, sizeof(msg),
+                    "samp_rate_hz must be between %f and %f Hz, but got %f",
+                    _radio->GetRxSampleRateMin(), _radio->GetRxSampleRateMax(), samp_rate_hz);
+                cler::panic(msg);
             }
 
             _max_samples_to_read = _radio->GetNativeMtuSample();
 
             if (bw_hz > 0.0f &&
                 (bw_hz > _radio->GetRxBandwidthMax() || bw_hz < _radio->GetRxBandwidthMin())) {
-                throw std::invalid_argument(
-                    "bw_hz must be between " +
-                    std::to_string(_radio->GetRxBandwidthMin()) + " and " +
-                    std::to_string(_radio->GetRxBandwidthMax()) + " Hz, but got " +
-                    std::to_string(bw_hz)
-                    );
+                char msg[160];
+                std::snprintf(msg, sizeof(msg),
+                    "bw_hz must be between %f and %f Hz, but got %f",
+                    _radio->GetRxBandwidthMin(), _radio->GetRxBandwidthMax(), bw_hz);
+                cler::panic(msg);
             }
 
             _radio->SetFrequency(freq_hz);

@@ -5,6 +5,7 @@
 #include "desktop_blocks/adsb/modes_2400.h"
 #include <cstring>
 #include <algorithm>
+#include <atomic>
 
 struct ADSBDecoderBlock : public cler::BlockBase {
     cler::Channel<uint16_t> in;
@@ -54,7 +55,6 @@ struct ADSBDecoderBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSpace;
         }
 
-        // Limit to buffer size to prevent overflow
         size_t to_process = std::min(read_size, BUFFER_ELEMENTS);
 
         memcpy(_tmp_buffer, read_ptr, to_process * sizeof(uint16_t));
@@ -65,7 +65,7 @@ struct ADSBDecoderBlock : public cler::BlockBase {
 
         CallbackContext ctx;
         ctx.out_channel = out;
-        ctx.df_filter = _df_filter;
+        ctx.df_filter = _df_filter.load(std::memory_order_relaxed);
 
         if (_mode == SampleRateMode::RATE_2MHZ) {
             mode_s_detect(&_decoder_state, _tmp_buffer, to_process, on_message_detected, &ctx);
@@ -76,18 +76,16 @@ struct ADSBDecoderBlock : public cler::BlockBase {
         return cler::Empty{};
     }
 
-    // Set or change DF filter (thread-safe with atomic)
     void set_df_filter(uint32_t df_filter) {
-        _df_filter = df_filter;
+        _df_filter.store(df_filter, std::memory_order_relaxed);
     }
 
 private:
     mode_s_t _decoder_state;
     SampleRateMode _mode;
-    uint32_t _df_filter;
+    std::atomic<uint32_t> _df_filter;
     uint16_t* _tmp_buffer = nullptr;
 
-    // Context for callback
     struct CallbackContext {
         cler::ChannelBase<mode_s_msg>* out_channel;
         uint32_t df_filter;

@@ -12,15 +12,13 @@
 
 int main(int argc, char** argv) {
     if (hackrf_init() != HACKRF_SUCCESS) {
-        throw std::runtime_error("Failed to initialize HackRF library");
+        cler::panic("Failed to initialize HackRF library");
     }
 
-    // Default parameters
-    uint64_t freq_hz = 915e6;          // 915 MHz
-    uint32_t samp_rate = 4e6;    // 4 MHz
-    size_t FFT_SIZE = 1024;            // FFT size
+    uint64_t freq_hz = 915e6;
+    uint32_t samp_rate = 4e6;
+    size_t FFT_SIZE = 1024;
 
-    // --- Parse command-line flags ---
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--freq" && i + 1 < argc) {

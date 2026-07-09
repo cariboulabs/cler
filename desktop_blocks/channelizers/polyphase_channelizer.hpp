@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include "liquid.h"
 #include <memory>
 #include <complex>
@@ -21,13 +22,10 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
                                  : in_buffer_size),
           _num_channels(num_channels)
     {
-        // Validate buffer size if provided
         if (in_buffer_size > 0) {
             const size_t min_elems = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>);
             if (in_buffer_size < min_elems || (in_buffer_size % _num_channels) != 0) {
-                throw std::invalid_argument("Buffer size must be ≥ " + 
-                    std::to_string(min_elems) + 
-                    " and a multiple of " + std::to_string(_num_channels));
+                cler::panic("Buffer size must be >= DOUBLY_MAPPED_MIN_SIZE elements and a multiple of num_channels");
             }
         }
 
@@ -41,10 +39,9 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
             kaiser_attenuation);
 
         if (!_pfch) {
-            throw std::runtime_error("Failed to create polyphase channelizer");
+            cler::panic("Failed to create polyphase channelizer");
         }
 
-        // Pre-allocate temporary output buffer
         _tmp_out.resize(_num_channels);
     }
 
@@ -70,20 +67,17 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
         assert(num_outs == _num_channels &&
                "Number of output channels must match the number of polyphase channels");
 
-        // Get the contiguous region from doubly-mapped input buffer
         auto [read_ptr, read_size] = in.read_dbf();
-        
+
         if (read_size < _num_channels) {
             return cler::Error::NotEnoughSamples;
         }
 
-        // Frames available contiguously
         const size_t frames_by_contig = read_size / _num_channels;
-        
-        // Get write_dbf pointers for all outputs
+
         std::array<std::pair<std::complex<float>*, size_t>, num_outs> write_ptrs;
         size_t min_write_space = std::numeric_limits<size_t>::max();
-        
+
         size_t idx = 0;
         auto get_write_ptrs = [&](auto*... chs) {
             ((write_ptrs[idx] = chs->write_dbf(),
@@ -91,40 +85,33 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
               idx++), ...);
         };
         get_write_ptrs(outs...);
-        
-        // How many frames can we process?
+
         size_t num_frames = std::min(frames_by_contig, min_write_space);
-        
         if (num_frames == 0) {
-            // Return NotEnoughSpace if CLER handles backpressure cleanly
-            // Otherwise use: return cler::Empty{}; to avoid spin
             return cler::Error::NotEnoughSpace;
         }
-        
-        // Process frames and write DIRECTLY to output buffers - no intermediate storage!
+
         for (size_t i = 0; i < num_frames; ++i) {
             const std::complex<float>* frame = read_ptr + i * _num_channels;
-            
-            // Zero-copy input processing
+
             firpfbch_crcf_analyzer_execute(
                 _pfch,
                 as_liq_nonconst(frame),
                 as_liq(_tmp_out.data())
             );
-            
-            // Scatter one sample per channel directly into its contiguous write span
+
+            // Each output channel is a separate contiguous write span; scatter one sample per channel.
             for (size_t ch = 0; ch < _num_channels; ++ch) {
                 write_ptrs[ch].first[i] = _tmp_out[ch];
             }
         }
-        
-        // Commit all writes
+
         idx = 0;
         auto commit_writes = [&](auto*... chs) {
             ((chs->commit_write(num_frames)), ...);
         };
         commit_writes(outs...);
-        
+
         in.commit_read(num_frames * _num_channels);
         return cler::Empty{};
     }

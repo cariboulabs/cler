@@ -41,19 +41,16 @@ struct CustomSourceBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSpace;
         }
     
-        // Generate a continuous wave signal
         auto result = cw_source_block.procedure(&noise_block.in);
         if (result.is_err()) {
             return result.unwrap_err();
         }
 
-        // Add noise to the signal
         result = noise_block.procedure(&fanout_block.in);
         if (result.is_err()) {
             return result.unwrap_err();
         }
 
-        // Fanout the signal to multiple outputs
         return fanout_block.procedure(out1, out2);
     }    
 

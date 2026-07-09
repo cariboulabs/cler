@@ -1,13 +1,13 @@
 #pragma once
 
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <SoapySDR/Errors.hpp>
 #include <complex>
 #include <vector>
 #include <string>
-#include <iostream>
 #include <sstream>
 #include <algorithm>
 
@@ -53,13 +53,12 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
           device(nullptr),
           stream(nullptr) {
         
-        // Create device
         device = SoapySDR::Device::make(device_args);
         if (!device) {
-            throw std::runtime_error("SourceSoapySDRBlock: Failed to create SoapySDR device with args: " + device_args);
+            std::string msg = "SourceSoapySDRBlock: Failed to create SoapySDR device with args: " + device_args;
+            cler::panic(msg.c_str());
         }
-        
-        // Validate and set sample rate
+
         auto sample_rates = device->getSampleRateRange(SOAPY_SDR_RX, channel_idx);
         bool rate_valid = false;
         for (const auto& range : sample_rates) {
@@ -75,11 +74,10 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
                 ss << range.minimum()/1e6 << "-" << range.maximum()/1e6 << " MSPS ";
             }
             SoapySDR::Device::unmake(device);
-            throw std::runtime_error(ss.str());
+            cler::panic(ss.str().c_str());
         }
         device->setSampleRate(SOAPY_SDR_RX, channel_idx, sample_rate);
-        
-        // Validate and set center frequency
+
         auto freq_ranges = device->getFrequencyRange(SOAPY_SDR_RX, channel_idx);
         bool freq_valid = false;
         for (const auto& range : freq_ranges) {
@@ -95,59 +93,53 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
                 ss << range.minimum()/1e6 << "-" << range.maximum()/1e6 << " MHz ";
             }
             SoapySDR::Device::unmake(device);
-            throw std::runtime_error(ss.str());
+            cler::panic(ss.str().c_str());
         }
         device->setFrequency(SOAPY_SDR_RX, channel_idx, center_freq);
-        
-        // Validate and set gain
+
         auto gain_range = device->getGainRange(SOAPY_SDR_RX, channel_idx);
         if (gain_db < gain_range.minimum() || gain_db > gain_range.maximum()) {
             std::stringstream ss;
             ss << "Gain " << gain_db << " dB not supported. Supported range: "
                << gain_range.minimum() << "-" << gain_range.maximum() << " dB";
             SoapySDR::Device::unmake(device);
-            throw std::runtime_error(ss.str());
+            cler::panic(ss.str().c_str());
         }
         if (device->hasGainMode(SOAPY_SDR_RX, channel_idx)) {
-            device->setGainMode(SOAPY_SDR_RX, channel_idx, false); // Manual gain mode
+            device->setGainMode(SOAPY_SDR_RX, channel_idx, false);
         }
         device->setGain(SOAPY_SDR_RX, channel_idx, gain_db);
-        
-        // Set bandwidth to match sample rate (if supported)
+
         if (device->getBandwidthRange(SOAPY_SDR_RX, channel_idx).size() > 0) {
             device->setBandwidth(SOAPY_SDR_RX, channel_idx, sample_rate);
         }
-        
-        // Setup stream with appropriate format
+
         std::vector<size_t> channels = {channel_idx};
         std::string format = get_soapy_format<T>();
-        
+
         stream = device->setupStream(SOAPY_SDR_RX, format, channels);
         if (!stream) {
             SoapySDR::Device::unmake(device);
-            throw std::runtime_error("SourceSoapySDRBlock: Failed to setup RX stream");
+            cler::panic("SourceSoapySDRBlock: Failed to setup RX stream");
         }
-        
-        // Get MTU
+
         mtu = device->getStreamMTU(stream);
-        
-        // Activate stream
+
         int ret = device->activateStream(stream);
         if (ret != 0) {
             device->closeStream(stream);
             SoapySDR::Device::unmake(device);
-            throw std::runtime_error("SourceSoapySDRBlock: Failed to activate stream: " + std::string(SoapySDR::errToStr(ret)));
+            std::string msg = "SourceSoapySDRBlock: Failed to activate stream: " + std::string(SoapySDR::errToStr(ret));
+            cler::panic(msg.c_str());
         }
-        
-        // Print device info
-        std::cout << "SourceSoapySDRBlock: Initialized " << device->getDriverKey() 
+
+        std::cout << "SourceSoapySDRBlock: Initialized " << device->getDriverKey()
                   << " (" << device->getHardwareKey() << ")"
                   << " at " << center_freq/1e6 << " MHz"
                   << ", " << sample_rate/1e6 << " MSPS"
                   << ", " << gain_db << " dB gain"
                   << ", MTU: " << mtu << " samples" << std::endl;
-                  
-        // Print available antennas
+
         auto antennas = device->listAntennas(SOAPY_SDR_RX, channel_idx);
         if (!antennas.empty()) {
             std::cout << "  Available RX antennas: ";
@@ -169,18 +161,16 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
     }
     
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
-        // Get output buffer using DBF
         auto [write_ptr, write_size] = out->write_dbf();
         if (write_ptr == nullptr || write_size == 0) {
             return cler::Error::NotEnoughSpace;
         }
-        
-        // Read directly into output buffer
+
         size_t to_read = std::min(write_size, mtu);
         void* buffs[] = {write_ptr};
         int flags = 0;
         long long time_ns = 0;
-        const long timeout_us = 100000; // 100ms timeout
+        const long timeout_us = 100000;
         
         int ret = device->readStream(stream, buffs, to_read, flags, time_ns, timeout_us);
         
@@ -201,7 +191,6 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
         }
     }
     
-    // Control methods
     void set_frequency(double freq) {
         device->setFrequency(SOAPY_SDR_RX, channel_idx, freq);
         center_freq = freq;
@@ -215,28 +204,27 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
     void set_sample_rate(double rate) {
         device->setSampleRate(SOAPY_SDR_RX, channel_idx, rate);
         sample_rate = rate;
-        // Also update bandwidth to match
         if (device->getBandwidthRange(SOAPY_SDR_RX, channel_idx).size() > 0) {
             device->setBandwidth(SOAPY_SDR_RX, channel_idx, rate);
         }
     }
-    
+
     void set_bandwidth(double bw) {
         device->setBandwidth(SOAPY_SDR_RX, channel_idx, bw);
     }
-    
-    void set_antenna(const std::string& antenna) {
-        // Validate antenna name
+
+    bool set_antenna(const std::string& antenna) {
         auto antennas = device->listAntennas(SOAPY_SDR_RX, channel_idx);
         if (std::find(antennas.begin(), antennas.end(), antenna) == antennas.end()) {
-            std::stringstream ss;
-            ss << "Antenna '" << antenna << "' not supported. Available antennas: ";
+            std::cerr << "Antenna '" << antenna << "' not supported. Available:";
             for (const auto& ant : antennas) {
-                ss << ant << " ";
+                std::cerr << " " << ant;
             }
-            throw std::runtime_error(ss.str());
+            std::cerr << std::endl;
+            return false;
         }
         device->setAntenna(SOAPY_SDR_RX, channel_idx, antenna);
+        return true;
     }
     
     void set_dc_offset_mode(bool automatic) {
@@ -251,7 +239,6 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
         }
     }
     
-    // Getters
     double get_frequency() const { return center_freq; }
     double get_gain() const { return gain_db; }
     double get_sample_rate() const { return sample_rate; }
@@ -289,25 +276,19 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
     }
     
 private:
-    // Configuration
     std::string device_args;
     double center_freq;
     double sample_rate;
     double gain_db;
     size_t channel_idx;
-    
-    // SoapySDR objects
+
     SoapySDR::Device* device;
     SoapySDR::Stream* stream;
-    
-    // Streaming
+
     size_t mtu;
-    
-    // Statistics
     size_t overflow_count = 0;
 };
 
-// Common template instantiations
 using SourceSoapySDRBlockCF32 = SourceSoapySDRBlock<std::complex<float>>;
 using SourceSoapySDRBlockCS16 = SourceSoapySDRBlock<std::complex<int16_t>>;
 using SourceSoapySDRBlockCS8 = SourceSoapySDRBlock<std::complex<int8_t>>;
@@ -336,8 +317,7 @@ inline std::vector<SoapyDeviceInfo> enumerate_devices() {
     for (const auto& result : results) {
         SoapyDeviceInfo info;
         info.args = result;
-        
-        // Extract key fields
+
         if (result.count("driver")) info.driver = result.at("driver");
         if (result.count("label")) info.label = result.at("label");
         if (result.count("serial")) info.serial = result.at("serial");

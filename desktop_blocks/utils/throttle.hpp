@@ -1,5 +1,6 @@
 #pragma once
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include <chrono>
 
 template <typename T>
@@ -14,7 +15,7 @@ struct ThrottleBlock : public cler::BlockBase {
           _next_tick(std::chrono::high_resolution_clock::now())
     {
         if (_sps == 0) {
-            throw std::invalid_argument("Sample rate must be greater than zero.");
+            cler::panic("Sample rate must be greater than zero.");
         }
     }
 
@@ -26,14 +27,12 @@ struct ThrottleBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSpace;
         }
 
-        // Pop one sample, push one sample
-        // Note: If we do a batch size, we will encause jittering downstream
-        //       working 1 sample at a time is slow, but we dont mind about slow if we are throttling
+        // One sample at a time by design: batching would jitter the downstream pacing this
+        // block exists to produce. Slower is fine here since throttling means we want slow.
         T sample;
         in.pop(sample);
         out->push(sample);
 
-        // Compute target time for the next sample
         _next_tick += std::chrono::duration_cast<std::chrono::high_resolution_clock::duration>(
             std::chrono::duration<double>(_interval));
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include "liquid.h"
 #include <complex>
 
@@ -20,28 +21,20 @@ struct FMDemodBlock : public cler::BlockBase {
           _sample_rate(sample_rate),
           _freq_deviation(freq_deviation)
     {
-        // Validate buffer size for DBF
         if (buffer_size > 0 && buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
-            throw std::invalid_argument(
-                "Buffer size too small for doubly-mapped buffers. Need at least " +
-                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>)) +
-                " complex<float> elements");
+            cler::panic("Buffer size too small for doubly-mapped buffers");
         }
-
         if (sample_rate <= 0.0) {
-            throw std::invalid_argument("Sample rate must be positive");
+            cler::panic("Sample rate must be positive");
         }
-
         if (freq_deviation <= 0.0) {
-            throw std::invalid_argument("Frequency deviation must be positive");
+            cler::panic("Frequency deviation must be positive");
         }
 
-        // Create FM demodulator: kf = freq_deviation / sample_rate
         float kf = static_cast<float>(freq_deviation / sample_rate);
         _demod = freqdem_create(kf);
-
         if (!_demod) {
-            throw std::runtime_error("Failed to create FM demodulator");
+            cler::panic("Failed to create FM demodulator");
         }
     }
 
@@ -52,22 +45,18 @@ struct FMDemodBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        // Read from input using DBF (zero-copy)
         auto [read_ptr, read_size] = in.read_dbf();
         if (!read_ptr || read_size == 0) {
             return cler::Error::NotEnoughSamples;
         }
 
-        // Write to output using DBF (zero-copy)
         auto [write_ptr, write_space] = out->write_dbf();
         if (!write_ptr || write_space == 0) {
             return cler::Error::NotEnoughSpace;
         }
 
-        // Process limited by available input, output space, and buffer size
         size_t samples_to_process = std::min({read_size, write_space});
 
-        // Demodulate directly into output buffer
         freqdem_demodulate_block(
             _demod,
             reinterpret_cast<liquid_float_complex*>(const_cast<std::complex<float>*>(read_ptr)),

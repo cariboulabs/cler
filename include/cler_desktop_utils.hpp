@@ -7,8 +7,14 @@
 #include <thread>
 #include <string>
 #include <cstdio>
+#include <cstdlib>
 
 namespace cler {
+
+[[noreturn]] inline void panic(const char* msg) {
+    std::fprintf(stderr, "cler panic: %s\n", msg);
+    std::abort();
+}
 
 // Stream output operator for Error enum (requires std::ostream)
 inline std::ostream& operator<<(std::ostream& os, cler::Error error) {

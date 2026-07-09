@@ -1,5 +1,6 @@
 #pragma once
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 
 #ifdef __has_include
     #if __has_include(<iio.h>)
@@ -11,9 +12,7 @@
 
 #include <complex>
 #include <cstdint>
-#include <stdexcept>
 #include <string>
-#include <iostream>
 
 // PlutoSDR (and any AD936x/IIO device) RX source via libiio.
 // Works with the same code over any libiio URI:
@@ -37,14 +36,15 @@ struct SourcePlutoBlock : public cler::BlockBase {
 
         _ctx = iio_create_context_from_uri(uri);
         if (!_ctx) {
-            throw std::runtime_error(std::string("Pluto: failed to create IIO context for uri: ") + uri);
+            std::string msg = std::string("Pluto: failed to create IIO context for uri: ") + uri;
+            cler::panic(msg.c_str());
         }
 
         iio_device* phy = iio_context_find_device(_ctx, "ad9361-phy");
         iio_device* rx_dev = iio_context_find_device(_ctx, "cf-ad9361-lpc");
         if (!phy || !rx_dev) {
             iio_context_destroy(_ctx);
-            throw std::runtime_error("Pluto: ad9361-phy / cf-ad9361-lpc not found (not a Pluto?)");
+            cler::panic("Pluto: ad9361-phy / cf-ad9361-lpc not found (not a Pluto?)");
         }
 
         // RX LO frequency lives on output channel altvoltage0 of the phy
@@ -53,14 +53,14 @@ struct SourcePlutoBlock : public cler::BlockBase {
         iio_channel* chn = iio_device_find_channel(phy, "voltage0", false);
         if (!lo || !chn) {
             iio_context_destroy(_ctx);
-            throw std::runtime_error("Pluto: phy channels not found");
+            cler::panic("Pluto: phy channels not found");
         }
 
         if (iio_channel_attr_write_longlong(lo, "frequency", freq_hz) < 0 ||
             iio_channel_attr_write_longlong(chn, "sampling_frequency", samp_rate_hz) < 0 ||
             iio_channel_attr_write_longlong(chn, "rf_bandwidth", bandwidth_hz) < 0) {
             iio_context_destroy(_ctx);
-            throw std::runtime_error("Pluto: failed to set freq/rate/bandwidth");
+            cler::panic("Pluto: failed to set freq/rate/bandwidth");
         }
 
         if (gain_db < 0.0) {
@@ -70,12 +70,11 @@ struct SourcePlutoBlock : public cler::BlockBase {
             iio_channel_attr_write_double(chn, "hardwaregain", gain_db);
         }
 
-        // Enable the two RX streaming channels (I and Q) and create the buffer
         _rx_i = iio_device_find_channel(rx_dev, "voltage0", false);
         _rx_q = iio_device_find_channel(rx_dev, "voltage1", false);
         if (!_rx_i || !_rx_q) {
             iio_context_destroy(_ctx);
-            throw std::runtime_error("Pluto: RX streaming channels not found");
+            cler::panic("Pluto: RX streaming channels not found");
         }
         iio_channel_enable(_rx_i);
         iio_channel_enable(_rx_q);
@@ -83,7 +82,7 @@ struct SourcePlutoBlock : public cler::BlockBase {
         _buf = iio_device_create_buffer(rx_dev, buffer_size, false);
         if (!_buf) {
             iio_context_destroy(_ctx);
-            throw std::runtime_error("Pluto: failed to create RX buffer");
+            cler::panic("Pluto: failed to create RX buffer");
         }
 
         std::cout << "SourcePlutoBlock: Initialized (" << uri << ")\n"
@@ -134,7 +133,6 @@ struct SourcePlutoBlock : public cler::BlockBase {
         return cler::Empty{};
     }
 
-    // Getters
     long long get_frequency() const { return _freq_hz; }
     long long get_sample_rate() const { return _samp_rate_hz; }
 

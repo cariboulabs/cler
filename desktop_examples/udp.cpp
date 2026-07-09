@@ -13,10 +13,7 @@ const size_t MAX_UDP_BLOB_SIZE = 256;
 const size_t SLAB_SLOTS = 10;
 const size_t FIXED_ARRAY_SIZE = 256;
 
-// =============================================================================================
-// Source side: example of using a slab and sending over Blobs (essentially pointers to the slab)
-//              This can be used for variable-size data like LoRa packets with different lengths
-// ==============================================================================================
+// Sends variable-size data (e.g. LoRa-like packets) as Blobs backed by a slab.
 struct SourceBlobBlock : public cler::BlockBase {
     Slab _slab{SLAB_SLOTS, MAX_UDP_BLOB_SIZE};
 
@@ -54,10 +51,6 @@ struct SourceBlobBlock : public cler::BlockBase {
 private:
     size_t counter = 0;
 };
-
-// ============================================================================
-// Sink side: Fixed-size array from UDP
-// ============================================================================
 
 void print_received_array(const std::array<uint8_t, FIXED_ARRAY_SIZE>& arr, void* context) {
     // arr.data() is now null-terminated, so use C-string constructor

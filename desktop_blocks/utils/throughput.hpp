@@ -1,7 +1,7 @@
 #pragma once
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include <chrono>
-#include <iostream>
 
 template <typename T>
 struct ThroughputBlock : public cler::BlockBase {
@@ -12,17 +12,14 @@ struct ThroughputBlock : public cler::BlockBase {
           in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size),
           _start_time(std::chrono::high_resolution_clock::now())
     {
-        // If user provided a non-zero buffer size, validate it's sufficient
         if (buffer_size > 0 && buffer_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
-            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
-                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) + " elements of type T");
+            cler::panic("Buffer size too small for doubly-mapped buffers");
         }
     }
 
     ~ThroughputBlock() = default;
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
-        // Use zero-copy path
         auto [read_ptr, read_size] = in.read_dbf();
         auto [write_ptr, write_size] = out->write_dbf();
         

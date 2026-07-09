@@ -1,6 +1,3 @@
-// HackRF CW (Continuous Wave) Example - Transmit a single tone
-// Shows spectrum plot and transmits via HackRF
-
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/sources/source_cw.hpp"
@@ -36,7 +33,6 @@ void print_usage(const char* prog) {
 }
 
 int main(int argc, char** argv) {
-    // Default values
     double freq_mhz = 915.0;
     double sample_rate_msps = 2.0;
     double cw_offset_khz = 100.0;
@@ -44,7 +40,6 @@ int main(int argc, char** argv) {
     int txvga_gain_db = 47;
     bool amp_enable = false;
 
-    // Parse command line flags
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         
@@ -125,80 +120,62 @@ int main(int argc, char** argv) {
     std::cout << "Amp Enable: " << (amp_enable ? "Yes" : "No") << std::endl;
     std::cout << std::endl;
 
-    try {
-        // Create GUI window
-        cler::GuiManager gui(1200, 600, "HackRF TX - Continuous Wave");
+    cler::GuiManager gui(1200, 600, "HackRF TX - Continuous Wave");
 
-        // Create blocks
-        // CW source: single tone at specified offset frequency
-        SourceCWBlock<std::complex<float>> cw_source("CW", 
-            amplitude,           // Amplitude
-            cw_freq_hz,         // Frequency offset from center
-            sample_rate_hz);    // Sample rate
+    SourceCWBlock<std::complex<float>> cw_source("CW", amplitude, cw_freq_hz, sample_rate_hz);
 
-        // Fanout to send CW to both spectrum plot and HackRF
-        FanoutBlock<std::complex<float>> fanout("Fanout", 2);
+    // Fanout: CW tone feeds both the spectrum plot and the HackRF TX sink
+    FanoutBlock<std::complex<float>> fanout("Fanout", 2);
 
-        // Spectrum plot to visualize the CW tone
-        PlotCSpectrumBlock spectrum("TX Spectrum", {"CW Tone"}, sample_rate_hz, 2048);
-        spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
+    PlotCSpectrumBlock spectrum("TX Spectrum", {"CW Tone"}, sample_rate_hz, 2048);
+    spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
 
-        // HackRF TX sink
-        SinkHackRFBlock hackrf_tx("HackRF_TX", freq_hz, sample_rate_hz, txvga_gain_db, amp_enable);
+    SinkHackRFBlock hackrf_tx("HackRF_TX", freq_hz, sample_rate_hz, txvga_gain_db, amp_enable);
 
-        // Build flowgraph
-        auto flowgraph = cler::make_desktop_flowgraph(
-            cler::BlockRunner(&cw_source, &fanout.in),
-            cler::BlockRunner(&fanout, &spectrum.in[0], &hackrf_tx.in),
-            cler::BlockRunner(&spectrum),
-            cler::BlockRunner(&hackrf_tx)
-        );
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&cw_source, &fanout.in),
+        cler::BlockRunner(&fanout, &spectrum.in[0], &hackrf_tx.in),
+        cler::BlockRunner(&spectrum),
+        cler::BlockRunner(&hackrf_tx)
+    );
 
-        std::cout << "Starting flowgraph..." << std::endl;
-        flowgraph.run();
-        std::cout << "Transmitting CW tone. Close window to stop." << std::endl;
-        std::cout << "You should see a single spectral line at " << cw_offset_khz << " kHz offset." << std::endl;
-        std::cout << std::endl;
+    std::cout << "Starting flowgraph..." << std::endl;
+    flowgraph.run();
+    std::cout << "Transmitting CW tone. Close window to stop." << std::endl;
+    std::cout << "You should see a single spectral line at " << cw_offset_khz << " kHz offset." << std::endl;
+    std::cout << std::endl;
 
-        // GUI event loop
-        auto last_stats = std::chrono::steady_clock::now();
-        while (!gui.should_close()) {
-            gui.begin_frame();
-            spectrum.render();
-            gui.end_frame();
+    auto last_stats = std::chrono::steady_clock::now();
+    while (!gui.should_close()) {
+        gui.begin_frame();
+        spectrum.render();
+        gui.end_frame();
 
-            // Print underrun stats every 5 seconds
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_stats).count();
-            if (elapsed >= 5) {
-                size_t underruns = hackrf_tx.get_underrun_count();
-                if (underruns > 0) {
-                    std::cout << "TX underruns: " << underruns << std::endl;
-                }
-                last_stats = now;
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_stats).count();
+        if (elapsed >= 5) {
+            size_t underruns = hackrf_tx.get_underrun_count();
+            if (underruns > 0) {
+                std::cout << "TX underruns: " << underruns << std::endl;
             }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            last_stats = now;
         }
 
-        std::cout << "\nStopping transmission..." << std::endl;
-        flowgraph.stop();
-
-        // Print final statistics
-        size_t final_underruns = hackrf_tx.get_underrun_count();
-        std::cout << "Total TX underruns: " << final_underruns << std::endl;
-        
-        if (final_underruns > 0) {
-            std::cout << "\nNote: Underruns indicate the source couldn't keep up with TX rate." << std::endl;
-            std::cout << "This is unusual for CW and may indicate system issues." << std::endl;
-        }
-
-        std::cout << "Done." << std::endl;
-
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
-        return 1;
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
+
+    std::cout << "\nStopping transmission..." << std::endl;
+    flowgraph.stop();
+
+    size_t final_underruns = hackrf_tx.get_underrun_count();
+    std::cout << "Total TX underruns: " << final_underruns << std::endl;
+
+    if (final_underruns > 0) {
+        std::cout << "\nNote: Underruns indicate the source couldn't keep up with TX rate." << std::endl;
+        std::cout << "This is unusual for CW and may indicate system issues." << std::endl;
+    }
+
+    std::cout << "Done." << std::endl;
 
     return 0;
 }

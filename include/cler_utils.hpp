@@ -78,7 +78,6 @@ namespace flowgraph_config {
     }
     
     
-    
     // Thread-per-block with adaptive sleep (for low-rate data scenarios)
     inline FlowGraphConfig thread_per_block_adaptive_sleep() {
         FlowGraphConfig config;

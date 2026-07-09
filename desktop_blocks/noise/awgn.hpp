@@ -1,8 +1,10 @@
 #pragma once
 
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include <random>
 #include <type_traits>
+#include <new>
 
 template <typename T>
 struct NoiseAWGNBlock : public cler::BlockBase {
@@ -14,12 +16,11 @@ struct NoiseAWGNBlock : public cler::BlockBase {
 
     NoiseAWGNBlock(const char* name, scalar_type noise_stddev, const size_t buffer_size = 0)
         : cler::BlockBase(name), in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size), _noise_stddev(noise_stddev) {
-        
-        // Allocate temporary buffer for readN/writeN operations
+
         _buffer_size = buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size;
-        _buffer = new T[_buffer_size];
+        _buffer = new (std::nothrow) T[_buffer_size];
         if (!_buffer) {
-            throw std::bad_alloc();
+            cler::panic("Failed to allocate temporary buffer");
         }
 
         std::random_device rd;
@@ -31,17 +32,16 @@ struct NoiseAWGNBlock : public cler::BlockBase {
         delete[] _buffer;
     }
 
+    // buffer_size isn't validated to be >=4KB (custom sizes allowed), so dbf isn't
+    // guaranteed available here; readN/writeN into a temp buffer stays correct for any size.
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
-        // Use readN/writeN for simple processing (recommended pattern)
         size_t transferable = std::min({in.size(), out->space(), _buffer_size});
         if (transferable == 0) {
             return cler::Error::NotEnoughSpaceOrSamples;
         }
-        
-        // Read input data
+
         in.readN(_buffer, transferable);
-        
-        // Add noise to buffer
+
         for (size_t i = 0; i < transferable; ++i) {
             if constexpr (std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>) {
                 auto n_re = _normal_dist(_rng);
@@ -51,10 +51,9 @@ struct NoiseAWGNBlock : public cler::BlockBase {
                 _buffer[i] = _buffer[i] + _normal_dist(_rng);
             }
         }
-        
-        // Write output
+
         out->writeN(_buffer, transferable);
-        
+
         return cler::Empty{};
     }
 
@@ -63,8 +62,7 @@ private:
 
     std::mt19937 _rng;
     std::normal_distribution<scalar_type> _normal_dist;
-    
-    // Temporary buffer for readN/writeN
+
     T* _buffer;
     size_t _buffer_size;
 };

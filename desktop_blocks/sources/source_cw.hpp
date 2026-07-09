@@ -1,5 +1,6 @@
 #pragma once
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include <cmath>
 #include <type_traits>
 #include <complex>
@@ -19,7 +20,7 @@ struct SourceCWBlock : public cler::BlockBase {
           _sps(sps)
     {
         if (_sps == 0) {
-            throw std::invalid_argument("Sample rate must be greater than zero.");
+            cler::panic("Sample rate must be greater than zero.");
         }
 
         float phase_increment = 2.0f * cler::PI * _frequency_hz / static_cast<float>(_sps);
@@ -27,12 +28,8 @@ struct SourceCWBlock : public cler::BlockBase {
         _phasor = std::complex<float>(1.0f, 0.0f);
         _phasor_inc = std::polar(1.0f, phase_increment);
 
-        // Allocate temporary buffer
         _buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T);
         _buffer = new T[_buffer_size];
-        if (!_buffer) {
-            throw std::bad_alloc();
-        }
     }
 
     ~SourceCWBlock() {
@@ -40,13 +37,11 @@ struct SourceCWBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
-        // Use writeN for simple generation (recommended pattern)
         size_t to_generate = std::min(out->space(), _buffer_size);
         if (to_generate == 0) {
             return cler::Error::NotEnoughSpace;
         }
-        
-        // Generate into temporary buffer
+
         for (size_t i = 0; i < to_generate; ++i) {
             std::complex<float> cw = _phasor;
 
@@ -57,9 +52,9 @@ struct SourceCWBlock : public cler::BlockBase {
             }
 
             _phasor *= _phasor_inc;
-            _phasor /= std::abs(_phasor); // Normalize to keep phasor on the unit circle, CRUCIAL for stability
+            _phasor /= std::abs(_phasor); // renormalize to unit circle each step, required for numerical stability
         }
-        
+
         out->writeN(_buffer, to_generate);
         return cler::Empty{};
     }
@@ -69,12 +64,9 @@ private:
     float _frequency_hz;
     size_t _sps;
 
-    // Recursive oscillator state
     std::complex<float> _phasor = {1.0f, 0.0f};
     std::complex<float> _phasor_inc = {1.0f, 0.0f};
-    
-    // Temporary buffer for writeN
+
     T* _buffer;
     size_t _buffer_size;
-
 };

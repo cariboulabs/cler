@@ -298,14 +298,14 @@ TEST_F(SinkBlocksTest, SinkFileBlockErrorConditions) {
     const size_t buffer_size = 4096; // Large enough for dbf
     
     // Test buffer size too small for doubly-mapped buffers (need at least 4096/sizeof(float) = 1024 for float)
-    EXPECT_THROW(SinkFileBlock<float>("test", test_filename.c_str(), 1), std::invalid_argument);
+    EXPECT_DEATH(SinkFileBlock<float>("test", test_filename.c_str(), 1), "cler panic");
     
     // Test empty filename
-    EXPECT_THROW(SinkFileBlock<float>("test", "", buffer_size), std::invalid_argument);
-    EXPECT_THROW(SinkFileBlock<float>("test", nullptr, buffer_size), std::invalid_argument);
+    EXPECT_DEATH(SinkFileBlock<float>("test", "", buffer_size), "cler panic");
+    EXPECT_DEATH(SinkFileBlock<float>("test", nullptr, buffer_size), "cler panic");
     
     // Test invalid file path (assuming /invalid/path doesn't exist)
-    EXPECT_THROW(SinkFileBlock<float>("test", "/invalid/path/file.bin", buffer_size), std::runtime_error);
+    EXPECT_DEATH(SinkFileBlock<float>("test", "/invalid/path/file.bin", buffer_size), "cler panic");
 }
 
 // Test SinkFileBlock with empty input

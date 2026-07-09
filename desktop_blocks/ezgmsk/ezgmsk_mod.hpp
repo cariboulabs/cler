@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include "liquid.h"
 #include <vector>
 #include "../blob.hpp"
@@ -25,11 +26,9 @@ struct EZGmskModBlock : public cler::BlockBase {
         _BT(BT),
         _preamble_len(preamble_symbols_len)
     {
-        // Create the modulator
         _mod = ezgmsk::ezgmsk_mod_create_set(k, m, BT, preamble_symbols_len);
-        
         if (!_mod) {
-            throw std::runtime_error("Failed to create EZGMSK modulator");
+            cler::panic("EZGmskModBlock: failed to create EZGMSK modulator");
         }
     }
 
@@ -67,7 +66,7 @@ struct EZGmskModBlock : public cler::BlockBase {
             ezgmsk::ezgmsk_mod_reset(_mod);
 
             blob->release();
-            in.commit_read(1); // Commit the read of the blob
+            in.commit_read(1);
         }
         return cler::Empty{};
     }

@@ -1,6 +1,5 @@
 #pragma once
 #include "cler.hpp"
-#include <stdexcept>
 #include <cstring>
 #include <cerrno>
 
@@ -20,7 +19,6 @@ enum class SocketType {
     UNIX_DGRAM    // UNIX datagram
 };
 
-// Helper function to parse address string based on socket type
 struct ParsedAddress {
     std::string address;
     uint16_t port;

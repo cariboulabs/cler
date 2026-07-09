@@ -9,8 +9,6 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
     cler::Channel<T> in;
     typedef void (*OnSendCallback)(const T&, void* context);
 
-    // Constructor - same signature for both Blob and non-Blob
-    // (input channel size is always relevant)
     SinkUDPSocketBlock(const char* name,
                       const UDPBlock::SocketType type,
                       const std::string& dest_host_or_path,
@@ -40,14 +38,12 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
             ssize_t bytes;
 
             if constexpr (IS_BLOB) {
-                // Blob-specific: send blob data and release slot
                 bytes = _socket.send(buffer[i].data, buffer[i].len);
                 if (_callback) {
                     _callback(buffer[i], _callback_context);
                 }
-                buffer[i].release();
+                buffer[i].release(); // return the slab slot now that it's sent
             } else {
-                // Generic fixed-size
                 bytes = _socket.send(reinterpret_cast<const uint8_t*>(&buffer[i]), sizeof(T));
                 if (_callback) {
                     _callback(buffer[i], _callback_context);

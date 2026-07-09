@@ -256,7 +256,7 @@ TEST_F(ResamplerBlocksTest, MultiStageResamplerErrorConditions) {
     const float attenuation = 60.0f;
     
     // Test buffer size too small for doubly-mapped buffers (need at least 4096/sizeof(float) = 1024 for float)
-    EXPECT_THROW(MultiStageResamplerBlock<float>("test", 2.0f, attenuation, 1), std::invalid_argument);
+    EXPECT_DEATH(MultiStageResamplerBlock<float>("test", 2.0f, attenuation, 1), "cler panic");
     
     // NOTE: Cannot safely test invalid ratio/attenuation parameters because liquid-dsp
     // library calls exit() or segfaults instead of returning error codes that we can handle.
@@ -329,6 +329,6 @@ TEST_F(ResamplerBlocksTest, MultiStageResamplerSmallBufferException) {
     const float ratio = 2.0f;
     const float attenuation = 60.0f;
     
-    // This should throw std::invalid_argument because buffer is too small
-    EXPECT_THROW(MultiStageResamplerBlock<float>("test_resampler_small", ratio, attenuation, small_buffer), std::invalid_argument);
+    // Buffer too small for doubly-mapped: must die
+    EXPECT_DEATH(MultiStageResamplerBlock<float>("test_resampler_small", ratio, attenuation, small_buffer), "cler panic");
 }

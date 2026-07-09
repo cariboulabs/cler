@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include "liquid.h"
 #include <complex>
 
@@ -28,10 +29,8 @@ struct EZGmskDemodBlock : public cler::BlockBase {
     : BlockBase(name),
       in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size)
     {
-        // If user provided a non-zero buffer size, validate it's sufficient
         if (buffer_size > 0 && buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
-            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
-                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>)) + " complex<float> elements");
+            cler::panic("EZGmskDemodBlock: buffer_size too small for doubly-mapped buffers");
         }
         _demod = ezgmsk_demod_create_set(
             k, m, BT,
@@ -58,10 +57,9 @@ struct EZGmskDemodBlock : public cler::BlockBase {
         if (!read_ptr || read_size == 0) {
             return cler::Error::NotEnoughSamples;
         }
-        
-        // Process directly from doubly-mapped buffer
-        // Note: liquid DSP functions don't modify input, so const_cast is safe here
-        ezgmsk::ezgmsk_demod_execute(_demod, 
+
+        // liquid DSP functions don't modify input, so const_cast is safe here
+        ezgmsk::ezgmsk_demod_execute(_demod,
             reinterpret_cast<liquid_float_complex*>(const_cast<std::complex<float>*>(read_ptr)), 
             read_size);
         in.commit_read(read_size);

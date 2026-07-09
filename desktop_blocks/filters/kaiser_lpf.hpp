@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include "liquid.h"
 #include <type_traits>
 #include <cmath>
@@ -26,50 +27,41 @@ struct KaiserLPFBlock : public cler::BlockBase {
           _sample_rate(sample_rate),
           _cutoff_freq(cutoff_freq)
     {
-        // Validate buffer size
         if (buffer_size > 0 && buffer_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
-            throw std::invalid_argument(
-                "Buffer size too small for doubly-mapped buffers. Need at least " +
-                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) +
-                " elements of type T");
+            cler::panic("Buffer size too small for doubly-mapped buffers");
         }
-
-        // Validate parameters
         if (sample_rate <= 0.0) {
-            throw std::invalid_argument("Sample rate must be positive");
+            cler::panic("Sample rate must be positive");
         }
         if (cutoff_freq <= 0.0 || cutoff_freq >= sample_rate / 2.0) {
-            throw std::invalid_argument("Cutoff frequency must be between 0 and Nyquist");
+            cler::panic("Cutoff frequency must be between 0 and Nyquist");
         }
         if (transition_bw <= 0.0) {
-            throw std::invalid_argument("Transition bandwidth must be positive");
+            cler::panic("Transition bandwidth must be positive");
         }
         if (attenuation_db <= 0.0) {
-            throw std::invalid_argument("Attenuation must be positive");
+            cler::panic("Attenuation must be positive");
         }
 
         // Normalize cutoff frequency to [0, 0.5] where 0.5 is Nyquist
         float fc = static_cast<float>(cutoff_freq / sample_rate);
         if (fc >= 0.5f) {
-            throw std::invalid_argument("Cutoff frequency must be less than Nyquist frequency (sample_rate/2)");
+            cler::panic("Cutoff frequency must be less than Nyquist frequency (sample_rate/2)");
         }
 
-        // Calculate filter order based on transition bandwidth and attenuation
-        // liquid-dsp uses: order = ceil(attenuation / (22.0 * transition_bw_normalized))
+        // liquid-dsp order estimate: order = ceil(attenuation / (22.0 * transition_bw_normalized))
         float transition_bw_normalized = static_cast<float>(transition_bw / sample_rate);
         unsigned int filter_order = static_cast<unsigned int>(
             std::ceil(attenuation_db / (22.0f * transition_bw_normalized)));
 
         if (filter_order < 5) {
-            throw std::invalid_argument(
-                "Filter order too small. Increase transition_bw or decrease attenuation_db");
+            cler::panic("Filter order too small. Increase transition_bw or decrease attenuation_db");
         }
-        // Ensure odd order for better frequency response
+        // Odd order gives better frequency response
         if (filter_order % 2 == 0) {
             filter_order++;
         }
 
-        // Create Kaiser low-pass filter using liquid-dsp
         if constexpr (std::is_same_v<T, float>) {
             _filter_r = firfilt_rrrf_create_kaiser(
                 filter_order,
@@ -78,7 +70,7 @@ struct KaiserLPFBlock : public cler::BlockBase {
                 0.0f);  // mu (fractional sample delay, usually 0)
 
             if (!_filter_r) {
-                throw std::runtime_error("Failed to create Kaiser LPF for float");
+                cler::panic("Failed to create Kaiser LPF for float");
             }
         } else if constexpr (std::is_same_v<T, std::complex<float>>) {
             _filter_c = firfilt_crcf_create_kaiser(
@@ -88,7 +80,7 @@ struct KaiserLPFBlock : public cler::BlockBase {
                 0.0f);  // mu (fractional sample delay, usually 0)
 
             if (!_filter_c) {
-                throw std::runtime_error("Failed to create Kaiser LPF for complex float");
+                cler::panic("Failed to create Kaiser LPF for complex float");
             }
         }
     }
@@ -105,7 +97,6 @@ struct KaiserLPFBlock : public cler::BlockBase {
         }
     }
 
-    // Simple: T -> T (same as resampler pattern)
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
         auto [read_ptr, read_size] = in.read_dbf();
         if (!read_ptr || read_size == 0) {

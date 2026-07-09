@@ -19,8 +19,6 @@ Slab::Slab(size_t num_slots, size_t max_blob_size)
     }
 }
 
-// Allocate a slice: pops a free slot, returns pointer to region
-// Returns nullptr if no space
 cler::Result<Blob, cler::Error> Slab::take_slot() {
     size_t slot_idx;
     if (!_free_slots.try_pop(slot_idx)) {

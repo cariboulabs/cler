@@ -17,11 +17,9 @@ struct SourceBlock : public cler::BlockBase {
         cler::ChannelBase<float>* out0,
         cler::ChannelBase<double>* out1) {
 
-        // Use zero-copy path
         auto [write_ptr0, write_size0] = out0->write_dbf();
         auto [write_ptr1, write_size1] = out1->write_dbf();
-        
-        // Direct write to both outputs
+
         size_t to_write0 = std::min(write_size0, CHANNEL_SIZE);
         size_t to_write1 = std::min(write_size1, CHANNEL_SIZE);
         
@@ -51,11 +49,10 @@ struct AdderBlock : public cler::BlockBase {
         in1(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(double)) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        // Use zero-copy path
         auto [write_ptr, write_size] = out->write_dbf();
         auto [read_ptr0, read_size0] = in0.read_dbf();
         auto [read_ptr1, read_size1] = in1.read_dbf();
-        
+
         size_t to_process = std::min({write_size, read_size0, read_size1});
         if (to_process > 0) {
             for (size_t i = 0; i < to_process; ++i) {
@@ -76,14 +73,10 @@ struct GainBlock : public cler::BlockBase {
     float* _buffer;
     size_t _buffer_size;
 
-    GainBlock(const char* name, float gain_value) : BlockBase(name), 
+    GainBlock(const char* name, float gain_value) : BlockBase(name),
         in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)), gain(gain_value) {
-        // Allocate temporary buffer for readN/writeN operations
         _buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float);
         _buffer = new float[_buffer_size];
-        if (!_buffer) {
-            throw std::bad_alloc();
-        }
     }
     
     ~GainBlock() {
@@ -91,13 +84,11 @@ struct GainBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        // Use readN/writeN for simple processing (recommended pattern)
         size_t transferable = std::min({in.size(), out->space(), _buffer_size});
         if (transferable == 0) return cler::Error::NotEnoughSamples;
-        
+
         in.readN(_buffer, transferable);
-        
-        // Process buffer
+
         for (size_t i = 0; i < transferable; ++i) {
             _buffer[i] = _buffer[i] * gain;
         }

@@ -15,66 +15,29 @@
 #include <string>
 #include <vector>
 
-// Polyphase channelizer panel: splits the full I/Q stream into N equal-width
-// channels (N = rate / channel_width, snapped to an integer in [2, 64]) with a
-// maximally-decimated liquid firpfbch analyzer, and renders one scrolling
-// power-vs-time strip per channel -- N mini zero-span scopes sharing one time
-// axis -- in its own "Channelizer" window.
+// Polyphase channelizer: N-channel liquid firpfbch analyzer, N scrolling
+// power-vs-time strips on a shared time axis, in a "Channelizer" window.
 //
-// Design notes:
-//  * The block is a SINK: it always drains its input (even when hidden via
-//    set_active(false)) so it can never back up the shared fanout and perturb
-//    the trigger path.
-//  * All liquid objects are created AND destroyed on the GUI thread through
-//    the same staged pending/active/retired slot scheme as PowerDetectorBlock
-//    (see power_detector.hpp): set_config() designs+stages, procedure() only
-//    pointer-swaps under the mutex, the next set_config() (or the destructor)
-//    frees the retired object. procedure() never allocates or frees.
-//  * Storage is allocated ONCE in the constructor for the N_MAX x POINTS_MAX
-//    worst case (64 * 2048 floats = 512 KB per ring copy); a channel-count
-//    change just reinterprets/clears it -- no reallocation ever.
-//  * HOT-PATH CPU RULE: |x|^2 is accumulated (peak-held) in LINEAR power per
-//    channel-sample (aggregate channel-sample rate == input rate, e.g. 20 M/s)
-//    and converted to dB only when a display bin completes -- points/s is a
-//    few thousand at most, so log10f never runs at the sample rate.
-//
-// Calibration: firpfbch_crcf_create_kaiser() would feed UNNORMALIZED
-// liquid_firdes_kaiser taps straight into the bank (fc = 0.5/N, DC gain
-// sum(h) ~= N, i.e. an N-DEPENDENT +20*log10(N) level offset -- verified in
-// liquid's src/multichannel/src/firpfbch.proto.c). We instead design the same
-// Kaiser prototype ourselves and scale it to unity DC gain before
-// firpfbch_crcf_create(), so an in-channel CW of amplitude A reads
-// ~20*log10(A) dB in every channel REGARDLESS of N: changing the channel
-// width never jumps the displayed levels.
-//
-// Channel k (FFT ordering, verified against liquid's analyzer: forward DFT of
-// the polyphase branch outputs, demonstrated in
-// examples/firpfbch_crcf_analysis_example.c) is centered at
-//   f_k = k * rate / N          for k <= N/2
-//   f_k = (k - N) * rate / N    for k >  N/2
-// relative to the device center frequency. The strips are drawn bottom-to-top
-// in ascending absolute frequency.
+// SINK: procedure() always drains `in`, even while hidden, so it can never
+// back up the shared fanout.
 struct ChannelizerPanelBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
 
     static constexpr size_t N_MIN      = 2;
     static constexpr size_t N_MAX      = 64;
     static constexpr size_t POINTS_MAX = 2048;   // dB points kept per strip
-    // Upper bound on analyzer frames per procedure() call: bounds worst-case
-    // per-call latency without ever letting the input channel back up (the
-    // scheduler simply calls us again).
+    // Cap on analyzer frames per procedure() call: bounds per-call latency
+    // without letting `in` back up (the scheduler just calls us again).
     static constexpr size_t FRAME_BUDGET = 256;
     static constexpr unsigned int FILTER_SEMI_LENGTH = 4;   // symbols (m)
     static constexpr float KAISER_ATTEN_DB = 60.0f;
-    // Fixed strip display range: each strip band maps [DB_MIN, DB_MAX] into
-    // 90% of its unit-height row (relative-level display; see render()).
-    static constexpr float DB_MIN = -120.0f;
+    static constexpr float DB_MIN = -120.0f;   // strip display range
     static constexpr float DB_MAX = 0.0f;
 
     ChannelizerPanelBlock(const char* name, size_t buffer_size = 32768)
         : BlockBase(name), in(buffer_size)
     {
-        // Everything sized once for the worst case; ~1.2 MB total.
+        // Sized once for the N_MAX x POINTS_MAX worst case (~1.2 MB); never reallocated.
         _rings      = new float[N_MAX * POINTS_MAX];   // per-channel dB point rings
         _render_buf = new float[N_MAX * POINTS_MAX];   // GUI's chronological copy
         _render_x   = new float[POINTS_MAX];           // shared time axis
@@ -102,7 +65,6 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
         if (_retired) firpfbch_crcf_destroy(_retired);
     }
 
-    // Channel count for a requested width at a given rate:
     // N = clamp(round(rate/width), N_MIN, N_MAX). Static so the GUI panel can
     // mirror the snapping next to the width control.
     static size_t channels_for(double width_hz, double rate_hz) {
@@ -113,24 +75,19 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
         return static_cast<size_t>(n);
     }
 
-    // The channel width actually achieved for a request: rate / N.
     static double effective_width(double width_hz, double rate_hz) {
         if (rate_hz <= 0.0) return 0.0;
         return rate_hz / static_cast<double>(channels_for(width_hz, rate_hz));
     }
 
-    // Stage a new channelizer configuration. GUI-thread only. width_hz snaps
-    // to rate/N (see channels_for); span_s is the strips' shared time-axis
-    // depth; center_freq_hz labels the Y ticks (absolute channel centers).
-    // N, the bin size and the point spacing travel to the DSP thread as ONE
-    // generation, so procedure() never sees torn values.
+    // Stages N, bin size and point spacing as ONE generation, so procedure()
+    // never sees torn values. GUI-thread only.
     void set_config(double width_hz, double rate_hz, double span_s,
                     double center_freq_hz) {
-        // Label-only params (render() runs on this same GUI thread).
         _gui_rate_hz   = rate_hz;
         _gui_center_hz = center_freq_hz;
 
-        // Drain the retired slot (destruction always here, on the GUI thread).
+        // Retired-slot destruction always happens here, on the GUI thread.
         firpfbch_crcf retired = nullptr;
         {
             std::lock_guard<std::mutex> lk(_cfg_mutex);
@@ -140,8 +97,8 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
         if (retired) firpfbch_crcf_destroy(retired);
 
         const size_t N = channels_for(width_hz, rate_hz);
-        // Display bin: one dB point per bin_samples channel samples, chosen so
-        // POINTS_MAX points span ~span_s seconds at the channel rate rate/N.
+        // One dB point per bin_samples channel samples, chosen so POINTS_MAX
+        // points span ~span_s seconds at the channel rate rate/N.
         const double chan_rate = rate_hz / static_cast<double>(N);
         double bs = std::round(span_s * chan_rate
                                / static_cast<double>(POINTS_MAX));
@@ -157,10 +114,8 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
         _staged_bin = bin_samples;
         _staged_dt  = point_dt;
 
-        // Same Kaiser prototype firpfbch_crcf_create_kaiser() designs
-        // (h_len = 2*N*m + 1, fc = 0.5/N), but normalized to unity DC gain
-        // (see calibration note in the header comment). create() consumes the
-        // first N*2m taps, exactly as create_kaiser() does internally.
+        // firpfbch_crcf_create_kaiser() feeds unnormalized taps -> N-dependent
+        // +20*log10(N) offset (verified against liquid source); we normalize to unity DC gain instead.
         const unsigned int h_len =
             2 * static_cast<unsigned int>(N) * FILTER_SEMI_LENGTH + 1;
         std::vector<float> h(h_len);
@@ -183,16 +138,13 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
             _pending_bin  = bin_samples;
             _pending_dt   = point_dt;
         }
-        _gen.fetch_add(1, std::memory_order_release);
+        _config_generation.fetch_add(1, std::memory_order_release);
         if (stale_pending) firpfbch_crcf_destroy(stale_pending);
     }
 
-    // Retune only the Y-tick labels (absolute channel centers). GUI-thread
-    // only; no DSP reconfiguration.
+    // Retunes only the Y-tick labels; no DSP reconfiguration. GUI-thread only.
     void set_center_freq(double center_freq_hz) { _gui_center_hz = center_freq_hz; }
 
-    // Drain-without-work when the window is hidden (mirrors the spectrum/
-    // spectrogram set_active pattern) so the fanout never stalls.
     void set_active(bool active) {
         _external_pause.store(!active, std::memory_order_release);
     }
@@ -202,9 +154,8 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
         _win_size = ImVec2(w, h);
     }
 
-    // One-shot programmatic window rect: the next render() applies it with
-    // ImGuiCond_Always and clears the request (same pattern as the other
-    // spike views). GUI thread only.
+    // One-shot programmatic window rect: next render() applies it and clears
+    // the request. GUI thread only.
     void apply_window_rect(float x, float y, float w, float h) {
         _pending_rect_pos  = ImVec2(x, y);
         _pending_rect_size = ImVec2(w, h);
@@ -212,27 +163,24 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
-        // Swap in a staged config (rare, GUI-driven). Pointer moves only: the
-        // old analyzer is parked in the retired slot for the GUI thread to
-        // destroy; nothing is freed or allocated here.
-        const uint64_t gen = _gen.load(std::memory_order_acquire);
-        if (gen != _gen_applied) {
+        // Analyzer create/destroy always happens on the GUI thread; here we
+        // only pointer-swap active/pending/retired under _cfg_mutex.
+        const uint64_t gen = _config_generation.load(std::memory_order_acquire);
+        if (gen != _config_generation_applied) {
             {
                 std::lock_guard<std::mutex> lk(_cfg_mutex);
                 if (_pending) {
-                    if (_active) _retired = _active;   // GUI drained this slot
+                    if (_active) _retired = _active;   // GUI drains and destroys this slot
                     _active  = _pending;
                     _pending = nullptr;
                     _N           = _pending_N;
                     _bin_samples = _pending_bin;
                     _point_dt    = _pending_dt;
                 }
-                _gen_applied = _gen.load(std::memory_order_relaxed);
+                _config_generation_applied = _config_generation.load(std::memory_order_relaxed);
             }
-            // New channel grid: old history is meaningless (different centers
-            // widths and bin spacing), so clear the rings HERE, on the thread
-            // that owns ring writes, so the rings always match _snap_N. A
-            // 512 KB fill on a rare reconfig is fine; never runs per-sample.
+            // New channel grid: old history no longer matches, so clear the
+            // rings here, on the thread that owns ring writes.
             _bin_count = 0;
             std::fill_n(_accum, N_MAX, 0.0f);
             {
@@ -245,8 +193,8 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
             }
         }
 
-        // Not yet configured, or hidden: drain everything so the shared
-        // fanout can never back up, do no DSP work.
+        // Not yet configured, or hidden: drain everything, do no DSP work,
+        // so the shared fanout can never back up.
         if (!_active || _external_pause.load(std::memory_order_acquire)) {
             const size_t avail = in.size();
             if (avail == 0) return cler::Error::NotEnoughSamples;
@@ -266,8 +214,8 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
                 _active,
                 reinterpret_cast<liquid_float_complex*>(_in_scratch + f * N),
                 reinterpret_cast<liquid_float_complex*>(_chan_out));
-            // Peak-hold LINEAR power per channel; no log10f here (this loop
-            // runs at the full input rate in aggregate).
+            // Peak-hold LINEAR power (runs at the full input rate); no
+            // log10f here -- that only happens in flush_bin().
             for (size_t ch = 0; ch < N; ++ch) {
                 const float re = _chan_out[ch].real();
                 const float im = _chan_out[ch].imag();
@@ -290,17 +238,16 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
         }
         ImGui::Begin(name());
 
-        // Copy the rings into a render-local buffer, unrolled into
-        // chronological order (two memcpys per channel). On lock contention
-        // just redraw last frame's copy.
+        // Unroll the rings into chronological order for rendering. On lock
+        // contention just redraw last frame's copy.
         if (_snap_mutex.try_lock()) {
-            _r_N    = _snap_N;
-            _r_fill = _ring_fill;
-            _r_dt   = _snap_dt;
-            const size_t fill  = _r_fill;
+            _render_channel_count      = _snap_N;
+            _render_fill               = _ring_fill;
+            _render_seconds_per_point  = _snap_dt;
+            const size_t fill  = _render_fill;
             const size_t start = (_ring_w + POINTS_MAX - fill) % POINTS_MAX;
             const size_t first = std::min(fill, POINTS_MAX - start);
-            for (size_t ch = 0; ch < _r_N; ++ch) {
+            for (size_t ch = 0; ch < _render_channel_count; ++ch) {
                 const float* src = _rings      + ch * POINTS_MAX;
                 float*       dst = _render_buf + ch * POINTS_MAX;
                 std::memcpy(dst, src + start, first * sizeof(float));
@@ -310,10 +257,10 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
             _snap_mutex.unlock();
         }
 
-        const size_t N    = _r_N;
-        const size_t fill = _r_fill;
+        const size_t N    = _render_channel_count;
+        const size_t fill = _render_fill;
         const double span_s = static_cast<double>(POINTS_MAX)
-                            * static_cast<double>(_r_dt);
+                            * static_cast<double>(_render_seconds_per_point);
 
         if (N == 0) {
             ImGui::TextUnformatted("Waiting for configuration...");
@@ -332,8 +279,8 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
         if (ImPlot::BeginPlot("##strips", ImVec2(-1, -1), ImPlotFlags_NoLegend)) {
             ImPlot::SetupAxes("Time [s]", "Channel center [MHz]");
             ImPlot::SetupAxisLimits(ImAxis_X1, -span_s, 0.0, ImPlotCond_Always);
-            // Re-fit Y only when the strip count changes; otherwise the user
-            // may zoom into a band of strips freely.
+            // Re-fit Y only when the strip count changes, so the user can
+            // otherwise zoom freely into a band of strips.
             ImPlot::SetupAxisLimits(ImAxis_Y1, -0.2,
                                     static_cast<double>(N) + 0.2,
                                     (_y_fit_N == N) ? ImPlotCond_Once
@@ -347,13 +294,10 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
             if (fill > 0) {
                 // Shared time axis: newest point at t = 0, older to the left.
                 for (size_t j = 0; j < fill; ++j)
-                    _render_x[j] = -static_cast<float>(fill - 1 - j) * _r_dt;
+                    _render_x[j] = -static_cast<float>(fill - 1 - j) * _render_seconds_per_point;
 
-                // One polyline per strip, bottom row = lowest absolute
-                // frequency. Row r shows FFT channel (r - N/2) mod N (the
-                // verified analyzer ordering). Each strip normalizes
-                // [DB_MIN, DB_MAX] into [row, row + 0.9]. Worst case
-                // 64 * 2048 = 131k line points/frame -- fine for ImPlot.
+                // FFT ordering: f_k = k*rate/N for k<=N/2, else (k-N)*rate/N.
+                // Row r (bottom = lowest freq) shows channel (r - N/2) mod N.
                 const float inv_range = 1.0f / (DB_MAX - DB_MIN);
                 for (size_t r = 0; r < N; ++r) {
                     const size_t ch = (r + N - N / 2) % N;
@@ -377,9 +321,8 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
     }
 
 private:
-    // Convert the completed bin's peak power to dB and push one point per
-    // channel. Runs at the display point rate (a few kpoints/s at most), so
-    // both the log10f and the brief lock are cheap.
+    // Converts the completed bin's peak power to dB and pushes one point per
+    // channel. Runs at the display point rate (a few kpoints/s), so the lock is cheap.
     void flush_bin(size_t N) {
         std::lock_guard<std::mutex> lk(_snap_mutex);
         for (size_t ch = 0; ch < N; ++ch) {
@@ -392,8 +335,7 @@ private:
         _bin_count = 0;
     }
 
-    // Y-tick label cache: rebuilt only when N / rate / center change, never
-    // per frame. At high N the ticks are strided so labels stay readable.
+    // Y-tick label cache, rebuilt only when N / rate / center change.
     void rebuild_ticks_if_needed(size_t N) {
         if (N == _labels_N && _gui_rate_hz == _labels_rate &&
             _gui_center_hz == _labels_center)
@@ -408,8 +350,6 @@ private:
         const size_t stride = (N + 31) / 32;   // at most ~32 labeled strips
         char buf[32];
         for (size_t r = 0; r < N; r += stride) {
-            // Row r (bottom = lowest freq) is FFT channel k with signed index
-            // r - N/2, centered at center + (r - N/2) * rate/N.
             const double off = (static_cast<double>(r)
                                 - static_cast<double>(N / 2)) * df;
             std::snprintf(buf, sizeof(buf), "%.3f", (_gui_center_hz + off) / 1e6);
@@ -421,8 +361,8 @@ private:
             _tick_ptrs.push_back(s.c_str());
     }
 
-    // ---- fixed storage (allocated once; see constructor) ----
-    float*               _rings      = nullptr;  // [N_MAX][POINTS_MAX] dB, DSP under _snap_mutex
+    // Fixed storage, allocated once in the constructor.
+    float*               _rings      = nullptr;  // [N_MAX][POINTS_MAX] dB, guarded by _snap_mutex
     float*               _render_buf = nullptr;  // GUI chronological copy
     float*               _render_x   = nullptr;  // shared strip time axis
     float*               _line_y     = nullptr;  // one strip's offset polyline
@@ -430,9 +370,9 @@ private:
     std::complex<float>* _chan_out   = nullptr;  // one sample per channel
     float*               _accum      = nullptr;  // linear peak power per channel
 
-    // ---- analyzer slots (create/destroy on GUI thread; procedure() only
-    //      moves pointers under _cfg_mutex -- see power_detector.hpp) ----
-    std::mutex    _cfg_mutex;
+    // Analyzer slots: created/destroyed on the GUI thread; procedure() only
+    // moves pointers under _cfg_mutex (see power_detector.hpp for the same pattern).
+    std::mutex    _cfg_mutex;   // guards _active/_pending/_retired and the *_N/_bin/_dt below
     firpfbch_crcf _active  = nullptr;   // owned by the DSP thread's hot path
     firpfbch_crcf _pending = nullptr;   // staged by GUI, not yet consumed
     firpfbch_crcf _retired = nullptr;   // swapped out; awaiting GUI destroy
@@ -440,32 +380,31 @@ private:
     size_t        _pending_bin = 1;
     float         _pending_dt  = 0.0f;
 
-    std::atomic<uint64_t> _gen{0};
-    uint64_t              _gen_applied = 0;
+    std::atomic<uint64_t> _config_generation{0};
+    uint64_t              _config_generation_applied = 0;
     std::atomic<bool>     _external_pause{false};
 
-    // ---- DSP-thread copies of the applied config ----
+    // DSP-thread copies of the applied config.
     size_t _N           = 0;
     size_t _bin_samples = 1;
     float  _point_dt    = 0.0f;
     size_t _bin_count   = 0;
 
-    // ---- ring snapshot shared with the GUI (guarded by _snap_mutex) ----
-    std::mutex _snap_mutex;
+    std::mutex _snap_mutex;   // guards _rings/_ring_w/_ring_fill/_snap_N/_snap_dt
     size_t     _ring_w    = 0;      // next point slot (shared by all channels)
     size_t     _ring_fill = 0;      // valid points (saturates at POINTS_MAX)
     size_t     _snap_N    = 0;      // N the rings correspond to
     float      _snap_dt   = 0.0f;   // seconds per ring point
 
-    // ---- GUI-thread state (setters + render() share the GUI thread) ----
+    // GUI-thread state (setters + render() share the GUI thread).
     size_t _staged_N   = 0;         // last staged grid (skip no-op restages)
     size_t _staged_bin = 0;
     float  _staged_dt  = -1.0f;
     double _gui_rate_hz   = 0.0;    // label-only params
     double _gui_center_hz = 0.0;
-    size_t _r_N    = 0;             // last snapshot copied for rendering
-    size_t _r_fill = 0;
-    float  _r_dt   = 0.0f;
+    size_t _render_channel_count      = 0;   // last snapshot copied for rendering
+    size_t _render_fill               = 0;
+    float  _render_seconds_per_point  = 0.0f;
     size_t _y_fit_N = 0;            // strip count the Y axis was last fit for
 
     size_t _labels_N = 0;           // tick-label cache keys

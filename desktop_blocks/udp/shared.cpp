@@ -1,39 +1,34 @@
 #include "shared.hpp"
-#include <sstream>
+#include "cler_desktop_utils.hpp"
+#include <charconv>
 
 namespace UDPBlock {
 
 ParsedAddress parse_address_string(SocketType type, const std::string& addr_str) {
     ParsedAddress result;
-    
+
     if (type == SocketType::UNIX_DGRAM) {
-        // For UNIX sockets, the entire string is the path
         result.address = addr_str;
         result.port = 0;
         return result;
     }
-    
-    // For IP sockets (IPv4/IPv6), parse IP:port format
+
     size_t colon_pos = addr_str.find_last_of(':');
     if (colon_pos == std::string::npos) {
-        throw std::runtime_error("Invalid address format for IP socket. Expected 'IP:port'");
+        cler::panic("Invalid address format for IP socket. Expected 'IP:port'");
     }
-    
+
     result.address = addr_str.substr(0, colon_pos);
     std::string port_str = addr_str.substr(colon_pos + 1);
-    
-    try {
-        int port_int = std::stoi(port_str);
-        if (port_int < 0 || port_int > 65535) {
-            throw std::runtime_error("Port number out of range (0-65535)");
-        }
-        result.port = static_cast<uint16_t>(port_int);
-    } catch (const std::invalid_argument&) {
-        throw std::runtime_error("Invalid port number: " + port_str);
-    } catch (const std::out_of_range&) {
-        throw std::runtime_error("Port number out of range: " + port_str);
+
+    int port_int = 0;
+    auto conv = std::from_chars(port_str.data(), port_str.data() + port_str.size(), port_int);
+    if (conv.ec != std::errc() || conv.ptr != port_str.data() + port_str.size() ||
+        port_int < 0 || port_int > 65535) {
+        cler::panic(("Invalid port number: " + port_str).c_str());
     }
-    
+    result.port = static_cast<uint16_t>(port_int);
+
     return result;
 }
 
@@ -47,7 +42,7 @@ GenericDatagramSocket::GenericDatagramSocket(SocketType type,
     if (type == SocketType::INET_UDP) {
         _sockfd = socket(AF_INET, SOCK_DGRAM, 0);
         if (_sockfd < 0) {
-            throw std::runtime_error("GenericDatagramSocket: failed to create INET socket: " + std::string(strerror(errno)));
+            cler::panic(("GenericDatagramSocket: failed to create INET socket: " + std::string(strerror(errno))).c_str());
         }
 
         if (!is_receiver) {
@@ -56,14 +51,14 @@ GenericDatagramSocket::GenericDatagramSocket(SocketType type,
             _dest_inet.sin_port = htons(port);
             if (inet_pton(AF_INET, host_or_path.c_str(), &_dest_inet.sin_addr) <= 0) {
                 close(_sockfd);
-                throw std::runtime_error("GenericDatagramSocket: invalid IPv4 address: " + host_or_path);
+                cler::panic(("GenericDatagramSocket: invalid IPv4 address: " + host_or_path).c_str());
             }
         }
     }
     else if (type == SocketType::INET6_UDP) {
         _sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
         if (_sockfd < 0) {
-            throw std::runtime_error("GenericDatagramSocket: failed to create INET6 socket: " + std::string(strerror(errno)));
+            cler::panic(("GenericDatagramSocket: failed to create INET6 socket: " + std::string(strerror(errno))).c_str());
         }
 
         if (!is_receiver) {
@@ -72,14 +67,14 @@ GenericDatagramSocket::GenericDatagramSocket(SocketType type,
             _dest_inet6.sin6_port = htons(port);
             if (inet_pton(AF_INET6, host_or_path.c_str(), &_dest_inet6.sin6_addr) <= 0) {
                 close(_sockfd);
-                throw std::runtime_error("GenericDatagramSocket: invalid IPv6 address: " + host_or_path);
+                cler::panic(("GenericDatagramSocket: invalid IPv6 address: " + host_or_path).c_str());
             }
         }
     }
     else if (type == SocketType::UNIX_DGRAM) {
         _sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
         if (_sockfd < 0) {
-            throw std::runtime_error("GenericDatagramSocket: failed to create UNIX socket: " + std::string(strerror(errno)));
+            cler::panic(("GenericDatagramSocket: failed to create UNIX socket: " + std::string(strerror(errno))).c_str());
         }
 
         if (!is_receiver) {
@@ -87,13 +82,13 @@ GenericDatagramSocket::GenericDatagramSocket(SocketType type,
             _dest_un.sun_family = AF_UNIX;
             if (host_or_path.size() >= sizeof(_dest_un.sun_path)) {
                 close(_sockfd);
-                throw std::runtime_error("GenericDatagramSocket: UNIX socket path too long");
+                cler::panic("GenericDatagramSocket: UNIX socket path too long");
             }
             std::strncpy(_dest_un.sun_path, host_or_path.c_str(), sizeof(_dest_un.sun_path) - 1);
         }
     }
     else {
-        throw std::runtime_error("GenericDatagramSocket: unknown SocketType");
+        cler::panic("GenericDatagramSocket: unknown SocketType");
     }
 }
 
@@ -101,7 +96,7 @@ GenericDatagramSocket GenericDatagramSocket::make_receiver(SocketType type,
                                         const std::string& bind_addr_str)
 {
     ParsedAddress parsed = parse_address_string(type, bind_addr_str);
-    GenericDatagramSocket sock(type, "", 0); // placeholders
+    GenericDatagramSocket sock(type, "", 0);
     sock.bind(parsed.address, parsed.port);
     return sock;
 }
@@ -118,7 +113,6 @@ GenericDatagramSocket::~GenericDatagramSocket() {
         close(_sockfd);
     }
 
-    // Clean up UNIX socket file if we created one
     if (!_bound_unix_path.empty()) {
         unlink(_bound_unix_path.c_str());
     }
@@ -131,14 +125,13 @@ void GenericDatagramSocket::bind(const std::string& bind_addr_or_path, uint16_t 
         local_addr.sin_port = htons(port);
         local_addr.sin_addr.s_addr = INADDR_ANY;
 
-        // Enable address reuse for quick rebinding
         int opt = 1;
         if (setsockopt(_sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-            throw std::runtime_error("GenericDatagramSocket: setsockopt SO_REUSEADDR failed");
+            cler::panic("GenericDatagramSocket: setsockopt SO_REUSEADDR failed");
         }
 
         if (::bind(_sockfd, reinterpret_cast<struct sockaddr*>(&local_addr), sizeof(local_addr)) < 0) {
-            throw std::runtime_error("GenericDatagramSocket: bind failed (INET_UDP)");
+            cler::panic("GenericDatagramSocket: bind failed (INET_UDP)");
         }
     }
     else if (_type == SocketType::INET6_UDP) {
@@ -149,11 +142,11 @@ void GenericDatagramSocket::bind(const std::string& bind_addr_or_path, uint16_t 
 
         int opt = 1;
         if (setsockopt(_sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-            throw std::runtime_error("GenericDatagramSocket: setsockopt SO_REUSEADDR failed");
+            cler::panic("GenericDatagramSocket: setsockopt SO_REUSEADDR failed");
         }
 
         if (::bind(_sockfd, reinterpret_cast<struct sockaddr*>(&local_addr6), sizeof(local_addr6)) < 0) {
-            throw std::runtime_error("GenericDatagramSocket: bind failed (INET6_UDP)");
+            cler::panic("GenericDatagramSocket: bind failed (INET6_UDP)");
         }
     }
     else if (_type == SocketType::UNIX_DGRAM) {
@@ -161,17 +154,16 @@ void GenericDatagramSocket::bind(const std::string& bind_addr_or_path, uint16_t 
         local_un.sun_family = AF_UNIX;
 
         if (bind_addr_or_path.size() >= sizeof(local_un.sun_path)) {
-            throw std::runtime_error("GenericDatagramSocket: UNIX bind path too long");
+            cler::panic("GenericDatagramSocket: UNIX bind path too long");
         }
 
         std::strncpy(local_un.sun_path, bind_addr_or_path.c_str(), sizeof(local_un.sun_path) - 1);
 
-        unlink(local_un.sun_path); // clean up old socket file
+        unlink(local_un.sun_path); // remove a stale socket file from a previous run
         if (::bind(_sockfd, reinterpret_cast<struct sockaddr*>(&local_un), sizeof(local_un)) < 0) {
-            throw std::runtime_error("GenericDatagramSocket: bind failed (UNIX_DGRAM)");
+            cler::panic("GenericDatagramSocket: bind failed (UNIX_DGRAM)");
         }
 
-        // Store path for later cleanup
         _bound_unix_path = bind_addr_or_path;
     }
 }
@@ -189,7 +181,7 @@ ssize_t GenericDatagramSocket::send(const uint8_t* data, size_t len) const {
         return sendto(_sockfd, data, len, 0,
                         reinterpret_cast<const struct sockaddr*>(&_dest_un), sizeof(_dest_un));
     }
-    throw std::runtime_error("GenericDatagramSocket: send called on invalid socket type");
+    cler::panic("GenericDatagramSocket: send called on invalid socket type");
 }
 
 ssize_t GenericDatagramSocket::recv(uint8_t* buffer, size_t max_len, int flags) const {
@@ -224,7 +216,7 @@ void GenericDatagramSocket::set_receive_timeout(std::chrono::milliseconds timeou
     tv.tv_usec = static_cast<suseconds_t>((timeout.count() % 1000) * 1000);
 
     if (setsockopt(_sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
-        throw std::runtime_error("GenericDatagramSocket: setsockopt SO_RCVTIMEO failed: " + std::string(strerror(errno)));
+        cler::panic(("GenericDatagramSocket: setsockopt SO_RCVTIMEO failed: " + std::string(strerror(errno))).c_str());
     }
 }
 

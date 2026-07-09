@@ -23,11 +23,10 @@ void list_devices() {
             std::cout << "    " << pair.first << " = " << pair.second << "\n";
         }
         
-        // Try to get more info by making the device
+        // Per-device query is best-effort: one busy/unreachable device must not abort the rest of the listing
         try {
             auto device = SoapySDR::Device::make(results[i]);
             if (device) {
-                // Sample rates
                 auto rates = device->getSampleRateRange(SOAPY_SDR_RX, 0);
                 std::cout << "    Sample rates: ";
                 for (const auto& range : rates) {
@@ -38,20 +37,17 @@ void list_devices() {
                     }
                 }
                 std::cout << "\n";
-                
-                // Frequency range
+
                 auto freqs = device->getFrequencyRange(SOAPY_SDR_RX, 0);
                 std::cout << "    Frequency range: ";
                 for (const auto& range : freqs) {
                     std::cout << range.minimum()/1e6 << "-" << range.maximum()/1e6 << " MHz ";
                 }
                 std::cout << "\n";
-                
-                // Gain range
+
                 auto gain = device->getGainRange(SOAPY_SDR_RX, 0);
                 std::cout << "    Gain range: " << gain.minimum() << "-" << gain.maximum() << " dB\n";
-                
-                // Antennas
+
                 auto antennas = device->listAntennas(SOAPY_SDR_RX, 0);
                 if (!antennas.empty()) {
                     std::cout << "    Antennas: ";
@@ -60,7 +56,7 @@ void list_devices() {
                     }
                     std::cout << "\n";
                 }
-                
+
                 SoapySDR::Device::unmake(device);
             }
         } catch (const std::exception& e) {
@@ -96,7 +92,6 @@ constexpr float PLOT_HEIGHT = WINDOW_HEIGHT;
 constexpr float WINDOW_WIDTH = CONTROL_WIDTH + (2 * PLOT_WIDTH);
 constexpr float SPACING = 10.0f;
 
-// Window positions
 constexpr float CONTROL_X = 0.0f;
 constexpr float CONTROL_Y = 0.0f;
 constexpr float SPECTRUM_X = CONTROL_WIDTH;
@@ -105,7 +100,6 @@ constexpr float SPECTROGRAM_X = CONTROL_WIDTH + PLOT_WIDTH;
 constexpr float SPECTROGRAM_Y = 0.0f;
 
 int main(int argc, char* argv[]) {
-    // Parse command line arguments
     std::string device_args = "driver=rtlsdr";
     double freq_mhz = 100.3;  // Default FM radio frequency
     double sample_rate_msps = 2.0;
@@ -150,10 +144,8 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "\n";
     
-    // Create GUI
     cler::GuiManager gui(WINDOW_WIDTH, WINDOW_HEIGHT, "CLER SoapySDR Example");
-    
-    // Create SDR source
+
     SourceSoapySDRBlock<std::complex<float>> sdr_source(
     "SDR_Source",
     device_args,
@@ -161,25 +153,21 @@ int main(int argc, char* argv[]) {
     sample_rate,
     gain
     );
-    
-    // Set antenna if specified
+
     if (!antenna.empty()) {
         sdr_source.set_antenna(antenna);
     }
-    
-    // Create fanout to feed both plots
+
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
-    
-    // Create spectrum plot
+
     PlotCSpectrumBlock spectrum(
-        "RF Spectrum", 
-        {"Signal"}, 
-        sample_rate, 
+        "RF Spectrum",
+        {"Signal"},
+        sample_rate,
         2048  // FFT size
     );
     spectrum.set_initial_window(SPECTRUM_X, SPECTRUM_Y, PLOT_WIDTH, PLOT_HEIGHT);
-    
-    // Create spectrogram plot  
+
     PlotCSpectrogramBlock spectrogram(
         "RF Spectrogram",
         {"Signal"},
@@ -189,7 +177,6 @@ int main(int argc, char* argv[]) {
     );
     spectrogram.set_initial_window(SPECTROGRAM_X, SPECTROGRAM_Y, PLOT_WIDTH, PLOT_HEIGHT);
 
-    // Create flowgraph
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&sdr_source, &fanout.in),
         cler::BlockRunner(&fanout, &spectrum.in[0], &spectrogram.in[0]),
@@ -197,17 +184,14 @@ int main(int argc, char* argv[]) {
         cler::BlockRunner(&spectrogram)
     );
 
-    // Run flowgraph
     flowgraph.run();
 
-    // GUI loop with frequency control
     float current_freq_mhz = freq_mhz;
     float current_gain = gain;
 
     while (!gui.should_close()) {
         gui.begin_frame();
-        
-        // Add controls
+
         ImGui::SetNextWindowPos(ImVec2(CONTROL_X + SPACING, CONTROL_Y + SPACING), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(CONTROL_WIDTH - (2 * SPACING), CONTROL_HEIGHT), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("SDR Controls")) {
@@ -245,16 +229,14 @@ int main(int argc, char* argv[]) {
             }
         }
         ImGui::End();
-        
-        // Render plots
+
         spectrum.render();
         spectrogram.render();
-        
+
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(16));  // ~60 FPS
     }
 
-    // Stop flowgraph
     flowgraph.stop();
     return 0;
 }

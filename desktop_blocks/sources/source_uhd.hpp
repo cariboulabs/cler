@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include "desktop_blocks/misc/uhd_common.hpp"
 
 #ifdef __has_include
@@ -16,7 +17,6 @@
 
 #include <vector>
 #include <string>
-#include <iostream>
 #include <numeric>
 #include <atomic>
 #include <mutex>
@@ -44,10 +44,10 @@ struct SourceUHDBlock : public cler::BlockBase {
 
         usrp = uhd::usrp::multi_usrp::make(device_address);
         if (!usrp) {
-            throw std::runtime_error("SourceUHDBlock: Failed to create USRP device");
+            cler::panic("SourceUHDBlock: Failed to create USRP device");
         }
         if (num_channels > usrp->get_rx_num_channels()) {
-            throw std::runtime_error("SourceUHDBlock: Not enough RX channels");
+            cler::panic("SourceUHDBlock: Not enough RX channels");
         }
         uhd::set_thread_priority_safe(0.5, true);
         for (size_t ch = 0; ch < num_channels; ++ch) {
@@ -59,9 +59,7 @@ struct SourceUHDBlock : public cler::BlockBase {
             usrp->set_rx_freq(uhd::tune_request_t(center_freq), ch);
             usrp->set_rx_gain(gain_db, ch);
         }
-        // The hardware may have snapped the requested rate (sample_rate now
-        // holds the actual value); expose it and remember it as the last
-        // applied rate so configure() can skip redundant set_rx_rate calls.
+        // Hardware may snap the requested rate; sample_rate now holds the actual value.
         _actual_rate.store(sample_rate, std::memory_order_release);
         _last_applied_rate = sample_rate;
         uhd::stream_args_t stream_args(get_uhd_format<T>(), wire_format);
@@ -70,14 +68,13 @@ struct SourceUHDBlock : public cler::BlockBase {
 
         rx_stream = usrp->get_rx_stream(stream_args);
         if (!rx_stream) {
-            throw std::runtime_error("SourceUHDBlock: Failed to setup RX stream");
+            cler::panic("SourceUHDBlock: Failed to setup RX stream");
         }
         uhd::stream_cmd_t stream_cmd(uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS);
         stream_cmd.stream_now = true;
         rx_stream->issue_stream_cmd(stream_cmd);
-        // Apps that retune/reconfigure right after construction (e.g. spike
-        // restoring saved settings) pass quiet=true: these values would only
-        // describe the constructor arguments, not what the app ends up using.
+        // quiet=true for apps that reconfigure immediately after construction,
+        // since these values would only describe the ctor args, not the final state.
         if (!_quiet) {
             std::cout << "SourceUHDBlock: Initialized " << usrp->get_mboard_name() << std::endl;
             std::cout << "  Channels: " << num_channels << std::endl;
@@ -96,14 +93,12 @@ struct SourceUHDBlock : public cler::BlockBase {
 
     bool configure(const UHDConfig& config, size_t channel = 0) {
         _configuring = true;
-        
-        //We want to avoid try-catch but UHD API crashes on errors
+
+        // try/catch kept despite the style guide: the UHD API throws on errors.
         try {
-            // Set sample rate -- skipped when the requested rate equals the
-            // last-applied request: callers that reconfigure freq/gain re-send
-            // an unchanged rate every time, and set_rx_rate mid-stream can
-            // glitch some devices (e.g. B2xx). Skipping a true no-op is
-            // behavior-preserving for callers that do change the rate.
+            // Skip set_rx_rate when unchanged: callers re-send the same rate on
+            // every freq/gain update, and a mid-stream set_rx_rate can glitch
+            // some devices (e.g. B2xx).
             if (std::abs(config.sample_rate_Hz - _last_applied_rate) > RATE_EPSILON_HZ) {
                 usrp->set_rx_rate(config.sample_rate_Hz, channel);
                 double actual_rate = usrp->get_rx_rate(channel);
@@ -115,7 +110,6 @@ struct SourceUHDBlock : public cler::BlockBase {
                 _actual_rate.store(actual_rate, std::memory_order_release);
             }
 
-            // Set frequency
             auto freq_range = usrp->get_rx_freq_range(channel);
             if (config.center_freq_Hz < freq_range.start() || 
                 config.center_freq_Hz > freq_range.stop()) {
@@ -124,15 +118,13 @@ struct SourceUHDBlock : public cler::BlockBase {
             }
             usrp->set_rx_freq(uhd::tune_request_t(config.center_freq_Hz), channel);
 
-            // Set gain
             auto gain_range = usrp->get_rx_gain_range(channel);
             if (config.gain < gain_range.start() || config.gain > gain_range.stop()) {
                 std::cerr << "Gain " << config.gain << " dB out of range" << std::endl;
             }
             usrp->set_rx_gain(config.gain, channel);
 
-            // Set bandwidth (if specified) -- skipped when unchanged for the
-            // same reason as the rate above (callers tie it to the rate).
+            // Same no-op skip as the rate above.
             if (config.bandwidth_Hz > 0 &&
                 std::abs(config.bandwidth_Hz - _last_applied_bw) > RATE_EPSILON_HZ) {
                 usrp->set_rx_bandwidth(config.bandwidth_Hz, channel);
@@ -148,18 +140,17 @@ struct SourceUHDBlock : public cler::BlockBase {
         }
     }
 
-    // Rate the hardware is ACTUALLY running at: the driver may snap a
-    // requested rate to what its clocking supports. Written at construction
-    // and by configure() (streaming thread) after a rate change; readable
-    // from any thread (e.g. a GUI polling for the change to land).
+    // The driver may snap a requested rate to what its clocking supports;
+    // this is the actual running rate, derived values must use it, not the
+    // requested one. Written by the ctor and by configure() (streaming
+    // thread); safe to read from any thread (e.g. a GUI polling for a change).
     double actual_sample_rate() const {
         return _actual_rate.load(std::memory_order_acquire);
     }
 
-    // Thread-safe live reconfigure: callable from any thread (e.g. the GUI).
-    // The request is only STAGED here; it is actually applied by the streaming
-    // thread itself at the top of procedure(), so we never touch the USRP from
-    // two threads at once (UHD multi_usrp is not safe against a concurrent recv).
+    // Callable from any thread; only stages the request here. It is applied by
+    // the streaming thread at the top of procedure(), since multi_usrp is not
+    // safe against a concurrent recv().
     void request_configure(const UHDConfig& cfg) {
         std::lock_guard<std::mutex> lk(_cfg_mutex);
         _pending_cfg = cfg;
@@ -171,7 +162,6 @@ struct SourceUHDBlock : public cler::BlockBase {
         constexpr size_t num_outs = sizeof...(OChannels);
         assert(num_outs == _num_channels && "Number of output channels defined in block constructor must match the number of channels");
 
-        // Apply any staged reconfigure in this (the streaming) thread.
         if (_pending_cfg_gen.load(std::memory_order_acquire) != _applied_cfg_gen) {
             UHDConfig cfg;
             {
@@ -245,9 +235,7 @@ private:
     // Requested rates/bandwidths closer than this are treated as identical.
     static constexpr double RATE_EPSILON_HZ = 0.5;
 
-    // Actual device rate (see actual_sample_rate()). The last-applied REQUESTED
-    // values let configure() skip redundant set_rx_rate/set_rx_bandwidth calls;
-    // they are touched only by the ctor and configure() (streaming thread).
+    // Touched only by the ctor and configure() (streaming thread).
     std::atomic<double> _actual_rate{0.0};
     double _last_applied_rate = 0.0;
     double _last_applied_bw   = -1.0;   // <0: never set (ctor doesn't set it)

@@ -1,4 +1,5 @@
 #include "gui_manager.hpp"
+#include "cler_desktop_utils.hpp"
 
 #include <GLFW/glfw3.h>
 #include "imgui_impl_glfw.h"
@@ -71,7 +72,7 @@ bool write_framebuffer_bmp(const char* path, int w, int h) {
 
 GuiManager::GuiManager(int width, int height, const std::string_view title) {
     if (!glfwInit()) {
-        throw std::runtime_error("GLFW init failed!");
+        cler::panic("GLFW init failed!");
     }
 
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -81,7 +82,7 @@ GuiManager::GuiManager(int width, int height, const std::string_view title) {
 
     window = glfwCreateWindow(width, height, title.data(), nullptr, nullptr);
     if (!window) {
-        throw std::runtime_error("Failed to create GLFW window");
+        cler::panic("Failed to create GLFW window");
     }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);

@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include <optional>
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include "desktop_blocks/sources/source_soapysdr.hpp"
@@ -8,26 +9,12 @@
 #include "desktop_blocks/sinks/sink_null.hpp"
 #include "desktop_blocks/math/frequency_shift.hpp"
 
-void on_aircraft_update(const ADSBState& state, void* context) {
-    // --------Print updates to console------ if desired[Decoder] 
-    // std::cout << "Aircraft detected: ICAO 0x" << std::hex << state.icao << std::dec;
-    // if (state.callsign[0] != '\0') {
-    //     std::cout << " | Callsign: " << state.callsign;
-    // }
-    // if (state.altitude > 0) {
-    //     std::cout << " | Alt: " << state.altitude << " ft";
-    // }
-    // if (state.groundspeed > 0) {
-    //     std::cout << " | Speed: " << static_cast<int>(state.groundspeed) << " kts";
-    // }
-    // std::cout << " | Messages: " << state.message_count << std::endl;
-}
+void on_aircraft_update(const ADSBState&, void*) {}
 
 using SoapyTypeCS16 = SourceSoapySDRBlock<std::complex<int16_t>>;
 using FileTypeCS16 = SourceFileBlock<std::complex<int16_t>>;
 using SourceVariant = std::variant<SoapyTypeCS16, FileTypeCS16>;
 
-// Helper to create variant with proper initialization
 inline auto make_source_variant(bool use_soapy, const std::string& device_args_or_filename,
                                 uint64_t freq, uint32_t rate, double gain) {
     if (use_soapy) {
@@ -39,7 +26,7 @@ inline auto make_source_variant(bool use_soapy, const std::string& device_args_o
     }
 }
 
-// Variant-based source selector block
+// Selects a live SoapySDR device or a recorded IQ file at construction, same procedure() either way
 struct SelectableSourceBlock : public cler::BlockBase {
     SourceVariant source;
 
@@ -60,7 +47,7 @@ struct SelectableSourceBlock : public cler::BlockBase {
 struct IQToMagnitudeBlock : public cler::BlockBase {
     cler::Channel<std::complex<int16_t>> in;
 
-    // DC offset removal filter state (1 Hz high-pass)
+    // 1 Hz high-pass DC offset removal filter state
     float z1_I = 0.0f;
     float z1_Q = 0.0f;
     float dc_a;
@@ -68,8 +55,6 @@ struct IQToMagnitudeBlock : public cler::BlockBase {
 
     IQToMagnitudeBlock(const char* name, uint32_t sample_rate = 2000000)
         : BlockBase(name), in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<int16_t>)) {
-
-        // Initialize DC filter coefficients (1 Hz high-pass filter)
         dc_b = expf(-2.0f * M_PI * 1.0f / sample_rate);
         dc_a = 1.0f - dc_b;
     }
@@ -88,25 +73,18 @@ struct IQToMagnitudeBlock : public cler::BlockBase {
         size_t to_process = std::min(read_size, write_size);
 
         for (size_t k = 0; k < to_process; k++) {
-            // Normalize int16_t to [-1.0, 1.0] range
             float fI = read_ptr[k].real() / 32768.0f;
             float fQ = read_ptr[k].imag() / 32768.0f;
 
-            // DC offset removal (1 Hz high-pass filter)
             z1_I = fI * dc_a + z1_I * dc_b;
             z1_Q = fQ * dc_a + z1_Q * dc_b;
             fI -= z1_I;
             fQ -= z1_Q;
 
-            // Compute magnitude squared
             float magsq = fI * fI + fQ * fQ;
-
-            // Clamp to [0, 1]
             if (magsq > 1.0f) magsq = 1.0f;
 
-            // Scale to uint16_t range [0, 65535]
             float mag = sqrtf(magsq) * 65535.0f + 0.5f;
-
             write_ptr[k] = static_cast<uint16_t>(mag);
         }
 
@@ -118,13 +96,11 @@ struct IQToMagnitudeBlock : public cler::BlockBase {
 };
 
 int main(int argc, char** argv) {
-    // Default values
     std::string source_arg;
     float initial_lat = 32.0f;   // Default: Israel
     float initial_lon = 34.0f;
     float sample_rate_mhz = -1.0f;  // No default - must be specified
 
-    // Parse command line arguments
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
 
@@ -151,7 +127,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Validate required arguments
     if (source_arg.empty()) {
         std::cerr << "Error: --source argument is required\n";
         std::cerr << "Run with --help for usage information\n";
@@ -164,7 +139,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Validate sample rate
     if (sample_rate_mhz != 2.0f && sample_rate_mhz != 2.4f) {
         std::cerr << "Error: --rate must be either 2 or 2.4\n";
         return 1;
@@ -177,7 +151,7 @@ int main(int argc, char** argv) {
     // ADS-B frequency and settings
     constexpr uint64_t ADSB_FREQ_HZ = 1'090'000'000;  // 1090 MHz
     uint32_t SAMPLE_RATE_HZ = static_cast<uint32_t>(sample_rate_mhz * 1'000'000);
-    constexpr double GAIN_DB = 30.0;               // RX gain in dB
+    constexpr double GAIN_DB = 30.0;
 
     bool use_soapy = (source_arg == "soapy");
 
@@ -193,17 +167,17 @@ int main(int argc, char** argv) {
     }
     std::cout << std::endl;
 
+    cler::GuiManager gui(1400, 800, "ADSB Aircraft Tracker");
+
+    std::string device_args_or_filename = "";
+    if (!use_soapy) {
+        device_args_or_filename = source_arg;
+    }
+
+    // SoapySDR reports device failures via exceptions by design
+    std::optional<SelectableSourceBlock> source;
     try {
-        // Initialize GUI
-        cler::GuiManager gui(1400, 800, "ADSB Aircraft Tracker");
-
-        std::string device_args_or_filename = "";
-        if (!use_soapy) {
-            device_args_or_filename = source_arg;
-        }
-
-        // Create blocks
-        SelectableSourceBlock source(
+        source.emplace(
             "Source",
             use_soapy,
             use_soapy ? "" : source_arg,  // Empty string for auto-detect, or filename
@@ -211,66 +185,8 @@ int main(int argc, char** argv) {
             SAMPLE_RATE_HZ,
             GAIN_DB
         );
-
-        IQToMagnitudeBlock iq2mag("IQ to Magnitude", SAMPLE_RATE_HZ);
-
-        // Determine decoder mode based on sample rate
-        ADSBDecoderBlock::SampleRateMode decoder_mode = (sample_rate_mhz == 2.4f)
-            ? ADSBDecoderBlock::SampleRateMode::RATE_2_4MHZ
-            : ADSBDecoderBlock::SampleRateMode::RATE_2MHZ;
-        ADSBDecoderBlock decoder("ADSB Decoder", decoder_mode);
-        
-        
-        SinkNullBlock<uint16_t> null_sink("Null Sink");
-
-        ADSBAggregateBlock aggregator(
-            "ADSB Map",
-            initial_lat, initial_lon,
-            on_aircraft_update,
-            nullptr
-            // Coastline path defaults to "adsb_coastlines/ne_110m_coastline.shp"
-        );
-
-        // Configure window
-        aggregator.set_initial_window(0.0f, 0.0f, 1400.0f, 800.0f);
-
-        // Create flowgraph with debug counter between decoder and aggregator
-        auto flowgraph = cler::make_desktop_flowgraph(
-            cler::BlockRunner(&source, &iq2mag.in),
-            cler::BlockRunner(&iq2mag, &decoder.in),
-            cler::BlockRunner(&decoder, &aggregator.in),
-            cler::BlockRunner(&aggregator)
-        );
-
-        // Start the flowgraph
-        std::cout << "Starting receiver..." << std::endl;
-        flowgraph.run();
-
-        std::cout << "Tracking aircraft. Close window to exit." << std::endl;
-        std::cout << "Controls:" << std::endl;
-        std::cout << "  - Mouse wheel: zoom in/out" << std::endl;
-        std::cout << "  - Right-click drag: pan map" << std::endl;
-        std::cout << std::endl;
-
-        // Main GUI loop
-        while (!gui.should_close()) {
-            gui.begin_frame();
-            aggregator.render();
-            gui.end_frame();
-
-            // Sleep to avoid excessive CPU usage
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));  // ~60 FPS
-        }
-
-        std::cout << "Shutting down..." << std::endl;
-        flowgraph.stop();
-
-        std::cout << "Total aircraft tracked: " << aggregator.aircraft_count() << std::endl;
-        std::cerr << "[DONE] Receiver completed successfully" << std::endl;
-
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
-        std::cerr << std::endl;
         if (use_soapy) {
             std::cerr << "Make sure:" << std::endl;
             std::cerr << "  1. SoapySDR device is connected" << std::endl;
@@ -279,6 +195,54 @@ int main(int argc, char** argv) {
         }
         return 1;
     }
+
+    IQToMagnitudeBlock iq2mag("IQ to Magnitude", SAMPLE_RATE_HZ);
+
+    ADSBDecoderBlock::SampleRateMode decoder_mode = (sample_rate_mhz == 2.4f)
+        ? ADSBDecoderBlock::SampleRateMode::RATE_2_4MHZ
+        : ADSBDecoderBlock::SampleRateMode::RATE_2MHZ;
+    ADSBDecoderBlock decoder("ADSB Decoder", decoder_mode);
+
+    SinkNullBlock<uint16_t> null_sink("Null Sink");
+
+    ADSBAggregateBlock aggregator(
+        "ADSB Map",
+        initial_lat, initial_lon,
+        on_aircraft_update,
+        nullptr
+        // Coastline path defaults to "adsb_coastlines/ne_110m_coastline.shp"
+    );
+
+    aggregator.set_initial_window(0.0f, 0.0f, 1400.0f, 800.0f);
+
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&*source, &iq2mag.in),
+        cler::BlockRunner(&iq2mag, &decoder.in),
+        cler::BlockRunner(&decoder, &aggregator.in),
+        cler::BlockRunner(&aggregator)
+    );
+
+    std::cout << "Starting receiver..." << std::endl;
+    flowgraph.run();
+
+    std::cout << "Tracking aircraft. Close window to exit." << std::endl;
+    std::cout << "Controls:" << std::endl;
+    std::cout << "  - Mouse wheel: zoom in/out" << std::endl;
+    std::cout << "  - Right-click drag: pan map" << std::endl;
+    std::cout << std::endl;
+
+    while (!gui.should_close()) {
+        gui.begin_frame();
+        aggregator.render();
+        gui.end_frame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));  // ~60 FPS
+    }
+
+    std::cout << "Shutting down..." << std::endl;
+    flowgraph.stop();
+
+    std::cout << "Total aircraft tracked: " << aggregator.aircraft_count() << std::endl;
+    std::cerr << "[DONE] Receiver completed successfully" << std::endl;
 
     return 0;
 }

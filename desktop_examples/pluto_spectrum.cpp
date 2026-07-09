@@ -11,14 +11,12 @@
 #include <iostream>
 
 int main(int argc, char** argv) {
-    // Default parameters
     const char* uri = "ip:192.168.2.1";
-    long long freq_hz = 100e6;         // 100 MHz (FM band)
-    long long samp_rate = 2.5e6;       // 2.5 MSPS
-    double gain_db = -1.0;             // AGC
+    long long freq_hz = 100e6;
+    long long samp_rate = 2.5e6;
+    double gain_db = -1.0;             // negative = AGC
     size_t FFT_SIZE = 1024;
 
-    // --- Parse command-line flags ---
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--uri" && i + 1 < argc) {
