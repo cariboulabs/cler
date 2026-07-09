@@ -1,19 +1,14 @@
 // Slim "Spike-like" spectrum analyzer GUI for USRP on CLER.
 //
-// Reliable zero-span (power-vs-time) capture with a real trigger, plus
-// spectrum, spectrogram (waterfall) and polyphase-channelizer views, all
-// driven from one live control panel.
-//
 //   USRP --> Fanout(4) --+--> PowerDetector --> Trigger --> PlotTimeSeries (zero-span)
 //                        +--> PlotCSpectrum                  (spectrum)
 //                        +--> PlotCSpectrogram               (waterfall)
 //                        +--> ChannelizerPanel                (per-channel strips)
 //
 // Single superset flowgraph: every block always runs; the "View" checkboxes only
-// choose which windows are drawn. Center frequency, gain and sample rate (span)
-// are all live; a rate change is staged into the source's streaming thread and
-// every rate-derived consumer re-syncs when the ACTUAL hardware rate lands
-// (see ControlPanel::on_rate_changed).
+// choose which windows are drawn. A rate change is staged into the source's
+// streaming thread; every rate-derived consumer re-syncs when the ACTUAL
+// hardware rate lands (see ControlPanel::on_rate_changed).
 
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
@@ -95,9 +90,9 @@ static SpikeArgs parse_args(int argc, char** argv) {
     return a;
 }
 
-// Render-only control surface. Owns no DSP; it reads/writes shared state on the
-// source (live retune, staged into the streaming thread) and the trigger
-// (mutex-guarded config snapshot applied at a safe point).
+// Render-only control surface. Reads/writes shared state on the source (live
+// retune, staged into the streaming thread) and the trigger (mutex-guarded
+// config snapshot applied at a safe point).
 struct ControlPanel {
     ControlPanel(SourceUHDBlock<std::complex<float>>* src, Trig* trig,
                  PlotCSpectrumBlock* spectrum,
@@ -121,9 +116,8 @@ struct ControlPanel {
     }
 
     // A slider (or drag) that turns into a typed input box on double-click.
-    // Returns true on the frames the value changed.
     // [vmin, vmax] bounds the slider/drag; the optional [tmin, tmax] bounds the
-    // TYPED value instead (defaults to vmin/vmax when NaN). This lets a control
+    // TYPED value instead (defaults to vmin/vmax when NaN) -- lets a control
     // show a narrow slider window while still accepting any value by typing
     // (used by the center-frequency slider below).
     bool editable(const char* label, float* v, float vmin, float vmax,
@@ -154,10 +148,8 @@ struct ControlPanel {
         return changed;
     }
 
-    // A value with NO slider and NO drag: it is only displayed, and a
-    // double-click turns it into a typed input box (committed on Enter or when
-    // focus leaves). Same _editing token mechanism as editable(); the typed
-    // value is clamped to [vmin, vmax]. Returns true on the frame it commits.
+    // A value with NO slider and NO drag: only displayed, and a double-click
+    // turns it into a typed input box, clamped to [vmin, vmax] on commit.
     bool grid_field(const char* label, float* v, const char* fmt,
                     float vmin, float vmax) {
         bool changed = false;
@@ -200,22 +192,17 @@ struct ControlPanel {
     void render() {
         // Rate-change choke point, polled every frame (cheap atomic read). The
         // source applies a requested rate asynchronously on its streaming
-        // thread, and the hardware may snap it -- so instead of assuming, we
-        // watch the ACTUAL rate and re-sync every rate-derived consumer the
-        // moment it changes. This one path covers typed changes, the saved
-        // conf rate staged at startup, and any initial hardware snap alike.
+        // thread and the hardware may snap it, so watch the ACTUAL rate and
+        // re-sync every rate-derived consumer the moment it changes.
         {
             const double actual = _src->actual_sample_rate();
             if (std::abs(actual - _rate_hz) > 0.5) on_rate_changed(actual);
         }
 
         ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        // Auto-size the panel to fit ALL its content: the old fixed 520 px
-        // default height hid the bottom sections below the fold (nobody ever
-        // found Snapshot down there). Width stays constrained so long labels
-        // or status lines can't blow the panel wide; the tiling code reads
-        // the ACTUAL rect (window_pos/window_size below) instead of assuming
-        // a fixed strip.
+        // Auto-size to content; width stays constrained. The tiling code
+        // reads the ACTUAL rect (window_pos/window_size below), not a fixed
+        // strip.
         ImGui::SetNextWindowSizeConstraints(ImVec2(360.0f, 0.0f),
                                             ImVec2(420.0f, FLT_MAX));
         ImGui::Begin("Control", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
@@ -237,8 +224,6 @@ struct ControlPanel {
              "checkboxes change or the main window is resized. You can still "
              "move/resize windows afterward.");
 
-        // Snapshot lives near the top on purpose: buried at the bottom of the
-        // panel it was below the fold and users never found it.
         ImGui::Dummy(ImVec2(0, 8));
         ImGui::TextUnformatted("Snapshot");
         ImGui::Separator();
@@ -280,11 +265,10 @@ struct ControlPanel {
         ImGui::TextUnformatted("Radio");
         ImGui::Separator();
 
-        // Sample rate (span), live. Number entry (double-click to type an
-        // exact value); committed on edit-end like freq/gain. The new rate is
-        // only REQUESTED here -- the source applies it on its streaming
-        // thread, and the poll above re-syncs everything (including this
-        // widget's value) when the actual rate lands.
+        // Sample rate (span), live. The new rate is only REQUESTED here -- the
+        // source applies it on its streaming thread, and the poll above
+        // re-syncs everything (including this widget) when the actual rate
+        // lands.
         ImGui::SetNextItemWidth(180);
         editable("Rate (MS/s)", &_rate_msps, 0.1f, 61.44f, "%.3f",
                  /*slider=*/false, /*drag_speed=*/0.01f);
@@ -295,13 +279,12 @@ struct ControlPanel {
              "follows the ACTUAL device rate. Note: a capture straddling the "
              "switch may be garbled once, and the waterfall restarts.");
 
-        // Apply freq/gain only when the user finishes editing, not every tick,
-        // so we don't spam the USRP with retunes. Center frequency is a slider
-        // over a narrow window (anchor +/- 25 MHz) since a full 0-6 GHz slider is
-        // far too coarse; double-click to type ANY value in [0, 6000] MHz. The
-        // anchor (and thus the slider range) is recomputed ONLY when an edit
-        // commits -- recentering mid-drag would move the value->pixel mapping
-        // under the cursor and feed back on itself.
+        // Apply freq/gain only on edit-end, not every tick, so we don't spam
+        // the USRP with retunes. Center frequency is a slider over a narrow
+        // window (anchor +/- 25 MHz); double-click to type ANY value in
+        // [0, 6000] MHz. The anchor is recomputed ONLY on commit -- recentering
+        // mid-drag would move the value->pixel mapping under the cursor and
+        // feed back on itself.
         const float freq_lo = std::max(0.0f,    _freq_anchor_mhz - 25.0f);
         const float freq_hi = std::min(6000.0f, _freq_anchor_mhz + 25.0f);
         ImGui::SetNextItemWidth(180);
@@ -322,7 +305,6 @@ struct ControlPanel {
         ImGui::TextUnformatted("Trigger");
         ImGui::Separator();
 
-        // All numeric fields: drag the slider to adjust, or double-click to type.
         bool changed = false;
         changed |= editable("Level (dB)", &_threshold_db, -120.0f, 0.0f, "%.1f", true);
         help("Power level the signal must cross to fire a trigger.");
@@ -363,14 +345,10 @@ struct ControlPanel {
 
         if (changed) push_trigger_config();
 
-        // Zero-span channel filter: a decimating channel selector ahead of the
-        // power detector, OFF by default behind an explicit checkbox. While
-        // unchecked the detector sees the raw full-rate stream (true bypass,
-        // no filter object in the path, zero added CPU). Both the toggle and
-        // a BW commit are treated exactly like a rate change for the trigger
-        // path: the trigger runs at the DETECTION rate (decimated when the
-        // filter is on, the device rate when off), so push the decimator
-        // config FIRST, then re-push the trigger with the new detection rate.
+        // Toggle and BW commit are treated like a rate change for the trigger:
+        // it runs at the DETECTION rate (decimated when the filter is on, the
+        // device rate when off), so push the decimator config FIRST, then
+        // re-push the trigger with the new detection rate.
         const bool filter_toggled = ImGui::Checkbox("Filter", &_zs_filter_on);
         help("Enable the zero-span channel-selection filter. Off (default): "
              "the power trace sees the raw full-rate I/Q stream, exactly as "
@@ -424,9 +402,8 @@ struct ControlPanel {
         ImGui::TextUnformatted("Channelizer");
         ImGui::Separator();
 
-        // Channel width: number entry like Rate / Zero-span BW. The block
-        // snaps the request to N = rate/width integer channels; the actual
-        // (effective) width and N are mirrored next to the control.
+        // The block snaps the request to N = rate/width integer channels; the
+        // effective width and N are mirrored next to the control.
         ImGui::SetNextItemWidth(180);
         editable("Channel width (MHz)", &_chan_width_mhz, min_chan_width_mhz(),
                  static_cast<float>(_rate_hz / 2e6), "%.3f",
@@ -460,9 +437,8 @@ struct ControlPanel {
         ImGui::Dummy(ImVec2(0, 8));
         ImGui::TextUnformatted("Spectrogram grid");
         ImGui::Separator();
-        // Line spacing for the waterfall measurement grid. No slider/drag --
-        // double-click a field to type a value. The grid itself is toggled by
-        // the "Grid" checkbox in the Spectrogram window; these only set density.
+        // Line spacing for the waterfall measurement grid; the grid itself is
+        // toggled by the "Grid" checkbox in the Spectrogram window.
         if (grid_field("Grid time (ms)", &_grid_time_ms, "%.1f",
                        0.1f, 100000.0f))
             _sgram->set_grid_time_ms(_grid_time_ms);
@@ -511,40 +487,30 @@ struct ControlPanel {
     void apply_all() {
         push_radio_config();
         // Decimator before trigger: the trigger's time base is the DECIMATED
-        // rate, so the detection rate must be established (and the saved
-        // window clamp run against it -- max window in ms GROWS at decimated
-        // rates) before the trigger config is derived.
+        // rate, so it must be established (and the window clamp run against
+        // it) before the trigger config is derived.
         clamp_zs_bw();
         push_power_config();
         refresh_trigger_window();
         push_trigger_config();
-        // Channelizer: derive N from the saved/default width at the current
-        // rate and stage the analyzer (runs unconditionally; the block only
-        // does work while its window is shown -- see set_active in the loop).
         clamp_chan_width();
         push_chan_config();
-        // Waterfall depth: seed the spectrogram's frames-per-row once from the
-        // saved (or default) seconds value. From here on the depth is owned by
-        // the History slider in the spectrogram window itself; the panel only
-        // reads it back at save() time.
+        // Waterfall depth: seed frames-per-row once from the saved/default
+        // seconds value; from here it's owned by the History slider in the
+        // spectrogram window, only read back at save() time.
         _sgram->set_frames_per_row(history_to_fpr(_history_s));
-        // Grid overlay: seed the spectrogram from the saved/default settings.
-        // From here the "Grid" checkbox lives in the spectrogram window; the
-        // density stays owned by the control panel (pushed on edit above).
         _sgram->set_show_grid(_show_grid);
         _sgram->set_grid_time_ms(_grid_time_ms);
         _sgram->set_grid_freq_mhz(_grid_freq_mhz);
-        // Saved sample rate (conf key rate_hz): staged LAST through the same
-        // live path as a typed change, so it lands as the newest pending
-        // config (request_configure keeps only the latest) and the per-frame
-        // poll runs on_rate_changed() once the streaming thread applies it.
-        // An explicit CLI -r wins over the saved value.
+        // Saved rate_hz: staged LAST through the same live path as a typed
+        // change, so it lands as the newest pending config and the per-frame
+        // poll runs on_rate_changed() once it applies. Explicit CLI -r wins.
         if (!_rate_from_cli && _loaded_rate_hz > 0.0 &&
             std::abs(_loaded_rate_hz - _rate_hz) > 0.5) {
             push_rate_config(_loaded_rate_hz);
             // The frames-per-row seed above was computed at the CONSTRUCTION
-            // rate; mark it stale so on_rate_changed() re-derives it from the
-            // saved history_s once the saved rate actually lands.
+            // rate; mark it stale so on_rate_changed() redoes it from
+            // _history_s once the saved rate actually lands.
             _history_seed_pending = true;
         }
     }
@@ -597,9 +563,8 @@ struct ControlPanel {
             else if (key == "grid_time_ms")   f >> _grid_time_ms;
             else if (key == "grid_freq_mhz")  f >> _grid_freq_mhz;
             else if (key == "zs_bw_hz") {
-                // Stored in Hz for backward compatibility; the widget is MHz.
-                // NOTE: this key alone never activates filtering -- only the
-                // zs_filter_on checkbox key does (old confs stay unfiltered).
+                // Stored in Hz (widget is MHz); this key alone never activates
+                // filtering -- only zs_filter_on does (old confs stay unfiltered).
                 float bw_hz = 0.0f;
                 f >> bw_hz;
                 _zs_bw_mhz = bw_hz / 1e6f;
@@ -607,22 +572,18 @@ struct ControlPanel {
             else if (key == "zs_filter_on")   f >> _zs_filter_on;
             else if (key == "rate_hz")        f >> _loaded_rate_hz;
             else if (key == "snapshot_dir") {
-                // Value is the REST OF THE LINE (may contain spaces), not one
-                // whitespace-delimited token like every other key.
+                // Value is the REST OF THE LINE (may contain spaces), unlike
+                // every other (whitespace-delimited) key.
                 std::string rest;
                 std::getline(f, rest);
                 _snapshot_dir = trimmed(rest.c_str());
             }
             else { std::string skip; std::getline(f, skip); }
         }
-        // A saved bandwidth may exceed this session's sample rate (or sit
-        // below the achievable floor). NOTE: the saved WINDOW is deliberately
-        // NOT clamped here -- its limit depends on the DECIMATED rate, which
-        // is only derivable once the bandwidth is applied; apply_all() (and
-        // every on_rate_changed) runs the clamp at the right time.
+        // NOTE: the saved WINDOW is deliberately NOT clamped here -- its limit
+        // depends on the DECIMATED rate, only derivable once the bandwidth is
+        // applied; apply_all() (and every on_rate_changed) clamps it then.
         clamp_zs_bw();
-        // Channelizer width is re-clamped/snapped against the live rate by
-        // apply_all() and every on_rate_changed(); only sanitize the span.
         _chan_span_s = std::min(std::max(_chan_span_s, 1.0f), 600.0f);
         _freq_anchor_mhz = _freq_mhz;   // center the freq slider on the saved value
         return true;
@@ -685,8 +646,7 @@ private:
         _src->request_configure(cfg);
     }
 
-    // Stage a NEW sample rate into the source (freq/gain carried unchanged;
-    // analog bandwidth tracks the rate). Applied asynchronously on the
+    // Stage a NEW sample rate into the source. Applied asynchronously on the
     // source's streaming thread; the poll in render() picks up the resulting
     // actual rate and runs on_rate_changed().
     void push_rate_config(double rate_hz) {
@@ -706,43 +666,32 @@ private:
         _rate_hz   = actual_hz;
         _rate_msps = static_cast<float>(actual_hz / 1e6);   // widget display
 
-        // Zero-span channel bandwidth: keep the REQUESTED value, re-clamped
-        // to the new rate's achievable range; the decimation factor R is
-        // re-derived from it. Push the decimator FIRST -- the trigger's time
-        // base below is the DECIMATED rate.
+        // Push the decimator FIRST -- the trigger's time base below is the
+        // DECIMATED rate, re-derived from the re-clamped bandwidth.
         clamp_zs_bw();
         push_power_config();
 
-        // Trigger: capture memory never reallocates, so the max window in ms
-        // shrinks at higher detection rates (and grows at narrow bandwidths).
-        // Re-clamp, then push ONE config carrying the new detection rate
-        // (sample counts are derived from it inside set_config, so the rate
-        // and its counts land on the block thread as a single generation).
+        // Capture memory never reallocates, so the max window in ms shrinks
+        // at higher detection rates. Push ONE config carrying the new
+        // detection rate so it and its derived sample counts land together.
         refresh_trigger_window();
         push_trigger_config();
 
-        // Channelizer: recompute N from the REQUESTED width at the new rate
-        // (the request is kept; only the snap changes) and re-stage the
-        // analyzer + bin sizing as one generation.
         clamp_chan_width();
         push_chan_config();
 
-        // Frequency axes of both FFT views (GUI-thread setters; the
-        // spectrogram also clears its ring -- old rows would be mislabeled).
+        // Frequency axes of both FFT views (the spectrogram also clears its
+        // ring -- old rows would be mislabeled at the new rate).
         const size_t sps = static_cast<size_t>(actual_hz + 0.5);
         _spectrum->set_sample_rate(sps);
         _sgram->set_sample_rate(sps);
 
         // Waterfall depth: PRESERVE THE SECONDS THE USER SET across rate
-        // changes. Startup case: apply_all() seeds frames-per-row from the
-        // saved history_s BEFORE the saved rate_hz lands, i.e. at the
-        // construction rate -- at 1 MS/s a 20 MS/s-session depth maps to
-        // fpr = round(history_s/4.096 s) which collapses to 1 and then reads
-        // as 2000*2048/20e6 = 0.2 s once the real rate arrives. If that seed
-        // is still pending, redo it now at the real rate. Otherwise rescale
-        // the CURRENT frames-per-row by new/old rate so the on-screen depth
-        // in seconds stays put (reads the live value, so a History-slider
-        // change made since startup is honored, not stomped).
+        // changes. Startup case: apply_all() seeds frames-per-row from
+        // history_s at the CONSTRUCTION rate, before the saved rate_hz
+        // lands -- if that seed is still pending, redo it now at the real
+        // rate. Otherwise rescale the CURRENT frames-per-row by new/old rate
+        // so the on-screen depth in seconds stays put.
         if (_history_seed_pending) {
             _sgram->set_frames_per_row(history_to_fpr(_history_s));
             _history_seed_pending = false;
@@ -907,10 +856,8 @@ static std::string config_path(const char* leaf) {
     return dir + "/" + leaf;
 }
 
-// ---------------------------------------------------------------------------
 // Snapshot support: <base>.bmp (screenshot, written by GuiManager) and
-// <base>.dat (plot data). All of this runs on the GUI thread; allocation and
-// file IO are fine here.
+// <base>.dat (plot data). Runs on the GUI thread.
 
 static bool file_exists(const std::string& p) {
     std::ifstream f(p);
@@ -935,28 +882,18 @@ static std::string snapshot_base_path(const std::string& dir) {
     return base;
 }
 
-// Snapshot data file (.dat) format -- self-describing; this description is
-// also written into the file header itself. Line-oriented text, '\n' endings,
-// with at most one raw binary blob at the very END of the file:
-//   '#' lines: comments/global metadata ("# spike snapshot <local time>",
-//   "# sample_rate_hz N", "# center_freq_mhz F", plus this format doc).
-//   Then one section per plot that was VISIBLE and had data when the snapshot
-//   was taken (a hidden plot gets no section):
-//   [trigger]     metadata lines "n <samples>", "pre_ms <f>", "post_ms <f>",
-//                 "frame <trigger frame counter>", then n CSV lines
-//                 "time_ms,power_db" -- time axis reconstructed exactly as the
-//                 scope renders it: trigger instant at t=0, pre-trigger
-//                 samples negative.
-//   [spectrum]    metadata "n_fft <bins>", then n_fft CSV lines
-//                 "freq_hz,mag_db" (baseband Hz; the averaged display trace).
-//   [spectrogram] metadata "rows <r>", "cols <c>", "row_seconds <s>" (time
-//                 span of one row = frames_per_row * n_fft / sps),
-//                 "freq_min_hz", "freq_max_hz" (baseband),
+// Snapshot data file (.dat) format -- line-oriented text ('\n' endings) with
+// at most one raw binary blob at the very END. One section per plot that was
+// VISIBLE and had data (a hidden plot gets no section):
+//   [trigger]     "n/pre_ms/post_ms/frame", then CSV "time_ms,power_db" --
+//                 trigger instant at t=0, pre-trigger samples negative.
+//   [spectrum]    "n_fft", then CSV "freq_hz,mag_db" (baseband Hz).
+//   [spectrogram] "rows/cols/row_seconds/freq_min_hz/freq_max_hz" (baseband),
 //                 "order newest_row_first", "encoding binary_float32_le",
 //                 then "BINARY <nbytes>" followed by exactly that many raw
-//                 bytes: rows*cols little-endian float32 dB values, row-major
-//                 (binary on purpose -- ~16 MB as text would hang the GUI).
-//                 Nothing follows the blob.
+//                 little-endian float32 dB bytes, row-major (binary on
+//                 purpose -- ~16 MB as text would hang the GUI). Nothing
+//                 follows the blob.
 static bool write_snapshot_dat(const std::string& path,
                                bool want_trig, bool want_spec, bool want_sgram,
                                double rate_hz, double detection_rate_hz,
@@ -1079,20 +1016,6 @@ static bool write_snapshot_dat(const std::string& path,
 int main(int argc, char** argv) {
     SpikeArgs args = parse_args(argc, argv);
 
-    // Probe the device once so a failure is reported cleanly before we build
-    // the rest of the graph (mirrors the pattern in uhd_device.cpp). Both
-    // constructions are quiet: the ctor's freq/rate are just the CLI defaults
-    // and get replaced by the saved settings right after startup, so printing
-    // them (twice) only misleads. The accurate values are printed below once
-    // the panel has loaded.
-    try {
-        SourceUHDBlock<std::complex<float>> probe("USRP", args.freq, args.rate,
-            args.device_address, args.gain, 1, "sc16", /*quiet=*/true);
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to initialize USRP: " << e.what() << std::endl;
-        return 1;
-    }
-
     SourceUHDBlock<std::complex<float>> usrp("USRP", args.freq, args.rate,
         args.device_address, args.gain, 1, "sc16", /*quiet=*/true);
 
@@ -1125,23 +1048,14 @@ int main(int argc, char** argv) {
 
     PlotCSpectrumBlock spectrum("Spectrum", {"I/Q"}, static_cast<size_t>(args.rate), args.fft);
 
-    // Waterfall: 2000 rows of history, each row peak-holding several FFT frames
-    // (adjustable live via "frames/row" in the window). Drains its whole input
-    // each call so it never stalls the shared fanout (which commits the min
-    // space across all branches). When its window is hidden it is paused (see
-    // set_active in the loop) so it costs nothing and can't perturb the trigger.
+    // Drains its whole input each call so it never stalls the shared fanout
+    // (which commits the min space across all branches). Paused when its
+    // window is hidden (see set_active in the loop) so it can't perturb the
+    // trigger.
     const size_t waterfall_tall = 2000;   // rows of waterfall history
     PlotCSpectrogramBlock spectrogram("Spectrogram", {"I/Q"},
         static_cast<size_t>(args.rate), args.fft, waterfall_tall);
-    // History depth (frames/row) is owned by the History slider inside the
-    // spectrogram window; the panel only seeds it once (default ~8 frames/row,
-    // overridden by the `history_s` conf key) via panel.apply_all() and reads
-    // it back at save() time.
 
-    // Polyphase channelizer strips (4th fanout arm). Superset pattern like
-    // the other views: the block always runs, but while its window is hidden
-    // set_active(false) makes it drain-without-work, so it can never steal
-    // cycles from or add jitter to the trigger path.
     ChannelizerPanelBlock channelizer("Channelizer");
 
     trigger.set_initial_window(380.0f, 10.0f, 1100.0f, 430.0f);
@@ -1169,24 +1083,22 @@ int main(int argc, char** argv) {
 
     flowgraph.run();
     panel.apply_all();   // sync radio + trigger to loaded/initial settings
-    // Report the values the panel actually applied (saved settings restored
-    // by load(), or the CLI/defaults on first run) -- args.* may be stale.
+    // Report what the panel actually applied (saved or CLI/defaults) --
+    // args.* may be stale.
     std::cout << "CLER Spike running at " << panel.freq_mhz() << " MHz, "
               << panel.rate_hz() / 1e6 << " MS/s. Close window to exit." << std::endl;
 
-    // Auto-layout: on the first frame, whenever the set of visible views
-    // changes, on the panel's "Arrange windows" button, or after the main
-    // window is resized (debounced, see below), tile the visible plot windows
-    // as equal-height rows in the area right of the control panel. Each block
-    // applies its rect exactly once (apply_window_rect), so the user can
-    // still move/resize freely afterward.
+    // Auto-layout: tile the visible plot windows as equal-height rows right
+    // of the control panel, on the first frame, when the visible-view set
+    // changes, on "Arrange windows", or after a debounced main-window resize.
+    // Each block applies its rect exactly once, so the user can still
+    // move/resize freely afterward.
     bool prev_scope = false, prev_spectrum = false, prev_spectrogram = false;
     bool prev_channelizer = false;
     bool first_layout = true;
-    // Debounce for the resize-triggered retile: only fire once the viewport
-    // work size has been STABLE for kResizeSettleFrames frames (so we never
-    // fight the user mid-drag) AND it differs from the size the last tiling
-    // used. Manual per-plot-window moves/resizes otherwise stick.
+    // Resize debounce: only retile once the viewport work size has been
+    // STABLE for kResizeSettleFrames (so we never fight the user mid-drag)
+    // AND differs from the size the last tiling used.
     constexpr int kResizeSettleFrames = 5;
     ImVec2 tiled_work_size(0.0f, 0.0f);     // WorkSize used by the last tiling
     ImVec2 pending_work_size(0.0f, 0.0f);   // last observed WorkSize
@@ -1205,9 +1117,6 @@ int main(int argc, char** argv) {
         gui.begin_frame();
         panel.render();
 
-        // Debounced main-window resize detection (see the declarations above):
-        // refresh the debounce while the size keeps changing, then retile once
-        // it has settled on something the last tiling didn't use.
         const ImGuiViewport* vp = ImGui::GetMainViewport();
         if (vp->WorkSize.x != pending_work_size.x ||
             vp->WorkSize.y != pending_work_size.y) {
@@ -1237,12 +1146,9 @@ int main(int argc, char** argv) {
         prev_channelizer = panel.show_channelizer;
 
         if (retile) {
-            // Plot area: main viewport minus the control panel on the left
-            // (its ACTUAL rect, recorded by panel.render() -- the panel
-            // auto-sizes to its content) and 10 px outer margins, split into
-            // N equal-height rows with small gaps.
-            // Note: a hidden view keeps its pending rect until it is next
-            // shown (its render() isn't called), which is what we want.
+            // Plot area: viewport minus the control panel's ACTUAL rect and
+            // 10 px margins, split into N equal-height rows. A hidden view
+            // keeps its pending rect until next shown (render() isn't called).
             tiled_work_size = vp->WorkSize;
             const float gap = 8.0f;
             const float x = panel.window_pos.x + panel.window_size.x + 10.0f;

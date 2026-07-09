@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
+#include "cler_utils.hpp"
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <SoapySDR/Errors.hpp>
@@ -57,19 +58,15 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
           device(nullptr),
           stream(nullptr) {
         
-        // Validate buffer size for DBF
         if (channel_size > 0 && channel_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
-            throw std::invalid_argument("Channel size too small for doubly-mapped buffers. Need at least " + 
-                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) + " elements");
+            cler::panic("Channel size too small for doubly-mapped buffers");
         }
-        
-        // Create device
+
         device = SoapySDR::Device::make(device_args);
         if (!device) {
-            throw std::runtime_error("SinkSoapySDRBlock: Failed to create SoapySDR device with args: " + device_args);
+            cler::panic(("SinkSoapySDRBlock: Failed to create SoapySDR device with args: " + device_args).c_str());
         }
-        
-        // Validate and set sample rate
+
         auto sample_rates = device->getSampleRateRange(SOAPY_SDR_TX, channel_idx);
         bool rate_valid = false;
         for (const auto& range : sample_rates) {
@@ -85,11 +82,10 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
                 ss << range.minimum()/1e6 << "-" << range.maximum()/1e6 << " MSPS ";
             }
             SoapySDR::Device::unmake(device);
-            throw std::runtime_error(ss.str());
+            cler::panic(ss.str().c_str());
         }
         device->setSampleRate(SOAPY_SDR_TX, channel_idx, sample_rate);
-        
-        // Validate and set center frequency
+
         auto freq_ranges = device->getFrequencyRange(SOAPY_SDR_TX, channel_idx);
         bool freq_valid = false;
         for (const auto& range : freq_ranges) {
@@ -105,60 +101,53 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
                 ss << range.minimum()/1e6 << "-" << range.maximum()/1e6 << " MHz ";
             }
             SoapySDR::Device::unmake(device);
-            throw std::runtime_error(ss.str());
+            cler::panic(ss.str().c_str());
         }
         device->setFrequency(SOAPY_SDR_TX, channel_idx, center_freq);
-        
-        // Validate and set gain
+
         auto gain_range = device->getGainRange(SOAPY_SDR_TX, channel_idx);
         if (gain_db < gain_range.minimum() || gain_db > gain_range.maximum()) {
             std::stringstream ss;
             ss << "Gain " << gain_db << " dB not supported. Supported range: "
                << gain_range.minimum() << "-" << gain_range.maximum() << " dB";
             SoapySDR::Device::unmake(device);
-            throw std::runtime_error(ss.str());
+            cler::panic(ss.str().c_str());
         }
         if (device->hasGainMode(SOAPY_SDR_TX, channel_idx)) {
-            device->setGainMode(SOAPY_SDR_TX, channel_idx, false); // Manual gain mode
+            device->setGainMode(SOAPY_SDR_TX, channel_idx, false);
         }
         device->setGain(SOAPY_SDR_TX, channel_idx, gain_db);
-        
-        // Set bandwidth to match sample rate (if supported)
+
         if (device->getBandwidthRange(SOAPY_SDR_TX, channel_idx).size() > 0) {
             device->setBandwidth(SOAPY_SDR_TX, channel_idx, sample_rate);
         }
-        
-        // Setup stream with appropriate format
+
         std::vector<size_t> channels = {channel_idx};
         std::string format = get_soapy_format<T>();
-        
+
         stream = device->setupStream(SOAPY_SDR_TX, format, channels);
         if (!stream) {
             SoapySDR::Device::unmake(device);
-            throw std::runtime_error("SinkSoapySDRBlock: Failed to setup TX stream");
+            cler::panic("SinkSoapySDRBlock: Failed to setup TX stream");
         }
-        
-        // Get MTU and allocate buffer
+
         mtu = device->getStreamMTU(stream);
         buffer.resize(mtu);
-        
-        // Activate stream
+
         int ret = device->activateStream(stream);
         if (ret != 0) {
             device->closeStream(stream);
             SoapySDR::Device::unmake(device);
-            throw std::runtime_error("SinkSoapySDRBlock: Failed to activate stream: " + std::string(SoapySDR::errToStr(ret)));
+            cler::panic(("SinkSoapySDRBlock: Failed to activate stream: " + std::string(SoapySDR::errToStr(ret))).c_str());
         }
-        
-        // Print device info
-        std::cout << "SinkSoapySDRBlock: Initialized " << device->getDriverKey() 
+
+        std::cout << "SinkSoapySDRBlock: Initialized " << device->getDriverKey()
                   << " (" << device->getHardwareKey() << ")"
                   << " at " << center_freq/1e6 << " MHz"
                   << ", " << sample_rate/1e6 << " MSPS"
                   << ", " << gain_db << " dB gain"
                   << ", MTU: " << mtu << " samples" << std::endl;
-                  
-        // Print available antennas
+
         auto antennas = device->listAntennas(SOAPY_SDR_TX, channel_idx);
         if (!antennas.empty()) {
             std::cout << "  Available TX antennas: ";
@@ -180,30 +169,26 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
     }
     
     cler::Result<cler::Empty, cler::Error> procedure() {
-        // Use DBF for zero-copy read
         auto [read_ptr, read_size] = in.read_dbf();
         if (read_ptr == nullptr || read_size == 0) {
             return cler::Error::NotEnoughSamples;
         }
-        
-        // Process in MTU-sized chunks
+
         size_t samples_sent = 0;
         while (samples_sent < read_size) {
             size_t to_send = std::min(mtu, read_size - samples_sent);
-            
-            // Copy to buffer (necessary because SoapySDR needs void* array)
+
+            // SoapySDR writeStream needs a void* array, so a copy is unavoidable here
             std::memcpy(buffer.data(), read_ptr + samples_sent, to_send * sizeof(T));
-            
-            // Transmit samples
+
             void* buffs[] = {buffer.data()};
             int flags = 0;
             const long long time_ns = 0;
-            const long timeout_us = 100000; // 100ms timeout
-            
+            const long timeout_us = 100000; // 100ms
+
             int ret = device->writeStream(stream, buffs, to_send, flags, time_ns, timeout_us);
-            
+
             if (ret == SOAPY_SDR_TIMEOUT) {
-                // Timeout - commit what we've sent and return
                 in.commit_read(samples_sent);
                 return cler::Error::NotEnoughSpace;
             } else if (ret == SOAPY_SDR_UNDERFLOW) {
@@ -211,7 +196,6 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
                 if (underflow_count % 100 == 0) {
                     std::cerr << "SinkSoapySDRBlock: Underflow count: " << underflow_count << std::endl;
                 }
-                // Continue despite underflow
                 samples_sent += to_send;
             } else if (ret < 0) {
                 std::cerr << "SinkSoapySDRBlock: writeStream error: " << SoapySDR::errToStr(ret) << std::endl;
@@ -226,7 +210,6 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
         return cler::Empty{};
     }
     
-    // Control methods
     void set_frequency(double freq) {
         device->setFrequency(SOAPY_SDR_TX, channel_idx, freq);
         center_freq = freq;
@@ -240,7 +223,6 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
     void set_sample_rate(double rate) {
         device->setSampleRate(SOAPY_SDR_TX, channel_idx, rate);
         sample_rate = rate;
-        // Also update bandwidth to match
         if (device->getBandwidthRange(SOAPY_SDR_TX, channel_idx).size() > 0) {
             device->setBandwidth(SOAPY_SDR_TX, channel_idx, rate);
         }
@@ -266,7 +248,6 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
         }
     }
     
-    // Getters
     double get_frequency() const { return center_freq; }
     double get_gain() const { return gain_db; }
     double get_sample_rate() const { return sample_rate; }
@@ -304,26 +285,21 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
     }
     
 private:
-    // Configuration
     std::string device_args;
     double center_freq;
     double sample_rate;
     double gain_db;
     size_t channel_idx;
-    
-    // SoapySDR objects
+
     SoapySDR::Device* device;
     SoapySDR::Stream* stream;
-    
-    // Buffer
+
     std::vector<T> buffer;
     size_t mtu;
-    
-    // Statistics
+
     size_t underflow_count = 0;
 };
 
-// Common template instantiations
 using SinkSoapySDRBlockCF32 = SinkSoapySDRBlock<std::complex<float>>;
 using SinkSoapySDRBlockCS16 = SinkSoapySDRBlock<std::complex<int16_t>>;
 using SinkSoapySDRBlockCS8 = SinkSoapySDRBlock<std::complex<int8_t>>;

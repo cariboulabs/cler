@@ -66,6 +66,7 @@ target_include_directories(blocks_gui PUBLIC
 
 # === Link dependencies ===
 target_link_libraries(blocks_gui PUBLIC
+  cler::cler
   ${GLFW_LIBRARIES}
   OpenGL::GL
   Threads::Threads

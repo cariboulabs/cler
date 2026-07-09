@@ -1,8 +1,8 @@
 #include "plot_cspectrum.hpp"
+#include "cler_utils.hpp"
 #include "implot.h"
 
 #include <cstring>
-#include <stdexcept>
 #include <cassert>
 #include <cmath>
 
@@ -19,36 +19,28 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
       _window_type(window_type)
 {
     if (_num_inputs < 1) {
-        throw std::invalid_argument("PlotCSpectrumBlock requires at least one input channel");
+        cler::panic("PlotCSpectrumBlock requires at least one input channel");
     }
     if (n_fft_samples <= 2 || n_fft_samples % 2 != 0) {
-        throw std::invalid_argument("FFT size must be > 2 and even");
+        cler::panic("FFT size must be > 2 and even");
     }
 
-    // Calculate buffer size with better DBF compatibility
-    // Use larger multiplier for small FFT sizes to ensure efficient DBF operation
     size_t min_buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>);
-    
-    // For small FFT sizes, increase the multiplier to ensure we have enough buffer
-    // This improves compatibility with DBF-using upstream blocks
+
+    // Below the DBF minimum, bump the multiplier so the buffer still clears it.
     size_t effective_multiplier = BUFFER_SIZE_MULTIPLIER;
     if (_n_fft_samples < min_buffer_size) {
-        // Increase multiplier to ensure buffer is at least 2x the minimum DBF size
-        // This provides better buffering for high-throughput DBF sources
         effective_multiplier = std::max(
             BUFFER_SIZE_MULTIPLIER,
             (2 * min_buffer_size + _n_fft_samples - 1) / _n_fft_samples
         );
     }
-    
+
     _buffer_size = effective_multiplier * _n_fft_samples;
-    
-    // Final check to ensure minimum size
     if (_buffer_size < min_buffer_size) {
         _buffer_size = min_buffer_size;
     }
 
-    // Input channels with proper buffer size
     in = static_cast<cler::Channel<std::complex<float>>*>(
         ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
     );
@@ -56,7 +48,6 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
         new (&in[i]) cler::Channel<std::complex<float>>(_buffer_size);
     }
 
-    // Plot ring buffers with same size as input channels
     _signal_channels = static_cast<cler::Channel<std::complex<float>>*>(
         ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
     );
@@ -64,7 +55,7 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
         new (&_signal_channels[i]) cler::Channel<std::complex<float>>(_buffer_size);
     }
 
-    // Snapshot buffers - only need FFT size, not full buffer size
+    // Snapshot buffers only need FFT-length, not the full ring size.
     _snapshot_buffers = new std::complex<float>*[_num_inputs];
     for (size_t i = 0; i < _num_inputs; ++i) {
         _snapshot_buffers[i] = new std::complex<float>[_n_fft_samples];
@@ -79,8 +70,7 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
         _freq_bins[i] = (_sps * (static_cast<float>(i) / static_cast<float>(_n_fft_samples)))
                       - (_sps / 2.0f);
     }
-    
-    // Allocate averaged spectrum buffers for each input
+
     _spectrum_avg = new float*[_num_inputs];
     for (size_t i = 0; i < _num_inputs; ++i) {
         _spectrum_avg[i] = new float[_n_fft_samples];
@@ -111,8 +101,7 @@ PlotCSpectrumBlock::~PlotCSpectrumBlock() {
     delete[] _liquid_inout;
     delete[] _tmp_mag_buffer;
     delete[] _freq_bins;
-    
-    // Cleanup averaged spectrum buffers
+
     if (_spectrum_avg) {
         for (size_t i = 0; i < _num_inputs; ++i) {
             delete[] _spectrum_avg[i];
@@ -155,25 +144,22 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
         size_t commit_size = (_signal_channels[i].size() + work_size > _buffer_size)
             ? (_signal_channels[i].size() + work_size - _buffer_size) : 0;
 
-        // Try zero-copy path first
+        // Zero-copy when both sides expose a contiguous dbf span; otherwise
+        // fall back one side at a time down to a readN/writeN copy.
         auto [read_ptr, read_size] = in[i].read_dbf();
         if (read_ptr && read_size >= work_size) {
-            // Try to write directly to internal buffer
             auto [write_ptr, write_size] = _signal_channels[i].write_dbf();
             if (write_ptr && write_size >= work_size) {
-                // FAST PATH: Direct copy from input to internal buffer
                 _signal_channels[i].commit_read(commit_size);
                 std::memcpy(write_ptr, read_ptr, work_size * sizeof(std::complex<float>));
                 _signal_channels[i].commit_write(work_size);
                 in[i].commit_read(work_size);
             } else {
-                // Input has dbf but output doesn't
                 _signal_channels[i].commit_read(commit_size);
                 _signal_channels[i].writeN(read_ptr, work_size);
                 in[i].commit_read(work_size);
             }
         } else {
-            // Fall back to standard approach
             in[i].readN(_tmp_buffer, work_size);
             _signal_channels[i].commit_read(commit_size);
             _signal_channels[i].writeN(_tmp_buffer, work_size);
@@ -186,8 +172,8 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
 
 
 void PlotCSpectrumBlock::render() {
-    // Take snapshot inside render, protected by mutex
-    // Only update snapshot when not paused - data keeps flowing, just freeze the display
+    // Skip the snapshot while paused so the displayed data stays frozen even
+    // though procedure() keeps draining input underneath.
     size_t available = 0;
 
     if (!_gui_pause.load(std::memory_order_acquire) && _snapshot_mutex.try_lock()) {
@@ -201,12 +187,11 @@ void PlotCSpectrumBlock::render() {
 
         _snapshot_ready_size = available;
 
-        // Only snapshot if enough samples
         if (available >= _n_fft_samples) {
             for (size_t i = 0; i < _num_inputs; ++i) {
                 auto [ptr, size] = _signal_channels[i].read_dbf();
-                // Copy only the last _n_fft_samples samples for FFT
-                memcpy(_snapshot_buffers[i], 
+                // FFT window is the newest _n_fft_samples samples in the ring.
+                memcpy(_snapshot_buffers[i],
                        ptr + size - _n_fft_samples, 
                        _n_fft_samples * sizeof(std::complex<float>));
             }
@@ -231,7 +216,7 @@ void PlotCSpectrumBlock::render() {
     }
     
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(80.0f);  // Small fixed width slider
+    ImGui::SetNextItemWidth(80.0f);
     ImGui::SliderFloat("##avg", &_avg_alpha, 0.0f, 1.0f, "alpha:%.2f");
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Averaging: 0=frozen, 0.3=heavy, 0.7=light, 1=none");
@@ -275,25 +260,22 @@ void PlotCSpectrumBlock::render() {
                 float power = (re * re + im * im) / scale2;
                 _tmp_mag_buffer[j] = 10.0f * log10f(power + 1e-20f);
             }
-            
-            // Apply exponential averaging
+
             if (_first_spectrum) {
-                // First frame: initialize with current values
                 std::memcpy(_spectrum_avg[i], _tmp_mag_buffer, _n_fft_samples * sizeof(float));
                 if (i == _num_inputs - 1) {
                     _first_spectrum = false;
                 }
             } else {
-                // Exponential moving average: new = alpha * current + (1 - alpha) * old
                 for (size_t j = 0; j < _n_fft_samples; ++j) {
-                    _spectrum_avg[i][j] = _avg_alpha * _tmp_mag_buffer[j] + 
+                    _spectrum_avg[i][j] = _avg_alpha * _tmp_mag_buffer[j] +
                                           (1.0f - _avg_alpha) * _spectrum_avg[i][j];
                 }
             }
 
             ImPlot::PlotLine(_signal_labels[i].c_str(),
                              _freq_bins,
-                             _spectrum_avg[i],  // Plot averaged spectrum instead
+                             _spectrum_avg[i],
                              static_cast<int>(_n_fft_samples));
         }
         ImPlot::EndPlot();

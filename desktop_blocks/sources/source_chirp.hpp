@@ -1,5 +1,6 @@
 #pragma once
 #include "cler.hpp"
+#include "cler_utils.hpp"
 #include <cmath>
 #include <type_traits>
 #include <complex>
@@ -22,34 +23,29 @@ struct SourceChirpBlock : public cler::BlockBase {
           _sps(sps),
           _chirp_duration_s(chirp_duration_s)
     {
-        if (_sps == 0) throw std::invalid_argument("Sample rate must be greater than zero.");
-        if (_chirp_duration_s <= 0) throw std::invalid_argument("Chirp duration must be positive.");
+        if (_sps == 0) cler::panic("Sample rate must be greater than zero.");
+        if (_chirp_duration_s <= 0) cler::panic("Chirp duration must be positive.");
 
         _n_samples_before_reset = static_cast<size_t>(_chirp_duration_s * _sps);
         _k = (_f1_hz - _f0_hz) / _chirp_duration_s; // Hz/s
 
-        // Precompute per-sample sweep rate
         const float dt = 1.0f / static_cast<float>(_sps);
         const float w0 = 2.0f * cler::PI * _f0_hz * dt;
 
-        // Precompute second difference method constants
-        _psi = std::polar(1.0f, w0);      // Initial phasor increment
-        _psi_inc = std::polar(1.0f, 2.0f * cler::PI * _k * dt * dt); // Second difference (==acceleration)
+        _psi = std::polar(1.0f, w0);
+        _psi_inc = std::polar(1.0f, 2.0f * cler::PI * _k * dt * dt); // second-difference recursion for phase acceleration
 
-        _phasor = std::complex<float>(1.0f, 0.0f); // Unit phasor
-
+        _phasor = std::complex<float>(1.0f, 0.0f);
     }
 
     ~SourceChirpBlock() = default;
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
-        // Use zero-copy path
         auto [write_ptr, write_size] = out->write_dbf();
         if (write_ptr == nullptr || write_size == 0) {
             return cler::Error::NotEnoughSpace;
         }
-        
-        // Generate directly into output buffer
+
         for (size_t i = 0; i < write_size; ++i) {
             std::complex<float> chirp = _phasor;
 
@@ -60,8 +56,8 @@ struct SourceChirpBlock : public cler::BlockBase {
             }
 
             _phasor *= _psi;
-            _phasor /= std::abs(_phasor); // Normalize to keep phasor on the unit circle, CRUCIAL for stability
-            _psi *= _psi_inc; // Update phase increment for next sample
+            _phasor /= std::abs(_phasor); // renormalize to unit circle each step, required for numerical stability
+            _psi *= _psi_inc;
 
             ++_samples_counter;
             if (_samples_counter >= _n_samples_before_reset) {
@@ -90,11 +86,10 @@ private:
     float _chirp_duration_s;
 
     size_t _n_samples_before_reset;
-    float _k;              // Sweep rate (Hz/s)
+    float _k;              // sweep rate, Hz/s
     size_t _samples_counter = 0;
 
-    // Recursive oscillator state
-    std::complex<float> _phasor;   // Current sample phasor
-    std::complex<float> _psi;      // Current phase increment
-    std::complex<float> _psi_inc;  // Second difference (sweep)
+    std::complex<float> _phasor;
+    std::complex<float> _psi;
+    std::complex<float> _psi_inc;
 };

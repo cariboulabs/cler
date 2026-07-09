@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "cler_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include <iostream>
 #include <cstring> // for memcpy
@@ -15,7 +16,6 @@ struct SourceOneBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure(
         cler::ChannelBase<float>* out) {
 
-        // Use zero-copy path
         auto [write_ptr, write_size] = out->write_dbf();
         size_t to_write = std::min(write_size, CHANNEL_SIZE);
         if (to_write > 0) {
@@ -39,7 +39,6 @@ struct SourceTwoBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure(
         cler::ChannelBase<float>* out) {
 
-        // Use zero-copy path
         auto [write_ptr, write_size] = out->write_dbf();
         size_t to_write = std::min(write_size, CHANNEL_SIZE);
         if (to_write > 0) {
@@ -59,7 +58,6 @@ struct Gain2Block : public cler::BlockBase {
     Gain2Block(const char* name) : BlockBase(name), in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        // Use zero-copy path
         auto [read_ptr, read_size] = in.read_dbf();
         auto [write_ptr, write_size] = out->write_dbf();
         
@@ -81,7 +79,6 @@ struct Gain3Block : public cler::BlockBase {
     Gain3Block(const char* name) : BlockBase(name), in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        // Use zero-copy path
         auto [read_ptr, read_size] = in.read_dbf();
         auto [write_ptr, write_size] = out->write_dbf();
         
@@ -106,7 +103,7 @@ struct switchSourceBlock : public cler::BlockBase {
                    std::variant<SourceOneBlock, SourceTwoBlock>(std::in_place_type<SourceOneBlock>, "SourceOne") :
                    std::variant<SourceOneBlock, SourceTwoBlock>(std::in_place_type<SourceTwoBlock>, "SourceTwo")) {
           if (source_choice < 1 || source_choice > 2) {
-              throw std::invalid_argument("Invalid source choice. Must be 1 or 2.");
+              cler::panic("Invalid source choice. Must be 1 or 2.");
           }
       }
 
@@ -126,7 +123,7 @@ struct switchGainBlock : public cler::BlockBase {
                   std::variant<Gain2Block, Gain3Block>(std::in_place_type<Gain2Block>, "Gain2") :
                   std::variant<Gain2Block, Gain3Block>(std::in_place_type<Gain3Block>, "Gain3")) {
           if (gain_choice < 2 || gain_choice > 3) {
-              throw std::invalid_argument("Invalid gain choice. Must be 2 or 3.");
+              cler::panic("Invalid gain choice. Must be 2 or 3.");
           }
       }
 
@@ -178,8 +175,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    int source_choice = std::stoi(argv[1]);
-    int gain_choice = std::stoi(argv[2]);
+    int source_choice = std::atoi(argv[1]);
+    int gain_choice = std::atoi(argv[2]);
     if (source_choice < 1 || source_choice > 2 || gain_choice < 2 || gain_choice > 3) {
         std::cerr << "Invalid choices. Source choice must be 1 or 2, gain choice must be 2 or 3.\n";
         return 1;

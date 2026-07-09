@@ -1,7 +1,6 @@
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 
-// Desktop blocks
 #include "desktop_blocks/sources/source_soapysdr.hpp"
 #include "desktop_blocks/filters/kaiser_lpf.hpp"
 #include "desktop_blocks/fm/fm_demod.hpp"
@@ -13,7 +12,6 @@
 #include <csignal>
 #include <atomic>
 
-// Global flag for signal handling
 static std::atomic<bool> g_should_exit{false};
 
 void signal_handler(int signum) {
@@ -38,11 +36,9 @@ void print_usage(const char* prog_name) {
 }
 
 int main(int argc, char* argv[]) {
-    // Register signal handler for Ctrl+C
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    // Parse command line arguments
     double freq_mhz = 88.5;
     double rate_msps = 2.0;
     double gain_db = 20.0;
@@ -69,7 +65,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Convert to Hz
     double freq_hz = freq_mhz * 1e6;
     double rate_hz = rate_msps * 1e6;
 
@@ -92,15 +87,14 @@ int main(int argc, char* argv[]) {
         0  // channel 0
     );
 
-    // Channel selection filter: isolate the desired FM station from adjacent channels
-    // FM broadcast spacing: 200 kHz, deviation: ±75 kHz
-    // Filter cutoff: 100 kHz (captures ±75 kHz deviation + audio bandwidth)
+    // Cutoff/transition/attenuation chosen to isolate a single 200 kHz-spaced FM
+    // broadcast station (±75 kHz deviation) from adjacent channels
     KaiserLPFBlock<std::complex<float>> channel_filter(
         "Channel Filter",
-        rate_hz,        // Sample rate (e.g., 2 MSPS)
-        100e3,          // Cutoff: 100 kHz (selects single FM station)
-        20e3,           // Transition: 20 kHz (sharp rolloff to reject adjacent channels)
-        60.0            // Attenuation: 60 dB (excellent adjacent channel rejection)
+        rate_hz,        // sample rate
+        100e3,          // cutoff
+        20e3,           // transition width
+        60.0            // stopband attenuation, dB
     );
 
     FMDemodBlock fm_demod(
@@ -110,14 +104,11 @@ int main(int argc, char* argv[]) {
     );
 
     static constexpr float kAudioSampleRate = 48000.0f;
-
-    // Resampler: downsample from SDR rate to 48 kHz audio rate
-    // (includes built-in anti-aliasing filter with 60 dB stopband attenuation)
     float resample_ratio = kAudioSampleRate / rate_hz;
     MultiStageResamplerBlock<float> resampler(
         "Resampler",
         resample_ratio,
-        60.0f  // 60 dB attenuation for filter stopband
+        60.0f  // stopband attenuation, dB
     );
 
     SinkAudioBlock audio_out(
@@ -127,7 +118,6 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Creating flowgraph...\n";
 
-    // Signal chain: SDR → Channel Filter → FM Demod → Resampler → Audio Out
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source, &channel_filter.in),
         cler::BlockRunner(&channel_filter, &fm_demod.in),
@@ -150,7 +140,6 @@ int main(int argc, char* argv[]) {
     flowgraph.stop();
     std::cout << "Flowgraph stopped. Cleanup complete.\n";
 
-    // Print stats:
     for (const auto& s : flowgraph.stats()) {
         printf("%s: %zu successful, %zu failed, %.1f%% CPU\n",
                 s.name.c_str(), s.successful_procedures, s.failed_procedures,

@@ -8,7 +8,6 @@
 #include <chrono>
 #include <thread>
 
-// Signal handler for graceful shutdown
 static std::atomic<bool> should_exit(false);
 
 void signal_handler(int signal) {
@@ -49,7 +48,6 @@ int main(int argc, char* argv[]) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    // Graceful shutdown
     flowgraph.stop();
 
     return 0;

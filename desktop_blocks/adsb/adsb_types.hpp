@@ -4,36 +4,32 @@
 #include <cstring>
 #include <chrono>
 
-// Aggregated aircraft state (unified across multiple Mode S messages)
+// aggregated aircraft state, unified across multiple Mode S messages
 struct ADSBState {
-    uint32_t icao;                  // Aircraft ICAO address
+    uint32_t icao;
 
-    // Identification
-    char callsign[9];               // Flight number (8 chars + null terminator)
+    char callsign[9];                // 8 chars + null terminator
 
-    // Position (most recent valid)
-    double lat;                     // Latitude (degrees)
-    double lon;                     // Longitude (degrees)
-    uint32_t position_update_time;  // Timestamp of last position update
-    bool position_valid;            // True if lat/lon have been decoded
+    double lat;                      // degrees
+    double lon;                      // degrees
+    uint32_t position_update_time;
+    bool position_valid;
 
-    // CPR position decoding state (for airborne positions)
-    int last_even_cprlat;           // Last even frame latitude (17 bits)
-    int last_even_cprlon;           // Last even frame longitude (17 bits)
-    int last_odd_cprlat;            // Last odd frame latitude (17 bits)
-    int last_odd_cprlon;            // Last odd frame longitude (17 bits)
-    bool has_even_position;         // True if we have a valid even position
-    bool has_odd_position;          // True if we have a valid odd position
+    // CPR (Compact Position Reporting) needs one even + one odd frame to decode a position
+    int last_even_cprlat;            // 17 bits
+    int last_even_cprlon;            // 17 bits
+    int last_odd_cprlat;             // 17 bits
+    int last_odd_cprlon;             // 17 bits
+    bool has_even_position;
+    bool has_odd_position;
 
-    // Altitude and speed (most recent)
-    int altitude;                   // Altitude (feet)
-    float groundspeed;              // Ground speed (knots)
-    float track;                    // Heading/track (degrees, 0-360)
-    int vertical_rate;              // Vertical rate (feet/minute)
+    int altitude;                    // feet
+    float groundspeed;                // knots
+    float track;                     // degrees, 0-360
+    int vertical_rate;               // feet/minute
 
-    // Metadata
-    uint32_t last_update_time;      // Timestamp of last any update
-    int message_count;              // Total messages received for this aircraft
+    uint32_t last_update_time;
+    int message_count;
 
     ADSBState()
         : icao(0), lat(0.0), lon(0.0), position_update_time(0),

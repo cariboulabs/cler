@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
+#include "cler_utils.hpp"
 #include "desktop_blocks/misc/uhd_common.hpp"
 
 #ifdef __has_include
@@ -44,10 +45,10 @@ struct SourceUHDBlock : public cler::BlockBase {
 
         usrp = uhd::usrp::multi_usrp::make(device_address);
         if (!usrp) {
-            throw std::runtime_error("SourceUHDBlock: Failed to create USRP device");
+            cler::panic("SourceUHDBlock: Failed to create USRP device");
         }
         if (num_channels > usrp->get_rx_num_channels()) {
-            throw std::runtime_error("SourceUHDBlock: Not enough RX channels");
+            cler::panic("SourceUHDBlock: Not enough RX channels");
         }
         uhd::set_thread_priority_safe(0.5, true);
         for (size_t ch = 0; ch < num_channels; ++ch) {
@@ -70,7 +71,7 @@ struct SourceUHDBlock : public cler::BlockBase {
 
         rx_stream = usrp->get_rx_stream(stream_args);
         if (!rx_stream) {
-            throw std::runtime_error("SourceUHDBlock: Failed to setup RX stream");
+            cler::panic("SourceUHDBlock: Failed to setup RX stream");
         }
         uhd::stream_cmd_t stream_cmd(uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS);
         stream_cmd.stream_now = true;
@@ -115,7 +116,6 @@ struct SourceUHDBlock : public cler::BlockBase {
                 _actual_rate.store(actual_rate, std::memory_order_release);
             }
 
-            // Set frequency
             auto freq_range = usrp->get_rx_freq_range(channel);
             if (config.center_freq_Hz < freq_range.start() || 
                 config.center_freq_Hz > freq_range.stop()) {
@@ -124,7 +124,6 @@ struct SourceUHDBlock : public cler::BlockBase {
             }
             usrp->set_rx_freq(uhd::tune_request_t(config.center_freq_Hz), channel);
 
-            // Set gain
             auto gain_range = usrp->get_rx_gain_range(channel);
             if (config.gain < gain_range.start() || config.gain > gain_range.stop()) {
                 std::cerr << "Gain " << config.gain << " dB out of range" << std::endl;

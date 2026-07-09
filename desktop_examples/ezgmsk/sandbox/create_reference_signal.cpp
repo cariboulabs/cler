@@ -4,22 +4,26 @@
 #include <iostream>
 #include <fstream>
 #include <filesystem>
+#include <system_error>
 #include <complex>
 
 int main() {
-    //create output directory if it does not exist
-    try {
-        if (!std::filesystem::exists("output")) {
-            std::filesystem::create_directory("output");
-            std::cout << "Directory output created.\n";
-        } else {
-             for (const auto& entry : std::filesystem::directory_iterator("output")) {
-                std::filesystem::remove_all(entry);  // removes files and subdirectories
-            }
+    std::error_code ec;
+    if (!std::filesystem::exists("output", ec)) {
+        std::filesystem::create_directory("output", ec);
+        if (ec) {
+            std::cerr << "Filesystem error: " << ec.message() << '\n';
+            return 1;
         }
-    } catch (const std::filesystem::filesystem_error& e) {
-        std::cerr << "Filesystem error: " << e.what() << '\n';
-        return 1;
+        std::cout << "Directory output created.\n";
+    } else {
+        for (const auto& entry : std::filesystem::directory_iterator("output", ec)) {
+            std::filesystem::remove_all(entry, ec);
+        }
+        if (ec) {
+            std::cerr << "Filesystem error: " << ec.message() << '\n';
+            return 1;
+        }
     }
 
     float bt = 0.3;

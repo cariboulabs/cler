@@ -1,5 +1,6 @@
 #pragma once
 #include "cler.hpp"
+#include "cler_utils.hpp"
 
 #ifdef __has_include
     #if __has_include(<libhackrf/hackrf.h>)
@@ -13,6 +14,7 @@
 
 #include <atomic>
 #include <cstring>
+#include <iostream>
 
 struct SourceHackRFBlock : public cler::BlockBase {
     SourceHackRFBlock(const char* name,
@@ -30,62 +32,56 @@ struct SourceHackRFBlock : public cler::BlockBase {
           _vga_gain_db(vga_gain_db),
           _amp_enable(amp_enable)
     {
-        // Validate buffer size for doubly-mapped buffers
         if (buffer_size > 0 && buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
-            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " + 
-                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>)) + " complex<float> elements");
+            char msg[160];
+            std::snprintf(msg, sizeof(msg),
+                "Buffer size too small for doubly-mapped buffers. Need at least %zu complex<float> elements",
+                cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>));
+            cler::panic(msg);
         }
 
-        // Initialize HackRF library (idempotent)
         if (hackrf_init() != HACKRF_SUCCESS) {
-            throw std::runtime_error("Failed to initialize HackRF library.");
+            cler::panic("Failed to initialize HackRF library.");
         }
 
-        // Open device
         if (hackrf_open(&_dev) != HACKRF_SUCCESS) {
-            throw std::runtime_error("Failed to open HackRF device.");
+            cler::panic("Failed to open HackRF device.");
         }
 
-        // Set frequency
         if (hackrf_set_freq(_dev, freq_hz) != HACKRF_SUCCESS) {
             hackrf_close(_dev);
             _dev = nullptr;
-            throw std::runtime_error("Failed to set frequency.");
+            cler::panic("Failed to set frequency.");
         }
 
-        // Set sample rate
         if (hackrf_set_sample_rate(_dev, samp_rate_hz) != HACKRF_SUCCESS) {
             hackrf_close(_dev);
             _dev = nullptr;
-            throw std::runtime_error("Failed to set sample rate.");
+            cler::panic("Failed to set sample rate.");
         }
 
-        // Set LNA gain
         if (hackrf_set_lna_gain(_dev, lna_gain_db) != HACKRF_SUCCESS) {
             hackrf_close(_dev);
             _dev = nullptr;
-            throw std::runtime_error("Failed to set LNA gain.");
+            cler::panic("Failed to set LNA gain.");
         }
 
-        // Set VGA gain
         if (hackrf_set_vga_gain(_dev, vga_gain_db) != HACKRF_SUCCESS) {
             hackrf_close(_dev);
             _dev = nullptr;
-            throw std::runtime_error("Failed to set VGA gain.");
+            cler::panic("Failed to set VGA gain.");
         }
 
-        // Enable/disable RX amplifier
         if (hackrf_set_amp_enable(_dev, amp_enable ? 1 : 0) != HACKRF_SUCCESS) {
             hackrf_close(_dev);
             _dev = nullptr;
-            throw std::runtime_error("Failed to set amp enable.");
+            cler::panic("Failed to set amp enable.");
         }
 
-        // Start RX streaming
         if (hackrf_start_rx(_dev, rx_callback, this) != HACKRF_SUCCESS) {
             hackrf_close(_dev);
             _dev = nullptr;
-            throw std::runtime_error("Failed to start RX streaming.");
+            cler::panic("Failed to start RX streaming.");
         }
 
         std::cout << "SourceHackRFBlock: Initialized" << std::endl;
@@ -103,7 +99,6 @@ struct SourceHackRFBlock : public cler::BlockBase {
         }
         hackrf_exit();
 
-        // Print statistics
         if (_overflow_count > 0) {
             std::cout << "SourceHackRFBlock: Total overflows: " << _overflow_count << std::endl;
         }
@@ -127,7 +122,6 @@ struct SourceHackRFBlock : public cler::BlockBase {
         return cler::Empty{};
     }
 
-    // Getters
     uint64_t get_frequency() const { return _freq_hz; }
     uint32_t get_sample_rate() const { return _samp_rate_hz; }
     int get_lna_gain() const { return _lna_gain_db; }
@@ -177,18 +171,14 @@ private:
         SourceHackRFBlock* self = static_cast<SourceHackRFBlock*>(transfer->rx_ctx);
         const uint8_t* buf = transfer->buffer;
 
-        // Convert int8_t IQ pairs to complex<float>
-        // HackRF format: signed int8_t, -128 to 127
+        // HackRF wire format: interleaved signed int8_t IQ, range [-128, 127]
         for (int i = 0; i < transfer->valid_length; i += 2) {
-            // Convert from int8_t [-128, 127] to float [-1.0, 1.0]
             float i_sample = static_cast<int8_t>(buf[i]) / 128.0f;
             float q_sample = static_cast<int8_t>(buf[i + 1]) / 128.0f;
-            
+
             std::complex<float> sample(i_sample, q_sample);
-            
-            bool success = self->_iq.try_push(sample);
-            if (!success) {
-                // Queue is full - overflow
+
+            if (!self->_iq.try_push(sample)) {
                 self->_overflow_count++;
             }
         }

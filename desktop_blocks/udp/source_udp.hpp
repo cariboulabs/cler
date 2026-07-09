@@ -43,7 +43,6 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
 
         for (size_t i = 0; i < available; ++i) {
             if constexpr (IS_BLOB) {
-                // Blob-specific: slab pooling
                 auto result = _slab.take_slot();
                 if (result.is_err()) break;
 
@@ -89,7 +88,6 @@ struct SourceUDPSocketBlock : public cler::BlockBase {
 
                 buffer[count++] = blob;
             } else {
-                // Generic fixed-size
                 ssize_t bytes = _socket.recv(reinterpret_cast<uint8_t*>(&buffer[i]), sizeof(T));
                 if (bytes <= 0) break;
 

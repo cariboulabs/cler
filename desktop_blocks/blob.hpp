@@ -16,8 +16,8 @@ struct Blob {
 struct Slab {
     Slab(size_t num_slots, size_t max_blob_size);
 
-    // Allocate a slice: pops a free slot, returns pointer to region
-    // Returns nullptr if no space
+    // Allocate a slice: pops a free slot, returns a Blob pointing into it.
+    // Returns cler::Error::ProcedureError if no slot is free.
     cler::Result<Blob, cler::Error> take_slot();
     void release_slot(size_t slot_idx);
 

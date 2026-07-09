@@ -1,4 +1,6 @@
 #include "cler.hpp"
+#include "cler_utils.hpp"
+#include <new>
 
 //a one to one gain block over arbitrary types
 template <typename T>
@@ -7,33 +9,32 @@ struct GainBlock : public cler::BlockBase {
 
     GainBlock(const char* name, const T gain_value, const size_t buffer_size = 0)
         : cler::BlockBase(name), in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size), _gain(gain_value) {
-        
-        // Allocate temporary buffer for readN/writeN operations
+
         _buffer_size = buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size;
-        _buffer = new T[_buffer_size];
+        _buffer = new (std::nothrow) T[_buffer_size];
         if (!_buffer) {
-            throw std::bad_alloc();
+            cler::panic("Failed to allocate temporary buffer");
         }
     }
-    
+
     ~GainBlock() {
         delete[] _buffer;
     }
 
+    // buffer_size isn't validated to be >=4KB (custom sizes allowed), so dbf isn't
+    // guaranteed available here; readN/writeN into a temp buffer stays correct for any size.
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
-        // Use readN/writeN for simple processing (recommended pattern)
         size_t transferable = std::min({in.size(), out->space(), _buffer_size});
         if (transferable == 0) {
             return cler::Error::NotEnoughSpaceOrSamples;
         }
-        
+
         in.readN(_buffer, transferable);
-        
-        // Process buffer
+
         for (size_t i = 0; i < transferable; ++i) {
             _buffer[i] = _buffer[i] * _gain;
         }
-        
+
         out->writeN(_buffer, transferable);
         return cler::Empty{};
     }

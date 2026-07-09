@@ -1,7 +1,5 @@
-// Unified USRP Example - demonstrates all UHD block features including TX
-// Select mode via command line argument
-
 #include "cler.hpp"
+#include <cstdlib>
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/sources/source_uhd.hpp"
 #include "desktop_blocks/sources/source_file.hpp"
@@ -73,48 +71,51 @@ USRPArgs parse_args(int argc, char** argv) {
             return argv[++i];
         };
 
-        try {
-            if (arg == "-h" || arg == "--help") {
-                print_usage(argv[0]);
-                exit(0);
-            }
-            else if (arg == "-m" || arg == "--mode") {
-                args.mode = next_arg();
-            }
-            else if (arg == "-f" || arg == "--freq") {
-                args.freq = std::stod(next_arg());  // supports 918e6 or 918000000
-            }
-            else if (arg == "-r" || arg == "--rate") {
-                args.rate = std::stod(next_arg());  // supports 2e6 or 2000000
-            }
-            else if (arg == "-g" || arg == "--gain") {
-                args.gain = std::stod(next_arg());
-            }
-            else if (arg == "-a" || arg == "--amp") {
-                args.amp = std::stod(next_arg());
-            }
-            else if (arg == "-o" || arg == "--cw_offset") {
-                args.cw_offset = std::stod(next_arg());
-            }
-            else if (arg == "-F" || arg == "--fft") {
-                args.fft = std::stoul(next_arg());
-            }
-            else if (arg == "-c" || arg == "--chirp_duration") {
-                args.chirp_duration_s = std::stod(next_arg());
-            }
-            else if (arg == "-d" || arg == "--dev" || arg == "--device") {
-                args.device_address = next_arg();
-            }
-            else {
-                std::cerr << "Error: Unknown option '" << arg << "'" << std::endl;
-                std::cerr << "Use -h or --help for usage information" << std::endl;
+        auto num_arg = [&]() -> double {
+            std::string v = next_arg();
+            char* end = nullptr;
+            double d = std::strtod(v.c_str(), &end);
+            if (end == v.c_str() || *end != '\0') {
+                std::cerr << "Error: invalid numeric value for " << arg << ": " << v << std::endl;
                 exit(1);
             }
-        } catch (const std::invalid_argument& e) {
-            std::cerr << "Error: Invalid numeric value for " << arg << ": " << e.what() << std::endl;
-            exit(1);
-        } catch (const std::out_of_range& e) {
-            std::cerr << "Error: Value out of range for " << arg << ": " << e.what() << std::endl;
+            return d;
+        };
+
+        if (arg == "-h" || arg == "--help") {
+            print_usage(argv[0]);
+            exit(0);
+        }
+        else if (arg == "-m" || arg == "--mode") {
+            args.mode = next_arg();
+        }
+        else if (arg == "-f" || arg == "--freq") {
+            args.freq = num_arg();  // supports 918e6 or 918000000
+        }
+        else if (arg == "-r" || arg == "--rate") {
+            args.rate = num_arg();  // supports 2e6 or 2000000
+        }
+        else if (arg == "-g" || arg == "--gain") {
+            args.gain = num_arg();
+        }
+        else if (arg == "-a" || arg == "--amp") {
+            args.amp = num_arg();
+        }
+        else if (arg == "-o" || arg == "--cw_offset") {
+            args.cw_offset = num_arg();
+        }
+        else if (arg == "-F" || arg == "--fft") {
+            args.fft = static_cast<size_t>(num_arg());
+        }
+        else if (arg == "-c" || arg == "--chirp_duration") {
+            args.chirp_duration_s = num_arg();
+        }
+        else if (arg == "-d" || arg == "--dev" || arg == "--device") {
+            args.device_address = next_arg();
+        }
+        else {
+            std::cerr << "Error: Unknown option '" << arg << "'" << std::endl;
+            std::cerr << "Use -h or --help for usage information" << std::endl;
             exit(1);
         }
     }
@@ -123,16 +124,6 @@ USRPArgs parse_args(int argc, char** argv) {
 }
 
 void mode_rx(const USRPArgs& args) {
-    
-    try {
-        //try to initialize USRP RX
-        SourceUHDBlock<std::complex<float>> usrp_source("USRP", args.freq,
-            args.rate, args.device_address, args.gain, 1 /*num channels*/);
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to initialize USRP" << e.what() << std::endl;
-        return;
-    }
-    //Initalization was successful, lets re-init for real
     SourceUHDBlock<std::complex<float>> usrp_source("USRP", args.freq,
         args.rate, args.device_address, args.gain, 1 /*num channels*/);
 
@@ -141,7 +132,6 @@ void mode_rx(const USRPArgs& args) {
     PlotCSpectrogramBlock spectrogram("Spectrogram", {"usrp_signal"}, args.rate, args.fft, 4000);
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
     spectrogram.set_initial_window(1000.0f, 0.0f, 800.0f, 800.0f);
-
 
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&usrp_source, &fanout.in),
@@ -153,11 +143,8 @@ void mode_rx(const USRPArgs& args) {
     flowgraph.run();
     std::cout << "Flowgraph running... Close window to exit." << std::endl;
 
-    // spectrum.set_initial_window(1000.0f, 0.0f, 400.0f, 400.0f);
-    // spectrogram.set_initial_window(1000.0f, 0.0f, 800.0f, 800.0f);
     while (!gui.should_close()) {
         gui.begin_frame();
-        // spectrum.render();
         spectrogram.render();
         gui.end_frame();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -169,17 +156,8 @@ void mode_rx(const USRPArgs& args) {
 
 void mode_tx_chirp(const USRPArgs& args) {
     UHDConfig config{args.freq, args.rate, args.gain};
-    
-    try {
-        // Try to initialize USRP TX
-        SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX", 
-            args.device_address, 1 /*num channels*/, 0 /*mboard*/, "sc16", &config);
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to initialize USRP: " << e.what() << std::endl;
-        return;
-    }
-    // Initialization was successful, lets re-init for real
-    SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX", 
+
+    SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX",
         args.device_address, 1 /*num channels*/, 0 /*mboard*/, "sc16", &config);
 
     cler::GuiManager gui(1200, 600, "USRP TX - Chirp Signal");
@@ -192,7 +170,6 @@ void mode_tx_chirp(const USRPArgs& args) {
     FanoutBlock<std::complex<float>> fanout("Fanout", 2);
     PlotCSpectrumBlock spectrum("TX Spectrum", {"Chirp"}, args.rate, 2048);
     spectrum.set_initial_window(0.0f, 0.0f, 1200.0f, 600.0f);
-
 
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&chirp, &fanout.in),
@@ -217,17 +194,8 @@ void mode_tx_chirp(const USRPArgs& args) {
 
 void mode_tx_cw(const USRPArgs& args) {
     UHDConfig config{args.freq, args.rate, args.gain};
-    
-    try {
-        // Try to initialize USRP TX
-        SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX", 
-            args.device_address, 1 /*num channels*/, 0 /*mboard*/, "sc16", &config);
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to initialize USRP: " << e.what() << std::endl;
-        return;
-    }
-    // Initialization was successful, lets re-init for real
-    SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX", 
+
+    SinkUHDBlock<std::complex<float>> usrp_sink("USRP_TX",
         args.device_address, 1 /*num channels*/, 0 /*mboard*/, "sc16", &config);
 
     cler::GuiManager gui(1200, 600, "USRP TX - Continuous Wave");
@@ -258,27 +226,18 @@ void mode_tx_cw(const USRPArgs& args) {
 }
 
 void mode_zero_span(const USRPArgs& args) {
-    try {
-        SourceUHDBlock<std::complex<float>> usrp_source("USRP", args.freq,
-            args.rate, args.device_address, args.gain, 1);
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to initialize USRP: " << e.what() << std::endl;
-        return;
-    }
     SourceUHDBlock<std::complex<float>> usrp_source("USRP", args.freq,
         args.rate, args.device_address, args.gain, 1);
 
     cler::GuiManager gui(1600, 1600, "USRP Zero Span - Power vs Time");
-    
-    // Power detector converts complex I/Q to power in dB
+
     PowerDetectorBlock<std::complex<float>> power_detector("PowerDetector", -80.0f);
-    
-    // Time series plot shows power over time
-    PlotTimeSeriesBlock power_plot("Power vs Time", 
-                                   {"Power (dB)"}, 
-                                   args.rate,    // sample rate
+
+    PlotTimeSeriesBlock power_plot("Power vs Time",
+                                   {"Power (dB)"},
+                                   args.rate,
                                    5.0f);        // show last 5 seconds
-    
+
     power_plot.set_initial_window(0.0f, 0.0f, 1600.0f, 1600.0f);
 
     auto flowgraph = cler::make_desktop_flowgraph(
@@ -304,7 +263,7 @@ void mode_zero_span(const USRPArgs& args) {
 
 int main(int argc, char** argv) {
     USRPArgs args = parse_args(argc, argv);
-    std::cout<<"inside main"<<std::endl;
+    std::cout << "inside main" << std::endl;
 
     std::cout << "Mode: " << args.mode << "\n"
               << "Freq: " << args.freq << " Hz\n"

@@ -21,23 +21,21 @@ struct PlantBlock : public cler::BlockBase {
     cler::Channel<float> force_in;
     PlantBlock(const char* name)  
         : BlockBase(name), force_in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) {
-            force_in.push(0.0f); //<-----MUST PROVIDE INITIAL FORCE OR CYCLIC GRAPH WILL FAIL
-        } 
+            force_in.push(0.0f); // seed value required: cyclic graph deadlocks without it
+        }
 
     cler::Result<cler::Empty, cler::Error> procedure(
         cler::ChannelBase<float>* measured_position_out) {
-        // Use zero-copy path when possible
         auto [read_ptr, read_size] = force_in.read_dbf();
         auto [write_ptr, write_size] = measured_position_out->write_dbf();
-        
+
         size_t to_process = std::min(read_size, write_size);
-        
+
         if (to_process > 0 && read_ptr && write_ptr) {
-            // Process directly in place
             for (size_t i = 0; i < to_process; ++i) {
                 float force = read_ptr[i];
-                
-                // Update position and velocity using the mass-spring-damper equations
+
+                // mass-spring-damper equation of motion (semi-implicit Euler)
                 float acceleration = (force - K * _x - C * _v) / M;
                 _v += acceleration * DT;
                 _x += _v * DT + 0.5f * acceleration * DT * DT;
@@ -52,7 +50,6 @@ struct PlantBlock : public cler::BlockBase {
                 float force;
                 force_in.pop(force);
 
-                // Update position and velocity using the mass-spring-damper equations
                 float acceleration = (force - K * _x - C * _v) / M;
                 _v += acceleration * DT;
                 _x += _v * DT + 0.5f * acceleration * DT * DT;
@@ -75,7 +72,6 @@ struct PlantBlock : public cler::BlockBase {
 
         ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
-        // Background and border
         draw_list->AddRectFilled(canvas_p0, canvas_p1, IM_COL32(40, 40, 40, 255));
         draw_list->AddRect(canvas_p0, canvas_p1, IM_COL32(255, 255, 255, 255));
 
@@ -84,14 +80,12 @@ struct PlantBlock : public cler::BlockBase {
 
         float spring_end_x = spring_start_x + 200.0f + _x * 20.0f;
 
-        // Floor line
         draw_list->AddLine(
             ImVec2(canvas_p0.x + 20.0f, center_y + 50.0f),
             ImVec2(canvas_p1.x - 20.0f, center_y + 50.0f),
             IM_COL32(200, 200, 200, 60), 1.0f
         );
 
-        // Fixed wall with hatch
         for (float y = center_y - 40.0f; y <= center_y + 40.0f; y += 8.0f) {
             draw_list->AddLine(
                 ImVec2(spring_start_x - 20.0f, y),
@@ -100,7 +94,6 @@ struct PlantBlock : public cler::BlockBase {
             );
         }
 
-        // Mass block
         ImVec2 mass_size = ImVec2(40.0f, 40.0f);
 
         ImVec2 mass_p0;
@@ -115,7 +108,7 @@ struct PlantBlock : public cler::BlockBase {
         mass_center.x = (mass_p0.x + mass_p1.x) * 0.5f;
         mass_center.y = (mass_p0.y + mass_p1.y) * 0.5f;
 
-        // 🌀 Perfect sine spring: always ends at mass_center
+        // Spring coil geometry is generated so it always ends at mass_center
         int num_points = 100;
         float coil_length = mass_center.x - 0.5f*(mass_size.x) - spring_start_x;
         float amplitude = 12.0f;
@@ -136,7 +129,6 @@ struct PlantBlock : public cler::BlockBase {
             prev.y = y;
         }
 
-        // Mass block shadow
         ImVec2 shadow_p0;
         shadow_p0.x = mass_p0.x + 4.0f;
         shadow_p0.y = mass_p0.y + 4.0f;
@@ -145,7 +137,6 @@ struct PlantBlock : public cler::BlockBase {
         shadow_p1.y = mass_p1.y + 4.0f;
         draw_list->AddRectFilled(shadow_p0, shadow_p1, IM_COL32(0, 0, 0, 100), 6.0f);
 
-        // Mass block
         draw_list->AddRectFilled(mass_p0, mass_p1, IM_COL32(200, 50, 50, 255), 6.0f);
         draw_list->AddRect(mass_p0, mass_p1, IM_COL32(255, 255, 255, 180), 2.0f);
 
@@ -170,14 +161,10 @@ struct ControllerBlock : public cler::BlockBase {
     float* _buffer;
     size_t _buffer_size;
 
-    ControllerBlock(const char* name)  
+    ControllerBlock(const char* name)
         : BlockBase(name), measured_position_in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) {
-        // Allocate temporary buffer for readN/writeN operations
         _buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float);
         _buffer = new float[_buffer_size];
-        if (!_buffer) {
-            throw std::bad_alloc();
-        }
     }
     
     ~ControllerBlock() {
@@ -186,33 +173,26 @@ struct ControllerBlock : public cler::BlockBase {
 
     cler::Result<cler::Empty, cler::Error> procedure(
         cler::ChannelBase<float>* force_out) {
-        // Use readN/writeN for simple processing (recommended pattern)
         size_t transferable = std::min({measured_position_in.size(), force_out->space(), _buffer_size});
         if (transferable == 0) return cler::Error::NotEnoughSamples;
-        
-        // Read input data
+
         measured_position_in.readN(_buffer, transferable);
-        
-        // Atomically read parameters once for the batch
+
+        // snapshot once per batch so all samples in it see consistent gains
         float target  = _target.load(std::memory_order_relaxed);
         float kp      = _kp.load(std::memory_order_relaxed);
         float ki      = _ki.load(std::memory_order_relaxed);
         float kd      = _kd.load(std::memory_order_relaxed);
         bool feed_forward_enabled = _feed_forward.load(std::memory_order_relaxed);
-        
-        // Process buffer
+
         for (size_t i = 0; i < transferable; ++i) {
             float measured_position = _buffer[i];
-
-            // Calculate error
             float ek = target - measured_position;
 
-            // PID control
-            float derivative = (ek - _ekm1) / DT; // Derivative term
-            float dk = 0.95f * _dkm1 + 0.05f * derivative; // Low-pass filter for derivative term
-            _int_state += ek * DT; // Integral term
+            float derivative = (ek - _ekm1) / DT;
+            float dk = 0.95f * _dkm1 + 0.05f * derivative; // low-pass filtered derivative term
+            _int_state += ek * DT;
 
-            //Feed forward control
             float feed_forward = 0.0f;
             if (feed_forward_enabled) {
                 feed_forward = K * target;
@@ -220,15 +200,14 @@ struct ControllerBlock : public cler::BlockBase {
 
             float force = kp * ek + ki * _int_state + kd * dk + feed_forward;
 
-            _ekm1 = ek; // Update previous error
-            _dkm1 = dk; // Update previous derivative
+            _ekm1 = ek;
+            _dkm1 = dk;
 
             _buffer[i] = force;
         }
-        
-        // Write output
+
         force_out->writeN(_buffer, transferable);
-        
+
         return cler::Empty{};
     }
 

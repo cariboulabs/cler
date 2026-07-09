@@ -17,7 +17,7 @@
  * For polylines (type 3), we extract coordinate sequences.
  */
 struct CoastlineData {
-    std::vector<std::vector<std::pair<float, float>>> polylines;  // List of polylines (each is lat/lon pairs)
+    std::vector<std::vector<std::pair<float, float>>> polylines;  // lat/lon pairs
 
     bool load_from_shapefile(const char* shp_path) {
         std::ifstream file(shp_path, std::ios::binary);
@@ -25,42 +25,37 @@ struct CoastlineData {
             return false;
         }
 
-        // Read file size
         file.seekg(0, std::ios::end);
         std::streamsize file_size = file.tellg();
         file.seekg(0, std::ios::beg);
 
-        // Read shapefile header (100 bytes)
         uint8_t header[100];
         file.read(reinterpret_cast<char*>(header), 100);
         if (file.gcount() != 100) {
             return false;
         }
 
-        // Parse records starting at byte 100
         size_t offset = 100;
 
         while (offset < static_cast<size_t>(file_size)) {
-            if (offset + 8 > static_cast<size_t>(file_size)) break;  // Not enough for record header
+            if (offset + 8 > static_cast<size_t>(file_size)) break;
 
             file.seekg(offset, std::ios::beg);
 
-            // Record header (8 bytes)
+            // record header fields are big-endian; shape data below is little-endian
             uint32_t record_num_be, record_len_be;
             file.read(reinterpret_cast<char*>(&record_num_be), 4);
             file.read(reinterpret_cast<char*>(&record_len_be), 4);
 
-            // Convert from big-endian (shapefile uses big-endian)
-            uint32_t record_len = swap_endian(record_len_be) * 2;  // Length in 16-bit words, convert to bytes
+            uint32_t record_len = swap_endian(record_len_be) * 2;  // length is in 16-bit words
 
             if (offset + 8 + record_len > static_cast<size_t>(file_size)) break;
 
-            // Read shape type (4 bytes, little-endian)
             uint32_t shape_type_le;
             file.read(reinterpret_cast<char*>(&shape_type_le), 4);
-            uint32_t shape_type = shape_type_le;  // Already little-endian in file for shape data
+            uint32_t shape_type = shape_type_le;
 
-            // Type 3 = PolyLine
+            // shape type 3 = PolyLine
             if (shape_type == 3) {
                 parse_polyline(file, record_len);
             }
@@ -73,7 +68,6 @@ struct CoastlineData {
     }
 
 private:
-    // Swap endianness (big-endian to little-endian)
     static uint32_t swap_endian(uint32_t val) {
         return ((val & 0x000000FFU) << 24) |
                ((val & 0x0000FF00U) << 8) |
@@ -101,31 +95,25 @@ private:
                ((val & 0xFF00000000000000ULL) >> 56);
     }
 
+    // called with the file positioned right after the shape type field
     void parse_polyline(std::ifstream& file, uint32_t record_len) {
-        // After shape type (4 bytes already read)
-
-        // Bounding box (32 bytes: xmin, ymin, xmax, ymax as doubles)
-        double xmin, ymin, xmax, ymax;
+        double xmin, ymin, xmax, ymax;  // bounding box, unused
         file.read(reinterpret_cast<char*>(&xmin), 8);
         file.read(reinterpret_cast<char*>(&ymin), 8);
         file.read(reinterpret_cast<char*>(&xmax), 8);
         file.read(reinterpret_cast<char*>(&ymax), 8);
 
-        // Number of parts and points
         uint32_t num_parts, num_points;
         file.read(reinterpret_cast<char*>(&num_parts), 4);
         file.read(reinterpret_cast<char*>(&num_points), 4);
 
         if (num_parts == 0 || num_points == 0) {
-            // Skip to next record
             return;
         }
 
-        // Read part indices (each part is a uint32)
         std::vector<uint32_t> part_indices(num_parts);
         file.read(reinterpret_cast<char*>(part_indices.data()), num_parts * 4);
 
-        // Read all points and organize by parts
         for (uint32_t part_idx = 0; part_idx < num_parts; ++part_idx) {
             uint32_t start_point = part_indices[part_idx];
             uint32_t end_point = (part_idx + 1 < num_parts) ? part_indices[part_idx + 1] : num_points;

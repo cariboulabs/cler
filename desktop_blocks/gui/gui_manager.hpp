@@ -3,7 +3,6 @@
 #include <GLFW/glfw3.h>
 #include <string>
 #include <string_view>
-#include <stdexcept>
 
 //included here so everyone that incldues this header can use ImGui and ImPlot
 #include "imgui.h"

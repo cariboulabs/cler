@@ -5,7 +5,15 @@
 
 #include "cler.hpp"
 
+#include <cstdio>
+#include <cstdlib>
+
 namespace cler {
+
+[[noreturn]] inline void panic(const char* msg) {
+    std::fprintf(stderr, "cler panic: %s\n", msg);
+    std::abort();
+}
 
 // Fast bit manipulation utility - finds largest power of 2 <= x
 // Useful for buffer sizing and alignment calculations
@@ -76,7 +84,6 @@ namespace flowgraph_config {
         config.num_workers = 4;  // Good default for most desktop systems
         return config;
     }
-    
     
     
     // Thread-per-block with adaptive sleep (for low-rate data scenarios)

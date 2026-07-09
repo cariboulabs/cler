@@ -1,4 +1,5 @@
 #include "plot_cspectrogram.hpp"
+#include "cler_utils.hpp"
 #include "implot.h"
 #include <cmath>
 #include <cstring>
@@ -28,22 +29,19 @@ PlotCSpectrogramBlock::PlotCSpectrogramBlock(const char*name,
       _tall(tall),
       _window_type(window_type)
 {
-    if (_num_inputs < 1) throw std::invalid_argument("At least one input required");
-    if (_n_fft_samples <= 2 || _n_fft_samples % 2 != 0) throw std::invalid_argument("FFT size must be even and > 2");
-    if (_tall < 1) throw std::invalid_argument("Tall must be > 0");
+    if (_num_inputs < 1) cler::panic("At least one input required");
+    if (_n_fft_samples <= 2 || _n_fft_samples % 2 != 0) cler::panic("FFT size must be even and > 2");
+    if (_tall < 1) cler::panic("Tall must be > 0");
 
     in = static_cast<cler::Channel<std::complex<float>>*>(
         ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
     );
-    
-    // Calculate buffer size with better DBF compatibility
+
     size_t min_buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>);
-    
-    // Use standard multiplier, but ensure we meet DBF requirements for small FFTs
-    size_t buffer_multiplier = BUFFER_SIZE_MULTIPLIER;  // Default is 3
+
+    // Below the DBF minimum, bump the multiplier so the buffer still clears it.
+    size_t buffer_multiplier = BUFFER_SIZE_MULTIPLIER;
     if (_n_fft_samples < min_buffer_size) {
-        // For small FFT sizes, increase multiplier to ensure adequate buffering
-        // This ensures smooth operation with high-throughput DBF sources
         buffer_multiplier = std::max(
             BUFFER_SIZE_MULTIPLIER,
             (2 * min_buffer_size + _n_fft_samples - 1) / _n_fft_samples

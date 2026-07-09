@@ -1,7 +1,7 @@
 #include "plot_timeseries.hpp"
+#include "cler_utils.hpp"
 #include "implot.h"
 #include <cstring>
-#include <stdexcept>
 
 PlotTimeSeriesBlock::PlotTimeSeriesBlock(const char* name,
     const std::vector<std::string> signal_labels,
@@ -13,21 +13,19 @@ PlotTimeSeriesBlock::PlotTimeSeriesBlock(const char* name,
       _sps(sps)
 {
     if (_num_inputs < 1) {
-        throw std::invalid_argument("PlotTimeSeriesBlock requires at least one input channel");
+        cler::panic("PlotTimeSeriesBlock requires at least one input channel");
     }
     if (duration_s <= 0) {
-        throw std::invalid_argument("Duration must be greater than zero.");
+        cler::panic("Duration must be greater than zero.");
     }
 
     _buffer_size = static_cast<size_t>(sps * duration_s);
-    
-    // Ensure buffer size meets minimum requirements for doubly-mapped buffers
+
     size_t min_buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float);
     if (_buffer_size < min_buffer_size) {
         _buffer_size = min_buffer_size;
     }
 
-    // Input channels
     in = static_cast<cler::Channel<float>*>(
         ::operator new[](_num_inputs * sizeof(cler::Channel<float>))
     );
@@ -35,7 +33,6 @@ PlotTimeSeriesBlock::PlotTimeSeriesBlock(const char* name,
         new (&in[i]) cler::Channel<float>(_buffer_size);
     }
 
-    // Output ring buffers for Y and X
     _y_channels = static_cast<cler::Channel<float>*>(
         ::operator new[](_num_inputs * sizeof(cler::Channel<float>))
     );
@@ -45,14 +42,12 @@ PlotTimeSeriesBlock::PlotTimeSeriesBlock(const char* name,
 
     _x_channel = new cler::Channel<float>(_buffer_size);
 
-    // Snapshots
     _snapshot_x_buffer = new float[_buffer_size];
     _snapshot_y_buffers = new float*[_num_inputs];
     for (size_t i = 0; i < _num_inputs; ++i) {
         _snapshot_y_buffers[i] = new float[_buffer_size];
     }
 
-    // Temp buffers
     _tmp_y_buffer = new float[_buffer_size];
     _tmp_x_buffer = new float[_buffer_size];
 }
@@ -91,44 +86,37 @@ cler::Result<cler::Empty, cler::Error> PlotTimeSeriesBlock::procedure() {
     size_t commit_read_size = (_x_channel->size() + work_size > _buffer_size)
         ? (_x_channel->size() + work_size - _buffer_size) : 0;
 
-    // Process each input channel
+    // Zero-copy when both sides expose a contiguous dbf span; otherwise fall
+    // back one side at a time down to a readN/writeN copy.
     for (size_t i = 0; i < _num_inputs; ++i) {
-        // Try zero-copy path first
         auto [read_ptr, read_size] = in[i].read_dbf();
         if (read_ptr && read_size >= work_size) {
-            // Try to write directly to internal buffer
             auto [write_ptr, write_size] = _y_channels[i].write_dbf();
             if (write_ptr && write_size >= work_size) {
-                // FAST PATH: Direct copy from input to internal buffer
                 _y_channels[i].commit_read(commit_read_size);
                 std::memcpy(write_ptr, read_ptr, work_size * sizeof(float));
                 _y_channels[i].commit_write(work_size);
                 in[i].commit_read(work_size);
             } else {
-                // Input has dbf but output doesn't
                 _y_channels[i].commit_read(commit_read_size);
                 _y_channels[i].writeN(read_ptr, work_size);
                 in[i].commit_read(work_size);
             }
         } else {
-            // Fall back to standard approach
             in[i].readN(_tmp_y_buffer, work_size);
             _y_channels[i].commit_read(commit_read_size);
             _y_channels[i].writeN(_tmp_y_buffer, work_size);
         }
     }
 
-    // Handle X channel (timestamps) - try dbf first
     _x_channel->commit_read(commit_read_size);
     auto [x_write_ptr, x_write_size] = _x_channel->write_dbf();
     if (x_write_ptr && x_write_size >= work_size) {
-        // Generate timestamps directly into buffer
         for (size_t i = 0; i < work_size; ++i) {
             x_write_ptr[i] = static_cast<float>(_samples_counter + i) / _sps;
         }
         _x_channel->commit_write(work_size);
     } else {
-        // Fall back to push
         for (size_t i = 0; i < work_size; ++i) {
             float t = static_cast<float>(_samples_counter + i) / _sps;
             _x_channel->push(t);
@@ -140,9 +128,9 @@ cler::Result<cler::Empty, cler::Error> PlotTimeSeriesBlock::procedure() {
 }
 
 void PlotTimeSeriesBlock::render() {
-    // Only update snapshot when not paused - data keeps flowing, just freeze the display
+    // Skip the snapshot while paused so the displayed data stays frozen even
+    // though procedure() keeps draining input underneath.
     if (!_gui_pause.load(std::memory_order_acquire) && _snapshot_mutex.try_lock()) {
-        // Try to update snapshot if no one is writing
         const float* ptr1; const float* ptr2;
         size_t size1, size2;
 

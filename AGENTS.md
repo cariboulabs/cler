@@ -68,7 +68,7 @@ Cler is a C++17 template-based DSP flowgraph framework for SDRs and embedded sys
 - **`cler_zephyr_tpolicy.hpp`** - Zephyr kernel thread implementation
 
 ### Desktop Blocks Library (`/desktop_blocks/`)
-**General-purpose blocks** - link with `cler::cler_desktop_blocks`:
+**General-purpose blocks** - link with `cler::desktop_blocks`:
 
 **Note**: Block names and organization may evolve as development continues.
 
@@ -148,7 +148,7 @@ cd build/desktop_examples
 target_link_libraries(app PRIVATE cler::cler)
 
 # Desktop development with GUI/plots/hardware support
-target_link_libraries(app PRIVATE cler::cler_desktop_blocks)
+target_link_libraries(app PRIVATE cler::desktop_blocks)
 ```
 
 ### CMake Structure Examples
@@ -159,7 +159,7 @@ target_link_libraries(simple_app PRIVATE cler::cler)
 
 # Desktop application with full blocks library
 add_executable(desktop_app main.cpp)  
-target_link_libraries(desktop_app PRIVATE cler::cler_desktop_blocks)
+target_link_libraries(desktop_app PRIVATE cler::desktop_blocks)
 
 # Custom block library
 add_library(my_blocks INTERFACE)
@@ -372,13 +372,13 @@ struct GainBlock : public cler::BlockBase {
 #### Buffer Access Patterns (Benchmarked Performance Order)
 
 **Performance Characteristics**:
+- **read_dbf/write_dbf**: True zero-copy - PREFERRED DEFAULT (needs heap channel >= 4KB)
+- **ReadN/WriteN**: Good baseline - use when an external API needs its own contiguous buffer
+- **Peek/Commit**: ~5% faster than readN/writeN but easy to misuse (forgotten commit, ignored second segment)
 - **Push/Pop**: Orders of magnitude slower (AVOID for high-throughput)
-- **ReadN/WriteN**: Good baseline performance - RECOMMENDED DEFAULT
-- **Peek/Commit**: ~5% faster than readN/writeN but complex to implement
-- **read_dbf/write_dbf**: Specialized technique - only faster for specific use cases
 
 ```cpp
-// TECHNIQUE 1: ReadN/WriteN (RECOMMENDED DEFAULT)
+// TECHNIQUE 1: ReadN/WriteN
 // Bulk transfer with single memory copy - simple and performant
 size_t transferable = std::min({in.size(), out->space(), BUFFER_SIZE});
 in.readN(buffer, transferable);
@@ -388,10 +388,9 @@ for (size_t i = 0; i < transferable; ++i) {
 }
 out->writeN(buffer, transferable);
 
-// TECHNIQUE 2: read_dbf/write_dbf (SPECIALIZED USE ONLY)
-// Doubly-mapped buffers: True zero-copy on supported platforms
-// Only use for: pure data movement, wraparound-heavy scenarios, or ultra-high throughput
-// NOTE: These methods throw exceptions if dbf is not available (buffer too small or stack-allocated)
+// TECHNIQUE 2: read_dbf/write_dbf (PREFERRED DEFAULT)
+// Doubly-mapped buffers: True zero-copy
+// NOTE: If dbf is unavailable (buffer too small or stack-allocated): assert in debug, {nullptr, 0} in release
 // Buffer must be >= 4KB (DOUBLY_MAPPED_MIN_SIZE) and heap-allocated
 auto [read_ptr, read_size] = in.read_dbf();
 auto [write_ptr, write_size] = out->write_dbf();
@@ -431,16 +430,10 @@ out->push(sample);
 ```
 
 **Performance Recommendations**:
-- **Use ReadN/WriteN as default** - Simple API, good performance, works everywhere
-- **Use DBF for**:
-  - **Hardware interfaces** - SDRs, ADCs, DACs, and other high-speed data acquisition
-  - Pure data movement without processing (50%+ speedup)
-  - Small buffers with frequent wraparound (20% speedup)
-  - Blocks with multiple inputs/outputs (simpler than managing multiple buffers)
-  - Real-time streaming where every microsecond counts
-- **Avoid DBF for simple DSP** - Only ~5% gain over ReadN/WriteN for single input/output blocks
+- **Use DBF as default** - zero-copy, mandatory for hardware interfaces (SDRs, ADCs, DACs), best for pure data movement and multi-IO blocks
+- **Use ReadN/WriteN when** an external API (liquid-dsp, decoders) needs its own contiguous buffer anyway
 - **Never use Push/Pop** - Orders of magnitude slower due to per-sample overhead
-- **Skip Peek/Commit** - Complex to implement correctly, only ~5% faster than ReadN/WriteN
+- **Skip Peek/Commit** - Easy to misuse (forgotten commit, ignored second segment), only ~5% faster than ReadN/WriteN
 
 **Hardware Interface Guidelines**:
 - **SDR Source Blocks**: Always use DBF - zero-copy is essential for maintaining sample rates
@@ -454,30 +447,27 @@ out->push(sample);
 - Choose based on your use case - hardware interfaces almost always benefit from DBF
 
 ### Channel Implementation Notes
-- **read_dbf()/write_dbf()**: Throw an exception when doubly-mapped buffers are not available
+- **read_dbf()/write_dbf()**: noexcept; when doubly-mapped buffers are unavailable they assert in debug and return `{nullptr, 0}` in release
 - **Requirements**: Buffers must be heap-allocated and page-aligned (minimum DOUBLY_MAPPED_MIN_SIZE = 4KB)
-- **No Fallbacks**: Blocks should catch exceptions if they want to handle DBF unavailability (desktop_blocks do not do that as they want to enforce having dbf)
+- **No Fallbacks**: desktop_blocks validate buffer size at construction (`cler::panic` if too small) to enforce dbf availability
 
 ### Recommended Block Pattern
 ```cpp
 cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-    // DEFAULT PATTERN: Use ReadN/WriteN for simplicity and good performance
-    size_t transferable = std::min({in.size(), out->space(), BUFFER_SIZE});
-    if (transferable == 0) return cler::Error::NotEnoughSamples;
-    
-    in.readN(_buffer, transferable);
-    
-    // Process data
-    for (size_t i = 0; i < transferable; ++i) {
-        _buffer[i] = _buffer[i] * _gain;
+    // DEFAULT PATTERN: DBF zero-copy
+    auto [rptr, rsize] = in.read_dbf();
+    auto [wptr, wsize] = out->write_dbf();
+    size_t n = std::min(rsize, wsize);
+    if (n == 0) return cler::Error::NotEnoughSamples;
+
+    for (size_t i = 0; i < n; ++i) {
+        wptr[i] = rptr[i] * _gain;
     }
-    
-    out->writeN(_buffer, transferable);
+
+    in.commit_read(n);
+    out->commit_write(n);
     return cler::Empty{};
 }
-
-// Only use DBF for specialized cases (pure copy, wraparound-heavy, etc.)
-// Most DSP blocks should stick with the simple ReadN/WriteN pattern above
 ```
 
 ### Error Handling Pattern
@@ -791,9 +781,9 @@ cd build/performance
 ```
 
 **Read/Write Technique Performance**:
-- **readN/writeN**: RECOMMENDED - Good performance, simple API
-- **read_dbf/write_dbf**: Specialized - Only faster for pure copy or wraparound scenarios
-- **peek/commit**: Complex - Only ~5% faster than readN/writeN, not worth it
+- **read_dbf/write_dbf**: PREFERRED - zero-copy
+- **readN/writeN**: Good - use when external API needs a contiguous scratch buffer
+- **peek/commit**: Easy to misuse - Only ~5% faster than readN/writeN, not worth it
 - **push/pop**: AVOID - orders of magnitude slower
 
 ### Common Performance Patterns
@@ -849,8 +839,13 @@ out->commit_write(to_process);
 - **Templates over virtual functions** for performance-critical paths
 - **Avoid `std::function`** - use function pointers or lambdas when needed
 - **Composition over inheritance** except for simple interfaces like `BlockBase`
-- **No try/catch for flow control** - use `cler::Result` for recoverable errors
 - **Heavy implementations in `.cpp`** when dealing with single data types
+
+### Style Rules (mandatory)
+- **No throw/try/catch in our code.** Recoverable runtime errors → `cler::Result`. Unrecoverable init/invariant failures → `cler::panic(msg)` (`cler_utils.hpp`; prints + aborts). try/catch only when an external library forces it.
+- **Minimal comments.** Prefer self-evident code. Keep a comment only for non-obvious constraints: hardware quirks, units, protocol/timing requirements, DSP math rationale.
+- **Prefer `read_dbf`/`write_dbf` over `readN`/`writeN`** in `procedure()` when the channel is heap-allocated and >= 4KB (always true for desktop_blocks defaults). Mandatory for hardware interfaces. `readN`/`writeN` acceptable when an external API needs a separate contiguous buffer anyway.
+- **Never push/pop in hot paths.**
 
 ### Framework Internals
 - **EmbeddableString**: Fixed-size strings without std::string dependency

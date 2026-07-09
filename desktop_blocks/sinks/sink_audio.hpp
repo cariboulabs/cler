@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
-#include <stdexcept>
+#include "cler_utils.hpp"
 #include <string>
 #include <cstring>
 #include <cstdio>
@@ -16,16 +16,14 @@
     #include <portaudio.h>
 #endif
 
-// Helper to convert Pa_GetErrorText to C++ exception
 inline void pa_check(PaError err) {
     if (err != paNoError) {
         std::string msg = "PortAudio error: ";
         msg += Pa_GetErrorText(err);
-        throw std::runtime_error(msg);
+        cler::panic(msg.c_str());
     }
 }
 
-// Audio sink for PortAudio float32 output
 struct SinkAudioBlock : public cler::BlockBase {
     cler::Channel<float> in;
 
@@ -40,28 +38,23 @@ struct SinkAudioBlock : public cler::BlockBase {
           _stream(nullptr)
     {
         if (sample_rate <= 0.0 || sample_rate > 1e6) {
-            throw std::invalid_argument("Invalid sample rate: must be > 0 and <= 1MHz");
+            cler::panic("Invalid sample rate: must be > 0 and <= 1MHz");
         }
 
-        // Validate buffer size for DBF
         if (buffer_size > 0 && buffer_size * sizeof(float) < cler::DOUBLY_MAPPED_MIN_SIZE) {
-            throw std::invalid_argument("Buffer size too small for doubly-mapped buffers. Need at least " +
-                std::to_string(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) + " elements");
+            cler::panic("Buffer size too small for doubly-mapped buffers");
         }
 
-        // Initialize PortAudio (safe to call multiple times)
         PaError err = Pa_Initialize();
         pa_check(err);
 
-        // Validate device index if specified
         if (device_index != paNoDevice) {
             int num_devices = Pa_GetDeviceCount();
             if (num_devices < 0 || device_index >= num_devices) {
-                throw std::invalid_argument("Invalid device index: " + std::to_string(device_index));
+                cler::panic("Invalid device index");
             }
         }
 
-        // Open the audio stream
         _open_stream();
     }
 
@@ -74,16 +67,12 @@ struct SinkAudioBlock : public cler::BlockBase {
             return cler::Error::TERM_IOError;
         }
 
-        // Use zero-copy doubly-mapped buffer path
         auto [read_ptr, read_size] = in.read_dbf();
 
         if (read_size > 0) {
-            // Write directly to PortAudio stream
             PaError err = Pa_WriteStream(_stream, read_ptr, read_size);
 
-            // Handle errors
             if (err == paOutputUnderflowed) {
-                // Underflow is expected during startup/low data scenarios
                 in.commit_read(read_size);
                 return cler::Empty{};
             } else if (err != paNoError) {
@@ -96,16 +85,15 @@ struct SinkAudioBlock : public cler::BlockBase {
         return cler::Empty{};
     }
 
-    // Static method to list available audio devices
     static void print_devices() {
         PaError err = Pa_Initialize();
         if (err != paNoError) {
-            throw std::runtime_error("PortAudio init failed");
+            cler::panic("PortAudio init failed");
         }
 
         int num_devices = Pa_GetDeviceCount();
         if (num_devices < 0) {
-            throw std::runtime_error("Pa_GetDeviceCount() failed");
+            cler::panic("Pa_GetDeviceCount() failed");
         }
 
         printf("PortAudio Output Devices:\n");
@@ -132,23 +120,23 @@ private:
 
         output_params.device = (_device_index == paNoDevice) ? Pa_GetDefaultOutputDevice() : _device_index;
         if (output_params.device < 0) {
-            throw std::runtime_error("No default output device found");
+            cler::panic("No default output device found");
         }
 
-        output_params.channelCount = 1;  // Mono
+        output_params.channelCount = 1;
         output_params.sampleFormat = paFloat32;
         output_params.suggestedLatency = Pa_GetDeviceInfo(output_params.device)->defaultHighOutputLatency;
         output_params.hostApiSpecificStreamInfo = nullptr;
 
         PaError err = Pa_OpenStream(
             &_stream,
-            nullptr,                              // no input
+            nullptr,
             &output_params,
             _sample_rate,
-            paFramesPerBufferUnspecified,         // Let PortAudio choose
-            paClipOff,                            // Don't auto-clip
-            nullptr,                              // no callback
-            nullptr                               // no user data
+            paFramesPerBufferUnspecified,
+            paClipOff,
+            nullptr,
+            nullptr
         );
         pa_check(err);
 
