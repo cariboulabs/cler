@@ -169,10 +169,16 @@ struct SinkUHDBlock : public cler::BlockBase {
             md.end_of_burst = false;
             md.has_time_spec = false;               
 
-            size_t sent = _tx_stream->send(_read_ptrs[i],
-                            _read_sizes[i],
-                            md,
-                            0.1);  // 100ms timeout
+            size_t sent = 0;
+            try {
+                sent = _tx_stream->send(_read_ptrs[i],
+                                _read_sizes[i],
+                                md,
+                                0.1);  // 100ms timeout
+            } catch (const std::exception& e) {
+                std::cerr << "SinkUHDBlock: send failed: " << e.what() << std::endl;
+                return cler::Error::TERM_ProcedureError;
+            }
             in[i].commit_read(sent);
         }
 

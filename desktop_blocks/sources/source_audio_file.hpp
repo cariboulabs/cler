@@ -87,7 +87,7 @@ struct SourceAudioFileBlock : public cler::BlockBase {
                 } else {
                     _eof_reached = true;
                     if (_callback) {
-                        _callback(_filename);
+                        _callback(_filename.c_str());
                     }
                     break;
                 }
@@ -143,7 +143,7 @@ struct SourceAudioFileBlock : public cler::BlockBase {
     }
 
 private:
-    const char* _filename;
+    std::string _filename;
     uint32_t _output_sample_rate;
     bool _repeat;
     on_eof _callback;
@@ -156,7 +156,7 @@ private:
     bool _eof_reached;
 
     void _open_audio_file() {
-        int ret = avformat_open_input(&_format_ctx, _filename, nullptr, nullptr);
+        int ret = avformat_open_input(&_format_ctx, _filename.c_str(), nullptr, nullptr);
         ffmpeg_check(ret, "Failed to open audio file");
 
         ret = avformat_find_stream_info(_format_ctx, nullptr);

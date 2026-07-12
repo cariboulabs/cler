@@ -210,29 +210,49 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
     }
     
     void set_frequency(double freq) {
-        device->setFrequency(SOAPY_SDR_TX, channel_idx, freq);
-        center_freq = freq;
-    }
-    
-    void set_gain(double gain) {
-        device->setGain(SOAPY_SDR_TX, channel_idx, gain);
-        gain_db = gain;
-    }
-    
-    void set_sample_rate(double rate) {
-        device->setSampleRate(SOAPY_SDR_TX, channel_idx, rate);
-        sample_rate = rate;
-        if (device->getBandwidthRange(SOAPY_SDR_TX, channel_idx).size() > 0) {
-            device->setBandwidth(SOAPY_SDR_TX, channel_idx, rate);
+        try {
+            device->setFrequency(SOAPY_SDR_TX, channel_idx, freq);
+            center_freq = freq;
+        } catch (const std::exception& e) {
+            std::cerr << "SinkSoapySDRBlock: set_frequency failed: " << e.what() << std::endl;
         }
     }
-    
-    void set_bandwidth(double bw) {
-        device->setBandwidth(SOAPY_SDR_TX, channel_idx, bw);
+
+    void set_gain(double gain) {
+        try {
+            device->setGain(SOAPY_SDR_TX, channel_idx, gain);
+            gain_db = gain;
+        } catch (const std::exception& e) {
+            std::cerr << "SinkSoapySDRBlock: set_gain failed: " << e.what() << std::endl;
+        }
     }
-    
+
+    void set_sample_rate(double rate) {
+        try {
+            device->setSampleRate(SOAPY_SDR_TX, channel_idx, rate);
+            sample_rate = rate;
+            if (device->getBandwidthRange(SOAPY_SDR_TX, channel_idx).size() > 0) {
+                device->setBandwidth(SOAPY_SDR_TX, channel_idx, rate);
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "SinkSoapySDRBlock: set_sample_rate failed: " << e.what() << std::endl;
+        }
+    }
+
+    void set_bandwidth(double bw) {
+        try {
+            device->setBandwidth(SOAPY_SDR_TX, channel_idx, bw);
+        } catch (const std::exception& e) {
+            std::cerr << "SinkSoapySDRBlock: set_bandwidth failed: " << e.what() << std::endl;
+        }
+    }
+
     void set_antenna(const std::string& antenna) {
-        device->setAntenna(SOAPY_SDR_TX, channel_idx, antenna);
+        try {
+            device->setAntenna(SOAPY_SDR_TX, channel_idx, antenna);
+        } catch (const std::exception& e) {
+            std::cerr << "SinkSoapySDRBlock: set_antenna failed: " << e.what() << std::endl;
+        }
     }
     
     void set_dc_offset(const std::complex<double>& offset) {

@@ -123,9 +123,14 @@ private:
             cler::panic("No default output device found");
         }
 
+        const PaDeviceInfo* device_info = Pa_GetDeviceInfo(output_params.device);
+        if (!device_info) {
+            cler::panic("Pa_GetDeviceInfo() failed for output device");
+        }
+
         output_params.channelCount = 1;
         output_params.sampleFormat = paFloat32;
-        output_params.suggestedLatency = Pa_GetDeviceInfo(output_params.device)->defaultHighOutputLatency;
+        output_params.suggestedLatency = device_info->defaultHighOutputLatency;
         output_params.hostApiSpecificStreamInfo = nullptr;
 
         PaError err = Pa_OpenStream(
