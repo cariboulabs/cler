@@ -136,6 +136,28 @@ struct SourceHackRFBlock : public cler::BlockBase {
         }
     }
 
+    // Live sample-rate change. hackrf_set_sample_rate reconfigures the sample
+    // clock, which is not safe while the RX callback is delivering buffers at
+    // the old rate, so we stop RX, apply the new rate, then restart streaming.
+    // A few in-flight samples straddling the switch may be garbled once (same
+    // caveat as the UHD path). The baseband filter is left at libhackrf's
+    // default (as in the constructor), not re-derived here.
+    void set_sample_rate(uint32_t samp_rate_hz) {
+        if (!_dev || samp_rate_hz == 0 || samp_rate_hz == _samp_rate_hz) {
+            return;
+        }
+        hackrf_stop_rx(_dev);
+        if (hackrf_set_sample_rate(_dev, samp_rate_hz) == HACKRF_SUCCESS) {
+            _samp_rate_hz = samp_rate_hz;
+        } else {
+            std::cerr << "SourceHackRFBlock: Failed to set sample rate" << std::endl;
+        }
+        if (hackrf_start_rx(_dev, rx_callback, this) != HACKRF_SUCCESS) {
+            std::cerr << "SourceHackRFBlock: Failed to restart RX after rate change"
+                      << std::endl;
+        }
+    }
+
     void set_lna_gain(int gain_db) {
         if (_dev && hackrf_set_lna_gain(_dev, gain_db) == HACKRF_SUCCESS) {
             _lna_gain_db = gain_db;

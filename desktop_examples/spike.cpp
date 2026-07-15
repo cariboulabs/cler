@@ -86,14 +86,23 @@ private:
 
 // HackRF: libhackrf's control transfers are separate from the RX callback, so
 // the setters are safe to call directly from the GUI thread while streaming.
-// Sample rate is fixed at construction (the block exposes no rate setter), so
-// request_configure() only touches frequency and the LNA/VGA/amp gain stages.
+// Frequency and the LNA/VGA/amp gain stages apply in place; a sample-rate
+// change stops/reconfigures/restarts the stream (see set_sample_rate), so it is
+// only issued when the rate actually differs from the running one.
 struct HackRFSourceAdapter : public ISource {
-    explicit HackRFSourceAdapter(SourceHackRFBlock* src) : _src(src) {}
+    explicit HackRFSourceAdapter(SourceHackRFBlock* src)
+        : _src(src), _cur_rate(src->get_sample_rate()) {}
     double actual_sample_rate() const override {
         return static_cast<double>(_src->get_sample_rate());
     }
     void request_configure(const SourceConfig& cfg) override {
+        // Only touch the rate on a real change: it forces a stream restart,
+        // and push_radio_config() re-sends the current rate on every retune.
+        uint32_t new_rate = static_cast<uint32_t>(cfg.sample_rate_Hz + 0.5);
+        if (new_rate != 0 && new_rate != _cur_rate) {
+            _src->set_sample_rate(new_rate);
+            _cur_rate = _src->get_sample_rate();
+        }
         _src->set_frequency(static_cast<uint64_t>(cfg.center_freq_Hz + 0.5));
         // Snap to the hardware's legal steps before applying.
         int lna = std::min(std::max(cfg.lna_gain_db, 0), 40);
@@ -108,6 +117,7 @@ struct HackRFSourceAdapter : public ISource {
     SourceKind kind() const override { return SourceKind::HackRF; }
 private:
     SourceHackRFBlock* _src;
+    uint32_t _cur_rate;
 };
 
 static void help(const char* text) {
@@ -131,6 +141,7 @@ struct SpikeArgs {
     int    vga  = 16;              // HackRF VGA gain (0-62, step 2)
     bool   amp  = false;           // HackRF RX amp
     size_t fft  = 2048;
+    double history_s = 0.0;         // waterfall ring depth (s) at min frames/row; 0 = default
     bool   rate_from_cli = false;   // -r given explicitly: overrides saved rate_hz
     std::string device_address;
 };
@@ -141,12 +152,15 @@ static void print_usage(const char* prog) {
               << "  -s, --source DEV  Device source: uhd|hackrf (default uhd)\n"
               << "  -f, --freq FREQ   Center frequency Hz (default 915e6)\n"
               << "  -r, --rate RATE   Initial sample rate S/s (default 1e6; live-tunable\n"
-              << "                    in the GUI on UHD only; if given, overrides saved rate)\n"
+              << "                    in the GUI; if given, overrides the saved rate)\n"
               << "  -g, --gain GAIN   [uhd]    Gain dB (default 30)\n"
               << "      --lna  DB     [hackrf] LNA gain dB, 0-40 step 8 (default 40)\n"
               << "      --vga  DB     [hackrf] VGA gain dB, 0-62 step 2 (default 16)\n"
               << "      --amp  0|1    [hackrf] RX amp on/off (default 0)\n"
               << "  -F, --fft  SIZE   FFT size for spectrum view (default 2048)\n"
+              << "  -H, --history SEC Minimum waterfall time-depth in seconds (sizes the\n"
+              << "                    spectrogram ring; default ~4.1s at 1MS/s. Lower this\n"
+              << "                    to reach a shorter history, e.g. --history 1)\n"
               << "  -d, --dev  ADDR   [uhd] USRP device address (default auto)\n"
               << "  -h, --help\n" << std::endl;
 }
@@ -173,6 +187,7 @@ static SpikeArgs parse_args(int argc, char** argv) {
         else if (arg == "--vga") a.vga = std::stoi(next());
         else if (arg == "--amp") a.amp = (std::stoi(next()) != 0);
         else if (arg == "-F" || arg == "--fft")  a.fft  = std::stoul(next());
+        else if (arg == "-H" || arg == "--history") a.history_s = std::stod(next());
         else if (arg == "-d" || arg == "--dev" || arg == "--device") a.device_address = next();
         else { std::cerr << "Unknown option: " << arg << "\n"; print_usage(argv[0]); exit(1); }
     }
@@ -191,6 +206,8 @@ struct ControlPanel {
           _chan(chan),
           _kind(src->kind()),
           _freq_ui_max_mhz(src->kind() == SourceKind::HackRF ? 7250.0f : 6000.0f),
+          _rate_ui_min_msps(src->kind() == SourceKind::HackRF ? 2.0f : 0.1f),
+          _rate_ui_max_msps(src->kind() == SourceKind::HackRF ? 20.0f : 61.44f),
           _freq_mhz(static_cast<float>(a.freq / 1e6)),
           _freq_anchor_mhz(_freq_mhz),
           _gain_db(static_cast<float>(a.gain)),
@@ -340,23 +357,18 @@ struct ControlPanel {
         ImGui::Separator();
 
         // Rate is only REQUESTED here; the poll above re-syncs this widget once
-        // it lands. HackRF has no live rate change, so the widget is read-only.
-        const bool rate_live = (_kind == SourceKind::UHD);
-        ImGui::BeginDisabled(!rate_live);
+        // it lands. Both sources support live rate change (HackRF via a brief
+        // stream stop/restart); the range differs per device.
         ImGui::SetNextItemWidth(180);
-        editable("Rate (MS/s)", &_rate_msps, 0.1f, 61.44f, "%.3f",
-                 /*slider=*/false, /*drag_speed=*/0.01f);
-        if (rate_live && ImGui::IsItemDeactivatedAfterEdit())
+        editable("Rate (MS/s)", &_rate_msps, _rate_ui_min_msps, _rate_ui_max_msps,
+                 "%.3f", /*slider=*/false, /*drag_speed=*/0.01f);
+        if (ImGui::IsItemDeactivatedAfterEdit())
             push_rate_config(static_cast<double>(_rate_msps) * 1e6);
-        ImGui::EndDisabled();
-        if (rate_live)
-            help("Sample rate = displayed span, applied live. The hardware may "
-                 "snap the request to what its clocking supports; the shown value "
-                 "follows the ACTUAL device rate. Note: a capture straddling the "
-                 "switch may be garbled once, and the waterfall restarts.");
-        else
-            help("Sample rate = displayed span. Fixed at startup on HackRF "
-                 "(no live rate change); set it with --rate on the command line.");
+        help("Sample rate = displayed span, applied live. The hardware may "
+             "snap the request to what its clocking supports; the shown value "
+             "follows the ACTUAL device rate. On HackRF the RX stream is briefly "
+             "stopped and restarted. A capture straddling the switch may be "
+             "garbled once, and the waterfall restarts.");
 
         // Apply only on edit-end (avoid spamming retunes); anchor recenters on commit only, else mid-drag moves the mapping under the cursor.
         const float freq_lo = std::max(0.0f,            _freq_anchor_mhz - 25.0f);
@@ -578,8 +590,7 @@ struct ControlPanel {
         _sgram->set_grid_time_ms(_grid_time_ms);
         _sgram->set_grid_freq_mhz(_grid_freq_mhz);
         // Saved rate staged LAST via the live path so on_rate_changed() fires once it lands; explicit CLI -r wins over it.
-        // HackRF has no live rate change, so its rate is whatever was constructed.
-        if (_kind == SourceKind::UHD && !_rate_from_cli && _loaded_rate_hz > 0.0 &&
+        if (!_rate_from_cli && _loaded_rate_hz > 0.0 &&
             std::abs(_loaded_rate_hz - _rate_hz) > 0.5) {
             push_rate_config(_loaded_rate_hz);
             // Seed above used the CONSTRUCTION rate; mark stale so on_rate_changed() redoes it.
@@ -844,6 +855,8 @@ private:
 
     SourceKind _kind;               // selects gain UI + rate-live behavior
     float  _freq_ui_max_mhz;        // freq slider/typed upper bound (6000 UHD, 7250 HackRF)
+    float  _rate_ui_min_msps;       // rate widget lower bound (0.1 UHD, 2 HackRF)
+    float  _rate_ui_max_msps;       // rate widget upper bound (61.44 UHD, 20 HackRF)
     float  _freq_mhz;
     float  _freq_anchor_mhz;        // center of the +/-25MHz slider window; moved only on commit (render())
     float  _gain_db;                // UHD single-knob gain
@@ -1072,7 +1085,20 @@ static int run_app(SourceBlock& source, ISource& src_if, SpikeArgs& args,
     PlotCSpectrumBlock spectrum("Spectrum", {"I/Q"}, static_cast<size_t>(args.rate), args.fft);
 
     // Drains its whole input each call so it never stalls the shared fanout (min-space commit); paused via set_active() while hidden.
-    const size_t waterfall_rows = 2000;
+    //
+    // The ring holds `waterfall_rows` rows; each row spans at minimum one FFT
+    // frame = n_fft/rate seconds (frames/row = 1). So the SHORTEST visible
+    // history is waterfall_rows * n_fft / rate. The default 2000 rows gives
+    // ~4.1 s at 1 MS/s / 2048-pt; --history sizes the ring to reach a shorter
+    // floor (rows = history * rate / n_fft), clamped to a usable range. The
+    // in-window History slider still scales UP from this floor (frames/row).
+    size_t waterfall_rows = 2000;
+    if (args.history_s > 0.0) {
+        double rows = std::round(args.history_s * args.rate
+                                 / static_cast<double>(args.fft));
+        rows = std::min(std::max(rows, 16.0), 20000.0);
+        waterfall_rows = static_cast<size_t>(rows);
+    }
     PlotCSpectrogramBlock spectrogram("Spectrogram", {"I/Q"},
         static_cast<size_t>(args.rate), args.fft, waterfall_rows);
 
@@ -1223,8 +1249,9 @@ int main(int argc, char** argv) {
     SpikeArgs args = parse_args(argc, argv);
 
     if (args.source == SourceKind::HackRF) {
-        // HackRF takes integer freq/rate; no live rate change, so the
-        // constructed rate is the actual rate for everything downstream.
+        // HackRF takes integer freq/rate. It reports the constructed rate back
+        // (get_sample_rate) as the actual rate; live changes go through the
+        // adapter's set_sample_rate path.
         SourceHackRFBlock source("HackRF",
             static_cast<uint64_t>(args.freq + 0.5),
             static_cast<uint32_t>(args.rate + 0.5),
