@@ -110,11 +110,17 @@ endif()
 if (UHD_FOUND AND CLER_BUILD_BLOCKS_GUI AND CLER_BUILD_BLOCKS_LIQUID)
     add_executable(uhd_device uhd_device.cpp)
     target_link_libraries(uhd_device PRIVATE cler::desktop_blocks uhd)
+else()
+    message(STATUS "Skipping uhd_device - requires UHD and GUI blocks")
+endif()
 
+# spike supports both UHD and HackRF sources selectable at runtime, so it needs
+# both libraries present to compile (libhackrf comes via cler::desktop_blocks).
+if (UHD_FOUND AND HACKRF_FOUND AND CLER_BUILD_BLOCKS_GUI AND CLER_BUILD_BLOCKS_LIQUID)
     add_executable(spike spike.cpp)
     target_link_libraries(spike PRIVATE cler::desktop_blocks uhd)
 else()
-    message(STATUS "Skipping usrp_example/spike - requires UHD and GUI blocks")
+    message(STATUS "Skipping spike - requires UHD, HackRF, and GUI/LIQUID blocks")
 endif()
 
 if (CLER_BUILD_BLOCKS_GUI AND SOAPYSDR_FOUND)

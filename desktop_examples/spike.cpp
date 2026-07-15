@@ -4,6 +4,7 @@
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/sources/source_uhd.hpp"
+#include "desktop_blocks/sources/source_hackrf.hpp"
 #include "desktop_blocks/utils/fanout.hpp"
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
 #include "desktop_blocks/plots/plot_cspectrogram.hpp"
@@ -28,6 +29,87 @@
 using Trig = TriggerBlock<float>;
 using PowerDet = PowerDetectorBlock<std::complex<float>>;
 
+// ---------------------------------------------------------------------------
+// Source abstraction
+//
+// spike was hardwired to SourceUHDBlock. To also drive a HackRF (whose gain
+// model is LNA/VGA/amp rather than a single dB knob, and which has no live
+// sample-rate change) without duplicating the whole GUI, the app talks to the
+// device only through this narrow interface. Two adapters implement it:
+//   - UHDSourceAdapter  : forwards to SourceUHDBlock's staged request_configure()
+//   - HackRFSourceAdapter: calls SourceHackRFBlock's direct setters
+// The concrete block is still built in main() and handed to the flowgraph; the
+// adapter is a thin, non-owning view used by ControlPanel/main.
+// ---------------------------------------------------------------------------
+enum class SourceKind { UHD, HackRF };
+
+// Superset config carrying both gain models; each adapter uses only the fields
+// its device understands (UHD: gain_db, rate/bw; HackRF: lna/vga/amp, freq).
+struct SourceConfig {
+    double center_freq_Hz = 915e6;
+    double sample_rate_Hz = 1e6;
+    double bandwidth_Hz   = 1e6;
+    double gain_db        = 30.0;   // UHD single-knob gain
+    int    lna_gain_db    = 40;     // HackRF LNA (0-40, step 8)
+    int    vga_gain_db    = 16;     // HackRF VGA (0-62, step 2)
+    bool   amp_enable     = false;  // HackRF RX amp (~+14 dB)
+};
+
+struct ISource {
+    virtual ~ISource() = default;
+    // Actual running sample rate (device may snap the request). HackRF has no
+    // live rate change, so this just echoes the constructed rate.
+    virtual double actual_sample_rate() const = 0;
+    // Stage/apply a configuration. Callable from the GUI thread.
+    virtual void   request_configure(const SourceConfig& cfg) = 0;
+    virtual size_t get_overflow_count() const = 0;
+    virtual SourceKind kind() const = 0;
+};
+
+// UHD: everything is staged through the block's own thread-safe request path.
+struct UHDSourceAdapter : public ISource {
+    explicit UHDSourceAdapter(SourceUHDBlock<std::complex<float>>* src) : _src(src) {}
+    double actual_sample_rate() const override { return _src->actual_sample_rate(); }
+    void   request_configure(const SourceConfig& cfg) override {
+        UHDConfig u;
+        u.center_freq_Hz = cfg.center_freq_Hz;
+        u.sample_rate_Hz = cfg.sample_rate_Hz;
+        u.gain           = cfg.gain_db;
+        u.bandwidth_Hz   = cfg.bandwidth_Hz;
+        _src->request_configure(u);
+    }
+    size_t get_overflow_count() const override { return _src->get_overflow_count(); }
+    SourceKind kind() const override { return SourceKind::UHD; }
+private:
+    SourceUHDBlock<std::complex<float>>* _src;
+};
+
+// HackRF: libhackrf's control transfers are separate from the RX callback, so
+// the setters are safe to call directly from the GUI thread while streaming.
+// Sample rate is fixed at construction (the block exposes no rate setter), so
+// request_configure() only touches frequency and the LNA/VGA/amp gain stages.
+struct HackRFSourceAdapter : public ISource {
+    explicit HackRFSourceAdapter(SourceHackRFBlock* src) : _src(src) {}
+    double actual_sample_rate() const override {
+        return static_cast<double>(_src->get_sample_rate());
+    }
+    void request_configure(const SourceConfig& cfg) override {
+        _src->set_frequency(static_cast<uint64_t>(cfg.center_freq_Hz + 0.5));
+        // Snap to the hardware's legal steps before applying.
+        int lna = std::min(std::max(cfg.lna_gain_db, 0), 40);
+        lna = (lna / 8) * 8;
+        int vga = std::min(std::max(cfg.vga_gain_db, 0), 62);
+        vga = (vga / 2) * 2;
+        _src->set_lna_gain(lna);
+        _src->set_vga_gain(vga);
+        _src->set_amp_enable(cfg.amp_enable);
+    }
+    size_t get_overflow_count() const override { return _src->get_overflow_count(); }
+    SourceKind kind() const override { return SourceKind::HackRF; }
+private:
+    SourceHackRFBlock* _src;
+};
+
 static void help(const char* text) {
     ImGui::SameLine();
     ImGui::TextDisabled("(?)");
@@ -41,23 +123,31 @@ static void help(const char* text) {
 }
 
 struct SpikeArgs {
+    SourceKind source = SourceKind::UHD;   // --source uhd|hackrf (default uhd)
     double freq = 915e6;
     double rate = 1e6;
-    double gain = 30.0;
+    double gain = 30.0;             // UHD single-knob gain (dB)
+    int    lna  = 40;              // HackRF LNA gain (0-40, step 8)
+    int    vga  = 16;              // HackRF VGA gain (0-62, step 2)
+    bool   amp  = false;           // HackRF RX amp
     size_t fft  = 2048;
     bool   rate_from_cli = false;   // -r given explicitly: overrides saved rate_hz
     std::string device_address;
 };
 
 static void print_usage(const char* prog) {
-    std::cout << "\nSlim Spike-like analyzer for USRP\n"
+    std::cout << "\nSlim Spike-like analyzer for USRP / HackRF\n"
               << "Usage: " << prog << " [OPTIONS]\n"
+              << "  -s, --source DEV  Device source: uhd|hackrf (default uhd)\n"
               << "  -f, --freq FREQ   Center frequency Hz (default 915e6)\n"
               << "  -r, --rate RATE   Initial sample rate S/s (default 1e6; live-tunable\n"
-              << "                    in the GUI; if given, overrides the saved rate)\n"
-              << "  -g, --gain GAIN   Gain dB (default 30)\n"
+              << "                    in the GUI on UHD only; if given, overrides saved rate)\n"
+              << "  -g, --gain GAIN   [uhd]    Gain dB (default 30)\n"
+              << "      --lna  DB     [hackrf] LNA gain dB, 0-40 step 8 (default 40)\n"
+              << "      --vga  DB     [hackrf] VGA gain dB, 0-62 step 2 (default 16)\n"
+              << "      --amp  0|1    [hackrf] RX amp on/off (default 0)\n"
               << "  -F, --fft  SIZE   FFT size for spectrum view (default 2048)\n"
-              << "  -d, --dev  ADDR   USRP device address (default auto)\n"
+              << "  -d, --dev  ADDR   [uhd] USRP device address (default auto)\n"
               << "  -h, --help\n" << std::endl;
 }
 
@@ -70,9 +160,18 @@ static SpikeArgs parse_args(int argc, char** argv) {
             return argv[++i];
         };
         if (arg == "-h" || arg == "--help") { print_usage(argv[0]); exit(0); }
+        else if (arg == "-s" || arg == "--source") {
+            std::string v = next();
+            if (v == "uhd" || v == "usrp") a.source = SourceKind::UHD;
+            else if (v == "hackrf")        a.source = SourceKind::HackRF;
+            else { std::cerr << "Unknown source: " << v << " (want uhd|hackrf)\n"; exit(1); }
+        }
         else if (arg == "-f" || arg == "--freq") a.freq = std::stod(next());
         else if (arg == "-r" || arg == "--rate") { a.rate = std::stod(next()); a.rate_from_cli = true; }
         else if (arg == "-g" || arg == "--gain") a.gain = std::stod(next());
+        else if (arg == "--lna") a.lna = std::stoi(next());
+        else if (arg == "--vga") a.vga = std::stoi(next());
+        else if (arg == "--amp") a.amp = (std::stoi(next()) != 0);
         else if (arg == "-F" || arg == "--fft")  a.fft  = std::stoul(next());
         else if (arg == "-d" || arg == "--dev" || arg == "--device") a.device_address = next();
         else { std::cerr << "Unknown option: " << arg << "\n"; print_usage(argv[0]); exit(1); }
@@ -82,7 +181,7 @@ static SpikeArgs parse_args(int argc, char** argv) {
 
 // Render-only: writes staged source config and mutex-guarded trigger config; owns neither.
 struct ControlPanel {
-    ControlPanel(SourceUHDBlock<std::complex<float>>* src, Trig* trig,
+    ControlPanel(ISource* src, Trig* trig,
                  PlotCSpectrumBlock* spectrum,
                  PlotCSpectrogramBlock* sgram,
                  PowerDetectorBlock<std::complex<float>>* power,
@@ -90,9 +189,14 @@ struct ControlPanel {
                  size_t sgram_rows, const SpikeArgs& a)
         : _src(src), _trig(trig), _spectrum(spectrum), _sgram(sgram), _power(power),
           _chan(chan),
+          _kind(src->kind()),
+          _freq_ui_max_mhz(src->kind() == SourceKind::HackRF ? 7250.0f : 6000.0f),
           _freq_mhz(static_cast<float>(a.freq / 1e6)),
           _freq_anchor_mhz(_freq_mhz),
           _gain_db(static_cast<float>(a.gain)),
+          _lna_db(a.lna),
+          _vga_db(a.vga),
+          _amp_enable(a.amp),
           _rate_hz(a.rate),
           _rate_msps(static_cast<float>(a.rate / 1e6)),
           _rate_from_cli(a.rate_from_cli),
@@ -235,31 +339,56 @@ struct ControlPanel {
         ImGui::TextUnformatted("Radio");
         ImGui::Separator();
 
-        // Rate is only REQUESTED here; the poll above re-syncs this widget once it lands.
+        // Rate is only REQUESTED here; the poll above re-syncs this widget once
+        // it lands. HackRF has no live rate change, so the widget is read-only.
+        const bool rate_live = (_kind == SourceKind::UHD);
+        ImGui::BeginDisabled(!rate_live);
         ImGui::SetNextItemWidth(180);
         editable("Rate (MS/s)", &_rate_msps, 0.1f, 61.44f, "%.3f",
                  /*slider=*/false, /*drag_speed=*/0.01f);
-        if (ImGui::IsItemDeactivatedAfterEdit())
+        if (rate_live && ImGui::IsItemDeactivatedAfterEdit())
             push_rate_config(static_cast<double>(_rate_msps) * 1e6);
-        help("Sample rate = displayed span, applied live. The hardware may "
-             "snap the request to what its clocking supports; the shown value "
-             "follows the ACTUAL device rate. Note: a capture straddling the "
-             "switch may be garbled once, and the waterfall restarts.");
+        ImGui::EndDisabled();
+        if (rate_live)
+            help("Sample rate = displayed span, applied live. The hardware may "
+                 "snap the request to what its clocking supports; the shown value "
+                 "follows the ACTUAL device rate. Note: a capture straddling the "
+                 "switch may be garbled once, and the waterfall restarts.");
+        else
+            help("Sample rate = displayed span. Fixed at startup on HackRF "
+                 "(no live rate change); set it with --rate on the command line.");
 
         // Apply only on edit-end (avoid spamming retunes); anchor recenters on commit only, else mid-drag moves the mapping under the cursor.
-        const float freq_lo = std::max(0.0f,    _freq_anchor_mhz - 25.0f);
-        const float freq_hi = std::min(6000.0f, _freq_anchor_mhz + 25.0f);
+        const float freq_lo = std::max(0.0f,            _freq_anchor_mhz - 25.0f);
+        const float freq_hi = std::min(_freq_ui_max_mhz, _freq_anchor_mhz + 25.0f);
         ImGui::SetNextItemWidth(180);
         editable("Center (MHz)", &_freq_mhz, freq_lo, freq_hi, "%.3f",
-                 /*slider=*/true, 0.1f, /*tmin=*/0.0f, /*tmax=*/6000.0f);
+                 /*slider=*/true, 0.1f, /*tmin=*/0.0f, /*tmax=*/_freq_ui_max_mhz);
         bool freq_done = ImGui::IsItemDeactivatedAfterEdit();
         if (freq_done) {
             _freq_anchor_mhz = _freq_mhz;   // recenter for next time
             _chan->set_center_freq(static_cast<double>(_freq_mhz) * 1e6);
         }
-        ImGui::SetNextItemWidth(180);
-        editable("Gain (dB)", &_gain_db, 0.0f, 76.0f, "%.1f", /*slider=*/true);
-        bool gain_done = ImGui::IsItemDeactivatedAfterEdit();
+
+        // Gain: UHD is a single dB knob; HackRF splits into LNA/VGA/amp stages.
+        bool gain_done = false;
+        if (_kind == SourceKind::UHD) {
+            ImGui::SetNextItemWidth(180);
+            editable("Gain (dB)", &_gain_db, 0.0f, 76.0f, "%.1f", /*slider=*/true);
+            gain_done = ImGui::IsItemDeactivatedAfterEdit();
+        } else {
+            ImGui::SetNextItemWidth(180);
+            ImGui::SliderInt("LNA (dB)", &_lna_db, 0, 40, "%d");
+            gain_done |= ImGui::IsItemDeactivatedAfterEdit();
+            help("HackRF front-end LNA gain. Applied in 8 dB steps (0-40).");
+            ImGui::SetNextItemWidth(180);
+            ImGui::SliderInt("VGA (dB)", &_vga_db, 0, 62, "%d");
+            gain_done |= ImGui::IsItemDeactivatedAfterEdit();
+            help("HackRF baseband VGA gain. Applied in 2 dB steps (0-62).");
+            if (ImGui::Checkbox("RX amp (+14 dB)", &_amp_enable)) gain_done = true;
+            help("HackRF external RX amplifier: adds ~14 dB but can overload on "
+                 "strong signals.");
+        }
         if (freq_done || gain_done) push_radio_config();
 
         ImGui::Dummy(ImVec2(0, 8));
@@ -449,7 +578,8 @@ struct ControlPanel {
         _sgram->set_grid_time_ms(_grid_time_ms);
         _sgram->set_grid_freq_mhz(_grid_freq_mhz);
         // Saved rate staged LAST via the live path so on_rate_changed() fires once it lands; explicit CLI -r wins over it.
-        if (!_rate_from_cli && _loaded_rate_hz > 0.0 &&
+        // HackRF has no live rate change, so its rate is whatever was constructed.
+        if (_kind == SourceKind::UHD && !_rate_from_cli && _loaded_rate_hz > 0.0 &&
             std::abs(_loaded_rate_hz - _rate_hz) > 0.5) {
             push_rate_config(_loaded_rate_hz);
             // Seed above used the CONSTRUCTION rate; mark stale so on_rate_changed() redoes it.
@@ -477,6 +607,9 @@ struct ControlPanel {
         while (f >> key) {
             if      (key == "freq_mhz")       f >> _freq_mhz;
             else if (key == "gain_db")        f >> _gain_db;
+            else if (key == "lna_gain_db")    f >> _lna_db;
+            else if (key == "vga_gain_db")    f >> _vga_db;
+            else if (key == "amp_enable")     f >> _amp_enable;
             else if (key == "threshold_db")   f >> _threshold_db;
             else if (key == "hysteresis_db")  f >> _hysteresis_db;
             else if (key == "window_ms")      f >> _window_ms;
@@ -523,6 +656,9 @@ struct ControlPanel {
         if (!f) return;
         f << "freq_mhz "       << _freq_mhz       << "\n"
           << "gain_db "        << _gain_db        << "\n"
+          << "lna_gain_db "    << _lna_db         << "\n"
+          << "vga_gain_db "    << _vga_db         << "\n"
+          << "amp_enable "     << _amp_enable     << "\n"
           << "threshold_db "   << _threshold_db   << "\n"
           << "hysteresis_db "  << _hysteresis_db  << "\n"
           << "window_ms "      << _window_ms      << "\n"
@@ -566,23 +702,28 @@ private:
         return "?";
     }
 
-    void push_radio_config() {
-        UHDConfig cfg;
-        cfg.center_freq_Hz = static_cast<double>(_freq_mhz) * 1e6;
-        cfg.sample_rate_Hz = _rate_hz;   // current rate: the source skips this no-op
-        cfg.gain           = static_cast<double>(_gain_db);
-        cfg.bandwidth_Hz   = _rate_hz;
-        _src->request_configure(cfg);
-    }
-
-    // Stages a new rate onto the source's streaming thread; render()'s poll picks up the actual result.
-    void push_rate_config(double rate_hz) {
-        UHDConfig cfg;
+    // Fill a SourceConfig from the current UI state (both gain models); the
+    // adapter uses only the fields its device understands.
+    SourceConfig make_config(double rate_hz) const {
+        SourceConfig cfg;
         cfg.center_freq_Hz = static_cast<double>(_freq_mhz) * 1e6;
         cfg.sample_rate_Hz = rate_hz;
-        cfg.gain           = static_cast<double>(_gain_db);
         cfg.bandwidth_Hz   = rate_hz;
-        _src->request_configure(cfg);
+        cfg.gain_db        = static_cast<double>(_gain_db);
+        cfg.lna_gain_db    = _lna_db;
+        cfg.vga_gain_db    = _vga_db;
+        cfg.amp_enable     = _amp_enable;
+        return cfg;
+    }
+
+    void push_radio_config() {
+        // current rate: UHD skips this no-op, HackRF ignores rate entirely
+        _src->request_configure(make_config(_rate_hz));
+    }
+
+    // Stages a new rate onto the source's streaming thread; render()'s poll picks up the actual result. (UHD only)
+    void push_rate_config(double rate_hz) {
+        _src->request_configure(make_config(rate_hz));
     }
 
     // Single choke point when the ACTUAL device rate changes; re-derives all rate-dependent state.
@@ -694,16 +835,21 @@ private:
                           detection_rate());
     }
 
-    SourceUHDBlock<std::complex<float>>* _src;
+    ISource* _src;
     Trig* _trig;
     PlotCSpectrumBlock* _spectrum;
     PlotCSpectrogramBlock* _sgram;
     PowerDetectorBlock<std::complex<float>>* _power;
     ChannelizerPanelBlock* _chan;
 
+    SourceKind _kind;               // selects gain UI + rate-live behavior
+    float  _freq_ui_max_mhz;        // freq slider/typed upper bound (6000 UHD, 7250 HackRF)
     float  _freq_mhz;
     float  _freq_anchor_mhz;        // center of the +/-25MHz slider window; moved only on commit (render())
-    float  _gain_db;
+    float  _gain_db;                // UHD single-knob gain
+    int    _lna_db;                 // HackRF LNA (0-40, step 8)
+    int    _vga_db;                 // HackRF VGA (0-62, step 2)
+    bool   _amp_enable;             // HackRF RX amp
     double _rate_hz;                // the ACTUAL device rate last synced to
     float  _rate_msps;              // rate widget value (MS/s), follows _rate_hz
     double _loaded_rate_hz = 0.0;   // conf key rate_hz (0 = not present)
@@ -894,16 +1040,15 @@ static bool write_snapshot_dat(const std::string& path,
     return true;
 }
 
-int main(int argc, char** argv) {
-    SpikeArgs args = parse_args(argc, argv);
-
-    SourceUHDBlock<std::complex<float>> usrp("USRP", args.freq, args.rate,
-        args.device_address, args.gain, 1, "sc16", /*quiet=*/true);
-
-    // Hardware may snap the requested rate; everything rate-derived below must use the ACTUAL rate.
-    args.rate = usrp.actual_sample_rate();
-
-    cler::GuiManager gui(1500, 900, "CLER Spike - USRP");
+// Builds the flowgraph around an already-constructed source block and runs the
+// GUI until the window closes. Templated on the concrete source block type so
+// one body serves both UHD and HackRF; all device access goes through the
+// ISource adapter, except the flowgraph runner, which needs the concrete block.
+// args.rate must already hold the ACTUAL device rate before this is called.
+template<typename SourceBlock>
+static int run_app(SourceBlock& source, ISource& src_if, SpikeArgs& args,
+                   const char* window_title) {
+    cler::GuiManager gui(1500, 900, window_title);
 
     // Persist window layout to a stable location (independent of working dir).
     ImGuiIO& io = ImGui::GetIO();
@@ -938,14 +1083,14 @@ int main(int argc, char** argv) {
     spectrogram.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);
     channelizer.set_initial_window(380.0f, 455.0f, 1100.0f, 430.0f);
 
-    ControlPanel panel(&usrp, &trigger, &spectrum, &spectrogram, &power,
+    ControlPanel panel(&src_if, &trigger, &spectrum, &spectrogram, &power,
                        &channelizer, waterfall_rows, args);
     const std::string settings_file = config_path(".cler_spike.conf");
     panel.load(settings_file);   // restore last session's settings if present
 
     // Trigger is a sink: renders its own capture (oscilloscope-style), no downstream channel.
     auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&usrp,    &fanout.in),
+        cler::BlockRunner(&source,  &fanout.in),
         cler::BlockRunner(&fanout,  &power.in, &spectrum.in[0], &spectrogram.in[0],
                                     &channelizer.in),
         cler::BlockRunner(&power,   &trigger.in),
@@ -1070,6 +1215,29 @@ int main(int argc, char** argv) {
 
     flowgraph.stop();
     panel.save(settings_file);   // remember settings for next session
-    std::cout << "Overflows: " << usrp.get_overflow_count() << std::endl;
+    std::cout << "Overflows: " << src_if.get_overflow_count() << std::endl;
     return 0;
+}
+
+int main(int argc, char** argv) {
+    SpikeArgs args = parse_args(argc, argv);
+
+    if (args.source == SourceKind::HackRF) {
+        // HackRF takes integer freq/rate; no live rate change, so the
+        // constructed rate is the actual rate for everything downstream.
+        SourceHackRFBlock source("HackRF",
+            static_cast<uint64_t>(args.freq + 0.5),
+            static_cast<uint32_t>(args.rate + 0.5),
+            args.lna, args.vga, args.amp);
+        args.rate = static_cast<double>(source.get_sample_rate());
+        HackRFSourceAdapter adapter(&source);
+        return run_app(source, adapter, args, "CLER Spike - HackRF");
+    }
+
+    SourceUHDBlock<std::complex<float>> source("USRP", args.freq, args.rate,
+        args.device_address, args.gain, 1, "sc16", /*quiet=*/true);
+    // Hardware may snap the requested rate; everything rate-derived uses the ACTUAL rate.
+    args.rate = source.actual_sample_rate();
+    UHDSourceAdapter adapter(&source);
+    return run_app(source, adapter, args, "CLER Spike - USRP");
 }
