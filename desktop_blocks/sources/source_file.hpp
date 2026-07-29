@@ -49,7 +49,7 @@ struct SourceFileBlock : public cler::BlockBase {
                 return cler::Empty{}; // Don't return an error, just let the flowgraph/loop call this again
             } else {
                 if (_callback) {
-                    _callback(_filename);
+                    _callback(_filename.c_str());
                 }
                 if (_file.is_open()) {_file.close();}
                 return cler::Empty{};
@@ -61,7 +61,7 @@ struct SourceFileBlock : public cler::BlockBase {
     }
 
 private:
-    const char* _filename;
+    std::string _filename;
     bool _repeat;
     on_eof _callback;
     std::ifstream _file;

@@ -9,7 +9,7 @@ struct SinkFileBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
     SinkFileBlock(const char* name, const char* filename, size_t buffer_size = 0)
-        : cler::BlockBase(name), in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size), _filename(filename) {
+        : cler::BlockBase(name), in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size) {
 
         if (buffer_size > 0 && buffer_size * sizeof(T) < cler::DOUBLY_MAPPED_MIN_SIZE) {
             cler::panic("Buffer size too small for doubly-mapped buffers");
@@ -18,7 +18,7 @@ struct SinkFileBlock : public cler::BlockBase {
             cler::panic("Filename must not be empty");
         }
 
-        _fp = std::fopen(_filename, "wb");
+        _fp = std::fopen(filename, "wb");
         if (!_fp) {
             cler::panic("Failed to open file for writing");
         }
@@ -56,6 +56,5 @@ struct SinkFileBlock : public cler::BlockBase {
     }
 
 private:
-    const char* _filename;
     FILE* _fp = nullptr;
 };

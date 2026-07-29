@@ -160,7 +160,9 @@ struct SourceUHDBlock : public cler::BlockBase {
     template<typename... OChannels>
     cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
         constexpr size_t num_outs = sizeof...(OChannels);
-        assert(num_outs == _num_channels && "Number of output channels defined in block constructor must match the number of channels");
+        if (num_outs != _num_channels) {
+            cler::panic("SourceUHDBlock: number of procedure() output channels must match num_channels from constructor");
+        }
 
         if (_pending_cfg_gen.load(std::memory_order_acquire) != _applied_cfg_gen) {
             UHDConfig cfg;
@@ -189,7 +191,14 @@ struct SourceUHDBlock : public cler::BlockBase {
                     result_error = cler::Error::NotEnoughSpace;
                     return;
                 }
-                size_t num_rx = rx_stream->recv(write_ptr, write_size, md, 0.1);
+                size_t num_rx = 0;
+                try {
+                    num_rx = rx_stream->recv(write_ptr, write_size, md, 0.1);
+                } catch (const std::exception& e) {
+                    std::cerr << "SourceUHDBlock: recv failed: " << e.what() << std::endl;
+                    result_error = cler::Error::TERM_ProcedureError;
+                    return;
+                }
                 if (num_rx == 0) {
                     return;
                 }
