@@ -20,29 +20,31 @@ struct is_valid_task_policy<T, std::void_t<
 template<typename T>
 constexpr bool is_valid_task_policy_v = is_valid_task_policy<T>::value;
 
+struct BackoffState {
+    size_t step = 0;
+};
+
 template<typename Derived>
 struct TaskPolicyBase {
-    // Static assertions to ensure derived class implements required interface
-    // These will be checked when the derived class is instantiated
-    
-    // Default implementations for optional optimizations
-    // Derived classes can override these for platform-specific behavior
-    
-    // Efficient pause that reduces CPU contention
-    // Default: just calls yield() followed by a tiny sleep
     static inline void relax() {
         Derived::yield();
         Derived::sleep_us(1);
     }
-    
-    // Pin worker thread to specific CPU core
-    // Default: no-op (no pinning)
-    static inline void pin_to_core(size_t worker_id) {
-        (void)worker_id;  // Suppress unused parameter warning
+
+    static inline void pin_to_core(size_t) {}
+
+    static inline void configure_thread_for_low_latency_sleep() {}
+
+    static inline void backoff(BackoffState& state) {
+        Derived::relax();
+        ++state.step;
     }
-    
+
+    static inline void backoff_reset(BackoffState& state) {
+        state.step = 0;
+    }
+
 protected:
-    // Prevent instantiation of base class
     TaskPolicyBase() = default;
     ~TaskPolicyBase() = default;
     

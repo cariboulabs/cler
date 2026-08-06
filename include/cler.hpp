@@ -4,6 +4,7 @@
 #include "cler_result.hpp"
 #include "cler_embeddable_string.hpp"
 #include "cler_platform.hpp"
+#include "task_policies/cler_task_policy_base.hpp"
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
 #include <complex> //again, a lot of cler blocks use complex numbers
@@ -293,48 +294,33 @@ namespace cler {
         const std::array<BlockExecutionStats, _N>& stats() const { return _stats; }
 
     private:
-        // Block-centric adaptive sleep logic (works with all schedulers)
         void handle_adaptive_sleep(size_t block_idx, bool procedure_succeeded) {
             if (!_config.adaptive_sleep) return;
-            
+
             auto& stats = _stats[block_idx];
-            
+
             if (procedure_succeeded) {
-                // Exponential decay instead of hard reset for better bursty workload handling
                 stats.consecutive_fails.store(0);
                 double current_sleep = stats.current_adaptive_sleep_us.load();
-                stats.current_adaptive_sleep_us.store(current_sleep * 0.5);  // Gradual decay
+                stats.current_adaptive_sleep_us.store(current_sleep * 0.5);
             } else {
-                // Increment failure count
                 size_t fails = stats.consecutive_fails.fetch_add(1) + 1;
-                
-                // Check if we should sleep
+
                 if (fails > _config.adaptive_sleep_fail_threshold) {
                     double current_sleep = stats.current_adaptive_sleep_us.load();
-                    
+                    double new_sleep;
+
                     if (current_sleep == 0.0) {
-                        // Start sleeping with 1 microsecond
                         static constexpr double INITIAL_SLEEP_US = 1.0;
-                        stats.current_adaptive_sleep_us.store(INITIAL_SLEEP_US);
-                        TaskPolicy::sleep_us(static_cast<size_t>(INITIAL_SLEEP_US));
+                        new_sleep = INITIAL_SLEEP_US;
                     } else {
-                        // Exponential backoff with deterministic jitter to prevent thundering herd
                         double base_sleep = current_sleep * _config.adaptive_sleep_multiplier;
-                        
-                        // Deterministic jitter based on block index (10% variation)
                         static constexpr double JITTER_FACTOR = 0.1;
                         double block_jitter = 1.0 + JITTER_FACTOR * (double(block_idx % 10) / 10.0 - 0.5);
-                        
-                        double new_sleep = std::min(
-                            base_sleep * block_jitter,
-                            _config.adaptive_sleep_max_us
-                        );
-                        stats.current_adaptive_sleep_us.store(new_sleep);
-                        TaskPolicy::sleep_us(static_cast<size_t>(new_sleep));
+                        new_sleep = std::min(base_sleep * block_jitter, _config.adaptive_sleep_max_us);
                     }
-                } else {
-                    // Not enough failures yet, use relax instead of pure yield
-                    TaskPolicy::relax();
+
+                    stats.current_adaptive_sleep_us.store(new_sleep);
                 }
             }
         }
@@ -353,11 +339,12 @@ namespace cler {
             auto& runner = std::get<I>(_runners);
             auto& stats = _stats[I];
 
+            TaskPolicy::configure_thread_for_low_latency_sleep();
+
             if (config.collect_detailed_stats) {
                 stats.name = runner.block->name();
             }
 
-            // Only declare timing variables if needed
             std::chrono::high_resolution_clock::time_point t_start, t_last;
             size_t successful = 0, failed = 0;
             double total_dead_time_s = 0.0;
@@ -366,11 +353,13 @@ namespace cler {
                 t_start = t_last = std::chrono::high_resolution_clock::now();
             }
 
-            while (!_stop_flag) {
+            BackoffState backoff_state{};
+
+            while (!_stop_flag.load(std::memory_order_relaxed)) {
                 bool did_work_in_batch = false;
-                
-                // Micro-batching: run block multiple times per tick
-                for (size_t c = 0; c < config.max_calls_per_tick && !_stop_flag; ++c) {
+                bool batch_failed = false;
+
+                for (size_t c = 0; c < config.max_calls_per_tick && !_stop_flag.load(std::memory_order_relaxed); ++c) {
                     std::chrono::duration<double> dt{};
                     if (config.collect_detailed_stats) {
                         auto t_now = std::chrono::high_resolution_clock::now();
@@ -401,23 +390,28 @@ namespace cler {
                                 total_dead_time_s += dt.count();
                             }
                             handle_adaptive_sleep(I, false);
-                            break;  // Exit micro-batch loop
-                        } else {
-                            TaskPolicy::relax();
-                            break;  // Exit micro-batch loop on soft error
                         }
+                        batch_failed = true;
+                        break;
 
                     } else {
                         if (config.collect_detailed_stats) {
                             successful++;
                         }
                         did_work_in_batch = true;
-                        // Keep looping up to max_calls_per_tick
                     }
                 }
-                
+
                 if (did_work_in_batch) {
                     handle_adaptive_sleep(I, true);
+                    TaskPolicy::backoff_reset(backoff_state);
+                } else if (batch_failed) {
+                    double pending_us = stats.current_adaptive_sleep_us.load();
+                    if (pending_us > 0.0) {
+                        TaskPolicy::sleep_us(static_cast<size_t>(pending_us));
+                    } else {
+                        TaskPolicy::backoff(backoff_state);
+                    }
                 }
             }
 
@@ -552,16 +546,13 @@ namespace cler {
             }
             
             bool get_next_block(size_t worker_id, size_t& block_idx_out) {
-                // Super fast path - no atomics!
-                if (queues[worker_id].get_block(block_idx_out)) {
-                    return true;
-                }
-                
-                // Reset and go again (continuous round-robin)
-                queues[worker_id].reset();
                 return queues[worker_id].get_block(block_idx_out);
             }
-            
+
+            void reset_pass(size_t worker_id) {
+                queues[worker_id].reset();
+            }
+
             bool is_block_owner(size_t worker_id, size_t block_idx) const {
                 return block_idx < num_blocks && block_owner[block_idx] == worker_id;
             }
@@ -574,33 +565,26 @@ namespace cler {
         void run_fixed_thread_pool(const FlowGraphConfig& config) {
             _stop_flag.store(false, std::memory_order_release);
 
-            // Validate worker count - must be at least 2 for fixed thread pool scheduling
-            size_t num_workers = config.num_workers;
-            assert(num_workers >= 2 && "FixedThreadPoolScheduler requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
-            
-            // Initialize stats for all blocks
+            assert(config.num_workers >= 2 && "FixedThreadPoolScheduler requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
+            const size_t max_worker_count = (std::min)(DEFAULT_MAX_WORKERS, _N);
+            const size_t effective_worker_count = (std::max)(size_t{1}, (std::min)(config.num_workers, max_worker_count));
+
             initialize_block_stats();
-            
-            // If more workers than blocks, use thread-per-block scheduling
-            if (num_workers >= _N) {
-                // More workers than blocks - use thread-per-block (current behavior)
+
+            if (effective_worker_count >= _N) {
                 run_thread_per_block(config);
             } else {
-                // Fewer workers than blocks - use fixed thread pool scheduler
-                // Initialize with contiguous block grouping (keeps producer->consumer chains together)
-                fixed_thread_pool_scheduler.initialize(_N, num_workers);
-                
-                // Record start time for all blocks (only if detailed stats enabled)
+                fixed_thread_pool_scheduler.initialize(_N, effective_worker_count);
+
                 if (config.collect_detailed_stats) {
                     auto start_time = std::chrono::high_resolution_clock::now();
                     for (size_t i = 0; i < _N; ++i) {
                         _block_start_times[i] = start_time;
                     }
                 }
-                
-                // Create worker tasks using fixed thread pool scheduler
+
                 _active_task_count = 0;
-                for (size_t worker_id = 0; worker_id < num_workers && worker_id < _N; ++worker_id) {
+                for (size_t worker_id = 0; worker_id < effective_worker_count; ++worker_id) {
                     _tasks[worker_id] = TaskPolicy::create_task([this, worker_id, config]() {
                         run_fixed_thread_pool_worker(worker_id, config);
                     });
@@ -611,46 +595,48 @@ namespace cler {
         
     public:  // Making run_fixed_thread_pool_worker public for lambda access (see comment above)
         void run_fixed_thread_pool_worker(size_t worker_id, const FlowGraphConfig& config) {
-            // Optional: pin worker to specific CPU core
+            TaskPolicy::configure_thread_for_low_latency_sleep();
             if (config.pin_workers) {
                 TaskPolicy::pin_to_core(worker_id);
             }
-            
-            while (!_stop_flag) {
-                bool did_work = false;
+
+            BackoffState backoff_state{};
+
+            while (!_stop_flag.load(std::memory_order_relaxed)) {
+                fixed_thread_pool_scheduler.reset_pass(worker_id);
+                bool did_work_in_pass = false;
                 size_t block_idx;
 
-                // Get next block from fixed thread pool scheduler (super fast - no atomics!)
                 while (fixed_thread_pool_scheduler.get_next_block(worker_id, block_idx)) {
-                    if (_stop_flag) break;
-                    
-                    // Track timing for dead time calculation (only if detailed stats enabled)
+                    if (_stop_flag.load(std::memory_order_relaxed)) break;
+
                     auto t_before = get_time_if_needed(config.collect_detailed_stats);
-                    
+
                     bool block_did_work = execute_block_at_index(block_idx, config);
-                    
-                    // Update dead time if block failed to process
+
                     if (!block_did_work && config.collect_detailed_stats) {
                         auto t_after = std::chrono::high_resolution_clock::now();
                         std::chrono::duration<double> dt = t_after - t_before;
                         _stats[block_idx].total_dead_time_s += dt.count();
                     }
-                    
-                    did_work = did_work || block_did_work;
+
+                    did_work_in_pass = did_work_in_pass || block_did_work;
                 }
-                
-                if (!did_work) {
-                    // No work available, use relax instead of pure yield
-                    TaskPolicy::relax();
+
+                if (did_work_in_pass) {
+                    TaskPolicy::backoff_reset(backoff_state);
+                } else {
+                    double pending_us = min_pending_backoff_us_for_worker(worker_id);
+                    if (pending_us > 0.0) {
+                        TaskPolicy::sleep_us(static_cast<size_t>(pending_us));
+                    } else {
+                        TaskPolicy::backoff(backoff_state);
+                    }
                 }
             }
-            
-            // Finalize stats when worker exits (only if detailed stats enabled)
+
             if (config.collect_detailed_stats) {
                 auto end_time = std::chrono::high_resolution_clock::now();
-                // IMPORTANT: In this scheduler each block is executed only by its owning worker.
-                // Stats writes are safe because there's no work-stealing or migration.
-                // If work-stealing is added later, _stats writes must be made thread-safe or owner-only.
                 for (size_t i = 0; i < _N; ++i) {
                     if (fixed_thread_pool_scheduler.is_block_owner(worker_id, i)) {
                         std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
@@ -662,28 +648,39 @@ namespace cler {
         }
         
     private:  // Return to private section for internal implementation details
+        double min_pending_backoff_us_for_worker(size_t worker_id) const {
+            double min_us = 0.0;
+            for (size_t i = 0; i < _N; ++i) {
+                if (!fixed_thread_pool_scheduler.is_block_owner(worker_id, i)) continue;
+                double pending = _stats[i].current_adaptive_sleep_us.load();
+                if (pending <= 0.0) continue;
+                if (min_us <= 0.0 || pending < min_us) {
+                    min_us = pending;
+                }
+            }
+            return min_us;
+        }
+
         template<size_t I>
         bool execute_block_at_index_helper(const FlowGraphConfig& config) {
             static_assert(I < _N, "Block index out of bounds");
-            
+
             auto& runner = std::get<I>(_runners);
             auto& stats = _stats[I];
-            
+
             bool did_work = false;
-            
-            // Micro-batching: run block multiple times if it's making progress
-            for (size_t c = 0; c < config.max_calls_per_tick && !_stop_flag; ++c) {
-                // Execute procedure and handle errors
+
+            for (size_t c = 0; c < config.max_calls_per_tick; ++c) {
                 auto result = std::apply([&](auto*... outs) {
                     return runner.block->procedure(outs...);
                 }, runner.outputs);
-                
+
                 if (result.is_err()) {
                     if (config.collect_detailed_stats) {
                         stats.failed_procedures++;
                     }
                     auto err = result.unwrap_err();
-                    
+
                     if (is_fatal(err)) {
                         _stop_flag.store(true, std::memory_order_release);
                         if (_on_err_terminate_cb) {
@@ -691,35 +688,28 @@ namespace cler {
                         }
                         break;
                     }
-                    
-                    // No progress - leave the burst early to let others run
+
                     if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace ||
                         err == Error::NotEnoughSpaceOrSamples) {
                         handle_adaptive_sleep(I, false);
-                        break;  // Exit micro-batch loop
-                    } else {
-                        // Soft error, brief relax and stop bursting
-                        TaskPolicy::relax();
-                        break;
                     }
+                    break;
                 } else {
                     if (config.collect_detailed_stats) {
                         stats.successful_procedures++;
                     }
                     did_work = true;
-                    // Keep looping up to max_calls_per_tick
                 }
             }
-            
+
             if (did_work) {
                 handle_adaptive_sleep(I, true);
             }
-            
+
             return did_work;
         }
-        
+
         bool execute_block_at_index(size_t index, const FlowGraphConfig& config) {
-            // Runtime dispatch to compile-time template using C++17 compatible approach
             return execute_block_dispatch_impl(std::make_index_sequence<_N>{}, index, config);
         }
         

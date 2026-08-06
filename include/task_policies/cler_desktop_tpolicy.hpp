@@ -4,6 +4,10 @@
 #include "cler_task_policy_base.hpp"
 #include <thread>
 #include <chrono>
+#include <algorithm>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 namespace cler {
 
@@ -27,16 +31,41 @@ struct DesktopTaskPolicy : TaskPolicyBase<DesktopTaskPolicy> {
         std::this_thread::sleep_for(std::chrono::microseconds(us));
     }
     
-    // Efficient pause that reduces CPU contention
-    // Uses platform-specific spin hints, then backs off with a tiny sleep
     static inline void relax() {
-        platform::spin_wait(64);  // Spin briefly with CPU-specific hints
-        sleep_us(1);              // Then back off to reduce contention
+        platform::spin_wait(64);
     }
-    
-    // Pin worker thread to specific CPU core for better cache locality
+
+    static constexpr size_t backoff_spin_steps = 8;
+    static constexpr size_t backoff_yield_steps = 16;
+    static constexpr size_t backoff_initial_sleep_us = 1;
+    static constexpr size_t backoff_max_sleep_us = 1000;
+    static constexpr size_t backoff_max_shift = 10;
+
+    static inline void backoff(BackoffState& state) {
+        if (state.step < backoff_spin_steps) {
+            platform::spin_wait(64);
+        } else if (state.step < backoff_yield_steps) {
+            std::this_thread::yield();
+        } else {
+            size_t shift = (std::min)(state.step - backoff_yield_steps, backoff_max_shift);
+            size_t sleep_us_value = (std::min)(backoff_initial_sleep_us << shift, backoff_max_sleep_us);
+            sleep_us(sleep_us_value);
+        }
+        ++state.step;
+    }
+
+    static inline void backoff_reset(BackoffState& state) {
+        state.step = 0;
+    }
+
     static inline void pin_to_core(size_t worker_id) {
         platform::set_thread_affinity(worker_id);
+    }
+
+    static inline void configure_thread_for_low_latency_sleep() {
+#ifdef __linux__
+        prctl(PR_SET_TIMERSLACK, 1);
+#endif
     }
 };
 
