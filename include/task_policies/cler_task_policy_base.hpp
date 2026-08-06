@@ -1,6 +1,9 @@
 #pragma once
 
 #include <type_traits>
+#include <atomic>
+#include <cstdint>
+#include <cstddef>
 
 namespace cler {
 
@@ -31,9 +34,18 @@ struct TaskPolicyBase {
         Derived::sleep_us(1);
     }
 
-    static inline void pin_to_core(size_t) {}
+    static inline bool pin_to_core(size_t) { return true; }
 
     static inline void configure_thread_for_low_latency_sleep() {}
+
+    static constexpr size_t park_fallback_sleep_us = 1000;
+
+    static inline void park(const std::atomic<uint32_t>& sleep_epoch, uint32_t expected) {
+        if (sleep_epoch.load(std::memory_order_acquire) != expected) return;
+        Derived::sleep_us(park_fallback_sleep_us);
+    }
+
+    static inline void unpark(std::atomic<uint32_t>&) {}
 
     static inline void backoff(BackoffState& state) {
         Derived::relax();

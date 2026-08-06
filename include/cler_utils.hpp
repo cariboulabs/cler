@@ -77,7 +77,14 @@ namespace flowgraph_config {
         return config;
     }
     
-    
+
+    inline FlowGraphConfig pinned_islands(size_t num_workers = 2) {
+        FlowGraphConfig config;
+        config.scheduler = SchedulerType::PinnedIslands;
+        config.num_workers = num_workers;
+        return config;
+    }
+
     // Thread-per-block with adaptive sleep (for low-rate data scenarios)
     inline FlowGraphConfig thread_per_block_adaptive_sleep() {
         FlowGraphConfig config;

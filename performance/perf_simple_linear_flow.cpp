@@ -283,7 +283,13 @@ int main() {
     fixed_pool_sleep_config.adaptive_sleep_max_us = 5000.0;
     fixed_pool_sleep_config.adaptive_sleep_fail_threshold = 10;
     results.push_back(run_enhanced_test("FixedThreadPool (with adaptive sleep)", fixed_pool_sleep_config, test_duration));
-    
+
+    auto pinned_islands_2 = cler::flowgraph_config::pinned_islands(2);
+    results.push_back(run_enhanced_test("PinnedIslands (2 workers)", pinned_islands_2, test_duration));
+
+    auto pinned_islands_4 = cler::flowgraph_config::pinned_islands(4);
+    results.push_back(run_enhanced_test("PinnedIslands (4 workers)", pinned_islands_4, test_duration));
+
 
     // Print results
     std::cout << "========================================" << std::endl;

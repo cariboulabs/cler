@@ -35,3 +35,15 @@ target_link_libraries(may_block_test
 )
 
 add_test(NAME may_block_test COMMAND may_block_test)
+
+add_executable(pinned_islands_test
+    test_pinned_islands.cpp
+)
+
+target_link_libraries(pinned_islands_test
+    gtest_main
+    cler::cler
+    Threads::Threads
+)
+
+add_test(NAME pinned_islands_test COMMAND pinned_islands_test)

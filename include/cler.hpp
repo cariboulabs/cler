@@ -228,8 +228,9 @@ namespace cler {
     };
 
     enum class SchedulerType {
-        ThreadPerBlock,        // Default: Simple, Debuggable
-        FixedThreadPool        // Better for constrained systems
+        ThreadPerBlock,
+        FixedThreadPool,
+        PinnedIslands
     };
     
     // Configuration for performance optimization
@@ -261,6 +262,9 @@ namespace cler {
         // Can improve cache locality and reduce migration overhead
         bool pin_workers = false;
 
+        size_t calibration_ms = 500;
+        size_t cpu_id_offset = 0;
+        size_t park_after_zero_passes = 4;
     };
 
     template<typename TaskPolicy, typename... BlockRunners>
@@ -276,6 +280,26 @@ namespace cler {
         struct UnresolvedEdge {
             uint8_t producer;
             const void* address;
+        };
+
+        struct Partition {
+            std::array<uint8_t, _N> block_ids{};
+            std::array<uint16_t, DEFAULT_MAX_WORKERS + 1> island_begin{};
+            uint16_t block_count = 0;
+            uint16_t island_count = 0;
+
+            uint16_t island_size(size_t island) const {
+                return static_cast<uint16_t>(island_begin[island + 1] - island_begin[island]);
+            }
+
+            size_t island_of(uint8_t block_id) const {
+                for (size_t w = 0; w < island_count; ++w) {
+                    for (uint16_t k = island_begin[w]; k < island_begin[w + 1]; ++k) {
+                        if (block_ids[k] == block_id) return w;
+                    }
+                }
+                return island_count;
+            }
         };
 
         FlowGraph(BlockRunners... runners)
@@ -311,6 +335,10 @@ namespace cler {
                 case SchedulerType::FixedThreadPool:
                     run_fixed_thread_pool(config);
                     break;
+
+                case SchedulerType::PinnedIslands:
+                    run_pinned_islands(config);
+                    break;
             }
         }
         
@@ -341,7 +369,9 @@ namespace cler {
 
         void stop() {
             _stop_flag.store(true, std::memory_order_release);
-            // Only join tasks that were actually created to prevent hang
+            if (_config.scheduler == SchedulerType::PinnedIslands) {
+                unpark_everyone();
+            }
             for (size_t i = 0; i < _active_task_count; ++i) {
                 TaskPolicy::join_task(_tasks[i]);
             }
@@ -362,6 +392,18 @@ namespace cler {
                 out[i].ewma_items_per_call = _cost_samples[i].ewma_items_per_call.load(std::memory_order_relaxed);
             }
             return out;
+        }
+
+        const Partition& partition() const { return _partition; }
+        size_t repartition_count() const { return _repartition_count.load(std::memory_order_acquire); }
+        size_t affinity_failure_count() const { return _affinity_failures.load(std::memory_order_relaxed); }
+
+        uint64_t total_park_events() const {
+            uint64_t total = 0;
+            for (const auto& state : _park_states) {
+                total += state.park_events.load(std::memory_order_relaxed);
+            }
+            return total;
         }
 
         const std::array<Edge, MaxEdges>& edges() const { return _edges; }
@@ -596,6 +638,9 @@ namespace cler {
                 if (did_work_in_batch) {
                     handle_adaptive_sleep(I, true);
                     TaskPolicy::backoff_reset(backoff_state);
+                    if (_pinned_worker_count > 0) {
+                        wake_parked_workers(kNoWorker);
+                    }
                 } else if (batch_failed) {
                     double pending_us = stats.current_adaptive_sleep_us.load();
                     if (pending_us > 0.0) {
@@ -678,9 +723,8 @@ namespace cler {
 
 
         void run_thread_per_block(const FlowGraphConfig& config) {
-            // Initialize stats for all blocks
+            _pinned_worker_count = 0;
             initialize_block_stats();
-            // Launch one thread per block using C++17 compatible approach
             launch_tasks_impl(std::make_index_sequence<_N>{}, config);
         }
 
@@ -699,7 +743,27 @@ namespace cler {
         void* _on_err_terminate_context = nullptr;
         std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
         size_t _active_task_count{0};  // Track actual created tasks to fix stop() hang
-        
+
+        struct alignas(platform::cache_line_size) WorkerParkState {
+            std::atomic<uint32_t> sleep_epoch{0};
+            std::atomic<bool> parked{false};
+            std::atomic<uint64_t> park_events{0};
+        };
+
+        static constexpr size_t kNoWorker = (std::numeric_limits<size_t>::max)();
+        static constexpr double CROSS_EDGE_PENALTY_NS = 200.0;
+        static constexpr size_t CALIBRATION_DEADLINE_CHECK_PASSES = 256;
+
+        std::array<WorkerParkState, DEFAULT_MAX_WORKERS> _park_states;
+        Partition _partition;
+        std::atomic<uint32_t> _partition_epoch{0};
+        std::atomic<bool> _repartition_pending{false};
+        std::atomic<size_t> _repartition_arrived{0};
+        std::atomic<size_t> _repartition_count{0};
+        std::atomic<size_t> _affinity_failures{0};
+        std::chrono::steady_clock::time_point _calibration_deadline;
+        size_t _pinned_worker_count = 0;
+
         // Initialize block stats with names (only if detailed stats enabled)
         void initialize_block_stats() {
             if (_config.collect_detailed_stats) {
@@ -715,7 +779,7 @@ namespace cler {
         
         
         template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
-        class FixedThreadPoolScheduler {
+        class WorkerQueueScheduler {
             using block_index_t = uint8_t;
 
             static_assert(MaxBlocksParam >= 1, "Must support at least one block");
@@ -769,6 +833,23 @@ namespace cler {
                 }
             }
 
+            void initialize_islands(const block_index_t* block_ids, const uint16_t* island_begin, size_t island_count) {
+                for (auto& q : queues) {
+                    q.count = 0;
+                    q.current = 0;
+                }
+                block_owner.fill(kNoOwner);
+
+                for (size_t w = 0; w < island_count && w < MaxWorkers; ++w) {
+                    auto& q = queues[w];
+                    for (uint16_t k = island_begin[w]; k < island_begin[w + 1]; ++k) {
+                        block_index_t bidx = block_ids[k];
+                        q.blocks[q.count++] = bidx;
+                        block_owner[bidx] = w;
+                    }
+                }
+            }
+
             bool get_next_block(size_t worker_id, size_t& block_idx_out) {
                 return queues[worker_id].get_block(block_idx_out);
             }
@@ -783,12 +864,243 @@ namespace cler {
         };
         
         
-        FixedThreadPoolScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> fixed_thread_pool_scheduler;
+        WorkerQueueScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> _worker_queues;
+
+        void topo_sort_blocks(const uint8_t* ids, size_t count, std::array<uint8_t, _N>& out) const {
+            std::array<uint16_t, _N> indegree{};
+            std::array<uint8_t, _N> in_set{};
+            std::array<uint8_t, _N> emitted{};
+
+            for (size_t i = 0; i < count; ++i) in_set[ids[i]] = 1;
+            for (size_t e = 0; e < _edge_count; ++e) {
+                const Edge& edge = _edges[e];
+                if (edge.producer == edge.consumer) continue;
+                if (in_set[edge.producer] && in_set[edge.consumer]) ++indegree[edge.consumer];
+            }
+
+            size_t emitted_count = 0;
+            bool progressed = true;
+            while (progressed) {
+                progressed = false;
+                for (size_t i = 0; i < count; ++i) {
+                    const uint8_t b = ids[i];
+                    if (emitted[b] || indegree[b] != 0) continue;
+                    emitted[b] = 1;
+                    out[emitted_count++] = b;
+                    progressed = true;
+                    for (size_t e = 0; e < _edge_count; ++e) {
+                        const Edge& edge = _edges[e];
+                        if (edge.producer != b || edge.producer == edge.consumer) continue;
+                        if (in_set[edge.consumer] && !emitted[edge.consumer]) --indegree[edge.consumer];
+                    }
+                }
+            }
+            for (size_t i = 0; i < count; ++i) {
+                if (!emitted[ids[i]]) out[emitted_count++] = ids[i];
+            }
+        }
+
+        void collect_block_weights(const std::array<uint8_t, _N>& order, size_t count,
+                                   std::array<double, _N>& weights) const {
+            std::array<double, _N> sorted{};
+            size_t sampled = 0;
+
+            for (size_t i = 0; i < count; ++i) {
+                const auto& sample = _cost_samples[order[i]];
+                const double ns = sample.ewma_ns_per_call.load(std::memory_order_relaxed);
+                const double items = sample.ewma_items_per_call.load(std::memory_order_relaxed);
+                weights[i] = ns > 0.0 ? ns / (std::max)(items, 1.0) : 0.0;
+                if (weights[i] > 0.0) sorted[sampled++] = weights[i];
+            }
+
+            double median = 1.0;
+            if (sampled > 0) {
+                std::sort(sorted.begin(), sorted.begin() + sampled);
+                median = sorted[sampled / 2];
+            }
+            for (size_t i = 0; i < count; ++i) {
+                if (weights[i] <= 0.0) weights[i] = median;
+            }
+        }
+
+        void count_cut_crossings(const std::array<uint8_t, _N>& order, size_t count,
+                                 std::array<uint16_t, _N>& crossings) const {
+            std::array<uint16_t, _N> position{};
+            std::array<uint8_t, _N> in_order{};
+            for (size_t i = 0; i < count; ++i) {
+                position[order[i]] = static_cast<uint16_t>(i);
+                in_order[order[i]] = 1;
+            }
+
+            for (size_t e = 0; e < _edge_count; ++e) {
+                const Edge& edge = _edges[e];
+                if (!in_order[edge.producer] || !in_order[edge.consumer]) continue;
+                const uint16_t producer_pos = position[edge.producer];
+                const uint16_t consumer_pos = position[edge.consumer];
+                const uint16_t low = (std::min)(producer_pos, consumer_pos);
+                const uint16_t high = (std::max)(producer_pos, consumer_pos);
+                for (uint16_t cut = static_cast<uint16_t>(low + 1); cut <= high; ++cut) {
+                    ++crossings[cut];
+                }
+            }
+        }
+
+        void build_partition(size_t worker_count, bool use_costs) {
+            std::array<uint8_t, _N> regular_ids{};
+            size_t regular_count = 0;
+            collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
+
+            std::array<uint8_t, _N> order{};
+            topo_sort_blocks(regular_ids.data(), regular_count, order);
+
+            const size_t islands = (std::max)(size_t{1}, (std::min)(worker_count, regular_count));
+            _partition.block_ids = order;
+            _partition.block_count = static_cast<uint16_t>(regular_count);
+            _partition.island_count = static_cast<uint16_t>(islands);
+
+            if (!use_costs) {
+                size_t cursor = 0;
+                for (size_t w = 0; w < islands; ++w) {
+                    _partition.island_begin[w] = static_cast<uint16_t>(cursor);
+                    cursor += regular_count / islands + (w < regular_count % islands ? 1 : 0);
+                }
+                _partition.island_begin[islands] = static_cast<uint16_t>(regular_count);
+                return;
+            }
+
+            std::array<double, _N> weights{};
+            collect_block_weights(order, regular_count, weights);
+
+            std::array<double, _N + 1> prefix{};
+            for (size_t i = 0; i < regular_count; ++i) prefix[i + 1] = prefix[i] + weights[i];
+
+            std::array<uint16_t, _N> crossings{};
+            count_cut_crossings(order, regular_count, crossings);
+
+            std::array<double, _N + 1> prev_max{};
+            std::array<double, _N + 1> prev_crossings{};
+            std::array<double, _N + 1> island_max{};
+            std::array<double, _N + 1> total_crossings{};
+            std::array<std::array<uint16_t, _N + 1>, DEFAULT_MAX_WORKERS + 1> choice{};
+
+            const double infinity = (std::numeric_limits<double>::max)();
+            for (size_t end = 0; end <= regular_count; ++end) {
+                prev_max[end] = (end == 0) ? 0.0 : infinity;
+                prev_crossings[end] = 0.0;
+            }
+
+            for (size_t k = 1; k <= islands; ++k) {
+                for (size_t end = 0; end <= regular_count; ++end) island_max[end] = infinity;
+                for (size_t end = k; end <= regular_count - (islands - k); ++end) {
+                    double best_objective = infinity;
+                    for (size_t start = k - 1; start < end; ++start) {
+                        if (prev_max[start] == infinity) continue;
+                        const double candidate_max = (std::max)(prev_max[start], prefix[end] - prefix[start]);
+                        const double candidate_crossings = prev_crossings[start] + (start > 0 ? crossings[start] : 0);
+                        const double objective = candidate_max + CROSS_EDGE_PENALTY_NS * candidate_crossings;
+                        if (objective < best_objective) {
+                            best_objective = objective;
+                            island_max[end] = candidate_max;
+                            total_crossings[end] = candidate_crossings;
+                            choice[k][end] = static_cast<uint16_t>(start);
+                        }
+                    }
+                }
+                prev_max = island_max;
+                prev_crossings = total_crossings;
+            }
+
+            size_t end = regular_count;
+            _partition.island_begin[islands] = static_cast<uint16_t>(regular_count);
+            for (size_t k = islands; k >= 1; --k) {
+                const uint16_t start = choice[k][end];
+                _partition.island_begin[k - 1] = start;
+                end = start;
+            }
+        }
+
+        void apply_partition() {
+            _worker_queues.initialize_islands(_partition.block_ids.data(),
+                                              _partition.island_begin.data(),
+                                              _partition.island_count);
+        }
+
+        void wake_parked_workers(size_t self_id) {
+            for (size_t w = 0; w < _pinned_worker_count; ++w) {
+                if (w == self_id) continue;
+                WorkerParkState& state = _park_states[w];
+                if (!state.parked.load(std::memory_order_relaxed)) continue;
+                if (!state.parked.exchange(false, std::memory_order_acq_rel)) continue;
+                state.sleep_epoch.fetch_add(1, std::memory_order_release);
+                TaskPolicy::unpark(state.sleep_epoch);
+            }
+        }
+
+        void unpark_everyone() {
+            for (auto& state : _park_states) {
+                state.parked.store(false, std::memory_order_relaxed);
+                state.sleep_epoch.fetch_add(1, std::memory_order_release);
+                TaskPolicy::unpark(state.sleep_epoch);
+            }
+            _partition_epoch.fetch_add(1, std::memory_order_release);
+            TaskPolicy::unpark(_partition_epoch);
+        }
+
+        void run_pinned_islands(const FlowGraphConfig& config) {
+            _stop_flag.store(false, std::memory_order_release);
+
+            initialize_block_stats();
+
+            if (config.collect_detailed_stats) {
+                auto start_time = std::chrono::high_resolution_clock::now();
+                for (size_t i = 0; i < _N; ++i) {
+                    _block_start_times[i] = start_time;
+                }
+            }
+
+            std::array<uint8_t, _N> regular_ids{};
+            size_t regular_count = 0;
+            collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
+
+            for (auto& state : _park_states) {
+                state.sleep_epoch.store(0, std::memory_order_relaxed);
+                state.parked.store(false, std::memory_order_relaxed);
+                state.park_events.store(0, std::memory_order_relaxed);
+            }
+            _partition_epoch.store(0, std::memory_order_relaxed);
+            _repartition_pending.store(false, std::memory_order_relaxed);
+            _repartition_arrived.store(0, std::memory_order_relaxed);
+            _repartition_count.store(0, std::memory_order_relaxed);
+            _affinity_failures.store(0, std::memory_order_relaxed);
+            _calibration_deadline = std::chrono::steady_clock::now() +
+                                    std::chrono::milliseconds(config.calibration_ms);
+
+            const size_t max_worker_count = (std::min)(DEFAULT_MAX_WORKERS, regular_count);
+            _pinned_worker_count = regular_count == 0
+                ? 0
+                : (std::max)(size_t{1}, (std::min)(config.num_workers, max_worker_count));
+
+            _active_task_count = 0;
+            launch_may_block_tasks_impl(std::make_index_sequence<_N>{}, config);
+
+            if (regular_count == 0) return;
+
+            build_partition(_pinned_worker_count, false);
+            apply_partition();
+
+            for (size_t worker_id = 0; worker_id < _pinned_worker_count; ++worker_id) {
+                _tasks[_active_task_count] = TaskPolicy::create_task([this, worker_id, config]() {
+                    run_pinned_islands_worker(worker_id, config);
+                });
+                _active_task_count++;
+            }
+        }
 
         void run_fixed_thread_pool(const FlowGraphConfig& config) {
             _stop_flag.store(false, std::memory_order_release);
+            _pinned_worker_count = 0;
 
-            assert(config.num_workers >= 2 && "FixedThreadPoolScheduler requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
+            assert(config.num_workers >= 2 && "FixedThreadPool requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
 
             initialize_block_stats();
 
@@ -816,7 +1128,7 @@ namespace cler {
                     launch_thread_per_block_task_dispatch_impl(std::make_index_sequence<_N>{}, regular_ids[idx], config);
                 }
             } else {
-                fixed_thread_pool_scheduler.initialize(regular_ids.data(), regular_count, effective_worker_count);
+                _worker_queues.initialize(regular_ids.data(), regular_count, effective_worker_count);
 
                 for (size_t worker_id = 0; worker_id < effective_worker_count; ++worker_id) {
                     _tasks[_active_task_count] = TaskPolicy::create_task([this, worker_id, config]() {
@@ -828,6 +1140,128 @@ namespace cler {
         }
         
     public:  // Making run_fixed_thread_pool_worker public for lambda access (see comment above)
+        void run_pinned_islands_worker(size_t worker_id, const FlowGraphConfig& config) {
+            TaskPolicy::configure_thread_for_low_latency_sleep();
+            if (!TaskPolicy::pin_to_core(config.cpu_id_offset + worker_id)) {
+                _affinity_failures.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            WorkerParkState& park_state = _park_states[worker_id];
+            BackoffState backoff_state{};
+            size_t zero_progress_passes = 0;
+            size_t passes_since_deadline_check = 0;
+            bool park_armed = false;
+            uint32_t observed_sleep_epoch = 0;
+
+            while (!_stop_flag.load(std::memory_order_relaxed)) {
+                _worker_queues.reset_pass(worker_id);
+                bool did_work_in_pass = false;
+                size_t block_idx;
+
+                while (_worker_queues.get_next_block(worker_id, block_idx)) {
+                    if (_stop_flag.load(std::memory_order_relaxed)) break;
+
+                    auto t_before = get_time_if_needed(config.collect_detailed_stats);
+
+                    bool block_did_work = execute_block_at_index(block_idx, config);
+
+                    if (!block_did_work && config.collect_detailed_stats) {
+                        auto t_after = std::chrono::high_resolution_clock::now();
+                        std::chrono::duration<double> dt = t_after - t_before;
+                        _stats[block_idx].total_dead_time_s += dt.count();
+                    }
+
+                    did_work_in_pass = did_work_in_pass || block_did_work;
+                }
+
+                if (worker_id == 0 && !_repartition_pending.load(std::memory_order_relaxed) &&
+                    _repartition_count.load(std::memory_order_relaxed) == 0 &&
+                    ++passes_since_deadline_check >= CALIBRATION_DEADLINE_CHECK_PASSES) {
+                    passes_since_deadline_check = 0;
+                    if (std::chrono::steady_clock::now() >= _calibration_deadline) {
+                        _repartition_pending.store(true, std::memory_order_release);
+                        wake_parked_workers(worker_id);
+                    }
+                }
+
+                if (_repartition_pending.load(std::memory_order_relaxed)) {
+                    if (park_armed) {
+                        park_armed = false;
+                        park_state.parked.store(false, std::memory_order_relaxed);
+                    }
+                    repartition_barrier(worker_id);
+                    zero_progress_passes = 0;
+                    TaskPolicy::backoff_reset(backoff_state);
+                    continue;
+                }
+
+                if (did_work_in_pass) {
+                    zero_progress_passes = 0;
+                    park_armed = false;
+                    if (park_state.parked.load(std::memory_order_relaxed)) {
+                        park_state.parked.store(false, std::memory_order_relaxed);
+                    }
+                    TaskPolicy::backoff_reset(backoff_state);
+                    wake_parked_workers(worker_id);
+                    continue;
+                }
+
+                ++zero_progress_passes;
+
+                if (zero_progress_passes <= config.park_after_zero_passes) {
+                    TaskPolicy::backoff(backoff_state);
+                } else if (!park_armed) {
+                    park_armed = true;
+                    observed_sleep_epoch = park_state.sleep_epoch.load(std::memory_order_acquire);
+                    park_state.parked.store(true, std::memory_order_release);
+                } else {
+                    park_state.park_events.fetch_add(1, std::memory_order_relaxed);
+                    TaskPolicy::park(park_state.sleep_epoch, observed_sleep_epoch);
+                    park_armed = false;
+                    park_state.parked.store(false, std::memory_order_relaxed);
+                }
+            }
+
+            park_state.parked.store(false, std::memory_order_relaxed);
+
+            if (config.collect_detailed_stats) {
+                auto end_time = std::chrono::high_resolution_clock::now();
+                for (size_t i = 0; i < _N; ++i) {
+                    if (_worker_queues.is_block_owner(worker_id, i)) {
+                        std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
+                        _stats[i].total_runtime_s = total_runtime.count();
+                        _stats[i].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[i].current_adaptive_sleep_us.load() : 0.0;
+                    }
+                }
+            }
+        }
+
+        void repartition_barrier(size_t worker_id) {
+            const uint32_t epoch_before = _partition_epoch.load(std::memory_order_acquire);
+            _repartition_arrived.fetch_add(1, std::memory_order_acq_rel);
+
+            if (worker_id != 0) {
+                while (_partition_epoch.load(std::memory_order_acquire) == epoch_before &&
+                       !_stop_flag.load(std::memory_order_relaxed)) {
+                    TaskPolicy::park(_partition_epoch, epoch_before);
+                }
+                return;
+            }
+
+            while (_repartition_arrived.load(std::memory_order_acquire) < _pinned_worker_count &&
+                   !_stop_flag.load(std::memory_order_relaxed)) {
+                wake_parked_workers(worker_id);
+                TaskPolicy::yield();
+            }
+
+            build_partition(_pinned_worker_count, true);
+            apply_partition();
+            _repartition_pending.store(false, std::memory_order_relaxed);
+            _repartition_count.fetch_add(1, std::memory_order_release);
+            _partition_epoch.fetch_add(1, std::memory_order_release);
+            TaskPolicy::unpark(_partition_epoch);
+        }
+
         void run_fixed_thread_pool_worker(size_t worker_id, const FlowGraphConfig& config) {
             TaskPolicy::configure_thread_for_low_latency_sleep();
             if (config.pin_workers) {
@@ -837,11 +1271,11 @@ namespace cler {
             BackoffState backoff_state{};
 
             while (!_stop_flag.load(std::memory_order_relaxed)) {
-                fixed_thread_pool_scheduler.reset_pass(worker_id);
+                _worker_queues.reset_pass(worker_id);
                 bool did_work_in_pass = false;
                 size_t block_idx;
 
-                while (fixed_thread_pool_scheduler.get_next_block(worker_id, block_idx)) {
+                while (_worker_queues.get_next_block(worker_id, block_idx)) {
                     if (_stop_flag.load(std::memory_order_relaxed)) break;
 
                     auto t_before = get_time_if_needed(config.collect_detailed_stats);
@@ -872,7 +1306,7 @@ namespace cler {
             if (config.collect_detailed_stats) {
                 auto end_time = std::chrono::high_resolution_clock::now();
                 for (size_t i = 0; i < _N; ++i) {
-                    if (fixed_thread_pool_scheduler.is_block_owner(worker_id, i)) {
+                    if (_worker_queues.is_block_owner(worker_id, i)) {
                         std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
                         _stats[i].total_runtime_s = total_runtime.count();
                         _stats[i].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[i].current_adaptive_sleep_us.load() : 0.0;
@@ -885,7 +1319,7 @@ namespace cler {
         double min_pending_backoff_us_for_worker(size_t worker_id) const {
             double min_us = 0.0;
             for (size_t i = 0; i < _N; ++i) {
-                if (!fixed_thread_pool_scheduler.is_block_owner(worker_id, i)) continue;
+                if (!_worker_queues.is_block_owner(worker_id, i)) continue;
                 double pending = _stats[i].current_adaptive_sleep_us.load();
                 if (pending <= 0.0) continue;
                 if (min_us <= 0.0 || pending < min_us) {

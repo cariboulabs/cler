@@ -98,3 +98,8 @@ GRCon19 Bloessl (fused order 2.75×, SCHED_RR +50%), StreamIt LCTES'05 (2.5× on
 - Test: park/wake — bursty source, workers reach parked state (observable counter), no deadlock over 10s run, wake latency sane.
 - Stress: existing tests pass under PinnedIslands; perf_simple_linear_flow PinnedIslands ≥ FixedThreadPool.
 - Idle CPU: parked flowgraph (throttled source) near-zero CPU vs current busy loop.
+
+### Implementation notes (post-review, landed)
+- Park has a 1 ms timeout (futex and condvar paths). Two reasons: timer-driven blocks (throttle) fail passes with no producer to send a wake, and the arm→final-pass→park sequence has a store-buffering race (worker's parked-flag store vs producer's data commit can mutually miss under acq/rel); the timeout bounds both to a ≤1 ms hiccup instead of a fence per producer pass.
+- PinnedIslands is opt-in (`flowgraph_config::pinned_islands(n)`), not auto-defaulted on 2-core machines — silently switching existing users' scheduler broke "keep old paths working". Plan row 2.6 superseded.
+- Cut objective: max island weight + 200 ns × total crossing edges (global term; per-island folding inverts the isolate-heavy-block incentive). DP exact for chains, heuristic on fan-out.

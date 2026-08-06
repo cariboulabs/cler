@@ -51,6 +51,7 @@ void print_flowgraph_execution_report(const DesktopFlowGraph<BlockRunners...>& f
     switch (fg.config().scheduler) {
         case SchedulerType::ThreadPerBlock: scheduler_name = "ThreadPerBlock"; break;
         case SchedulerType::FixedThreadPool: scheduler_name = "FixedThreadPool"; break;
+        case SchedulerType::PinnedIslands: scheduler_name = "PinnedIslands"; break;
     }
     printf("  - Scheduler: %s\n", scheduler_name);
     
