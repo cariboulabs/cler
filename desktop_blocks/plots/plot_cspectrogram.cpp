@@ -53,6 +53,7 @@ PlotCSpectrogramBlock::PlotCSpectrogramBlock(const char*name,
     
     for (size_t i = 0; i < _num_inputs; ++i) {
         new (&in[i]) cler::Channel<std::complex<float>>(buffer_size);
+        register_input(in[i]);
     }
 
     _liquid_inout = new std::complex<float>[_n_fft_samples];

@@ -6,6 +6,7 @@
 
 template <typename T>
 struct SinkFileBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
     cler::Channel<T> in;
 
     SinkFileBlock(const char* name, const char* filename, size_t buffer_size = 0)

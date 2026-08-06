@@ -21,6 +21,8 @@
 //   "usb:"            - Pluto over raw USB
 //   "local:"          - running ON the Pluto itself
 struct SourcePlutoBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
+
     SourcePlutoBlock(const char* name,
                      const char* uri,          // e.g. "ip:192.168.2.1"
                      long long freq_hz,

@@ -20,8 +20,6 @@ struct AddBlock : public cler::BlockBase {
             cler::panic("AddBlock requires at least two input channels");
         }
 
-        // Channels are not copy/move constructible, so std::vector can't hold them;
-        // use a raw array with placement-new instead.
         in = static_cast<cler::Channel<T>*>(
             ::operator new[](num_inputs * sizeof(cler::Channel<T>), std::nothrow));
         if (!in) {
@@ -30,6 +28,7 @@ struct AddBlock : public cler::BlockBase {
 
         for (size_t i = 0; i < num_inputs; ++i) {
             new (&in[i]) cler::Channel<T>(actual_buffer_size);
+            register_input(in[i]);
         }
     }
     ~AddBlock() {

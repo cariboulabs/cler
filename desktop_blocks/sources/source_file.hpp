@@ -7,6 +7,7 @@
 
 template <typename T>
 struct SourceFileBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
     typedef void (*on_eof)(const char* filename);
 
     SourceFileBlock(const char* name, const char* filename, const bool repeat = true, on_eof callback = nullptr)

@@ -46,6 +46,7 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
     );
     for (size_t i = 0; i < _num_inputs; ++i) {
         new (&in[i]) cler::Channel<std::complex<float>>(_buffer_size);
+        register_input(in[i]);
     }
 
     _signal_channels = static_cast<cler::Channel<std::complex<float>>*>(

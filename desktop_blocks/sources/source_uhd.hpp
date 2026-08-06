@@ -23,6 +23,7 @@
 
 template<typename T>
 struct SourceUHDBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
 
     SourceUHDBlock(const char* name,
                    double freq,

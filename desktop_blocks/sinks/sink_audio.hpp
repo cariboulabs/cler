@@ -25,6 +25,7 @@ inline void pa_check(PaError err) {
 }
 
 struct SinkAudioBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
     cler::Channel<float> in;
 
     SinkAudioBlock(const char* name,

@@ -5,6 +5,7 @@
 template<typename T>
 struct SourceUDPSocketBlock : public cler::BlockBase {
     static constexpr bool IS_BLOB = std::is_same_v<T, Blob>;
+    static constexpr bool may_block = true;
 
     typedef bool (*ValidateCallback)(const T&, void* context);
     typedef void (*OnReceiveCallback)(const T&, void* context);

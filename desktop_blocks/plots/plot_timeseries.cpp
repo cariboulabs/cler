@@ -31,6 +31,7 @@ PlotTimeSeriesBlock::PlotTimeSeriesBlock(const char* name,
     );
     for (size_t i = 0; i < _num_inputs; ++i) {
         new (&in[i]) cler::Channel<float>(_buffer_size);
+        register_input(in[i]);
     }
 
     _y_channels = static_cast<cler::Channel<float>*>(

@@ -13,6 +13,8 @@
 #include <cassert> // for assertions
 #include <atomic> // for atomic adaptive sleep state
 #include <limits> // for std::numeric_limits
+#include <type_traits>
+#include <cstdint>
 
 namespace cler {
 
@@ -24,6 +26,8 @@ namespace cler {
     #define CLER_DEFAULT_MAX_WORKERS (8)  // Conservative default for embedded systems
     #endif
     constexpr size_t DEFAULT_MAX_WORKERS = CLER_DEFAULT_MAX_WORKERS;
+
+    constexpr size_t MAX_REGISTERED_INPUTS = 16;
 
     enum class Error {
         OK,
@@ -127,8 +131,23 @@ namespace cler {
         BlockBase& operator=(const BlockBase&) = delete;
         BlockBase(BlockBase&&) = delete;
         BlockBase& operator=(BlockBase&&) = delete;
+
+        template<typename T>
+        void register_input(ChannelBase<T>& channel) {
+            assert(_registered_input_count < MAX_REGISTERED_INPUTS &&
+                   "BlockBase::register_input: MAX_REGISTERED_INPUTS exceeded");
+            if (_registered_input_count < MAX_REGISTERED_INPUTS) {
+                _registered_inputs[_registered_input_count++] = static_cast<const void*>(&channel);
+            }
+        }
+
+        size_t registered_input_count() const { return _registered_input_count; }
+        const void* registered_input_at(size_t i) const { return _registered_inputs[i]; }
+
     private:
         EmbeddableString<64> _name;
+        std::array<const void*, MAX_REGISTERED_INPUTS> _registered_inputs{};
+        size_t _registered_input_count = 0;
     };
 
     template<typename T>
@@ -138,10 +157,18 @@ namespace cler {
     template<typename T>
     using channel_to_base_t = typename channel_to_base<T>::type;
 
+    template<typename Block, typename = void>
+    struct block_declares_may_block : std::false_type {};
+    template<typename Block>
+    struct block_declares_may_block<Block, std::enable_if_t<Block::may_block>> : std::true_type {};
+    template<typename Block>
+    constexpr bool block_declares_may_block_v = block_declares_may_block<Block>::value;
+
     template<typename Block, typename... Channels>
     struct BlockRunner {
         Block* block;
         std::tuple<Channels*...> outputs;
+        bool may_block = block_declares_may_block_v<Block>;
 
         template<typename... InputChannels>
         BlockRunner(Block* blk, InputChannels*... outs)
@@ -152,6 +179,25 @@ namespace cler {
     // This allows: BlockRunner(&block, &channel) instead of BlockRunner<Block, ChannelBase<T>>(&block, &channel)
     template<typename Block, typename... Channels>
     BlockRunner(Block*, Channels*...) -> BlockRunner<Block, channel_to_base_t<Channels>...>;
+
+    template<typename Block, typename... Channels>
+    auto BlockRunnerMayBlock(Block* blk, Channels*... outs) {
+        BlockRunner<Block, channel_to_base_t<Channels>...> runner(blk, outs...);
+        runner.may_block = true;
+        return runner;
+    }
+
+    struct Edge {
+        uint8_t producer;
+        uint8_t consumer;
+    };
+
+    template<typename Runner>
+    struct runner_output_count;
+    template<typename Block, typename... Channels>
+    struct runner_output_count<BlockRunner<Block, Channels...>> {
+        static constexpr size_t value = sizeof...(Channels);
+    };
 
     struct alignas(platform::cache_line_size) BlockExecutionStats {
         EmbeddableString<64> name;
@@ -224,10 +270,18 @@ namespace cler {
         static constexpr std::size_t MaxBlocks = sizeof...(BlockRunners);  // Clean compile-time constant
         static_assert(_N > 0, "FlowGraph must have at least one block");
         static_assert(_N <= 256, "FlowGraph cannot have more than 256 blocks (due to uint8_t indexing)");
+        static constexpr std::size_t MaxEdges = (runner_output_count<BlockRunners>::value + ... + 0);
         using OnErrTerminateCallback = void (*)(void* context);
 
+        struct UnresolvedEdge {
+            uint8_t producer;
+            const void* address;
+        };
+
         FlowGraph(BlockRunners... runners)
-            : _runners(std::make_tuple(std::forward<BlockRunners>(std::move(runners))...)) {}
+            : _runners(std::make_tuple(std::forward<BlockRunners>(std::move(runners))...)) {
+            derive_edges();
+        }
 
         ~FlowGraph() { stop(); }
 
@@ -310,7 +364,81 @@ namespace cler {
             return out;
         }
 
+        const std::array<Edge, MaxEdges>& edges() const { return _edges; }
+        size_t edge_count() const { return _edge_count; }
+        size_t unresolved_edge_count() const { return _unresolved_edge_count; }
+        const std::array<UnresolvedEdge, MaxEdges>& unresolved_edges() const { return _unresolved_edges; }
+        const char* block_name(size_t index) const { return _block_bases[index]->name(); }
+
     private:
+        struct BlockSpan {
+            const void* begin;
+            const void* end;
+        };
+
+        template<std::size_t I>
+        void collect_block_base_for_index() {
+            _block_bases[I] = static_cast<const BlockBase*>(std::get<I>(_runners).block);
+        }
+
+        template<std::size_t... Is>
+        void collect_block_bases_impl(std::index_sequence<Is...>) {
+            (collect_block_base_for_index<Is>(), ...);
+        }
+
+        template<std::size_t I>
+        void collect_span_for_index(std::array<BlockSpan, _N>& spans) {
+            auto* block = std::get<I>(_runners).block;
+            const void* begin = static_cast<const void*>(block);
+            const void* end = static_cast<const void*>(
+                reinterpret_cast<const unsigned char*>(begin) + sizeof(*block));
+            spans[I] = BlockSpan{begin, end};
+        }
+
+        template<std::size_t... Is>
+        void collect_spans_impl(std::index_sequence<Is...>, std::array<BlockSpan, _N>& spans) {
+            (collect_span_for_index<Is>(spans), ...);
+        }
+
+        void resolve_and_add_edge(uint8_t producer, const void* address, const std::array<BlockSpan, _N>& spans) {
+            for (size_t k = 0; k < _N; ++k) {
+                const BlockBase* candidate = _block_bases[k];
+                for (size_t r = 0; r < candidate->registered_input_count(); ++r) {
+                    if (candidate->registered_input_at(r) == address) {
+                        _edges[_edge_count++] = Edge{producer, static_cast<uint8_t>(k)};
+                        return;
+                    }
+                }
+            }
+            for (size_t k = 0; k < _N; ++k) {
+                if (address >= spans[k].begin && address < spans[k].end) {
+                    _edges[_edge_count++] = Edge{producer, static_cast<uint8_t>(k)};
+                    return;
+                }
+            }
+            _unresolved_edges[_unresolved_edge_count++] = UnresolvedEdge{producer, address};
+        }
+
+        template<std::size_t I>
+        void collect_edges_for_index(const std::array<BlockSpan, _N>& spans) {
+            auto& runner = std::get<I>(_runners);
+            std::apply([&](auto*... outs) {
+                (resolve_and_add_edge(static_cast<uint8_t>(I), static_cast<const void*>(outs), spans), ...);
+            }, runner.outputs);
+        }
+
+        template<std::size_t... Is>
+        void collect_edges_impl(std::index_sequence<Is...>, const std::array<BlockSpan, _N>& spans) {
+            (collect_edges_for_index<Is>(spans), ...);
+        }
+
+        void derive_edges() {
+            collect_block_bases_impl(std::make_index_sequence<_N>{});
+            std::array<BlockSpan, _N> spans{};
+            collect_spans_impl(std::make_index_sequence<_N>{}, spans);
+            collect_edges_impl(std::make_index_sequence<_N>{}, spans);
+        }
+
         void handle_adaptive_sleep(size_t block_idx, bool procedure_succeeded) {
             if (!_config.adaptive_sleep) return;
 
@@ -514,7 +642,41 @@ namespace cler {
             (void)((index == Is ? (result = execute_block_at_index_helper<Is>(config), true) : false) || ...);
             return result;
         }
-        
+
+        template<std::size_t I>
+        void collect_regular_block_id_for_index(std::array<uint8_t, _N>& ids, size_t& count) {
+            if (!std::get<I>(_runners).may_block) {
+                ids[count++] = static_cast<uint8_t>(I);
+            }
+        }
+
+        template<std::size_t... Is>
+        void collect_regular_block_ids_impl(std::index_sequence<Is...>, std::array<uint8_t, _N>& ids, size_t& count) {
+            (collect_regular_block_id_for_index<Is>(ids, count), ...);
+        }
+
+        template<std::size_t I>
+        void launch_may_block_task_for_index(const FlowGraphConfig& config) {
+            if (std::get<I>(_runners).may_block) {
+                _tasks[_active_task_count++] = TaskPolicy::create_task([this, config]() {
+                    run_block_at_index_thread_per_block<I>(config);
+                });
+            }
+        }
+
+        template<std::size_t... Is>
+        void launch_may_block_tasks_impl(std::index_sequence<Is...>, const FlowGraphConfig& config) {
+            (launch_may_block_task_for_index<Is>(config), ...);
+        }
+
+        template<std::size_t... Is>
+        void launch_thread_per_block_task_dispatch_impl(std::index_sequence<Is...>, size_t index, const FlowGraphConfig& config) {
+            (void)((index == Is ? (_tasks[_active_task_count++] = TaskPolicy::create_task([this, config]() {
+                run_block_at_index_thread_per_block<Is>(config);
+            }), true) : false) || ...);
+        }
+
+
         void run_thread_per_block(const FlowGraphConfig& config) {
             // Initialize stats for all blocks
             initialize_block_stats();
@@ -528,6 +690,11 @@ namespace cler {
         FlowGraphConfig _config;
         std::array<BlockExecutionStats, _N> _stats;
         std::array<SchedulerCostSample, _N> _cost_samples;
+        std::array<const BlockBase*, _N> _block_bases{};
+        std::array<Edge, MaxEdges> _edges{};
+        size_t _edge_count = 0;
+        std::array<UnresolvedEdge, MaxEdges> _unresolved_edges{};
+        size_t _unresolved_edge_count = 0;
         OnErrTerminateCallback _on_err_terminate_cb = nullptr;
         void* _on_err_terminate_context = nullptr;
         std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
@@ -550,19 +717,17 @@ namespace cler {
         template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
         class FixedThreadPoolScheduler {
             using block_index_t = uint8_t;
-            
-            // Compile-time validation
+
             static_assert(MaxBlocksParam >= 1, "Must support at least one block");
             static_assert(MaxWorkers >= 1, "Must support at least one worker");
-            static_assert(MaxBlocksParam <= (std::numeric_limits<block_index_t>::max)(), 
+            static_assert(MaxBlocksParam <= (std::numeric_limits<block_index_t>::max)(),
                           "MaxBlocksParam exceeds block_index_t capacity");
-            
-            // Align to cache line to prevent false sharing
+
             struct alignas(platform::cache_line_size) WorkerQueue {
                 std::array<block_index_t, MaxBlocksParam> blocks;
                 uint32_t count = 0;
                 uint32_t current = 0;
-                
+
                 bool get_block(size_t& block_idx_out) {
                     if (current < count) {
                         block_idx_out = blocks[current++];
@@ -570,45 +735,40 @@ namespace cler {
                     }
                     return false;
                 }
-                
+
                 void reset() {
                     current = 0;
                 }
             };
-            
-            // Ensure WorkerQueue doesn't grow too large for cache efficiency
-            static_assert(sizeof(WorkerQueue) <= platform::cache_line_size * 4, 
+
+            static_assert(sizeof(WorkerQueue) <= platform::cache_line_size * 4,
                           "WorkerQueue is too large, consider reducing MaxBlocksParam");
-            
+
+            static constexpr size_t kNoOwner = (std::numeric_limits<size_t>::max)();
+
             std::array<WorkerQueue, MaxWorkers> queues;
-            std::array<size_t, MaxBlocksParam> block_owner;  // Track which worker owns each block
-            size_t num_blocks = 0;
-            size_t num_workers = 0;
-            
+            std::array<size_t, MaxBlocksParam> block_owner;
+
         public:
-            void initialize(size_t blocks, size_t workers) {
-                num_blocks = blocks;
-                num_workers = workers;
-                
-                // NEW: Contiguous grouping instead of round-robin
-                // This keeps producer->consumer chains on the same core,
-                // dramatically reducing SPSC queue cache coherency traffic
-                for (auto& q : queues) { 
-                    q.count = 0; 
-                    q.current = 0; 
+            void initialize(const block_index_t* block_ids, size_t block_id_count, size_t workers) {
+                for (auto& q : queues) {
+                    q.count = 0;
+                    q.current = 0;
                 }
-                
-                const size_t per = (blocks + workers - 1) / workers;  // ceil(blocks/workers)
+                block_owner.fill(kNoOwner);
+
+                const size_t per = (block_id_count + workers - 1) / workers;
                 size_t idx = 0;
-                for (size_t w = 0; w < workers && idx < blocks; ++w) {
+                for (size_t w = 0; w < workers && idx < block_id_count; ++w) {
                     auto& q = queues[w];
-                    for (size_t k = 0; k < per && idx < blocks; ++k, ++idx) {
-                        q.blocks[q.count++] = static_cast<block_index_t>(idx);
-                        block_owner[idx] = w;  // Track ownership for stats finalization
+                    for (size_t k = 0; k < per && idx < block_id_count; ++k, ++idx) {
+                        block_index_t bidx = block_ids[idx];
+                        q.blocks[q.count++] = bidx;
+                        block_owner[bidx] = w;
                     }
                 }
             }
-            
+
             bool get_next_block(size_t worker_id, size_t& block_idx_out) {
                 return queues[worker_id].get_block(block_idx_out);
             }
@@ -618,38 +778,48 @@ namespace cler {
             }
 
             bool is_block_owner(size_t worker_id, size_t block_idx) const {
-                return block_idx < num_blocks && block_owner[block_idx] == worker_id;
+                return block_idx < block_owner.size() && block_owner[block_idx] == worker_id;
             }
         };
         
         
         FixedThreadPoolScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> fixed_thread_pool_scheduler;
-        
-        // FixedThreadPool implementation
+
         void run_fixed_thread_pool(const FlowGraphConfig& config) {
             _stop_flag.store(false, std::memory_order_release);
 
             assert(config.num_workers >= 2 && "FixedThreadPoolScheduler requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
-            const size_t max_worker_count = (std::min)(DEFAULT_MAX_WORKERS, _N);
-            const size_t effective_worker_count = (std::max)(size_t{1}, (std::min)(config.num_workers, max_worker_count));
 
             initialize_block_stats();
 
-            if (effective_worker_count >= _N) {
-                run_thread_per_block(config);
-            } else {
-                fixed_thread_pool_scheduler.initialize(_N, effective_worker_count);
-
-                if (config.collect_detailed_stats) {
-                    auto start_time = std::chrono::high_resolution_clock::now();
-                    for (size_t i = 0; i < _N; ++i) {
-                        _block_start_times[i] = start_time;
-                    }
+            if (config.collect_detailed_stats) {
+                auto start_time = std::chrono::high_resolution_clock::now();
+                for (size_t i = 0; i < _N; ++i) {
+                    _block_start_times[i] = start_time;
                 }
+            }
 
-                _active_task_count = 0;
+            std::array<uint8_t, _N> regular_ids{};
+            size_t regular_count = 0;
+            collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
+
+            _active_task_count = 0;
+            launch_may_block_tasks_impl(std::make_index_sequence<_N>{}, config);
+
+            if (regular_count == 0) return;
+
+            const size_t max_worker_count = (std::min)(DEFAULT_MAX_WORKERS, regular_count);
+            const size_t effective_worker_count = (std::max)(size_t{1}, (std::min)(config.num_workers, max_worker_count));
+
+            if (effective_worker_count >= regular_count) {
+                for (size_t idx = 0; idx < regular_count; ++idx) {
+                    launch_thread_per_block_task_dispatch_impl(std::make_index_sequence<_N>{}, regular_ids[idx], config);
+                }
+            } else {
+                fixed_thread_pool_scheduler.initialize(regular_ids.data(), regular_count, effective_worker_count);
+
                 for (size_t worker_id = 0; worker_id < effective_worker_count; ++worker_id) {
-                    _tasks[worker_id] = TaskPolicy::create_task([this, worker_id, config]() {
+                    _tasks[_active_task_count] = TaskPolicy::create_task([this, worker_id, config]() {
                         run_fixed_thread_pool_worker(worker_id, config);
                     });
                     _active_task_count++;

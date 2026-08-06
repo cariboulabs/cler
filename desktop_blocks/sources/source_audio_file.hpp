@@ -37,6 +37,7 @@ inline void ffmpeg_check(int err, const char* context) {
 
 template <typename T = float>
 struct SourceAudioFileBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
     typedef void (*on_eof)(const char* filename);
 
     SourceAudioFileBlock(const char* name,

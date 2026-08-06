@@ -37,9 +37,10 @@ inline std::string get_soapy_format() {
 
 template<typename T>
 struct SinkSoapySDRBlock : public cler::BlockBase {
-    
+    static constexpr bool may_block = true;
+
     cler::Channel<T> in;
-    
+
     SinkSoapySDRBlock(const char* name,
                       const std::string& args,
                       double freq,

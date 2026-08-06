@@ -30,6 +30,7 @@ struct AsyncTxEvent {
 
 template<typename T>
 struct SinkUHDBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
 
     cler::Channel<T>* in = nullptr;
 
@@ -61,6 +62,7 @@ struct SinkUHDBlock : public cler::BlockBase {
         );
         for (size_t i = 0; i < _num_channels; ++i) {
             new (&in[i]) cler::Channel<T>(actual_buffer_size);
+            register_input(in[i]);
         }
 
         _usrp = uhd::usrp::multi_usrp::make(_device_address);
