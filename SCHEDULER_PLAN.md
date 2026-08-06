@@ -64,3 +64,37 @@ Work stealing (2 cores, 1 victim), online rebalancing, priority-heap occupancy s
 ## Evidence base
 
 GRCon19 Bloessl (fused order 2.75×, SCHED_RR +50%), StreamIt LCTES'05 (2.5× on StrongARM), GR4 (buffer elimination 30× on trivial kernels), qsdr/FOSDEM25 (L1 quanta, pin per core, spin-then-park), Tokio LIFO slot / Go runnext / TBB bypass / HyPer morsels (run consumer next on same core), Unity job system (never wake per item), Task Bench (10µs task floor).
+
+## Phase 2 design spec (2.3–2.6) — implementation contract
+
+### New scheduler type
+`SchedulerType::PinnedIslands`. FixedThreadPool stays byte-for-byte behavioral for existing users. PinnedIslands shares the worker/queue machinery but adds: calibration→cost partition, topo execution order, park/wake, affinity on by default.
+
+### Lifecycle
+1. Startup: may-block blocks → dedicated threads (as FixedThreadPool). Regular blocks → contiguous topo-order split across workers (fallback partition), workers pinned to cpu ids (config `cpu_id_offset`, default 0; check and report affinity failure via stats, do not abort).
+2. Calibration: run normally for `config.calibration_ms` (default 500). Phase 1 EWMAs accumulate.
+3. Repartition (once): worker 0 is leader. At first pass boundary past deadline, leader sets `repartition_pending`; every worker parks at its next pass boundary on the partition futex; leader waits for all, computes new partition, rebuilds queues, bumps `partition_epoch`, wakes all. Workers re-read their queue on epoch change. One-shot; no periodic rebalancing.
+4. Steady state: each pass executes the worker's blocks in topo order (upstream→downstream), micro-batching per block as today.
+
+### Partition algorithm (leader, cold path)
+- Topo order via Kahn over edges(); blocks in cycles or unreachable keep insertion order after sorted ones.
+- Block weight = ewma_ns_per_call / max(ewma_items_per_call, 1.0). Zero-sample blocks get median weight.
+- W workers: choose W-1 cut points in the topo sequence minimizing max island weight-sum, plus penalty `CROSS_EDGE_PENALTY_NS = 200` per edge crossing a cut (SPSC handoff cost stand-in). Chain length ≤ 256, W ≤ 8: brute force / DP fine on cold path.
+- Islands stay contiguous in topo order. v1 limitation accepted: uniform item-rate assumption (resamplers skew weights; revisit with rate signatures later).
+
+### Park/wake protocol (the missed-wake dance, follow exactly)
+- Per worker: `atomic<uint32_t> sleep_epoch`, `atomic<bool> parked`.
+- Worker with zero-progress passes escalates through existing BackoffState (spin→yield); after `PARK_AFTER_ZERO_PASSES = 4`, it: sets `parked = true` (release), runs ONE more full pass, if that pass made progress → clear parked, continue; else `TaskPolicy::park(sleep_epoch, observed_epoch)`.
+- Any worker whose pass made progress: after the pass, scan other workers' `parked` flags (relaxed); for each set: bump that worker's `sleep_epoch`, `TaskPolicy::unpark(...)`, at most one wake attempt per worker per pass. May-block dedicated threads do the same scan after successful procedures (they produce into pooled consumers).
+- The extra full pass after setting `parked` closes the race: data committed before the final pass is found by it; data committed after is committed by a producer that already sees `parked==true` and wakes.
+- TaskPolicy gains `park(const std::atomic<uint32_t>&, uint32_t expected)` / `unpark(std::atomic<uint32_t>&)`. Desktop: Linux futex syscall (FUTEX_WAIT_PRIVATE/FUTEX_WAKE_PRIVATE); macOS fallback: mutex+condvar per worker. Base policy default: park = escalated backoff sleep (embedded stays syscall-free, semantics preserved).
+- Shutdown: stop() bumps every sleep_epoch and unparks all workers before joining.
+
+### Config additions
+`calibration_ms = 500`, `cpu_id_offset = 0`, `park_after_zero_passes = 4`. PinnedIslands implies pin_workers unless explicitly disabled.
+
+### Acceptance
+- Test: imbalanced synthetic chain (one heavy block) → post-calibration partition puts heavy block alone; assert via a new `partition()` accessor.
+- Test: park/wake — bursty source, workers reach parked state (observable counter), no deadlock over 10s run, wake latency sane.
+- Stress: existing tests pass under PinnedIslands; perf_simple_linear_flow PinnedIslands ≥ FixedThreadPool.
+- Idle CPU: parked flowgraph (throttled source) near-zero CPU vs current busy loop.
