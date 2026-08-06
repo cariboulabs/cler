@@ -220,6 +220,7 @@ private:
   struct alignas(details::cacheLineSize) WriterCacheLine {
     std::atomic<std::size_t> writeIndex_{0};
     std::size_t readIndexCache_{0};
+    std::size_t cumulativeWriteCount_{0};
   } writer_;
 
   struct alignas(details::cacheLineSize) ReaderCacheLine {
@@ -269,13 +270,13 @@ public:
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     const auto nextWriteIndex =
         (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
-    // Loop while waiting for reader to catch up
     while (nextWriteIndex == writer_.readIndexCache_) {
       writer_.readIndexCache_ =
           reader_.readIndex_.load(std::memory_order_acquire);
     }
     write_value(writeIndex, val);
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+    ++writer_.cumulativeWriteCount_;
   }
 
   template <typename P,
@@ -286,21 +287,19 @@ public:
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     const auto nextWriteIndex =
         (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
-    // Loop while waiting for reader to catch up
     while (nextWriteIndex == writer_.readIndexCache_) {
       writer_.readIndexCache_ =
           reader_.readIndex_.load(std::memory_order_acquire);
     }
     write_value(writeIndex, std::forward<P>(val));
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+    ++writer_.cumulativeWriteCount_;
   }
 
-  // Non-blocking push - returns false if no space
   [[nodiscard]] bool try_push(const T &val) noexcept(nothrow_v) {
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     const auto nextWriteIndex =
         (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
-    // Check reader cache and if actually equal then fail to write
     if (nextWriteIndex == writer_.readIndexCache_) {
       writer_.readIndexCache_ =
           reader_.readIndex_.load(std::memory_order_acquire);
@@ -310,6 +309,7 @@ public:
     }
     write_value(writeIndex, val);
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+    ++writer_.cumulativeWriteCount_;
     return true;
   }
 
@@ -322,7 +322,6 @@ public:
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     const auto nextWriteIndex =
         (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
-    // Check reader cache and if actually equal then fail to write
     if (nextWriteIndex == writer_.readIndexCache_) {
       writer_.readIndexCache_ =
           reader_.readIndex_.load(std::memory_order_acquire);
@@ -332,6 +331,7 @@ public:
     }
     write_value(writeIndex, std::forward<P>(val));
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+    ++writer_.cumulativeWriteCount_;
     return true;
   }
 
@@ -388,6 +388,10 @@ public:
     return capacity() - size();
   }
 
+  [[nodiscard]] std::size_t producer_thread_cumulative_write_count() const noexcept {
+    return writer_.cumulativeWriteCount_;
+  }
+
   // Check if this queue uses doubly-mapped memory
   bool is_doubly_mapped() const noexcept {
     if constexpr (N == 0) {
@@ -425,6 +429,7 @@ public:
     }
 
     writer_.writeIndex_.store((writeIndex + toWrite) % capacity, std::memory_order_release);
+    writer_.cumulativeWriteCount_ += toWrite;
     return toWrite;
   }
 
@@ -602,6 +607,7 @@ public:
       const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
       const auto nextWriteIndex = (writeIndex + count) % capacity;
       writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+      writer_.cumulativeWriteCount_ += count;
   }
 
   std::pair<T*, std::size_t> write_dbf() noexcept {

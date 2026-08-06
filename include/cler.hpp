@@ -82,6 +82,7 @@ namespace cler {
         virtual void commit_write(size_t count) = 0;
         virtual std::pair<const T*, std::size_t> read_dbf() = 0;
         virtual std::pair<T*, std::size_t> write_dbf() = 0;
+        virtual std::size_t producer_thread_cumulative_write_count() const = 0;
     };
 
     template <typename T, size_t N = 0>
@@ -113,6 +114,9 @@ namespace cler {
 
         std::pair<const T*, std::size_t> read_dbf() override { return _queue.read_dbf(); }
         std::pair<T*, std::size_t> write_dbf() override { return _queue.write_dbf(); }
+        std::size_t producer_thread_cumulative_write_count() const override {
+            return _queue.producer_thread_cumulative_write_count();
+        }
     };
 
     struct BlockBase {
@@ -172,7 +176,11 @@ namespace cler {
         }
     };
 
-    // Scheduling types for performance optimization  
+    struct BlockCost {
+        double ewma_ns_per_call = 0.0;
+        double ewma_items_per_call = 0.0;
+    };
+
     enum class SchedulerType {
         ThreadPerBlock,        // Default: Simple, Debuggable
         FixedThreadPool        // Better for constrained systems
@@ -293,6 +301,15 @@ namespace cler {
         const FlowGraphConfig& config() const { return _config; }
         const std::array<BlockExecutionStats, _N>& stats() const { return _stats; }
 
+        std::array<BlockCost, _N> block_costs() const {
+            std::array<BlockCost, _N> out{};
+            for (size_t i = 0; i < _N; ++i) {
+                out[i].ewma_ns_per_call = _cost_samples[i].ewma_ns_per_call.load(std::memory_order_relaxed);
+                out[i].ewma_items_per_call = _cost_samples[i].ewma_items_per_call.load(std::memory_order_relaxed);
+            }
+            return out;
+        }
+
     private:
         void handle_adaptive_sleep(size_t block_idx, bool procedure_succeeded) {
             if (!_config.adaptive_sleep) return;
@@ -324,7 +341,55 @@ namespace cler {
                 }
             }
         }
-        
+
+        static constexpr size_t COST_SAMPLE_PERIOD_MASK = 63;
+
+        struct alignas(platform::cache_line_size) SchedulerCostSample {
+            size_t call_counter = 0;
+            std::atomic<double> ewma_ns_per_call{0.0};
+            std::atomic<double> ewma_items_per_call{0.0};
+        };
+
+        template<typename... Channels>
+        static std::size_t sum_output_cumulative_write_count(const std::tuple<Channels*...>& outputs) {
+            return std::apply([](auto*... outs) {
+                return (std::size_t{0} + ... + outs->producer_thread_cumulative_write_count());
+            }, outputs);
+        }
+
+        template<std::size_t I>
+        Result<Empty, Error> sample_and_invoke_procedure() {
+            auto& runner = std::get<I>(_runners);
+            auto& sample = _cost_samples[I];
+
+            if ((++sample.call_counter & COST_SAMPLE_PERIOD_MASK) != 0) {
+                return std::apply([&](auto*... outs) {
+                    return runner.block->procedure(outs...);
+                }, runner.outputs);
+            }
+
+            const auto items_before = sum_output_cumulative_write_count(runner.outputs);
+            const auto t_before = std::chrono::steady_clock::now();
+            auto result = std::apply([&](auto*... outs) {
+                return runner.block->procedure(outs...);
+            }, runner.outputs);
+            const auto t_after = std::chrono::steady_clock::now();
+
+            if (result.is_ok()) {
+                const auto items_after = sum_output_cumulative_write_count(runner.outputs);
+                const double observed_ns = std::chrono::duration<double, std::nano>(t_after - t_before).count();
+                const double observed_items = static_cast<double>(items_after - items_before);
+
+                const double prev_ns = sample.ewma_ns_per_call.load(std::memory_order_relaxed);
+                sample.ewma_ns_per_call.store(prev_ns + (observed_ns - prev_ns) / 8.0, std::memory_order_relaxed);
+
+                const double prev_items = sample.ewma_items_per_call.load(std::memory_order_relaxed);
+                sample.ewma_items_per_call.store(prev_items + (observed_items - prev_items) / 8.0, std::memory_order_relaxed);
+            }
+
+            return result;
+        }
+
     public:
         // These methods must be public because they are called from lambdas passed to 
         // TaskPolicy::create_task(). Even though the lambdas are created within the class,
@@ -367,9 +432,7 @@ namespace cler {
                         t_last = t_now;
                     }
 
-                    Result<Empty, Error> result = std::apply([&](auto*... outs) {
-                        return runner.block->procedure(outs...);
-                    }, runner.outputs);
+                    Result<Empty, Error> result = sample_and_invoke_procedure<I>();
 
                     if (result.is_err()) {
                         if (config.collect_detailed_stats) {
@@ -464,6 +527,7 @@ namespace cler {
         std::atomic<bool> _stop_flag{false};
         FlowGraphConfig _config;
         std::array<BlockExecutionStats, _N> _stats;
+        std::array<SchedulerCostSample, _N> _cost_samples;
         OnErrTerminateCallback _on_err_terminate_cb = nullptr;
         void* _on_err_terminate_context = nullptr;
         std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
@@ -665,15 +729,12 @@ namespace cler {
         bool execute_block_at_index_helper(const FlowGraphConfig& config) {
             static_assert(I < _N, "Block index out of bounds");
 
-            auto& runner = std::get<I>(_runners);
             auto& stats = _stats[I];
 
             bool did_work = false;
 
             for (size_t c = 0; c < config.max_calls_per_tick; ++c) {
-                auto result = std::apply([&](auto*... outs) {
-                    return runner.block->procedure(outs...);
-                }, runner.outputs);
+                auto result = sample_and_invoke_procedure<I>();
 
                 if (result.is_err()) {
                     if (config.collect_detailed_stats) {
