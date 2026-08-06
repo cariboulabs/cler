@@ -17,9 +17,8 @@ protected:
 // Test AddBlock with float inputs
 TEST_F(MathBlocksTest, AddBlockFloat) {
     const size_t buffer_size = 1024;
-    const size_t num_inputs = 3;
-    
-    AddBlock<float> add_block("test_add", num_inputs, buffer_size);
+
+    AddBlock<float, 3> add_block("test_add", buffer_size);
     cler::Channel<float> output(buffer_size);
     
     // Fill inputs with test data
@@ -51,9 +50,8 @@ TEST_F(MathBlocksTest, AddBlockFloat) {
 // Test AddBlock with complex inputs
 TEST_F(MathBlocksTest, AddBlockComplex) {
     const size_t buffer_size = 1024;
-    const size_t num_inputs = 2;
-    
-    AddBlock<std::complex<float>> add_block("test_add_complex", num_inputs, buffer_size);
+
+    AddBlock<std::complex<float>, 2> add_block("test_add_complex", buffer_size);
     cler::Channel<std::complex<float>> output(buffer_size);
     
     // Fill inputs with test data
@@ -87,11 +85,8 @@ TEST_F(MathBlocksTest, AddBlockComplex) {
 
 // Test AddBlock error conditions
 TEST_F(MathBlocksTest, AddBlockErrorConditions) {
-    // Test minimum inputs requirement
-    EXPECT_DEATH(AddBlock<float>("test", 1, 1024), "cler panic");
-    
-    // Test buffer size too small for doubly-mapped buffers (need at least 4096/sizeof(float) = 1024 for float)
-    EXPECT_DEATH(AddBlock<float>("test", 2, 1), "cler panic");
+    // Buffer size too small for doubly-mapped buffers (need at least 4096/sizeof(float) = 1024 for float)
+    EXPECT_DEATH((AddBlock<float, 2>("test", 1)), "cler panic");
 }
 
 // Test GainBlock with float

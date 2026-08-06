@@ -25,14 +25,28 @@ struct DummySink : public cler::BlockBase {
     }
 };
 
+struct RegisteredInputBlock : public cler::BlockBase {
+    cler::Channel<float>* in;
+
+    RegisteredInputBlock(std::string name, size_t capacity) : BlockBase(std::move(name)) {
+        in = new cler::Channel<float>(capacity);
+        register_input(*in);
+    }
+    ~RegisteredInputBlock() { delete in; }
+
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        return cler::Error::NotEnoughSamples;
+    }
+};
+
 } // namespace
 
-TEST(EdgeDerivationTest, ResolvesRegisteredAndContainedOutputs) {
+TEST(EdgeDerivationTest, ResolvesContainedOutputs) {
     static constexpr size_t kBufferSize = 4096;
 
     DummySource source0("Source0");
     DummySource source1("Source1");
-    AddBlock<float> add("Add", 2, kBufferSize);
+    AddBlock<float, 2> add("Add", kBufferSize);
     GainBlock<float> gain("Gain", 2.0f, kBufferSize);
     DummySink sink("Sink", kBufferSize);
 
@@ -58,6 +72,23 @@ TEST(EdgeDerivationTest, ResolvesRegisteredAndContainedOutputs) {
     EXPECT_EQ(edges[2].consumer, GAIN);
     EXPECT_EQ(edges[3].producer, GAIN);
     EXPECT_EQ(edges[3].consumer, SINK);
+}
+
+TEST(EdgeDerivationTest, ResolvesRegisteredHeapChannel) {
+    static constexpr size_t kBufferSize = 64;
+
+    DummySource source("Source");
+    RegisteredInputBlock sink("Sink", kBufferSize);
+
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, sink.in),
+        cler::BlockRunner(&sink)
+    );
+
+    ASSERT_EQ(fg.unresolved_edge_count(), 0u);
+    ASSERT_EQ(fg.edge_count(), 1u);
+    EXPECT_EQ(fg.edges()[0].producer, 0u);
+    EXPECT_EQ(fg.edges()[0].consumer, 1u);
 }
 
 TEST(EdgeDerivationTest, UnresolvedOutputIsReportedNotEdged) {

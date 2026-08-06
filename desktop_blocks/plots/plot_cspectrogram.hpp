@@ -7,6 +7,7 @@
 #include "spectral_windows.hpp"
 #include <mutex>
 #include <vector>
+#include <type_traits>
 
 struct PlotCSpectrogramBlock : public cler::BlockBase {
     const size_t BUFFER_SIZE_MULTIPLIER = 3;
@@ -14,6 +15,7 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
     // Input is always fully drained (upstream fanout never stalls); only the
     // most recent MAX_FFTS_PER_CALL frames become rows, bounding CPU/lock time.
     static constexpr size_t MAX_FFTS_PER_CALL = 32;
+    static constexpr size_t MAX_INPUT_CHANNEL_SLOTS = 16;
 
     cler::Channel<std::complex<float>>* in;
 
@@ -72,6 +74,8 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
                         size_t& frames_per_row_out, size_t& sps_out) const;
 
 private:
+    std::aligned_storage_t<sizeof(cler::Channel<std::complex<float>>), alignof(cler::Channel<std::complex<float>>)> _in_storage[MAX_INPUT_CHANNEL_SLOTS];
+
     size_t _num_inputs;
     std::vector<std::string> _signal_labels;
 

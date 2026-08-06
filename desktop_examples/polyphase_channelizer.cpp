@@ -79,7 +79,7 @@ int main() {
     CustomSourceBlock cw_source4("CW Source 4", 1*10000.0f, 0.01f,  ch4_freq, SPS);
 
 
-    AddBlock<std::complex<float>> adder("Adder", NUM_CHANNELS);
+    AddBlock<std::complex<float>, NUM_CHANNELS> adder("Adder");
 
     ThroughputBlock<std::complex<float>> throughput("Throughput");
 

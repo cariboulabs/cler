@@ -13,7 +13,7 @@ int main() {
     SourceCWBlock<float> source1("CWSource", 1.0f, 1.0f, SPS); //amplitude, frequency
     SourceCWBlock<float> source2("CWSource2", 1.0f, 20.0f, SPS);
     ThrottleBlock<float> throttle("Throttle", SPS);
-    AddBlock<float> adder("Adder", 2); // 2 inputs
+    AddBlock<float, 2> adder("Adder");
 
     PlotTimeSeriesBlock plot(
         "Hello World Plot",

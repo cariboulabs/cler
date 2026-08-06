@@ -28,12 +28,11 @@ PlotCSpectrogramBlock::PlotCSpectrogramBlock(const char*name,
       _window_type(window_type)
 {
     if (_num_inputs < 1) cler::panic("At least one input required");
+    if (_num_inputs > MAX_INPUT_CHANNEL_SLOTS) cler::panic("PlotCSpectrogramBlock: too many input channels for MAX_INPUT_CHANNEL_SLOTS");
     if (_n_fft_samples <= 2 || _n_fft_samples % 2 != 0) cler::panic("FFT size must be even and > 2");
     if (_tall < 1) cler::panic("Tall must be > 0");
 
-    in = static_cast<cler::Channel<std::complex<float>>*>(
-        ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
-    );
+    in = reinterpret_cast<cler::Channel<std::complex<float>>*>(_in_storage);
 
     size_t min_buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>);
 
@@ -53,7 +52,6 @@ PlotCSpectrogramBlock::PlotCSpectrogramBlock(const char*name,
     
     for (size_t i = 0; i < _num_inputs; ++i) {
         new (&in[i]) cler::Channel<std::complex<float>>(buffer_size);
-        register_input(in[i]);
     }
 
     _liquid_inout = new std::complex<float>[_n_fft_samples];
@@ -97,7 +95,6 @@ PlotCSpectrogramBlock::~PlotCSpectrogramBlock() {
     for (size_t i = 0; i < _num_inputs; ++i) {
         in[i].~ComplexChannel();
     }
-    ::operator delete[](in);
 
     delete[] _liquid_inout;
     delete[] _tmp_y_buffer;
