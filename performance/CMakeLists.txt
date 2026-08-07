@@ -10,6 +10,9 @@ target_link_libraries(perf_read_write_techniques cler::desktop_blocks)
 add_executable(perf_fused_vs_chain perf_fused_vs_chain.cpp)
 target_link_libraries(perf_fused_vs_chain cler::desktop_blocks)
 
+add_executable(perf_lora_receiver_shape perf_lora_receiver_shape.cpp)
+target_link_libraries(perf_lora_receiver_shape cler::desktop_blocks)
+
 if(UNIX)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/cpugov.sh
