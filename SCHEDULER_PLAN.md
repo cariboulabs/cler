@@ -103,3 +103,13 @@ GRCon19 Bloessl (fused order 2.75×, SCHED_RR +50%), StreamIt LCTES'05 (2.5× on
 - Park has a 1 ms timeout (futex and condvar paths). Two reasons: timer-driven blocks (throttle) fail passes with no producer to send a wake, and the arm→final-pass→park sequence has a store-buffering race (worker's parked-flag store vs producer's data commit can mutually miss under acq/rel); the timeout bounds both to a ≤1 ms hiccup instead of a fence per producer pass.
 - PinnedIslands is opt-in (`flowgraph_config::pinned_islands(n)`), not auto-defaulted on 2-core machines — silently switching existing users' scheduler broke "keep old paths working". Plan row 2.6 superseded.
 - Cut objective: max island weight + 200 ns × total crossing edges (global term; per-island folding inverts the isolate-heavy-block incentive). DP exact for chains, heuristic on fan-out.
+
+## Architecture review outcomes (2026-08-07)
+
+Adversarial architecture pass findings and dispositions:
+- ACCEPTED, done/queued: delete dormant register_input machinery (no in-tree users, per-block RAM tax); FusedBlock composes kernel functors, not blocks (dead-channel waste); telemetry sampling gated to PinnedIslands and EWMAs stored as atomic<uint64_t> bits (Cortex-M lock-free + static-link safety); adaptive_sleep scoped to ThreadPerBlock/FixedThreadPool (dead knob under islands); manual island override in config as the deterministic embedded path (DP fills around it); embedded_optimized() helper updated to current thesis; document CLER_DEFAULT_MAX_WORKERS=2 for small targets.
+- CORRECTED CLAIM: FixedThreadPool is NOT byte-for-byte pre-branch behavior — the may_block lane changes thread count and mapping for graphs containing blocking blocks. This is a deliberate behavior improvement, not preservation.
+- CLARIFIED SCOPE: "no online rebalancing" bars per-pass migration/stealing; the drift repartition (5s cadence, 20% hysteresis, user-requested for bursty LoRa) is epoch-scale and stands.
+- KEPT: park arm→final-pass→futex dance (timeout is the backstop; the dance saves a guaranteed 1ms stall on the common race); span-containment edge derivation (formally unspecified pointer comparison, universally fine on supported targets; typed-registration-only alternative rejected as a worse API).
+- QUEUED (post correctness-review): collapse FixedThreadPool worker loop into the islands loop parameterized by idle policy.
+- WATCHLIST: drift repartition named most likely 6-month trap (only mechanism rewiring SPSC thread ownership mid-run); mitigation = burst test coverage in the lora-shape bench and repartition_count() observability.
