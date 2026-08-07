@@ -22,8 +22,7 @@ void print_unresolved_edge_warnings(const DesktopFlowGraph<BlockRunners...>& fg)
         const auto& u = fg.unresolved_edges()[i];
         std::fprintf(stderr,
             "cler: unresolved output edge from block '%s' at %p (no consumer found; "
-            "call BlockBase::register_input in the owning block's constructor if its "
-            "channel lives in a heap container)\n",
+            "edge derivation matches channels stored inside the consuming block's object)\n",
             fg.block_name(u.producer), u.address);
     }
 }
@@ -60,13 +59,6 @@ void print_flowgraph_execution_report(const DesktopFlowGraph<BlockRunners...>& f
         
     }
     
-    printf("  - Adaptive Sleep: %s\n", fg.config().adaptive_sleep ? "ENABLED" : "DISABLED");
-    if (fg.config().adaptive_sleep) {
-        printf("      * Multiplier: %.2f\n", fg.config().adaptive_sleep_multiplier);
-        printf("      * Max Sleep (us): %.1f\n", fg.config().adaptive_sleep_max_us);
-        printf("      * Fail Threshold: %zu\n", fg.config().adaptive_sleep_fail_threshold);
-    }
-    
     printf("  - Detailed Stats: %s\n", fg.config().collect_detailed_stats ? "ENABLED" : "DISABLED");
     printf("\n");
 
@@ -96,23 +88,8 @@ void print_flowgraph_execution_report(const DesktopFlowGraph<BlockRunners...>& f
     } else {
         // Ultra-performance mode - minimal stats
         printf("Performance Mode: Detailed stats collection disabled for maximum throughput.\n");
-        
-        if (fg.config().adaptive_sleep) {
-            printf("Adaptive sleep state is tracked:\n\n");
-            
-            printf("%-30s | %12s\n", "Block", "Sleep(us)");
-            printf("%s\n", std::string(45, '-').c_str());
-            
-            for (const auto& s : fg.stats()) {
-                printf("%-30s | %12.1f\n",
-                    s.name.empty() ? "Block" : s.name.c_str(),
-                    s.current_adaptive_sleep_us.load()
-                );
-            }
-        } else {
-            printf("No runtime statistics are being collected.\n");
-            printf("Block count: %zu\n", fg.stats().size());
-        }
+        printf("No runtime statistics are being collected.\n");
+        printf("Block count: %zu\n", fg.stats().size());
     }
 }
 

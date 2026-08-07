@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "cler.hpp"
+#include "cler_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 
 namespace {
@@ -59,7 +60,9 @@ TEST(SchedulerCostTest, BlockCostsReflectActualCallShape) {
         cler::BlockRunner(&sink)
     );
 
-    fg.run_for(std::chrono::milliseconds(200));
+    auto config = cler::flowgraph_config::pinned_islands(2);
+    config.calibration_ms = 60000;
+    fg.run_for(std::chrono::milliseconds(200), config);
 
     ASSERT_GT(sink.received(), 0u);
 

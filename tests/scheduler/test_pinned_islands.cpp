@@ -359,6 +359,46 @@ TEST(PinnedIslandsTest, HysteresisKeepsSteadyChainPartitioned) {
     EXPECT_EQ(fg.repartition_count(), 1u);
 }
 
+TEST(PinnedIslandsTest, SecondRunStartsFromCleanState) {
+    static constexpr size_t CAPACITY = 1 << 14;
+
+    SteadySource source("Source");
+    WeightedStage<400> heavy("Heavy", CAPACITY);
+    WeightedStage<1> light("Light", CAPACITY);
+    CountingSink sink("Sink", CAPACITY);
+
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, &heavy.in),
+        cler::BlockRunner(&heavy, &light.in),
+        cler::BlockRunner(&light, &sink.in),
+        cler::BlockRunner(&sink)
+    );
+
+    auto islands_config = cler::flowgraph_config::pinned_islands(2);
+    islands_config.calibration_ms = 100;
+    islands_config.collect_detailed_stats = true;
+
+    fg.run_for(std::chrono::milliseconds(400), islands_config);
+
+    const size_t first_run_successes = fg.stats()[1].successful_procedures;
+    ASSERT_GT(first_run_successes, 0u);
+    ASSERT_EQ(fg.repartition_count(), 1u);
+    ASSERT_GT(fg.block_costs()[1].ewma_ns_per_call, 0.0);
+    ASSERT_EQ(fg.partition().block_count, 4u);
+
+    cler::FlowGraphConfig reuse_config;
+    reuse_config.collect_detailed_stats = true;
+    fg.run_for(std::chrono::milliseconds(100), reuse_config);
+
+    EXPECT_EQ(fg.repartition_count(), 0u);
+    EXPECT_EQ(fg.partition().block_count, 0u);
+    EXPECT_EQ(fg.block_costs()[1].ewma_ns_per_call, 0.0);
+    EXPECT_EQ(fg.block_costs()[1].ewma_items_per_call, 0.0);
+    EXPECT_GT(fg.stats()[1].successful_procedures, 0u);
+    EXPECT_LT(fg.stats()[1].successful_procedures, first_run_successes);
+    EXPECT_EQ(fg.total_park_events(), 0u);
+}
+
 TEST(PinnedIslandsTest, MatchesFixedThreadPoolOnSteadyChain) {
     static constexpr size_t CAPACITY = 1 << 14;
 

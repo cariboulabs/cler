@@ -91,7 +91,7 @@ GRCon19 Bloessl (fused order 2.75×, SCHED_RR +50%), StreamIt LCTES'05 (2.5× on
 - Shutdown: stop() bumps every sleep_epoch and unparks all workers before joining.
 
 ### Config additions
-`calibration_ms = 500`, `cpu_id_offset = 0`, `park_after_zero_passes = 4`. PinnedIslands implies pin_workers unless explicitly disabled.
+`calibration_ms = 500`, `cpu_id_offset = 0`, `park_after_zero_passes = 4`. PinnedIslands always pins its workers (`pin_workers` is a FixedThreadPool-only knob; PinnedIslands ignores it and reports affinity failures via `affinity_failure_count()`).
 
 ### Acceptance
 - Test: imbalanced synthetic chain (one heavy block) → post-calibration partition puts heavy block alone; assert via a new `partition()` accessor.

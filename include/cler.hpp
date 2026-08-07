@@ -11,10 +11,11 @@
 #include <chrono> // for timing measurements in FlowGraph
 #include <tuple> // for storing block runners
 #include <cassert> // for assertions
-#include <atomic> // for atomic adaptive sleep state
+#include <atomic>
 #include <limits> // for std::numeric_limits
 #include <type_traits>
 #include <cstdint>
+#include <cstring>
 
 namespace cler {
 
@@ -26,8 +27,6 @@ namespace cler {
     #define CLER_DEFAULT_MAX_WORKERS (8)  // Conservative default for embedded systems
     #endif
     constexpr size_t DEFAULT_MAX_WORKERS = CLER_DEFAULT_MAX_WORKERS;
-
-    constexpr size_t MAX_REGISTERED_INPUTS = 16;
 
     enum class Error {
         OK,
@@ -132,22 +131,8 @@ namespace cler {
         BlockBase(BlockBase&&) = delete;
         BlockBase& operator=(BlockBase&&) = delete;
 
-        template<typename T>
-        void register_input(ChannelBase<T>& channel) {
-            assert(_registered_input_count < MAX_REGISTERED_INPUTS &&
-                   "BlockBase::register_input: MAX_REGISTERED_INPUTS exceeded");
-            if (_registered_input_count < MAX_REGISTERED_INPUTS) {
-                _registered_inputs[_registered_input_count++] = static_cast<const void*>(&channel);
-            }
-        }
-
-        size_t registered_input_count() const { return _registered_input_count; }
-        const void* registered_input_at(size_t i) const { return _registered_inputs[i]; }
-
     private:
         EmbeddableString<64> _name;
-        std::array<const void*, MAX_REGISTERED_INPUTS> _registered_inputs{};
-        size_t _registered_input_count = 0;
     };
 
     template<typename T>
@@ -205,10 +190,7 @@ namespace cler {
         size_t failed_procedures = 0;
         double total_dead_time_s = 0.0;
         double total_runtime_s = 0.0;
-        double final_adaptive_sleep_us = 0.0;
-        std::atomic<double> current_adaptive_sleep_us{0.0};
-        std::atomic<size_t> consecutive_fails{0};
-        
+
         double get_avg_execution_time_us() const {
             return successful_procedures > 0 ? (total_runtime_s * 1e6) / successful_procedures : 0.0;
         }
@@ -233,35 +215,12 @@ namespace cler {
         PinnedIslands
     };
     
-    // Configuration for performance optimization
     struct FlowGraphConfig {
         SchedulerType scheduler = SchedulerType::ThreadPerBlock;
-        size_t num_workers = 4;  // Used by FixedThreadPool; ThreadPerBlock creates one thread per block
-
-        // Optimizes CPU usage, usually at the cost of reducing throughput
-        // Most useful for:
-        // - Intermittent sensor data  
-        // - Network packet processing with gaps
-        // - File processing with I/O delays
-        bool adaptive_sleep = false;
-        double adaptive_sleep_multiplier = 1.5;  // How aggressively to increase sleep time
-        double adaptive_sleep_max_us = 5000.0;          // Maximum sleep time in microseconds
-        size_t adaptive_sleep_fail_threshold = 10;  // Start sleeping after N consecutive fails
-
-        // Performance optimization: disable detailed stats collection for ultra-high throughput
-        // When false: saves ~200 bytes per block, eliminates procedure counting and timing
-        // When true: full diagnostics available (successful_procedures, timing, etc.)
+        size_t num_workers = 4;
         bool collect_detailed_stats = false;
-        
-        // Micro-batching: run block procedure multiple times per scheduling tick
-        // Reduces context switches and queue crossing overhead
-        // Typical values: 1-16, with 4-8 being sweet spot for most workloads
-        size_t max_calls_per_tick = 4;  // Conservative default to prevent runaway hot stages
-        
-        // Optional: pin worker threads to specific CPU cores
-        // Can improve cache locality and reduce migration overhead
+        size_t max_calls_per_tick = 4;
         bool pin_workers = false;
-
         size_t calibration_ms = 500;
         size_t repartition_check_ms = 5000;
         size_t cpu_id_offset = 0;
@@ -389,8 +348,8 @@ namespace cler {
         std::array<BlockCost, _N> block_costs() const {
             std::array<BlockCost, _N> out{};
             for (size_t i = 0; i < _N; ++i) {
-                out[i].ewma_ns_per_call = _cost_samples[i].ewma_ns_per_call.load(std::memory_order_relaxed);
-                out[i].ewma_items_per_call = _cost_samples[i].ewma_items_per_call.load(std::memory_order_relaxed);
+                out[i].ewma_ns_per_call = bits_to_double(_cost_samples[i].ewma_ns_per_call_bits.load(std::memory_order_relaxed));
+                out[i].ewma_items_per_call = bits_to_double(_cost_samples[i].ewma_items_per_call_bits.load(std::memory_order_relaxed));
             }
             return out;
         }
@@ -445,15 +404,6 @@ namespace cler {
 
         void resolve_and_add_edge(uint8_t producer, const void* address, const std::array<BlockSpan, _N>& spans) {
             for (size_t k = 0; k < _N; ++k) {
-                const BlockBase* candidate = _block_bases[k];
-                for (size_t r = 0; r < candidate->registered_input_count(); ++r) {
-                    if (candidate->registered_input_at(r) == address) {
-                        _edges[_edge_count++] = Edge{producer, static_cast<uint8_t>(k)};
-                        return;
-                    }
-                }
-            }
-            for (size_t k = 0; k < _N; ++k) {
                 if (address >= spans[k].begin && address < spans[k].end) {
                     _edges[_edge_count++] = Edge{producer, static_cast<uint8_t>(k)};
                     return;
@@ -482,43 +432,24 @@ namespace cler {
             collect_edges_impl(std::make_index_sequence<_N>{}, spans);
         }
 
-        void handle_adaptive_sleep(size_t block_idx, bool procedure_succeeded) {
-            if (!_config.adaptive_sleep) return;
+        static constexpr size_t COST_SAMPLE_PERIOD_CALLS = 61;
 
-            auto& stats = _stats[block_idx];
-
-            if (procedure_succeeded) {
-                stats.consecutive_fails.store(0);
-                double current_sleep = stats.current_adaptive_sleep_us.load();
-                stats.current_adaptive_sleep_us.store(current_sleep * 0.5);
-            } else {
-                size_t fails = stats.consecutive_fails.fetch_add(1) + 1;
-
-                if (fails > _config.adaptive_sleep_fail_threshold) {
-                    double current_sleep = stats.current_adaptive_sleep_us.load();
-                    double new_sleep;
-
-                    if (current_sleep == 0.0) {
-                        static constexpr double INITIAL_SLEEP_US = 1.0;
-                        new_sleep = INITIAL_SLEEP_US;
-                    } else {
-                        double base_sleep = current_sleep * _config.adaptive_sleep_multiplier;
-                        static constexpr double JITTER_FACTOR = 0.1;
-                        double block_jitter = 1.0 + JITTER_FACTOR * (double(block_idx % 10) / 10.0 - 0.5);
-                        new_sleep = std::min(base_sleep * block_jitter, _config.adaptive_sleep_max_us);
-                    }
-
-                    stats.current_adaptive_sleep_us.store(new_sleep);
-                }
-            }
+        static uint64_t double_to_bits(double value) {
+            uint64_t bits;
+            std::memcpy(&bits, &value, sizeof(bits));
+            return bits;
         }
 
-        static constexpr size_t COST_SAMPLE_PERIOD_CALLS = 61;
+        static double bits_to_double(uint64_t bits) {
+            double value;
+            std::memcpy(&value, &bits, sizeof(value));
+            return value;
+        }
 
         struct alignas(platform::cache_line_size) SchedulerCostSample {
             size_t calls_until_sample = COST_SAMPLE_PERIOD_CALLS;
-            std::atomic<double> ewma_ns_per_call{0.0};
-            std::atomic<double> ewma_items_per_call{0.0};
+            std::atomic<uint64_t> ewma_ns_per_call_bits{0};
+            std::atomic<uint64_t> ewma_items_per_call_bits{0};
         };
 
         template<typename... Channels>
@@ -533,7 +464,7 @@ namespace cler {
             auto& runner = std::get<I>(_runners);
             auto& sample = _cost_samples[I];
 
-            if (--sample.calls_until_sample != 0) {
+            if (!_cost_sampling_enabled || --sample.calls_until_sample != 0) {
                 return std::apply([&](auto*... outs) {
                     return runner.block->procedure(outs...);
                 }, runner.outputs);
@@ -552,11 +483,13 @@ namespace cler {
                 const double observed_ns = std::chrono::duration<double, std::nano>(t_after - t_before).count();
                 const double observed_items = static_cast<double>(items_after - items_before);
 
-                const double prev_ns = sample.ewma_ns_per_call.load(std::memory_order_relaxed);
-                sample.ewma_ns_per_call.store(prev_ns + (observed_ns - prev_ns) / 8.0, std::memory_order_relaxed);
+                const double prev_ns = bits_to_double(sample.ewma_ns_per_call_bits.load(std::memory_order_relaxed));
+                sample.ewma_ns_per_call_bits.store(double_to_bits(prev_ns + (observed_ns - prev_ns) / 8.0),
+                                                   std::memory_order_relaxed);
 
-                const double prev_items = sample.ewma_items_per_call.load(std::memory_order_relaxed);
-                sample.ewma_items_per_call.store(prev_items + (observed_items - prev_items) / 8.0, std::memory_order_relaxed);
+                const double prev_items = bits_to_double(sample.ewma_items_per_call_bits.load(std::memory_order_relaxed));
+                sample.ewma_items_per_call_bits.store(double_to_bits(prev_items + (observed_items - prev_items) / 8.0),
+                                                      std::memory_order_relaxed);
             }
 
             return result;
@@ -624,7 +557,6 @@ namespace cler {
                             if (config.collect_detailed_stats) {
                                 total_dead_time_s += dt.count();
                             }
-                            handle_adaptive_sleep(I, false);
                         }
                         batch_failed = true;
                         break;
@@ -638,18 +570,12 @@ namespace cler {
                 }
 
                 if (did_work_in_batch) {
-                    handle_adaptive_sleep(I, true);
                     TaskPolicy::backoff_reset(backoff_state);
                     if (_pinned_worker_count > 0) {
                         wake_parked_workers(kNoWorker);
                     }
                 } else if (batch_failed) {
-                    double pending_us = stats.current_adaptive_sleep_us.load();
-                    if (pending_us > 0.0) {
-                        TaskPolicy::sleep_us(static_cast<size_t>(pending_us));
-                    } else {
-                        TaskPolicy::backoff(backoff_state);
-                    }
+                    TaskPolicy::backoff(backoff_state);
                 }
             }
 
@@ -660,7 +586,6 @@ namespace cler {
                 stats.successful_procedures = successful;
                 stats.failed_procedures = failed;
                 stats.total_dead_time_s = total_dead_time_s;
-                stats.final_adaptive_sleep_us = config.adaptive_sleep ? stats.current_adaptive_sleep_us.load() : 0.0;
                 stats.total_runtime_s = total_runtime_s.count();
             }
         }
@@ -725,7 +650,7 @@ namespace cler {
 
 
         void run_thread_per_block(const FlowGraphConfig& config) {
-            _pinned_worker_count = 0;
+            reset_run_state();
             initialize_block_stats();
             launch_tasks_impl(std::make_index_sequence<_N>{}, config);
         }
@@ -753,20 +678,28 @@ namespace cler {
         };
 
         static constexpr size_t kNoWorker = (std::numeric_limits<size_t>::max)();
+        static constexpr uint32_t kNoRepartitionRequest = (std::numeric_limits<uint32_t>::max)();
         static constexpr double CROSS_EDGE_PENALTY_NS = 200.0;
         static constexpr size_t CALIBRATION_DEADLINE_CHECK_PASSES = 256;
         static constexpr double REPARTITION_IMPROVEMENT_RATIO = 0.8;
 
+        static constexpr uint64_t barrier_word(uint32_t generation, uint32_t arrived) {
+            return (static_cast<uint64_t>(generation) << 32) | arrived;
+        }
+        static constexpr uint32_t barrier_generation(uint64_t word) { return static_cast<uint32_t>(word >> 32); }
+        static constexpr uint32_t barrier_arrived(uint64_t word) { return static_cast<uint32_t>(word); }
+
         std::array<WorkerParkState, DEFAULT_MAX_WORKERS> _park_states;
         Partition _partition;
         std::atomic<uint32_t> _partition_epoch{0};
-        std::atomic<bool> _repartition_pending{false};
-        std::atomic<size_t> _repartition_arrived{0};
+        std::atomic<uint32_t> _repartition_request{kNoRepartitionRequest};
+        std::atomic<uint64_t> _repartition_barrier{0};
         std::atomic<size_t> _repartition_count{0};
         std::atomic<size_t> _affinity_failures{0};
         std::chrono::steady_clock::time_point _calibration_deadline;
         std::chrono::steady_clock::time_point _next_repartition_check;
         size_t _pinned_worker_count = 0;
+        bool _cost_sampling_enabled = false;
 
         // Initialize block stats with names (only if detailed stats enabled)
         void initialize_block_stats() {
@@ -912,8 +845,8 @@ namespace cler {
             for (size_t i = 0; i < count; ++i) {
                 const uint8_t id = order[i];
                 const auto& sample = _cost_samples[id];
-                const double ns = sample.ewma_ns_per_call.load(std::memory_order_relaxed);
-                const double items = sample.ewma_items_per_call.load(std::memory_order_relaxed);
+                const double ns = bits_to_double(sample.ewma_ns_per_call_bits.load(std::memory_order_relaxed));
+                const double items = bits_to_double(sample.ewma_items_per_call_bits.load(std::memory_order_relaxed));
                 weights[id] = ns > 0.0 ? ns / (std::max)(items, 1.0) : 0.0;
                 if (weights[id] > 0.0) sorted[sampled++] = weights[id];
             }
@@ -1082,8 +1015,33 @@ namespace cler {
             TaskPolicy::unpark(_partition_epoch);
         }
 
+        void reset_run_state() {
+            for (auto& stats : _stats) stats = BlockExecutionStats{};
+            for (auto& sample : _cost_samples) {
+                sample.calls_until_sample = COST_SAMPLE_PERIOD_CALLS;
+                sample.ewma_ns_per_call_bits.store(0, std::memory_order_relaxed);
+                sample.ewma_items_per_call_bits.store(0, std::memory_order_relaxed);
+            }
+            for (auto& state : _park_states) {
+                state.sleep_epoch.store(0, std::memory_order_relaxed);
+                state.parked.store(false, std::memory_order_relaxed);
+                state.park_events.store(0, std::memory_order_relaxed);
+            }
+            _partition = Partition{};
+            _partition_epoch.store(0, std::memory_order_relaxed);
+            _repartition_request.store(kNoRepartitionRequest, std::memory_order_relaxed);
+            _repartition_barrier.store(barrier_word(0, 0), std::memory_order_relaxed);
+            _repartition_count.store(0, std::memory_order_relaxed);
+            _affinity_failures.store(0, std::memory_order_relaxed);
+            _active_task_count = 0;
+            _pinned_worker_count = 0;
+            _cost_sampling_enabled = false;
+        }
+
         void run_pinned_islands(const FlowGraphConfig& config) {
             _stop_flag.store(false, std::memory_order_release);
+            reset_run_state();
+            _cost_sampling_enabled = true;
 
             initialize_block_stats();
 
@@ -1098,16 +1056,6 @@ namespace cler {
             size_t regular_count = 0;
             collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
 
-            for (auto& state : _park_states) {
-                state.sleep_epoch.store(0, std::memory_order_relaxed);
-                state.parked.store(false, std::memory_order_relaxed);
-                state.park_events.store(0, std::memory_order_relaxed);
-            }
-            _partition_epoch.store(0, std::memory_order_relaxed);
-            _repartition_pending.store(false, std::memory_order_relaxed);
-            _repartition_arrived.store(0, std::memory_order_relaxed);
-            _repartition_count.store(0, std::memory_order_relaxed);
-            _affinity_failures.store(0, std::memory_order_relaxed);
             _calibration_deadline = std::chrono::steady_clock::now() +
                                     std::chrono::milliseconds(config.calibration_ms);
             _next_repartition_check = _calibration_deadline;
@@ -1117,7 +1065,6 @@ namespace cler {
                 ? 0
                 : (std::max)(size_t{1}, (std::min)(config.num_workers, max_worker_count));
 
-            _active_task_count = 0;
             launch_may_block_tasks_impl(std::make_index_sequence<_N>{}, config);
 
             if (regular_count == 0) return;
@@ -1135,7 +1082,7 @@ namespace cler {
 
         void run_fixed_thread_pool(const FlowGraphConfig& config) {
             _stop_flag.store(false, std::memory_order_release);
-            _pinned_worker_count = 0;
+            reset_run_state();
 
             assert(config.num_workers >= 2 && "FixedThreadPool requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
 
@@ -1152,7 +1099,6 @@ namespace cler {
             size_t regular_count = 0;
             collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
 
-            _active_task_count = 0;
             launch_may_block_tasks_impl(std::make_index_sequence<_N>{}, config);
 
             if (regular_count == 0) return;
@@ -1188,6 +1134,7 @@ namespace cler {
             size_t zero_progress_passes = 0;
             size_t passes_since_deadline_check = 0;
             bool park_armed = false;
+            bool pass_follows_park = false;
             uint32_t observed_sleep_epoch = 0;
 
             while (!_stop_flag.load(std::memory_order_relaxed)) {
@@ -1211,21 +1158,27 @@ namespace cler {
                     did_work_in_pass = did_work_in_pass || block_did_work;
                 }
 
-                if (worker_id == 0 && !_repartition_pending.load(std::memory_order_relaxed) &&
-                    ++passes_since_deadline_check >= CALIBRATION_DEADLINE_CHECK_PASSES) {
+                const bool deadline_check_due =
+                    ++passes_since_deadline_check >= CALIBRATION_DEADLINE_CHECK_PASSES || pass_follows_park;
+                pass_follows_park = false;
+
+                if (worker_id == 0 && deadline_check_due &&
+                    _repartition_request.load(std::memory_order_relaxed) == kNoRepartitionRequest) {
                     passes_since_deadline_check = 0;
                     if (leader_should_repartition(config)) {
-                        _repartition_pending.store(true, std::memory_order_release);
+                        _repartition_request.store(_partition_epoch.load(std::memory_order_relaxed),
+                                                   std::memory_order_release);
                         wake_parked_workers(worker_id);
                     }
                 }
 
-                if (_repartition_pending.load(std::memory_order_relaxed)) {
+                const uint32_t requested_generation = _repartition_request.load(std::memory_order_relaxed);
+                if (requested_generation != kNoRepartitionRequest) {
                     if (park_armed) {
                         park_armed = false;
                         park_state.parked.store(false, std::memory_order_relaxed);
                     }
-                    repartition_barrier(worker_id);
+                    repartition_barrier(worker_id, requested_generation);
                     zero_progress_passes = 0;
                     TaskPolicy::backoff_reset(backoff_state);
                     continue;
@@ -1254,6 +1207,7 @@ namespace cler {
                     park_state.park_events.fetch_add(1, std::memory_order_relaxed);
                     TaskPolicy::park(park_state.sleep_epoch, observed_sleep_epoch);
                     park_armed = false;
+                    pass_follows_park = true;
                     park_state.parked.store(false, std::memory_order_relaxed);
                 }
             }
@@ -1266,36 +1220,50 @@ namespace cler {
                     if (_worker_queues.is_block_owner(worker_id, i)) {
                         std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
                         _stats[i].total_runtime_s = total_runtime.count();
-                        _stats[i].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[i].current_adaptive_sleep_us.load() : 0.0;
                     }
                 }
             }
         }
 
-        void repartition_barrier(size_t worker_id) {
-            const uint32_t epoch_before = _partition_epoch.load(std::memory_order_acquire);
-            _repartition_arrived.fetch_add(1, std::memory_order_acq_rel);
+        bool arrive_at_repartition_barrier(uint32_t generation) {
+            uint64_t word = _repartition_barrier.load(std::memory_order_acquire);
+            while (barrier_generation(word) == generation) {
+                if (_repartition_barrier.compare_exchange_weak(word, word + 1,
+                                                               std::memory_order_acq_rel,
+                                                               std::memory_order_acquire)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        void repartition_barrier(size_t worker_id, uint32_t generation) {
+            if (!arrive_at_repartition_barrier(generation)) return;
 
             if (worker_id != 0) {
-                while (_partition_epoch.load(std::memory_order_acquire) == epoch_before &&
+                while (_partition_epoch.load(std::memory_order_acquire) == generation &&
                        !_stop_flag.load(std::memory_order_relaxed)) {
-                    TaskPolicy::park(_partition_epoch, epoch_before);
+                    TaskPolicy::park(_partition_epoch, generation);
                 }
                 return;
             }
 
-            while (_repartition_arrived.load(std::memory_order_acquire) < _pinned_worker_count &&
+            while (barrier_arrived(_repartition_barrier.load(std::memory_order_acquire)) < _pinned_worker_count &&
                    !_stop_flag.load(std::memory_order_relaxed)) {
                 wake_parked_workers(worker_id);
                 TaskPolicy::yield();
             }
 
-            build_partition(_pinned_worker_count, true, _partition);
-            apply_partition();
-            _next_repartition_check = std::chrono::steady_clock::now() +
-                                      std::chrono::milliseconds(_config.repartition_check_ms);
-            _repartition_pending.store(false, std::memory_order_relaxed);
-            _repartition_count.fetch_add(1, std::memory_order_release);
+            if (!_stop_flag.load(std::memory_order_relaxed)) {
+                build_partition(_pinned_worker_count, true, _partition);
+                apply_partition();
+                _next_repartition_check = std::chrono::steady_clock::now() +
+                                          std::chrono::milliseconds(_config.repartition_check_ms);
+                _repartition_count.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            _repartition_barrier.store(barrier_word(generation + 1, 0), std::memory_order_release);
+            _repartition_request.store(kNoRepartitionRequest, std::memory_order_release);
             _partition_epoch.fetch_add(1, std::memory_order_release);
             TaskPolicy::unpark(_partition_epoch);
         }
@@ -1332,12 +1300,7 @@ namespace cler {
                 if (did_work_in_pass) {
                     TaskPolicy::backoff_reset(backoff_state);
                 } else {
-                    double pending_us = min_pending_backoff_us_for_worker(worker_id);
-                    if (pending_us > 0.0) {
-                        TaskPolicy::sleep_us(static_cast<size_t>(pending_us));
-                    } else {
-                        TaskPolicy::backoff(backoff_state);
-                    }
+                    TaskPolicy::backoff(backoff_state);
                 }
             }
 
@@ -1347,26 +1310,12 @@ namespace cler {
                     if (_worker_queues.is_block_owner(worker_id, i)) {
                         std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
                         _stats[i].total_runtime_s = total_runtime.count();
-                        _stats[i].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[i].current_adaptive_sleep_us.load() : 0.0;
                     }
                 }
             }
         }
-        
-    private:  // Return to private section for internal implementation details
-        double min_pending_backoff_us_for_worker(size_t worker_id) const {
-            double min_us = 0.0;
-            for (size_t i = 0; i < _N; ++i) {
-                if (!_worker_queues.is_block_owner(worker_id, i)) continue;
-                double pending = _stats[i].current_adaptive_sleep_us.load();
-                if (pending <= 0.0) continue;
-                if (min_us <= 0.0 || pending < min_us) {
-                    min_us = pending;
-                }
-            }
-            return min_us;
-        }
 
+    private:  // Return to private section for internal implementation details
         template<size_t I>
         bool execute_block_at_index_helper(const FlowGraphConfig& config) {
             static_assert(I < _N, "Block index out of bounds");
@@ -1392,10 +1341,6 @@ namespace cler {
                         break;
                     }
 
-                    if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace ||
-                        err == Error::NotEnoughSpaceOrSamples) {
-                        handle_adaptive_sleep(I, false);
-                    }
                     break;
                 } else {
                     if (config.collect_detailed_stats) {
@@ -1403,10 +1348,6 @@ namespace cler {
                     }
                     did_work = true;
                 }
-            }
-
-            if (did_work) {
-                handle_adaptive_sleep(I, true);
             }
 
             return did_work;

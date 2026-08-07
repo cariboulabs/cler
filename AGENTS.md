@@ -267,7 +267,6 @@ int main() {
     
     // Configure and run
     cler::FlowGraphConfig config;
-    // config.adaptive_sleep = true;  // Optional: for sparse/intermittent data only
     flowgraph.run(config);
     
     // GUI loop...
@@ -338,16 +337,13 @@ config.num_workers = 4;  // Number of worker threads (minimum 2 for FixedThreadP
 // config.calibration_ms = 500;         // measure block costs, then repartition once
 // config.repartition_check_ms = 5000;  // periodic drift check thereafter (0 = off)
 // config.cpu_id_offset = 0;            // first core to pin workers to
+// PinnedIslands ALWAYS pins its workers (config.pin_workers is ignored by it).
 // Blocks whose procedure() can block (hardware refill, blocking I/O) declare
 // `static constexpr bool may_block = true;` and automatically get a dedicated
 // thread instead of sharing a pool/island worker.
 
-// Adaptive sleep configuration (works with all scheduler types)
-// WARNING: Can significantly reduce throughput - only use for sparse/intermittent data
-config.adaptive_sleep = true;  // CAUTION: reduces CPU usage but may impact throughput
-config.adaptive_sleep_multiplier = 1.5;       // How aggressively to increase sleep time
-config.adaptive_sleep_max_us = 5000.0;        // Maximum sleep time in microseconds
-config.adaptive_sleep_fail_threshold = 10;    // Start sleeping after N consecutive fails
+// Optional core pinning for FixedThreadPool (PinnedIslands does not consult this)
+config.pin_workers = false;
 
 flowgraph.run(config);
 ```
@@ -744,6 +740,17 @@ Cler provides three scheduler types to optimize for different workload character
 - **Pros**: Lower thread overhead, better CPU cache utilization
 - **Cons**: Can suffer from work imbalance
 - **Requires**: `config.num_workers` (minimum 2)
+- **Pinning**: optional, via `config.pin_workers = true`
+
+#### PinnedIslands
+- **Best for**: Core-constrained targets and imbalanced chains (the Pluto/ARM case)
+- **Characteristics**: blocks split into contiguous topo-order islands, one pinned worker per island; costs measured during `calibration_ms`, then one repartition, then a drift check every `repartition_check_ms` (0 disables)
+- **Pinning**: **always on** — PinnedIslands pins every worker to `cpu_id_offset + worker_id` by design and does not consult `config.pin_workers`. Affinity failures are counted (`affinity_failure_count()`), never fatal. If you want optional pinning, use FixedThreadPool with `pin_workers`.
+- **Telemetry**: per-block cost sampling (`block_costs()`) is only collected under this scheduler; ThreadPerBlock/FixedThreadPool skip it and report zeros
+- **Idle**: workers escalate through the backoff ladder and then park on a futex with a 1 ms timeout
+
+#### Observability accessors and when they are valid
+`partition()`, `stats()`, `block_costs()`, `repartition_count()`, `total_park_events()` and `affinity_failure_count()` are safe to read after `stop()` has joined the workers. During a run they are best-effort: `block_costs()` and the stats counters are approximate (updated by workers without synchronization to the reader), and `partition()` is unsynchronized — a drift repartition can rewrite it while you read. Read them after `stop()` when you need exact values. All of them are reset at the start of every `run()`.
 
 ### Execution Statistics and Block Performance
 ```cpp
@@ -753,7 +760,6 @@ cler::FlowGraphConfig config;
 // Example 1: Uniform workload (e.g., simple signal processing chain)
 config.scheduler = cler::SchedulerType::FixedThreadPool;
 config.num_workers = 4;
-// config.adaptive_sleep = true;  // Optional: only if data is sparse
 
 flowgraph.run(config);
 
@@ -766,7 +772,6 @@ cler::print_flowgraph_execution_report(flowgraph);
 // - CPU utilization percentage
 // - Average execution time per procedure
 // - Throughput in samples/second
-// - Adaptive sleep final value (if enabled)
 ```
 
 ### Benchmarking
@@ -812,12 +817,10 @@ out->commit_write(to_process);
 
 #### Simple Linear Chain (Source → A → B → C → Sink)
 - **Scheduler**: ThreadPerBlock (simple, predictable)
-- **Adaptive Sleep**: Yes for sparse data, No for continuous streams
 - **Expected**: Good performance, easy debugging
 
 #### Fanout with Uniform Processing (Source → Fanout → [N similar paths] → Sinks)
 - **Scheduler**: FixedThreadPool with workers = min(N/2, CPU cores)
-- **Adaptive Sleep**: Optional based on data rate
 - **Expected**: Better than ThreadPerBlock due to reduced thread overhead
 
 #### Fanout with Imbalanced Processing (different complexity per path)
@@ -831,10 +834,9 @@ out->commit_write(to_process);
 - **Rationale**: ThreadPerBlock creates too many threads
 
 #### Sparse/Intermittent Data (sensors, network packets)
-- **Scheduler**: Any (ThreadPerBlock is fine for simplicity)
-- **Adaptive Sleep**: REQUIRED - aggressive settings
-- **Settings**: multiplier=2.0, max_us=10000, fail_threshold=5
-- **Expected**: >90% reduction in CPU usage during idle
+- **Scheduler**: PinnedIslands (idle workers park on a futex instead of spinning)
+- **Tuning**: `config.park_after_zero_passes` (default 4) trades wake latency for idle CPU
+- **Expected**: near-zero CPU while the graph has nothing to do
 
 ## 12. Development Guidelines & Code Style
 
@@ -934,7 +936,7 @@ enum class Error : int {
 4. Avoid single-sample `push`/`pop` in hot paths
 5. Process multiple samples per `procedure()` call
 6. Use compile-time channel sizes when possible
-7. Enable adaptive sleep for better CPU usage
+7. Use PinnedIslands when idle CPU matters - its workers park instead of spinning
 
 ### Common Pitfalls
 1. **Allocating memory in `procedure()`** - Use member variables instead (hot path!)

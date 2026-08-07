@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "cler.hpp"
+#include "cler_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/math/add.hpp"
 #include "desktop_blocks/math/gain.hpp"
@@ -25,14 +26,13 @@ struct DummySink : public cler::BlockBase {
     }
 };
 
-struct RegisteredInputBlock : public cler::BlockBase {
+struct HeapChannelBlock : public cler::BlockBase {
     cler::Channel<float>* in;
 
-    RegisteredInputBlock(std::string name, size_t capacity) : BlockBase(std::move(name)) {
+    HeapChannelBlock(std::string name, size_t capacity) : BlockBase(std::move(name)) {
         in = new cler::Channel<float>(capacity);
-        register_input(*in);
     }
-    ~RegisteredInputBlock() { delete in; }
+    ~HeapChannelBlock() { delete in; }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
         return cler::Error::NotEnoughSamples;
@@ -74,21 +74,27 @@ TEST(EdgeDerivationTest, ResolvesContainedOutputs) {
     EXPECT_EQ(edges[3].consumer, SINK);
 }
 
-TEST(EdgeDerivationTest, ResolvesRegisteredHeapChannel) {
+TEST(EdgeDerivationTest, HeapChannelIsUnresolvedAndPartitionsContiguously) {
     static constexpr size_t kBufferSize = 64;
 
     DummySource source("Source");
-    RegisteredInputBlock sink("Sink", kBufferSize);
+    HeapChannelBlock sink("Sink", kBufferSize);
 
     auto fg = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source, sink.in),
         cler::BlockRunner(&sink)
     );
 
-    ASSERT_EQ(fg.unresolved_edge_count(), 0u);
-    ASSERT_EQ(fg.edge_count(), 1u);
-    EXPECT_EQ(fg.edges()[0].producer, 0u);
-    EXPECT_EQ(fg.edges()[0].consumer, 1u);
+    EXPECT_EQ(fg.edge_count(), 0u);
+    ASSERT_EQ(fg.unresolved_edge_count(), 1u);
+    EXPECT_EQ(fg.unresolved_edges()[0].address, static_cast<const void*>(sink.in));
+
+    auto config = cler::flowgraph_config::pinned_islands(2);
+    config.calibration_ms = 30;
+    fg.run_for(std::chrono::milliseconds(120), config);
+
+    EXPECT_EQ(fg.partition().block_count, 2u);
+    EXPECT_EQ(fg.partition().island_count, 2u);
 }
 
 TEST(EdgeDerivationTest, UnresolvedOutputIsReportedNotEdged) {
