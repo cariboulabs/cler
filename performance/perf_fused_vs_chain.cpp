@@ -2,6 +2,7 @@
 #include "cler_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/math/gain.hpp"
+#include "desktop_blocks/kernels/kernels.hpp"
 #include "desktop_blocks/utils/fused.hpp"
 #include <iostream>
 #include <cstring>
@@ -98,11 +99,8 @@ TestResult run_fused_test(std::chrono::seconds duration) {
     std::cout << "Running FUSED BLOCK test..." << std::flush;
 
     SourceBlock source("Source");
-    GainBlock<float> gain0("Gain0", 1.5f, BUFFER_SIZE);
-    GainBlock<float> gain1("Gain1", 0.8f, BUFFER_SIZE);
-    GainBlock<float> gain2("Gain2", 1.2f, BUFFER_SIZE);
-    FusedBlock<GainBlock<float>, GainBlock<float>, GainBlock<float>> fused(
-        "FusedGains", &gain0, &gain1, &gain2, BUFFER_SIZE);
+    FusedBlock<GainKernel<float>, GainKernel<float>, GainKernel<float>> fused(
+        "FusedGains", GainKernel<float>{1.5f}, GainKernel<float>{0.8f}, GainKernel<float>{1.2f}, BUFFER_SIZE);
     SinkBlock sink("Sink", BUFFER_SIZE);
 
     auto fg = cler::make_desktop_flowgraph(

@@ -2,6 +2,7 @@
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/math/gain.hpp"
+#include "desktop_blocks/kernels/kernels.hpp"
 #include "desktop_blocks/utils/fused.hpp"
 #include <random>
 #include <vector>
@@ -86,9 +87,8 @@ TEST(FusedBlockTest, MatchesSequentialGainChain) {
     }
     fg_chain.stop();
 
-    GainBlock<float> fused_gain0("FusedGain0", 2.0f, kBufferSize);
-    GainBlock<float> fused_gain1("FusedGain1", 0.5f, kBufferSize);
-    FusedBlock<GainBlock<float>, GainBlock<float>> fused("Fused", &fused_gain0, &fused_gain1, kBufferSize);
+    FusedBlock<GainKernel<float>, GainKernel<float>> fused(
+        "Fused", GainKernel<float>{2.0f}, GainKernel<float>{0.5f}, kBufferSize);
 
     VectorSource source_fused("SourceFused", samples);
     VectorSink sink_fused("SinkFused", kBufferSize);
@@ -115,11 +115,10 @@ TEST(FusedBlockTest, SingleBlockChainMatchesDirectKernel) {
     static constexpr size_t kBufferSize = 4096;
     auto samples = make_random_buffer(500);
 
-    GainBlock<float> underlying("Underlying", 3.0f, kBufferSize);
-    FusedBlock<GainBlock<float>> fused("FusedSingle", &underlying, kBufferSize);
+    FusedBlock<GainKernel<float>> fused("FusedSingle", GainKernel<float>{3.0f}, kBufferSize);
 
-    static_assert(std::is_same_v<FusedBlock<GainBlock<float>>::FirstIn, float>);
-    static_assert(std::is_same_v<FusedBlock<GainBlock<float>>::LastOut, float>);
+    static_assert(std::is_same_v<FusedBlock<GainKernel<float>>::FirstIn, float>);
+    static_assert(std::is_same_v<FusedBlock<GainKernel<float>>::LastOut, float>);
 
     VectorSource source("Source", samples);
     VectorSink sink("Sink", kBufferSize);

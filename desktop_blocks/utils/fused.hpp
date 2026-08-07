@@ -20,48 +20,48 @@ struct fused_member_fn_traits<R (C::*)(A) const> {
     using Out = R;
 };
 
-template<typename Block, typename = void>
+template<typename Kernel, typename = void>
 struct fused_kernel_traits {
-    static_assert(!std::is_same_v<Block, Block>,
-        "FusedBlock: Block must expose a per-sample kernel `Out processOne(In)`");
+    static_assert(!std::is_same_v<Kernel, Kernel>,
+        "FusedBlock: Kernel must expose `Out operator()(In)`");
 };
 
-template<typename Block>
-struct fused_kernel_traits<Block, std::void_t<decltype(&Block::processOne)>>
-    : fused_member_fn_traits<decltype(&Block::processOne)> {};
+template<typename Kernel>
+struct fused_kernel_traits<Kernel, std::void_t<decltype(&Kernel::operator())>>
+    : fused_member_fn_traits<decltype(&Kernel::operator())> {};
 
-template<typename... Blocks>
+template<typename... Kernels>
 struct fused_chain;
 
-template<typename Block>
-struct fused_chain<Block> {
-    using In = typename fused_kernel_traits<Block>::In;
-    using Out = typename fused_kernel_traits<Block>::Out;
+template<typename Kernel>
+struct fused_chain<Kernel> {
+    using In = typename fused_kernel_traits<Kernel>::In;
+    using Out = typename fused_kernel_traits<Kernel>::Out;
 };
 
-template<typename Block0, typename Block1, typename... Rest>
-struct fused_chain<Block0, Block1, Rest...> {
-    using Kernel0 = fused_kernel_traits<Block0>;
-    using Next = fused_chain<Block1, Rest...>;
-    static_assert(std::is_same_v<typename Kernel0::Out, typename Next::In>,
-        "FusedBlock: adjacent blocks in chain have mismatched processOne Out/In types");
-    using In = typename Kernel0::In;
+template<typename Kernel0, typename Kernel1, typename... Rest>
+struct fused_chain<Kernel0, Kernel1, Rest...> {
+    using Head = fused_kernel_traits<Kernel0>;
+    using Next = fused_chain<Kernel1, Rest...>;
+    static_assert(std::is_same_v<typename Head::Out, typename Next::In>,
+        "FusedBlock: adjacent kernels in chain have mismatched operator() Out/In types");
+    using In = typename Head::In;
     using Out = typename Next::Out;
 };
 
-template<typename... Blocks>
+template<typename... Kernels>
 struct FusedBlock : public cler::BlockBase {
-    static_assert(sizeof...(Blocks) >= 1, "FusedBlock requires at least one block");
+    static_assert(sizeof...(Kernels) >= 1, "FusedBlock requires at least one kernel");
 
-    using FirstIn = typename fused_chain<Blocks...>::In;
-    using LastOut = typename fused_chain<Blocks...>::Out;
+    using FirstIn = typename fused_chain<Kernels...>::In;
+    using LastOut = typename fused_chain<Kernels...>::Out;
 
     cler::Channel<FirstIn> in;
 
-    FusedBlock(const char* name, Blocks*... blocks, const size_t buffer_size = 0)
+    FusedBlock(const char* name, Kernels... kernels, const size_t buffer_size = 0)
         : cler::BlockBase(name),
           in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(FirstIn) : buffer_size),
-          _blocks(blocks...)
+          _kernels(std::move(kernels)...)
     {
         if (buffer_size > 0 && buffer_size * sizeof(FirstIn) < cler::DOUBLY_MAPPED_MIN_SIZE) {
             cler::panic("Buffer size too small for doubly-mapped buffers");
@@ -92,14 +92,14 @@ struct FusedBlock : public cler::BlockBase {
     }
 
 private:
-    std::tuple<Blocks*...> _blocks;
+    std::tuple<Kernels...> _kernels;
 
     template<size_t I, typename Val>
     auto apply_chain(Val v) {
-        if constexpr (I == sizeof...(Blocks)) {
+        if constexpr (I == sizeof...(Kernels)) {
             return v;
         } else {
-            return apply_chain<I + 1>(std::get<I>(_blocks)->processOne(v));
+            return apply_chain<I + 1>(std::get<I>(_kernels)(v));
         }
     }
 };
