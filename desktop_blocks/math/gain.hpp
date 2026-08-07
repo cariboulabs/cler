@@ -39,6 +39,8 @@ struct GainBlock : public cler::BlockBase {
         return cler::Empty{};
     }
 
+    T processOne(T x) { return x * _gain; }
+
     private:
         T _gain;
         T* _buffer;

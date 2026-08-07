@@ -47,3 +47,15 @@ target_link_libraries(pinned_islands_test
 )
 
 add_test(NAME pinned_islands_test COMMAND pinned_islands_test)
+
+add_executable(fused_block_test
+    test_fused_block.cpp
+)
+
+target_link_libraries(fused_block_test
+    gtest_main
+    cler::desktop_blocks
+    Threads::Threads
+)
+
+add_test(NAME fused_block_test COMMAND fused_block_test)

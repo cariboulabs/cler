@@ -57,6 +57,16 @@ struct NoiseAWGNBlock : public cler::BlockBase {
         return cler::Empty{};
     }
 
+    T processOne(T x) {
+        if constexpr (std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>) {
+            auto n_re = _normal_dist(_rng);
+            auto n_im = _normal_dist(_rng);
+            return x + T{n_re, n_im};
+        } else {
+            return x + _normal_dist(_rng);
+        }
+    }
+
 private:
     scalar_type _noise_stddev;
 
