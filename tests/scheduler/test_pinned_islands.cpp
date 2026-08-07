@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <thread>
 #include "cler.hpp"
 #include "cler_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
@@ -26,13 +27,16 @@ template<size_t WorkIterations>
 struct WeightedStage : public cler::BlockBase {
     cler::Channel<float> in;
 
-    WeightedStage(std::string name, size_t capacity) : BlockBase(std::move(name)), in(capacity) {}
+    WeightedStage(std::string name, size_t capacity, const std::atomic<bool>* heavy_gate = nullptr)
+        : BlockBase(std::move(name)), in(capacity), _heavy_gate(heavy_gate) {}
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
         const size_t n = (std::min)((std::min)(in.size(), out->space()), CHUNK);
         if (n == 0) return cler::Error::NotEnoughSpaceOrSamples;
         in.readN(_buffer, n);
-        for (size_t w = 0; w < WorkIterations; ++w) {
+        const size_t iterations =
+            (_heavy_gate && !_heavy_gate->load(std::memory_order_relaxed)) ? 1 : WorkIterations;
+        for (size_t w = 0; w < iterations; ++w) {
             for (size_t i = 0; i < n; ++i) {
                 _accumulator += _buffer[i] * 1.000001f;
             }
@@ -44,6 +48,7 @@ struct WeightedStage : public cler::BlockBase {
     volatile float _accumulator = 0.0f;
 
 private:
+    const std::atomic<bool>* _heavy_gate;
     float _buffer[CHUNK];
 };
 
@@ -93,6 +98,55 @@ private:
     std::chrono::steady_clock::time_point _next_release;
     float _buffer[CHUNK];
 };
+
+struct CostShiftOutcome {
+    size_t repartitions;
+    size_t island_of_upstream_heavy;
+    size_t island_of_downstream_heavy;
+    size_t received;
+};
+
+CostShiftOutcome run_cost_shift(size_t repartition_check_ms) {
+    static constexpr size_t CAPACITY = 1 << 14;
+    static constexpr uint8_t UPSTREAM_HEAVY = 3;
+    static constexpr uint8_t DOWNSTREAM_HEAVY = 4;
+
+    std::atomic<bool> early_heavy{true};
+    std::atomic<bool> late_heavy{false};
+
+    SteadySource source("Source");
+    WeightedStage<400> early0("Early0", CAPACITY, &early_heavy);
+    WeightedStage<400> early1("Early1", CAPACITY, &early_heavy);
+    WeightedStage<400> late0("Late0", CAPACITY, &late_heavy);
+    WeightedStage<400> late1("Late1", CAPACITY, &late_heavy);
+    CountingSink sink("Sink", CAPACITY);
+
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, &early0.in),
+        cler::BlockRunner(&early0, &early1.in),
+        cler::BlockRunner(&early1, &late0.in),
+        cler::BlockRunner(&late0, &late1.in),
+        cler::BlockRunner(&late1, &sink.in),
+        cler::BlockRunner(&sink)
+    );
+
+    auto config = cler::flowgraph_config::pinned_islands(2);
+    config.calibration_ms = 150;
+    config.repartition_check_ms = repartition_check_ms;
+
+    fg.run(config);
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    early_heavy.store(false);
+    late_heavy.store(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    fg.stop();
+
+    const auto& partition = fg.partition();
+    return CostShiftOutcome{fg.repartition_count(),
+                            partition.island_of(UPSTREAM_HEAVY),
+                            partition.island_of(DOWNSTREAM_HEAVY),
+                            sink.received.load()};
+}
 
 } // namespace
 
@@ -261,6 +315,48 @@ TEST(PinnedIslandsTest, DegenerateWorkerCountsStayBounded) {
         EXPECT_EQ(fg.partition().island_count, (std::min)(workers, size_t{3}));
         EXPECT_EQ(fg.partition().block_count, 3u);
     }
+}
+
+TEST(PinnedIslandsTest, PeriodicCheckFollowsCostShift) {
+    const CostShiftOutcome outcome = run_cost_shift(100);
+
+    EXPECT_GT(outcome.received, 0u);
+    EXPECT_GE(outcome.repartitions, 2u);
+    EXPECT_EQ(outcome.island_of_upstream_heavy, 0u);
+    EXPECT_EQ(outcome.island_of_downstream_heavy, 1u);
+}
+
+TEST(PinnedIslandsTest, PeriodicCheckDisabledIgnoresCostShift) {
+    const CostShiftOutcome outcome = run_cost_shift(0);
+
+    EXPECT_GT(outcome.received, 0u);
+    EXPECT_EQ(outcome.repartitions, 1u);
+    EXPECT_EQ(outcome.island_of_upstream_heavy, outcome.island_of_downstream_heavy);
+}
+
+TEST(PinnedIslandsTest, HysteresisKeepsSteadyChainPartitioned) {
+    static constexpr size_t CAPACITY = 1 << 14;
+
+    SteadySource source("Source");
+    WeightedStage<8> stage0("Stage0", CAPACITY);
+    WeightedStage<8> stage1("Stage1", CAPACITY);
+    CountingSink sink("Sink", CAPACITY);
+
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, &stage0.in),
+        cler::BlockRunner(&stage0, &stage1.in),
+        cler::BlockRunner(&stage1, &sink.in),
+        cler::BlockRunner(&sink)
+    );
+
+    auto config = cler::flowgraph_config::pinned_islands(2);
+    config.calibration_ms = 200;
+    config.repartition_check_ms = 100;
+
+    fg.run_for(std::chrono::seconds(2), config);
+
+    EXPECT_GT(sink.received.load(), 0u);
+    EXPECT_EQ(fg.repartition_count(), 1u);
 }
 
 TEST(PinnedIslandsTest, MatchesFixedThreadPoolOnSteadyChain) {

@@ -263,6 +263,7 @@ namespace cler {
         bool pin_workers = false;
 
         size_t calibration_ms = 500;
+        size_t repartition_check_ms = 5000;
         size_t cpu_id_offset = 0;
         size_t park_after_zero_passes = 4;
     };
@@ -512,10 +513,10 @@ namespace cler {
             }
         }
 
-        static constexpr size_t COST_SAMPLE_PERIOD_MASK = 63;
+        static constexpr size_t COST_SAMPLE_PERIOD_CALLS = 61;
 
         struct alignas(platform::cache_line_size) SchedulerCostSample {
-            size_t call_counter = 0;
+            size_t calls_until_sample = COST_SAMPLE_PERIOD_CALLS;
             std::atomic<double> ewma_ns_per_call{0.0};
             std::atomic<double> ewma_items_per_call{0.0};
         };
@@ -532,11 +533,12 @@ namespace cler {
             auto& runner = std::get<I>(_runners);
             auto& sample = _cost_samples[I];
 
-            if ((++sample.call_counter & COST_SAMPLE_PERIOD_MASK) != 0) {
+            if (--sample.calls_until_sample != 0) {
                 return std::apply([&](auto*... outs) {
                     return runner.block->procedure(outs...);
                 }, runner.outputs);
             }
+            sample.calls_until_sample = COST_SAMPLE_PERIOD_CALLS;
 
             const auto items_before = sum_output_cumulative_write_count(runner.outputs);
             const auto t_before = std::chrono::steady_clock::now();
@@ -753,6 +755,7 @@ namespace cler {
         static constexpr size_t kNoWorker = (std::numeric_limits<size_t>::max)();
         static constexpr double CROSS_EDGE_PENALTY_NS = 200.0;
         static constexpr size_t CALIBRATION_DEADLINE_CHECK_PASSES = 256;
+        static constexpr double REPARTITION_IMPROVEMENT_RATIO = 0.8;
 
         std::array<WorkerParkState, DEFAULT_MAX_WORKERS> _park_states;
         Partition _partition;
@@ -762,6 +765,7 @@ namespace cler {
         std::atomic<size_t> _repartition_count{0};
         std::atomic<size_t> _affinity_failures{0};
         std::chrono::steady_clock::time_point _calibration_deadline;
+        std::chrono::steady_clock::time_point _next_repartition_check;
         size_t _pinned_worker_count = 0;
 
         // Initialize block stats with names (only if detailed stats enabled)
@@ -906,11 +910,12 @@ namespace cler {
             size_t sampled = 0;
 
             for (size_t i = 0; i < count; ++i) {
-                const auto& sample = _cost_samples[order[i]];
+                const uint8_t id = order[i];
+                const auto& sample = _cost_samples[id];
                 const double ns = sample.ewma_ns_per_call.load(std::memory_order_relaxed);
                 const double items = sample.ewma_items_per_call.load(std::memory_order_relaxed);
-                weights[i] = ns > 0.0 ? ns / (std::max)(items, 1.0) : 0.0;
-                if (weights[i] > 0.0) sorted[sampled++] = weights[i];
+                weights[id] = ns > 0.0 ? ns / (std::max)(items, 1.0) : 0.0;
+                if (weights[id] > 0.0) sorted[sampled++] = weights[id];
             }
 
             double median = 1.0;
@@ -919,8 +924,20 @@ namespace cler {
                 median = sorted[sampled / 2];
             }
             for (size_t i = 0; i < count; ++i) {
-                if (weights[i] <= 0.0) weights[i] = median;
+                if (weights[order[i]] <= 0.0) weights[order[i]] = median;
             }
+        }
+
+        double max_island_weight(const Partition& partition, const std::array<double, _N>& weights) const {
+            double worst = 0.0;
+            for (size_t w = 0; w < partition.island_count; ++w) {
+                double island = 0.0;
+                for (uint16_t k = partition.island_begin[w]; k < partition.island_begin[w + 1]; ++k) {
+                    island += weights[partition.block_ids[k]];
+                }
+                worst = (std::max)(worst, island);
+            }
+            return worst;
         }
 
         void count_cut_crossings(const std::array<uint8_t, _N>& order, size_t count,
@@ -945,7 +962,7 @@ namespace cler {
             }
         }
 
-        void build_partition(size_t worker_count, bool use_costs) {
+        void build_partition(size_t worker_count, bool use_costs, Partition& out) {
             std::array<uint8_t, _N> regular_ids{};
             size_t regular_count = 0;
             collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
@@ -954,17 +971,17 @@ namespace cler {
             topo_sort_blocks(regular_ids.data(), regular_count, order);
 
             const size_t islands = (std::max)(size_t{1}, (std::min)(worker_count, regular_count));
-            _partition.block_ids = order;
-            _partition.block_count = static_cast<uint16_t>(regular_count);
-            _partition.island_count = static_cast<uint16_t>(islands);
+            out.block_ids = order;
+            out.block_count = static_cast<uint16_t>(regular_count);
+            out.island_count = static_cast<uint16_t>(islands);
 
             if (!use_costs) {
                 size_t cursor = 0;
                 for (size_t w = 0; w < islands; ++w) {
-                    _partition.island_begin[w] = static_cast<uint16_t>(cursor);
+                    out.island_begin[w] = static_cast<uint16_t>(cursor);
                     cursor += regular_count / islands + (w < regular_count % islands ? 1 : 0);
                 }
-                _partition.island_begin[islands] = static_cast<uint16_t>(regular_count);
+                out.island_begin[islands] = static_cast<uint16_t>(regular_count);
                 return;
             }
 
@@ -972,7 +989,7 @@ namespace cler {
             collect_block_weights(order, regular_count, weights);
 
             std::array<double, _N + 1> prefix{};
-            for (size_t i = 0; i < regular_count; ++i) prefix[i + 1] = prefix[i] + weights[i];
+            for (size_t i = 0; i < regular_count; ++i) prefix[i + 1] = prefix[i] + weights[order[i]];
 
             std::array<uint16_t, _N> crossings{};
             count_cut_crossings(order, regular_count, crossings);
@@ -1011,12 +1028,31 @@ namespace cler {
             }
 
             size_t end = regular_count;
-            _partition.island_begin[islands] = static_cast<uint16_t>(regular_count);
+            out.island_begin[islands] = static_cast<uint16_t>(regular_count);
             for (size_t k = islands; k >= 1; --k) {
                 const uint16_t start = choice[k][end];
-                _partition.island_begin[k - 1] = start;
+                out.island_begin[k - 1] = start;
                 end = start;
             }
+        }
+
+        bool leader_should_repartition(const FlowGraphConfig& config) {
+            const bool calibrated = _repartition_count.load(std::memory_order_relaxed) != 0;
+            if (calibrated && config.repartition_check_ms == 0) return false;
+
+            const auto now = std::chrono::steady_clock::now();
+            if (!calibrated) return now >= _calibration_deadline;
+            if (now < _next_repartition_check) return false;
+            _next_repartition_check = now + std::chrono::milliseconds(config.repartition_check_ms);
+
+            std::array<double, _N> weights{};
+            collect_block_weights(_partition.block_ids, _partition.block_count, weights);
+
+            Partition candidate;
+            build_partition(_pinned_worker_count, true, candidate);
+
+            return max_island_weight(candidate, weights) <
+                   REPARTITION_IMPROVEMENT_RATIO * max_island_weight(_partition, weights);
         }
 
         void apply_partition() {
@@ -1074,6 +1110,7 @@ namespace cler {
             _affinity_failures.store(0, std::memory_order_relaxed);
             _calibration_deadline = std::chrono::steady_clock::now() +
                                     std::chrono::milliseconds(config.calibration_ms);
+            _next_repartition_check = _calibration_deadline;
 
             const size_t max_worker_count = (std::min)(DEFAULT_MAX_WORKERS, regular_count);
             _pinned_worker_count = regular_count == 0
@@ -1085,7 +1122,7 @@ namespace cler {
 
             if (regular_count == 0) return;
 
-            build_partition(_pinned_worker_count, false);
+            build_partition(_pinned_worker_count, false, _partition);
             apply_partition();
 
             for (size_t worker_id = 0; worker_id < _pinned_worker_count; ++worker_id) {
@@ -1175,10 +1212,9 @@ namespace cler {
                 }
 
                 if (worker_id == 0 && !_repartition_pending.load(std::memory_order_relaxed) &&
-                    _repartition_count.load(std::memory_order_relaxed) == 0 &&
                     ++passes_since_deadline_check >= CALIBRATION_DEADLINE_CHECK_PASSES) {
                     passes_since_deadline_check = 0;
-                    if (std::chrono::steady_clock::now() >= _calibration_deadline) {
+                    if (leader_should_repartition(config)) {
                         _repartition_pending.store(true, std::memory_order_release);
                         wake_parked_workers(worker_id);
                     }
@@ -1254,8 +1290,10 @@ namespace cler {
                 TaskPolicy::yield();
             }
 
-            build_partition(_pinned_worker_count, true);
+            build_partition(_pinned_worker_count, true, _partition);
             apply_partition();
+            _next_repartition_check = std::chrono::steady_clock::now() +
+                                      std::chrono::milliseconds(_config.repartition_check_ms);
             _repartition_pending.store(false, std::memory_order_relaxed);
             _repartition_count.fetch_add(1, std::memory_order_release);
             _partition_epoch.fetch_add(1, std::memory_order_release);
