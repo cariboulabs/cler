@@ -115,3 +115,10 @@ Adversarial architecture pass findings and dispositions:
 - WATCHLIST: drift repartition named most likely 6-month trap (only mechanism rewiring SPSC thread ownership mid-run); mitigation = burst test coverage in the lora-shape bench and repartition_count() observability.
 - CONSIDERED, REJECTED: procedure() returning samples-processed — sampled EWMAs already serve partitioning; exact counts only pay for per-call scheduling we don't do; signature change breaks every block. If ever needed: optional SFINAE-detected last_procedure_items() accessor, no signature change.
 - FOLLOW-UP FOUND (pre-existing, independent of this branch): plot blocks (plot_timeseries, plot_cspectrum) access internal channels from both procedure() (worker) and render() (GUI thread) — violates SPSC single-reader assumptions; peek_read/size/read_dbf from render() are unsynchronized. Lazy caching was deliberately NOT applied to peek/size paths because of this. Needs its own fix: hand-off ring or GUI-side snapshot buffer.
+
+## NEON findings for the Pluto build (2026-08-07, echo-side TODO)
+
+- Pluto toolchain already passes -mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard, but NOT -ffast-math. ARM codegen probe (clang armv7): with -ffast-math all hot loop shapes vectorize to NEON q-register ops including complex MAC; without it, dotprod reductions stay scalar (FP reassociation barred). Today's build is effectively scalar in its hottest loops.
+- liquid-dsp ships hand-written NEON dotprod kernels (dotprod_{rrrf,crcf,cccf}.neon.c) but its CMake compiles only the portable scalar versions - the whole SIMD source block is commented out upstream. The resampler and polyphase channelizer bottom out in exactly these dotprods.
+- Expected NEON win on A9 dotprods: 2-4x, matching the estimated 3-4x shortfall to 4 MS/s. Likely decisive.
+- Echo-side actions (needs ARM toolchain to verify, not shippable blind from this machine): (1) add -ffast-math to pluto-armhf.cmake and validate LoRa decode once on device; (2) preferably patch echo's liquid FetchContent to compile the .neon.c dotprod sources in place of the portable ones (same symbols - replace, not add).
