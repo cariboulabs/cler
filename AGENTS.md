@@ -250,7 +250,7 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
 int main() {
     // Create blocks
     SourceCWBlock<float> source("Source", 1.0f, 10.0f, 1000);
-    AddBlock<float> adder("Adder", 2);
+    AddBlock<float, 2> adder("Adder");
     ThrottleBlock<float> throttle("Throttle", 1000);
     PlotTimeSeriesBlock plot("Plot", {"Signal"}, 1000, 3.0f);
     
@@ -325,13 +325,22 @@ auto flowgraph = cler::make_desktop_flowgraph(
 // Configure scheduler and performance options
 cler::FlowGraphConfig config;
 
-// Choose scheduler type (new in recent versions)
+// Choose scheduler type
 config.scheduler = cler::SchedulerType::ThreadPerBlock;        // Default: one thread per block
 // config.scheduler = cler::SchedulerType::FixedThreadPool;    // Fixed worker pool (num_workers required)
-// config.scheduler = cler::SchedulerType::AdaptiveLoadBalancing; // Dynamic work distribution
+// config.scheduler = cler::SchedulerType::PinnedIslands;      // Core-pinned topo islands, cost-partitioned (best on core-constrained targets)
 
-// Worker configuration (for FixedThreadPool and AdaptiveLoadBalancing)
-config.num_workers = 4;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
+// Worker configuration (for FixedThreadPool and PinnedIslands)
+config.num_workers = 4;  // Number of worker threads (minimum 2 for FixedThreadPool; PinnedIslands accepts 1)
+
+// PinnedIslands: shorthand and tuning
+// auto cfg = cler::flowgraph_config::pinned_islands(2);  // cler_utils.hpp
+// config.calibration_ms = 500;         // measure block costs, then repartition once
+// config.repartition_check_ms = 5000;  // periodic drift check thereafter (0 = off)
+// config.cpu_id_offset = 0;            // first core to pin workers to
+// Blocks whose procedure() can block (hardware refill, blocking I/O) declare
+// `static constexpr bool may_block = true;` and automatically get a dedicated
+// thread instead of sharing a pool/island worker.
 
 // Adaptive sleep configuration (works with all scheduler types)
 // WARNING: Can significantly reduce throughput - only use for sparse/intermittent data
@@ -339,11 +348,6 @@ config.adaptive_sleep = true;  // CAUTION: reduces CPU usage but may impact thro
 config.adaptive_sleep_multiplier = 1.5;       // How aggressively to increase sleep time
 config.adaptive_sleep_max_us = 5000.0;        // Maximum sleep time in microseconds
 config.adaptive_sleep_fail_threshold = 10;    // Start sleeping after N consecutive fails
-
-// Load balancing (only for AdaptiveLoadBalancing scheduler)
-config.load_balancing = true;                 // Enable dynamic rebalancing
-config.load_balancing_interval = 1000;        // Rebalance every N procedure calls
-config.load_balancing_threshold = 0.2;        // 20% imbalance triggers rebalancing
 
 flowgraph.run(config);
 ```
@@ -582,7 +586,7 @@ SourceCaribouliteBlock caribou("Caribou", center_freq, sample_rate);
 #### Processing Blocks
 ```cpp
 // Math operations
-AddBlock<float> adder("Adder", num_inputs);  // Variable number of inputs
+AddBlock<float, NUM_INPUTS> adder("Adder");  // Input count is a template parameter
 GainBlock<float> gain("Gain", gain_value);
 ComplexDemuxBlock demux("Demux");
 
@@ -680,7 +684,7 @@ struct ChannelizerBlock : public cler::BlockBase {
 int main() {
     // Create blocks
     SourceCWBlock<float> source("Source", 1.0f, 10.0f, 1000);
-    AddBlock<float> adder("Adder", 2);
+    AddBlock<float, 2> adder("Adder");
     PlotTimeSeriesBlock plot("Plot", {"Signal"}, 1000, 3.0f);
     
     // Create flowgraph with connections
@@ -817,13 +821,12 @@ out->commit_write(to_process);
 - **Expected**: Better than ThreadPerBlock due to reduced thread overhead
 
 #### Fanout with Imbalanced Processing (different complexity per path)
-- **Scheduler**: AdaptiveLoadBalancing with load_balancing enabled
-- **Workers**: Start with CPU cores - 1
-- **Load Balancing**: interval=500-1000, threshold=0.1-0.2
+- **Scheduler**: PinnedIslands (cost-based partition isolates the heavy path after calibration)
+- **Workers**: CPU cores, or cores - 1 when a may_block source needs headroom
 - **Expected**: Significantly better than FixedThreadPool for imbalanced loads
 
 #### Many Blocks (>20 blocks in flowgraph)
-- **Scheduler**: AdaptiveLoadBalancing or FixedThreadPool
+- **Scheduler**: PinnedIslands or FixedThreadPool
 - **Workers**: 4-8 depending on CPU
 - **Rationale**: ThreadPerBlock creates too many threads
 
