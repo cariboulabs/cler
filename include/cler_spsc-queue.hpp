@@ -221,6 +221,7 @@ private:
     std::atomic<std::size_t> writeIndex_{0};
     std::size_t readIndexCache_{0};
     std::size_t cumulativeWriteCount_{0};
+    std::size_t dbfLastWriteIndex_{0};
   } writer_;
 
   struct alignas(details::cacheLineSize) ReaderCacheLine {
@@ -228,6 +229,7 @@ private:
     std::size_t writeIndexCache_{0};
     // Cache capacity for performance
     std::size_t capacityCache_{};
+    std::size_t dbfLastReadIndex_{0};
   } reader_;
 
   // Helper to get buffer pointer with correct offset
@@ -562,34 +564,31 @@ public:
     reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
   }
 
-  // NEW: Zero-copy contiguous read (only available with doubly mapped heap buffers)
   std::pair<const T*, std::size_t> read_dbf() noexcept {
       if constexpr (N == 0) {
-          // Only heap buffers can be doubly mapped
           if (base_type::is_doubly_mapped_) {
               const auto capacity = base_type::capacity_;
               const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
-              auto writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
-              reader_.writeIndexCache_ = writeIndexCache;
-              
-              std::size_t available;
-              if (writeIndexCache >= readIndex) {
-                  available = writeIndexCache - readIndex;
-              } else {
-                  available = capacity - readIndex + writeIndexCache;
+
+              std::size_t available = (reader_.writeIndexCache_ >= readIndex)
+                  ? reader_.writeIndexCache_ - readIndex
+                  : capacity - readIndex + reader_.writeIndexCache_;
+
+              if (available == 0 || readIndex == reader_.dbfLastReadIndex_) {
+                  reader_.writeIndexCache_ = writer_.writeIndex_.load(std::memory_order_acquire);
+                  available = (reader_.writeIndexCache_ >= readIndex)
+                      ? reader_.writeIndexCache_ - readIndex
+                      : capacity - readIndex + reader_.writeIndexCache_;
               }
-              
+              reader_.dbfLastReadIndex_ = readIndex;
+
               if (available == 0) {
                   return {nullptr, 0};
               }
-              
+
               const T* ptr = &base_type::buffer_[readIndex];
-              
-              // With aligned boundaries, we can read all available data contiguously
-              // The double mapping ensures continuity past capacity_
               return {ptr, available};
           }
-          // NOT doubly mapped - assert in debug mode with specific reason
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
           if (buffer_bytes < details::DOUBLY_MAPPED_MIN_SIZE) {
               assert(false && "read_dbf() requires buffer size >= 4KB. Current buffer too small.");
@@ -612,31 +611,29 @@ public:
 
   std::pair<T*, std::size_t> write_dbf() noexcept {
       if constexpr (N == 0) {
-          // Only heap buffers can be doubly mapped
           if (base_type::is_doubly_mapped_) {
               const auto capacity = base_type::capacity_;
               const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
-              auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
-              writer_.readIndexCache_ = readIndexCache;
-              
-              std::size_t space;
-              if (readIndexCache > writeIndex) {
-                  space = readIndexCache - writeIndex - 1;
-              } else {
-                  space = capacity - writeIndex + readIndexCache - 1;
+
+              std::size_t space = (writer_.readIndexCache_ > writeIndex)
+                  ? writer_.readIndexCache_ - writeIndex - 1
+                  : capacity - writeIndex + writer_.readIndexCache_ - 1;
+
+              if (space == 0 || writeIndex == writer_.dbfLastWriteIndex_) {
+                  writer_.readIndexCache_ = reader_.readIndex_.load(std::memory_order_acquire);
+                  space = (writer_.readIndexCache_ > writeIndex)
+                      ? writer_.readIndexCache_ - writeIndex - 1
+                      : capacity - writeIndex + writer_.readIndexCache_ - 1;
               }
-              
+              writer_.dbfLastWriteIndex_ = writeIndex;
+
               if (space == 0) {
                   return {nullptr, 0};
               }
-              
+
               T* ptr = &base_type::buffer_[writeIndex];
-              
-              // With aligned boundaries, we can write all available space contiguously
-              // The double mapping ensures continuity past capacity_
               return {ptr, space};
           }
-          // NOT doubly mapped - assert in debug mode with specific reason
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
           if (buffer_bytes < details::DOUBLY_MAPPED_MIN_SIZE) {
               assert(false && "write_dbf() requires buffer size >= 4KB. Current buffer too small.");
