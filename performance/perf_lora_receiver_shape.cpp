@@ -196,7 +196,14 @@ int main() {
     std::vector<TestResult> results;
 
     results.push_back(run_test("ThreadPerBlock (default)", cler::FlowGraphConfig{}, false));
-    results.push_back(run_test("FixedThreadPool (2 workers)", cler::flowgraph_config::embedded_optimized(), false));
+
+    cler::FlowGraphConfig ftp_config;
+    ftp_config.scheduler = cler::SchedulerType::FixedThreadPool;
+    ftp_config.num_workers = 2;
+    results.push_back(run_test("FixedThreadPool (2 workers)", ftp_config, false));
+
+    results.push_back(run_test("embedded_optimized() [PinnedIslands, 2 workers]",
+                               cler::flowgraph_config::embedded_optimized(), false));
     results.push_back(run_test("PinnedIslands (1 worker)", cler::flowgraph_config::pinned_islands(1), false));
     results.push_back(run_test("PinnedIslands (2 workers)", cler::flowgraph_config::pinned_islands(2), false));
 

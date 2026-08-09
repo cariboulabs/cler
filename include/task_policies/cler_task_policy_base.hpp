@@ -36,6 +36,8 @@ struct TaskPolicyBase {
 
     static inline bool pin_to_core(size_t) { return true; }
 
+    static inline void warn_unresolved_edge(const char*, const void*) {}
+
     static inline void configure_thread_for_low_latency_sleep() {}
 
     static constexpr size_t park_fallback_sleep_us = 1000;

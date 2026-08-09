@@ -132,13 +132,10 @@ struct SourceAudioFileBlock : public cler::BlockBase {
             }
         }
 
-        if (samples_written > 0) {
-            out->commit_write(samples_written);
+        if (samples_written == 0) {
+            return cler::Error::NotEnoughSamples;
         }
-
-        if (_eof_reached && samples_written == 0) {
-            return cler::Empty{};
-        }
+        out->commit_write(samples_written);
 
         return cler::Empty{};
     }

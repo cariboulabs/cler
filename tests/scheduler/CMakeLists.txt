@@ -59,3 +59,15 @@ target_link_libraries(fused_block_test
 )
 
 add_test(NAME fused_block_test COMMAND fused_block_test)
+
+add_executable(idle_progress_contract_test
+    test_idle_progress_contract.cpp
+)
+
+target_link_libraries(idle_progress_contract_test
+    gtest_main
+    cler::desktop_blocks
+    Threads::Threads
+)
+
+add_test(NAME idle_progress_contract_test COMMAND idle_progress_contract_test)

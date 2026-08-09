@@ -47,12 +47,13 @@ struct SinkFileBlock : public cler::BlockBase {
         }
 
         auto [span_ptr, span_size] = in.read_dbf();
-
-        if (span_size > 0) {
-            size_t written = std::fwrite(span_ptr, sizeof(T), span_size, _fp);
-            if (written != span_size) return cler::Error::TERM_IOError;
-            in.commit_read(written);
+        if (span_size == 0) {
+            return cler::Error::NotEnoughSamples;
         }
+
+        size_t written = std::fwrite(span_ptr, sizeof(T), span_size, _fp);
+        if (written != span_size) return cler::Error::TERM_IOError;
+        in.commit_read(written);
         return cler::Empty{};
     }
 

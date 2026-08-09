@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #ifdef __linux__
 #include <sys/prctl.h>
 #include <sys/syscall.h>
@@ -70,6 +71,14 @@ struct DesktopTaskPolicy : TaskPolicyBase<DesktopTaskPolicy> {
 
     static inline bool pin_to_core(size_t worker_id) {
         return platform::set_thread_affinity(worker_id);
+    }
+
+    static inline void warn_unresolved_edge(const char* producer_name, const void* address) {
+        std::fprintf(stderr,
+            "cler: unresolved output edge from block '%s' at %p (no consumer found; "
+            "edge derivation matches channels stored inside the consuming block's object). "
+            "PinnedIslands will fall back to a contiguous partition.\n",
+            producer_name, address);
     }
 
     static constexpr size_t park_timeout_us = 1000;

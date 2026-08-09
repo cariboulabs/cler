@@ -108,10 +108,10 @@ TEST_F(UtilityBlocksTest, FanoutBlockEmptyInput) {
     cler::Channel<float> output1(buffer_size);
     cler::Channel<float> output2(buffer_size);
     
-    // Run the block with empty input
     auto result = fanout_block.procedure(&output1, &output2);
-    EXPECT_TRUE(result.is_ok());
-    
+    ASSERT_TRUE(result.is_err());
+    EXPECT_EQ(result.unwrap_err(), cler::Error::NotEnoughSpaceOrSamples);
+
     // Verify outputs are empty
     EXPECT_EQ(output1.size(), 0);
     EXPECT_EQ(output2.size(), 0);
@@ -290,10 +290,10 @@ TEST_F(UtilityBlocksTest, ThroughputBlockEmptyInput) {
     ThroughputBlock<float> throughput_block("test_throughput_empty", buffer_size);
     cler::Channel<float> output(buffer_size);
     
-    // Run with empty input
     auto result = throughput_block.procedure(&output);
-    EXPECT_TRUE(result.is_ok());
-    
+    ASSERT_TRUE(result.is_err());
+    EXPECT_EQ(result.unwrap_err(), cler::Error::NotEnoughSpaceOrSamples);
+
     // Verify no samples passed
     EXPECT_EQ(throughput_block.samples_passed(), 0);
     EXPECT_EQ(output.size(), 0);

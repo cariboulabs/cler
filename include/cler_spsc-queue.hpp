@@ -230,6 +230,7 @@ private:
     // Cache capacity for performance
     std::size_t capacityCache_{};
     std::size_t dbfLastReadIndex_{0};
+    std::atomic<std::size_t> cumulativeReadCount_{0};
   } reader_;
 
   // Helper to get buffer pointer with correct offset
@@ -348,6 +349,9 @@ public:
     const auto nextReadIndex =
         (readIndex == reader_.capacityCache_ - 1) ? 0 : readIndex + 1;
     reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
+    reader_.cumulativeReadCount_.store(
+        reader_.cumulativeReadCount_.load(std::memory_order_relaxed) + 1,
+        std::memory_order_relaxed);
   }
 
   [[nodiscard]] bool try_pop(T &val) noexcept(nothrow_v) {
@@ -364,6 +368,9 @@ public:
     const auto nextReadIndex =
         (readIndex == reader_.capacityCache_ - 1) ? 0 : readIndex + 1;
     reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
+    reader_.cumulativeReadCount_.store(
+        reader_.cumulativeReadCount_.load(std::memory_order_relaxed) + 1,
+        std::memory_order_relaxed);
     return true;
   }
 
@@ -392,6 +399,10 @@ public:
 
   [[nodiscard]] std::size_t producer_thread_cumulative_write_count() const noexcept {
     return writer_.cumulativeWriteCount_;
+  }
+
+  [[nodiscard]] std::size_t consumer_thread_cumulative_read_count() const noexcept {
+    return reader_.cumulativeReadCount_.load(std::memory_order_relaxed);
   }
 
   // Check if this queue uses doubly-mapped memory
@@ -465,6 +476,9 @@ public:
 
     const auto nextReadIndex = (readIndex + toRead) % capacity;
     reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
+    reader_.cumulativeReadCount_.store(
+        reader_.cumulativeReadCount_.load(std::memory_order_relaxed) + toRead,
+        std::memory_order_relaxed);
 
     return toRead;
   }
@@ -562,6 +576,9 @@ public:
     const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
     const auto nextReadIndex = (readIndex + count) % capacity;
     reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
+    reader_.cumulativeReadCount_.store(
+        reader_.cumulativeReadCount_.load(std::memory_order_relaxed) + count,
+        std::memory_order_relaxed);
   }
 
   std::pair<const T*, std::size_t> read_dbf() noexcept {

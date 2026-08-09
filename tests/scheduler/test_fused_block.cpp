@@ -46,14 +46,27 @@ struct VectorSink : public cler::BlockBase {
         }
         _received.insert(_received.end(), read_ptr, read_ptr + read_size);
         in.commit_read(read_size);
+        _count.store(_received.size(), std::memory_order_release);
         return cler::Empty{};
     }
 
+    size_t count() const { return _count.load(std::memory_order_acquire); }
     const std::vector<float>& received() const { return _received; }
 
 private:
     std::vector<float> _received;
+    std::atomic<size_t> _count{0};
 };
+
+bool wait_for_count(const VectorSink& sink, size_t target,
+                    std::chrono::seconds timeout = std::chrono::seconds(10)) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (sink.count() < target) {
+        if (std::chrono::steady_clock::now() > deadline) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
 
 std::vector<float> make_random_buffer(size_t n) {
     std::mt19937 rng(1234);
@@ -82,9 +95,7 @@ TEST(FusedBlockTest, MatchesSequentialGainChain) {
         cler::BlockRunner(&sink_chain)
     );
     fg_chain.run();
-    while (sink_chain.received().size() < samples.size()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    ASSERT_TRUE(wait_for_count(sink_chain, samples.size()));
     fg_chain.stop();
 
     FusedBlock<GainKernel<float>, GainKernel<float>> fused(
@@ -99,9 +110,7 @@ TEST(FusedBlockTest, MatchesSequentialGainChain) {
         cler::BlockRunner(&sink_fused)
     );
     fg_fused.run();
-    while (sink_fused.received().size() < samples.size()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    ASSERT_TRUE(wait_for_count(sink_fused, samples.size()));
     fg_fused.stop();
 
     ASSERT_EQ(sink_chain.received().size(), samples.size());
@@ -129,9 +138,7 @@ TEST(FusedBlockTest, SingleBlockChainMatchesDirectKernel) {
         cler::BlockRunner(&sink)
     );
     fg.run();
-    while (sink.received().size() < samples.size()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    ASSERT_TRUE(wait_for_count(sink, samples.size()));
     fg.stop();
 
     ASSERT_EQ(sink.received().size(), samples.size());

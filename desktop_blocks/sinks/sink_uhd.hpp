@@ -159,16 +159,20 @@ struct SinkUHDBlock : public cler::BlockBase {
 
     cler::Result<cler::Empty, cler::Error> procedure() {
         if (_configuring.load(std::memory_order_acquire)) {
-            return cler::Empty{};  // Skip this iteration
+            return cler::Error::NotEnoughSamples;
         }
+        const size_t min_samples = (cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) / 4;
         for (size_t i = 0; i < _num_channels; ++i) {
             auto [ptr, size] = in[i].read_dbf();
             _read_ptrs[i] = ptr;
             _read_sizes[i] = size;
 
-            if (_read_sizes[i] < (cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) / 4) {
+            if (_read_sizes[i] < min_samples) {
                 return cler::Error::NotEnoughSamples;
             }
+        }
+
+        for (size_t i = 0; i < _num_channels; ++i) {
             uhd::tx_metadata_t md;
             md.start_of_burst = false;
             md.end_of_burst = false;

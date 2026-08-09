@@ -185,7 +185,7 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
             if (overflow_count % 100 == 0) {
                 std::cerr << "SourceSoapySDRBlock: Overflow count: " << overflow_count << std::endl;
             }
-            return cler::Empty{}; // Continue despite overflow
+            return cler::Error::NotEnoughSamples;
         } else {
             std::cerr << "SourceSoapySDRBlock: readStream error: " << SoapySDR::errToStr(ret) << std::endl;
             return cler::Error::TERM_ProcedureError;

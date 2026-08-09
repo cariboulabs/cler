@@ -86,6 +86,7 @@ namespace cler {
         virtual std::pair<const T*, std::size_t> read_dbf() = 0;
         virtual std::pair<T*, std::size_t> write_dbf() = 0;
         virtual std::size_t producer_thread_cumulative_write_count() const = 0;
+        virtual std::size_t consumer_thread_cumulative_read_count() const = 0;
     };
 
     template <typename T, size_t N = 0>
@@ -119,6 +120,9 @@ namespace cler {
         std::pair<T*, std::size_t> write_dbf() override { return _queue.write_dbf(); }
         std::size_t producer_thread_cumulative_write_count() const override {
             return _queue.producer_thread_cumulative_write_count();
+        }
+        std::size_t consumer_thread_cumulative_read_count() const override {
+            return _queue.consumer_thread_cumulative_read_count();
         }
     };
 
@@ -233,13 +237,24 @@ namespace cler {
         static constexpr std::size_t _N = sizeof...(BlockRunners);
         static constexpr std::size_t MaxBlocks = sizeof...(BlockRunners);  // Clean compile-time constant
         static_assert(_N > 0, "FlowGraph must have at least one block");
-        static_assert(_N <= 256, "FlowGraph cannot have more than 256 blocks (due to uint8_t indexing)");
+        static constexpr std::size_t MaxSupportedBlocks =
+            (std::min)(static_cast<std::size_t>((std::numeric_limits<uint8_t>::max)()),
+                       platform::cache_line_size * 4 - 2 * sizeof(uint32_t));
+        static_assert(_N <= MaxSupportedBlocks,
+                      "FlowGraph has more blocks than the scheduler's worker queue can index; "
+                      "the bound is min(255, cache_line_size * 4 - 8) and is platform-dependent");
         static constexpr std::size_t MaxEdges = (runner_output_count<BlockRunners>::value + ... + 0);
         using OnErrTerminateCallback = void (*)(void* context);
 
         struct UnresolvedEdge {
             uint8_t producer;
             const void* address;
+        };
+
+        struct InputCounter {
+            const void* channel;
+            std::size_t (*read_count)(const void*);
+            uint8_t consumer;
         };
 
         struct Partition {
@@ -402,10 +417,19 @@ namespace cler {
             (collect_span_for_index<Is>(spans), ...);
         }
 
-        void resolve_and_add_edge(uint8_t producer, const void* address, const std::array<BlockSpan, _N>& spans) {
+        template<typename Ch>
+        void resolve_and_add_edge(uint8_t producer, Ch* channel, const std::array<BlockSpan, _N>& spans) {
+            const void* address = static_cast<const void*>(channel);
             for (size_t k = 0; k < _N; ++k) {
                 if (address >= spans[k].begin && address < spans[k].end) {
                     _edges[_edge_count++] = Edge{producer, static_cast<uint8_t>(k)};
+                    _input_counters[_input_counter_count++] = InputCounter{
+                        address,
+                        [](const void* p) -> std::size_t {
+                            return static_cast<const Ch*>(p)->consumer_thread_cumulative_read_count();
+                        },
+                        static_cast<uint8_t>(k)
+                    };
                     return;
                 }
             }
@@ -416,7 +440,7 @@ namespace cler {
         void collect_edges_for_index(const std::array<BlockSpan, _N>& spans) {
             auto& runner = std::get<I>(_runners);
             std::apply([&](auto*... outs) {
-                (resolve_and_add_edge(static_cast<uint8_t>(I), static_cast<const void*>(outs), spans), ...);
+                (resolve_and_add_edge(static_cast<uint8_t>(I), outs, spans), ...);
             }, runner.outputs);
         }
 
@@ -459,6 +483,29 @@ namespace cler {
             }, outputs);
         }
 
+        bool snapshot_input_reads(uint8_t block_id, std::array<std::size_t, MaxEdges>& snap) const {
+            bool found = false;
+            for (size_t i = 0; i < _input_counter_count; ++i) {
+                const auto& ic = _input_counters[i];
+                if (ic.consumer != block_id) continue;
+                found = true;
+                snap[i] = ic.read_count(ic.channel);
+            }
+            return found;
+        }
+
+        std::size_t max_input_read_delta(uint8_t block_id,
+                                         const std::array<std::size_t, MaxEdges>& snap) const {
+            std::size_t max_delta = 0;
+            for (size_t i = 0; i < _input_counter_count; ++i) {
+                const auto& ic = _input_counters[i];
+                if (ic.consumer != block_id) continue;
+                const std::size_t delta = ic.read_count(ic.channel) - snap[i];
+                if (delta > max_delta) max_delta = delta;
+            }
+            return max_delta;
+        }
+
         template<std::size_t I>
         Result<Empty, Error> sample_and_invoke_procedure() {
             auto& runner = std::get<I>(_runners);
@@ -471,7 +518,10 @@ namespace cler {
             }
             sample.calls_until_sample = COST_SAMPLE_PERIOD_CALLS;
 
-            const auto items_before = sum_output_cumulative_write_count(runner.outputs);
+            std::array<std::size_t, MaxEdges> input_snapshot{};
+            const bool has_inputs = snapshot_input_reads(static_cast<uint8_t>(I), input_snapshot);
+            const std::size_t writes_before = sum_output_cumulative_write_count(runner.outputs);
+
             const auto t_before = std::chrono::steady_clock::now();
             auto result = std::apply([&](auto*... outs) {
                 return runner.block->procedure(outs...);
@@ -479,9 +529,14 @@ namespace cler {
             const auto t_after = std::chrono::steady_clock::now();
 
             if (result.is_ok()) {
-                const auto items_after = sum_output_cumulative_write_count(runner.outputs);
                 const double observed_ns = std::chrono::duration<double, std::nano>(t_after - t_before).count();
-                const double observed_items = static_cast<double>(items_after - items_before);
+                const std::size_t write_delta =
+                    sum_output_cumulative_write_count(runner.outputs) - writes_before;
+                const std::size_t read_delta = has_inputs
+                    ? max_input_read_delta(static_cast<uint8_t>(I), input_snapshot)
+                    : std::size_t{0};
+                const double observed_items =
+                    static_cast<double>(read_delta > 0 ? read_delta : write_delta);
 
                 const double prev_ns = bits_to_double(sample.ewma_ns_per_call_bits.load(std::memory_order_relaxed));
                 sample.ewma_ns_per_call_bits.store(double_to_bits(prev_ns + (observed_ns - prev_ns) / 8.0),
@@ -666,6 +721,8 @@ namespace cler {
         size_t _edge_count = 0;
         std::array<UnresolvedEdge, MaxEdges> _unresolved_edges{};
         size_t _unresolved_edge_count = 0;
+        std::array<InputCounter, MaxEdges> _input_counters{};
+        size_t _input_counter_count = 0;
         OnErrTerminateCallback _on_err_terminate_cb = nullptr;
         void* _on_err_terminate_context = nullptr;
         std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
@@ -900,15 +957,21 @@ namespace cler {
             size_t regular_count = 0;
             collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
 
+            const bool topology_is_complete = (_unresolved_edge_count == 0);
+
             std::array<uint8_t, _N> order{};
-            topo_sort_blocks(regular_ids.data(), regular_count, order);
+            if (topology_is_complete) {
+                topo_sort_blocks(regular_ids.data(), regular_count, order);
+            } else {
+                order = regular_ids;
+            }
 
             const size_t islands = (std::max)(size_t{1}, (std::min)(worker_count, regular_count));
             out.block_ids = order;
             out.block_count = static_cast<uint16_t>(regular_count);
             out.island_count = static_cast<uint16_t>(islands);
 
-            if (!use_costs) {
+            if (!use_costs || !topology_is_complete) {
                 size_t cursor = 0;
                 for (size_t w = 0; w < islands; ++w) {
                     out.island_begin[w] = static_cast<uint16_t>(cursor);
@@ -1050,6 +1113,11 @@ namespace cler {
                 for (size_t i = 0; i < _N; ++i) {
                     _block_start_times[i] = start_time;
                 }
+            }
+
+            for (size_t i = 0; i < _unresolved_edge_count; ++i) {
+                TaskPolicy::warn_unresolved_edge(block_name(_unresolved_edges[i].producer),
+                                                 _unresolved_edges[i].address);
             }
 
             std::array<uint8_t, _N> regular_ids{};

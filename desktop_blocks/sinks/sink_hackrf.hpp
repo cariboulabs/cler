@@ -90,8 +90,7 @@ struct SinkHackRFBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
-        // tx_callback pulls from `in` on HackRF's own thread; nothing to do here.
-        return cler::Empty{};
+        return cler::Error::NotEnoughSamples;
     }
 
     size_t get_underrun_count() const { return _underrun_count.load(); }

@@ -470,6 +470,60 @@ cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) 
 }
 ```
 
+### Progress Contract (mandatory)
+
+**A successful return means the block moved at least one sample.** Schedulers treat
+`cler::Empty{}` as evidence of progress: it resets the idle backoff ladder and wakes
+parked workers. A `procedure()` that returns success after doing nothing pins a core at
+100% and defeats PinnedIslands entirely.
+
+If you consumed nothing and produced nothing, return an error:
+- No input → `cler::Error::NotEnoughSamples`
+- No output space → `cler::Error::NotEnoughSpace`
+- Either/both, don't care which → `cler::Error::NotEnoughSpaceOrSamples`
+
+These are non-fatal; the framework retries and backs off. This applies to every early-out:
+a device timeout, an overflow with no samples recovered, a config-in-progress skip, a
+callback-driven block whose `procedure()` is a no-op — all of them return an error, never
+`Empty{}`.
+
+**The contract has a second half: a retryable error must mean nothing was consumed.**
+`NotEnoughSamples` / `NotEnoughSpace` / `NotEnoughSpaceOrSamples` tell the framework "call
+me again"; if the block already committed reads before bailing, that data is counted twice
+in the statistics and, on multi-channel hardware, the channels silently lose alignment.
+Validate every channel *before* committing on any of them:
+
+```cpp
+// WRONG - channel 0 consumed, then a retryable error reported
+for (size_t i = 0; i < n; ++i) {
+    if (in[i].size() < need) return cler::Error::NotEnoughSamples;
+    send(in[i]); in[i].commit_read(need);
+}
+
+// RIGHT - check all, then commit all
+for (size_t i = 0; i < n; ++i) {
+    if (in[i].size() < need) return cler::Error::NotEnoughSamples;
+}
+for (size_t i = 0; i < n; ++i) { send(in[i]); in[i].commit_read(need); }
+```
+
+A block that has already made progress must report success, then surface the shortfall on
+the next call. Also watch for paths that *compute* their way to zero — a ratio or frame
+size that truncates to `0` items — not just paths guarded on an empty channel.
+
+```cpp
+// WRONG - scheduler sees progress, never parks
+size_t n = in.size();
+in.commit_read(n);
+return cler::Empty{};
+
+// RIGHT
+size_t n = in.size();
+if (n == 0) return cler::Error::NotEnoughSamples;
+in.commit_read(n);
+return cler::Empty{};
+```
+
 ### Error Handling Pattern
 ```cpp
 cler::Result<cler::Empty, cler::Error> procedure(/* outputs */) {
@@ -748,6 +802,12 @@ Cler provides three scheduler types to optimize for different workload character
 - **Pinning**: **always on** — PinnedIslands pins every worker to `cpu_id_offset + worker_id` by design and does not consult `config.pin_workers`. Affinity failures are counted (`affinity_failure_count()`), never fatal. If you want optional pinning, use FixedThreadPool with `pin_workers`.
 - **Telemetry**: per-block cost sampling (`block_costs()`) is only collected under this scheduler; ThreadPerBlock/FixedThreadPool skip it and report zeros
 - **Idle**: workers escalate through the backoff ladder and then park on a futex with a 1 ms timeout
+- **Cost units**: block weight is `ns / items_moved`, and *items moved* is derived automatically — no block-side annotation. Because a producer's output channel is physically owned by the consuming block, edge derivation already identifies each block's inputs; the scheduler counts a block's input consumption where it has resolved inputs, and falls back to output writes otherwise. This keeps every block in the same unit:
+  - **sources** have no inputs → output writes
+  - **sinks** have no outputs → input reads (previously collapsed to `ns/call`, a different unit)
+  - **fanout/channelizer** → input reads, so weight does not shrink as output count grows
+  - **multi-input blocks** take the **max of the per-call deltas**, not the sum, since an N-input block consumes N items per input for one item's worth of work. It must be the max of the deltas, never the delta of the lifetime maxima — an input holding the largest lifetime count while a different input advances would otherwise report zero.
+  - a block whose input edge failed to resolve, or that has a resolved input it never reads (a control channel), falls back to output writes rather than reporting zero
 
 #### Observability accessors and when they are valid
 `partition()`, `stats()`, `block_costs()`, `repartition_count()`, `total_park_events()` and `affinity_failure_count()` are safe to read after `stop()` has joined the workers. During a run they are best-effort: `block_costs()` and the stats counters are approximate (updated by workers without synchronization to the reader), and `partition()` is unsynchronized — a drift repartition can rewrite it while you read. Read them after `stop()` when you need exact values. All of them are reset at the start of every `run()`.

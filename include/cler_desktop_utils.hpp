@@ -16,17 +16,6 @@ namespace cler {
     std::abort();
 }
 
-template<typename... BlockRunners>
-void print_unresolved_edge_warnings(const DesktopFlowGraph<BlockRunners...>& fg) {
-    for (size_t i = 0; i < fg.unresolved_edge_count(); ++i) {
-        const auto& u = fg.unresolved_edges()[i];
-        std::fprintf(stderr,
-            "cler: unresolved output edge from block '%s' at %p (no consumer found; "
-            "edge derivation matches channels stored inside the consuming block's object)\n",
-            fg.block_name(u.producer), u.address);
-    }
-}
-
 // Stream output operator for Error enum (requires std::ostream)
 inline std::ostream& operator<<(std::ostream& os, cler::Error error) {
     return os << to_str(error);

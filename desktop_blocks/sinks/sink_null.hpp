@@ -16,6 +16,8 @@ struct SinkNullBlock : public cler::BlockBase {
          _callback(callback), _callback_context(callback_context) {}
 
     cler::Result<cler::Empty, cler::Error> procedure() {
+        const size_t reads_before = in.consumer_thread_cumulative_read_count();
+
         size_t to_commit;
         if (_callback) {
             to_commit = _callback(&in, _callback_context);
@@ -23,6 +25,10 @@ struct SinkNullBlock : public cler::BlockBase {
             to_commit = in.size();
         }
         in.commit_read(to_commit);
+
+        if (in.consumer_thread_cumulative_read_count() == reads_before) {
+            return cler::Error::NotEnoughSamples;
+        }
         return cler::Empty{};
     }
 

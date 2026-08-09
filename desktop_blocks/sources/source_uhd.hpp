@@ -50,6 +50,8 @@ struct SourceUHDBlock : public cler::BlockBase {
         if (num_channels > usrp->get_rx_num_channels()) {
             cler::panic("SourceUHDBlock: Not enough RX channels");
         }
+        _write_ptrs.resize(num_channels);
+        _write_sizes.resize(num_channels);
         uhd::set_thread_priority_safe(0.5, true);
         for (size_t ch = 0; ch < num_channels; ++ch) {
             usrp->set_rx_rate(sample_rate, ch);
@@ -176,22 +178,35 @@ struct SourceUHDBlock : public cler::BlockBase {
         }
 
         if (_configuring.load(std::memory_order_acquire)) {
-            return cler::Empty{};  // Skip this iteration
+            return cler::Error::NotEnoughSpace;
+        }
+
+        size_t probe_ch = 0;
+        bool all_have_space = true;
+        ([&](OChannels* out) {
+            auto [wp, ws] = out->write_dbf();
+            _write_ptrs[probe_ch] = wp;
+            _write_sizes[probe_ch] = ws;
+            if (!wp || ws == 0) all_have_space = false;
+            ++probe_ch;
+        }(outs), ...);
+        if (!all_have_space) {
+            return cler::Error::NotEnoughSpace;
         }
 
         uhd::rx_metadata_t md;
         cler::Error result_error = cler::Error::OK;
+        size_t total_rx = 0;
+        size_t recv_ch = 0;
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
             ([&](OChannels* out) {
+                const size_t ch = recv_ch++;
 
                 if (result_error != cler::Error::OK) {
                     return;
                 }
-                auto [write_ptr, write_size] = out->write_dbf();
-                if (!write_ptr || write_size == 0) {
-                    result_error = cler::Error::NotEnoughSpace;
-                    return;
-                }
+                T* write_ptr = _write_ptrs[ch];
+                const size_t write_size = _write_sizes[ch];
                 size_t num_rx = 0;
                 try {
                     num_rx = rx_stream->recv(write_ptr, write_size, md, 0.1);
@@ -213,6 +228,7 @@ struct SourceUHDBlock : public cler::BlockBase {
                 }
 
                 out->commit_write(num_rx);
+                total_rx += num_rx;
             }(outs), ...);
         }(std::make_index_sequence<num_outs>{});
 
@@ -220,6 +236,9 @@ struct SourceUHDBlock : public cler::BlockBase {
 
         if (result_error != cler::Error::OK) {
             return result_error;
+        }
+        if (total_rx == 0) {
+            return cler::Error::NotEnoughSamples;
         }
         return cler::Empty{};
 
@@ -237,6 +256,8 @@ private:
     std::string device_address;
     double gain_db;
     size_t _num_channels;
+    std::vector<T*> _write_ptrs;
+    std::vector<size_t> _write_sizes;
     std::string wire_format;
     bool _quiet;
     std::atomic<bool> _configuring;
