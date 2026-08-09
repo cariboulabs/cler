@@ -9,6 +9,10 @@
 #include <cstddef>
 #include <cstring>
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 template <size_t INTERP, size_t DECIM, size_t TAPS_PER_PHASE>
 class RationalResampler {
     static_assert(INTERP > 0, "Interpolation factor must be positive");
@@ -98,6 +102,37 @@ private:
         }
     }
 
+#if defined(__ARM_NEON)
+
+    inline std::complex<float> filter(const std::complex<float>* window, size_t phase) const
+    {
+        const float* tap = _taps.data() + phase * TAPS_PER_PHASE;
+        const float* w = reinterpret_cast<const float*>(window);
+        constexpr size_t vec = TAPS_PER_PHASE / 4 * 4;
+
+        float32x4_t acc_r4 = vdupq_n_f32(0.0f);
+        float32x4_t acc_i4 = vdupq_n_f32(0.0f);
+        for (size_t j = 0; j < vec; j += 4) {
+            float32x4x2_t s = vld2q_f32(w + 2 * j);
+            float32x4_t t4 = vld1q_f32(tap + j);
+            acc_r4 = vmlaq_f32(acc_r4, s.val[0], t4);
+            acc_i4 = vmlaq_f32(acc_i4, s.val[1], t4);
+        }
+
+        float32x2_t r2 = vadd_f32(vget_low_f32(acc_r4), vget_high_f32(acc_r4));
+        float32x2_t i2 = vadd_f32(vget_low_f32(acc_i4), vget_high_f32(acc_i4));
+        float acc_r = vget_lane_f32(vpadd_f32(r2, r2), 0);
+        float acc_i = vget_lane_f32(vpadd_f32(i2, i2), 0);
+
+        for (size_t j = vec; j < TAPS_PER_PHASE; ++j) {
+            acc_r += window[j].real() * tap[j];
+            acc_i += window[j].imag() * tap[j];
+        }
+        return std::complex<float>(acc_r, acc_i);
+    }
+
+#else
+
     inline std::complex<float> filter(const std::complex<float>* window, size_t phase) const
     {
         const float* tap = _taps.data() + phase * TAPS_PER_PHASE;
@@ -109,6 +144,8 @@ private:
         }
         return std::complex<float>(acc_r, acc_i);
     }
+
+#endif
 
     std::array<float, INTERP * TAPS_PER_PHASE> _taps{};
     std::array<std::complex<float>, 2 * history> _carry{};

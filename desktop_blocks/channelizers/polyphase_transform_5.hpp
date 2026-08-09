@@ -4,6 +4,10 @@
 #include <complex>
 #include <cstddef>
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 namespace polyphase5 {
 
 constexpr size_t channels = 5;
@@ -47,6 +51,45 @@ inline void winograd_dft(const std::array<float, channels>& bins_r,
     out_channels[4][frame_index] = std::complex<float>(near_r - near_quad_i, near_i + near_quad_r);
 }
 
+#if defined(__ARM_NEON)
+
+inline void transform(const float* taps,
+                      const std::complex<float>* window,
+                      std::complex<float>* const* out_channels,
+                      size_t frame_index)
+{
+    const float* w = reinterpret_cast<const float*>(window);
+
+    float32x4x2_t s = vld2q_f32(w);
+    float32x4_t tap4 = vld1q_f32(taps);
+    float32x4_t acc_r4 = vmulq_f32(s.val[0], tap4);
+    float32x4_t acc_i4 = vmulq_f32(s.val[1], tap4);
+    float acc_r1 = w[8] * taps[4];
+    float acc_i1 = w[9] * taps[4];
+
+    for (size_t t = 1; t < taps_per_subfilter; ++t) {
+        const float* row = w + t * 2 * channels;
+        const float* tap_row = taps + t * channels;
+        s = vld2q_f32(row);
+        tap4 = vld1q_f32(tap_row);
+        acc_r4 = vmlaq_f32(acc_r4, s.val[0], tap4);
+        acc_i4 = vmlaq_f32(acc_i4, s.val[1], tap4);
+        acc_r1 += row[8] * tap_row[4];
+        acc_i1 += row[9] * tap_row[4];
+    }
+
+    std::array<float, channels> bins_r;
+    std::array<float, channels> bins_i;
+    vst1q_f32(bins_r.data(), acc_r4);
+    vst1q_f32(bins_i.data(), acc_i4);
+    bins_r[4] = acc_r1;
+    bins_i[4] = acc_i1;
+
+    winograd_dft(bins_r, bins_i, out_channels, frame_index);
+}
+
+#else
+
 inline void transform(const float* taps,
                       const std::complex<float>* window,
                       std::complex<float>* const* out_channels,
@@ -70,5 +113,7 @@ inline void transform(const float* taps,
 
     winograd_dft(bins_r, bins_i, out_channels, frame_index);
 }
+
+#endif
 
 }
