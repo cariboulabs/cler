@@ -208,36 +208,54 @@ struct MyBlock : public cler::BlockBase {
 - **Channel ownership**: Blocks own input channels, output channels owned by downstream blocks
 
 ### Example: Polyphase Channelizer with N Outputs
+
+The channel count is a template parameter, not a constructor argument. It has to
+be: `procedure` takes its outputs as a variadic pack, so the count is already
+fixed at compile time by every call site. A runtime copy of it can only ever
+disagree by mistake, and the mismatch is a buffer overrun.
+
 ```cpp
+template <size_t NUM_CHANNELS, size_t FILTER_SEMILENGTH>
 struct PolyphaseChannelizerBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
-    
+
     template <typename... OChannels>
     cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
-        constexpr size_t num_outs = sizeof...(OChannels);
-        assert(num_outs == _num_channels);
-        
-        // Process one frame at a time
-        if (in.size() < _num_channels) return cler::Error::NotEnoughSamples;
-        
-        size_t n_frames_by_space = std::min({outs->space()...});
-        if (n_frames_by_space == 0) return cler::Error::NotEnoughSpace;
-        
-        // Read input frame, process with liquid-dsp, distribute to outputs
-        in.readN(_tmp_in, _num_channels);
-        firpfbch_crcf_analyzer_execute(_pfch, _tmp_in, _tmp_out);
-        
-        // Push outputs using lambda with fold expression
+        static_assert(sizeof...(OChannels) == NUM_CHANNELS);
+
+        auto [read_ptr, read_size] = in.read_dbf();
+        if (read_size < NUM_CHANNELS) return cler::Error::NotEnoughSamples;
+
+        // Collect one contiguous write span per output, take the smallest.
+        std::array<std::complex<float>*, NUM_CHANNELS> ports;
+        size_t min_write_space = std::numeric_limits<size_t>::max();
         size_t idx = 0;
-        auto push_outputs = [&](auto*... chs) {
-            ((chs->push(_tmp_out[idx++])), ...);
+        auto get_write_ptrs = [&](auto*... chs) {
+            ([&] {
+                auto [write_ptr, write_space] = chs->write_dbf();
+                ports[idx] = write_ptr;
+                min_write_space = std::min(min_write_space, write_space);
+                idx++;
+            }(), ...);
         };
-        push_outputs(outs...);
-        
+        get_write_ptrs(outs...);
+
+        const size_t num_frames = std::min(read_size / NUM_CHANNELS, min_write_space);
+        if (num_frames == 0) return cler::Error::NotEnoughSpace;
+
+        _analyzer.execute(read_ptr, num_frames, ports.data());   // whole batch, one call
+
+        auto commit_writes = [&](auto*... chs) { ((chs->commit_write(num_frames)), ...); };
+        commit_writes(outs...);
+        in.commit_read(num_frames * NUM_CHANNELS);
         return cler::Empty{};
     }
 };
 ```
+
+**Batch the whole span, do not loop per frame.** This block was 3x faster on a
+Cortex-A9 after the per-frame `liquid` call was replaced by one batched
+allocation-free kernel; see "Polyphase channelizer" under Performance Notes.
 
 ### Two Programming Models
 
@@ -645,7 +663,7 @@ GainBlock<float> gain("Gain", gain_value);
 ComplexDemuxBlock demux("Demux");
 
 // DSP processing
-PolyphaseChannelizerBlock channelizer("PFB", num_channels, attenuation, filter_len);
+PolyphaseChannelizerBlock<NUM_CHANNELS, FILTER_SEMILEN> channelizer("PFB", attenuation);
 MultistageResamplerBlock resampler("Resampler", input_rate, output_rate);
 NoiseAWGNBlock<std::complex<float>> noise("AWGN", noise_power);
 
@@ -968,6 +986,51 @@ costs are uneven -- on a balanced chain it is pure overhead.
 - **Scheduler**: PinnedIslands (idle workers park on a futex instead of spinning)
 - **Tuning**: `config.park_after_zero_passes` (default 4) trades wake latency for idle CPU
 - **Expected**: near-zero CPU while the graph has nothing to do
+
+### Sizing a block's input channel against a blocking driver
+
+A block downstream of a hardware source must give its input channel **at least
+the driver's buffer size**, or the driver's refill stalls the whole graph.
+
+`SourcePlutoBlock` allocates a 16384-sample iio buffer and `iio_buffer_refill`
+blocks for roughly one buffer duration -- 5.5 ms at 3 MS/s. With the polyphase
+channelizer's default input channel of `DOUBLY_MAPPED_MIN_SIZE/8 * M` = 2560
+samples (0.85 ms of stream at that rate) the consumer drained the channel and
+starved through every refill, capping the graph at 98% of the required rate.
+
+The symptom is diagnostic and worth recognising: **throughput short of the rate
+while the worker sits well under 1.0 core.** That is never a compute problem.
+Raising the input channel to 16385 or above fixed it with no other change.
+
+### Polyphase channelizer: batch the span, do not loop per frame
+
+Measured on a PlutoSDR (2x Cortex-A9 @ 667 MHz), M=5, 3.0 MS/s in: the block
+went from 194.3 to 600.1 kS/s per port, 3.09x, by replacing a per-frame
+`firpfbch_crcf_analyzer_execute` with one batched kernel. The kernel alone is
+~10x (1.33 -> 13.3 MS/s on-device).
+
+Almost none of that was arithmetic -- the total real-multiply count only fell
+1.7x. The rest was liquid's per-call plumbing: per 5 input samples it pushed 5
+`windowcf` buffers, ran 5 dot products through a runtime-selected function
+pointer, and dispatched a DFT, all to perform 30 multiply-accumulates.
+
+The structural trick is to fold the subfilter bank over the frame index. liquid
+keeps M sliding windows advancing one sample per frame; substituting `k = M-1-i`
+into its own output reversal gives
+
+```
+X[k](j) = sum over n of h[n*M + M-1-k] * x[(j-n)*M + k]
+```
+
+so the taps are contiguous slices of the prototype and the data is `p`
+consecutive input frames read **in place from the caller's read span**. No
+windows, no per-channel state, no delay line beyond `p-1` carried frames. Both
+`M` and the filter semilength are template parameters, so every buffer is a
+`std::array` and the block never touches the heap.
+
+General lesson for any liquid-backed block: if you are calling a liquid
+`_execute` once per sample or once per frame, the wrapper is probably costing
+more than the DSP.
 
 ## 12. Development Guidelines & Code Style
 
