@@ -1,139 +1,258 @@
-# Frontier: the four 600 -> 500 kS/s resamplers
+# Frontier: the last 5% of the Pluto receiver rate
 
-Status: the throughput question is **settled and instrumented**, the rational
-resampler is **wired in and measured on the air**, and the receiver is still
-short of 3.0 MS/s — by much less than before.
+Replaces `RESAMPLER_FRONTIER.md`. The resampler question it was written to ask
+is answered — the four resamplers were the dominant cost and are not any more.
+What is left is a ~5% shortfall with no measured owner, and a separate,
+probably more important defect: **payloads reach echo corrupted, and the
+receiver's own `crc_ok` counter cannot detect it.**
 
-## Settled: the receiver did not hold 3.0 MS/s
+## Where it stands
 
-Measured on the Pluto, `pinned_islands(2)`, srulik on 974 MHz channel 3, 30 s
-windows, with throughput counters at `channelizer.in` and each `lora_rx.in`.
+`echo_ground_station` receiver on a PlutoSDR (2x Cortex-A9 @ 667 MHz),
+`pinned_islands(2)`, srulik transmitting on 974 MHz channel 3.
 
 | probe | liquid `msresamp` | `RationalResampler<5,6,14>` | required |
 |---|---|---|---|
 | source alone, `pluto_smoke` | 3.000 MS/s | 3.000 MS/s | 3.0 MS/s |
-| `channelizer.in` | **1.513 MS/s** | **2.655 / 2.645 MS/s** | 3.0 MS/s |
-| one `lora_rx.in` | 252.2 kS/s | 442.6 / 440.9 kS/s | 500 kS/s |
-| `channelizer.in` steady occupancy | 100.0% of cap | 87.6% / 93.8% of cap | — |
-| ch2 / ch3 payloads in 30 s | 16 / 16, crc_ok 16 / 16 | 32 / 32, crc_ok 32 / 32 (both reps) | — |
-| `RX_CPU_CORES` | 1.660 | 1.829 | 2.0 available |
+| `channelizer.in`, **production** | not measured | **2.862 MS/s (95.4%)** | 3.0 MS/s |
+| `channelizer.in`, under profiler | **1.513 MS/s** | 2.655 / 2.645 / 2.641 MS/s | 3.0 MS/s |
+| one `lora_rx.in`, production | not measured | 477.1 kS/s | 500 kS/s |
+| occupancy, production | — | 72.1% of cap | — |
+| occupancy, under profiler | 100.0% of cap | 87.6% / 93.8% / 89.5% | — |
+| `RX_CPU_CORES` under profiler | 1.660 | 1.829 / 1.847 | 2.0 available |
+| ch2 / ch3 payloads per 30 s | 16 / 16 | 32 / 32 | — |
 
-Two reps for the rational configuration, shown as `rep1 / rep2`.
+**`measure_receiver.sh` sets `CLWB_RECEIVER_BLOCK_STATS=1`, which turns on
+`collect_detailed_stats` — per-procedure timing on every block — and that costs
+8.1% of throughput.** Every figure this project has published for the receiver
+was taken under that profiler, including the ones committed earlier today. The
+production number, taken with the same binary and no env var, is 2.862 MS/s:
+**95.4% of rate, not 88%.** The remaining gap is ~5%.
 
-Both signs in the earlier note were right. The graph ran at a self-consistent
-50.4% of rate and the AD9361 was overflowing; the source-only bracket proves the
-radio was never the limit. Swapping the four resamplers to the rational bank
-gives **1.76x on the whole graph** and doubles the decoded frame rate, to 88.5%
-of the required rate.
+The lesson generalises past this repo: the harness was part of the system under
+test, and nobody had bracketed it. If a measurement mode exists, measure with it
+off at least once.
 
-The per-stage ratio `channelizer.in : lora_rx.in` held at exactly 1/6.00 in
-every window in both configurations, which is what makes the counters
-trustworthy.
+Cost per delivered sample fell from 1.097 to 0.691 cores per MS/s under the
+profiler (no production CPU figure exists — `measure_receiver.sh` is the only
+thing that reports cores, and it always enables stats; that is worth fixing).
+A linear extrapolation of the profiled numbers put 3.0 MS/s at ~2.07 cores.
+**That extrapolation is arithmetic, not a measurement**, and it was built on the
+profiled rate, so treat it as void rather than merely uncertain.
 
-### The 100.6% reading was real backlog, and the denominator was wrong
+## Settled — do not re-derive
 
-`hi=82431 cap=81920 (100.6%)` compared the watermark against the *requested*
-buffer size. cler rounds a request up, so the true usable capacity is 82431:
-the channel was sitting at exactly **100.0%** — completely full, continuously,
-in every window. Not a startup artifact. The probes now take `cap` from
-`in.space()` on the empty channel and track a separate post-warmup watermark, so
-this cannot be misread again.
+- **The receiver never held 3.0 MS/s.** It ran at a self-consistent 50.4% of
+  rate with liquid's resamplers, with `channelizer.in` full continuously, so the
+  AD9361 was overflowing. Every `RX_CPU_CORES` figure recorded before this was
+  taken at an unknown rate and is not comparable to anything.
+- **The source was never the limit.** `pluto_smoke local: 975800000 3000000` hits
+  3.000 MS/s with a null consumer, in both configurations.
+- **The `hi=82431 cap=81920 (100.6%)` reading was real backlog, not a startup
+  artifact.** The denominator was wrong: cler rounds a requested buffer size up,
+  so the true usable capacity is 82431 and the channel was at exactly 100.0% —
+  completely full, in every window. Probes now take `cap` from `in.space()` on
+  the empty channel.
+- **`crc_ok` in the receiver's report proves nothing.** `build_lora_cfg` sets
+  `has_crc = false`, and clora's `frame_decoder.cpp:170` then assigns
+  `crc_valid = true` unconditionally. So `crc_ok` equals `payloads` by
+  construction and can never fail. Every "crc_ok = 100%" in this project's
+  history is vacuous, including the claim that "the DSP chain does not corrupt
+  payloads: ch3 payloads=15 crc_ok=15". That claim is **unsupported**, not
+  disproven — but see the open defect below, which points the other way.
+- **`RationalResamplerBlock<5,6,14>` is correct and is in.** Kernel is 6.27 MS/s
+  on the A9 against liquid's 1.65 MS/s (3.81x; 7.5x on x86), exact output count,
+  flat across batch 509 / 4096 / 16384, and marginally *sharper* past 200 kHz.
+  Pinned by `tests/desktop_blocks/test_resampler_blocks.cpp`: a 60000-sample
+  stream cut into varying batches must equal one whole-stream kernel call sample
+  for sample at exactly 50000 outputs. Those offline tests are what pin this
+  block — the on-air "crc_ok 32/32" that was quoted alongside them is vacuous.
+- **`msresamp`'s 256 phases never made it sharper.** Transition width comes from
+  the 14-tap span, which both have; the phase count only buys fractional-delay
+  resolution a rational ratio does not need.
+- **`msresamp_crcf_get_num_output()` is a stub** in the vendored liquid
+  (`resamp.proto.c:298` logs "not implemented", returns 0). Any plan that needs
+  liquid's output count in advance is dead.
 
-### How the counters work
+## The method that worked — reuse it for what is left
 
-No block was inserted. Every drain path in the SPSC queue — `commit_read`,
-`readN`, `try_pop` — bumps `reader_.cumulativeReadCount_`, which is atomic, so
-the existing 200 ms watermark probe in `echo_ground_station/src/receiver/main.cpp`
-reads it for free and divides by wall time over a window that starts after a 3 s
-warmup. A pass-through `ThroughputBlock` would have cost a thread and a
-full-rate memcpy on a box that is already CPU-starved — it would have perturbed
-the number being measured. Validate on the desktop file path first: the same
-probes are live in `run_file`.
+This is the part worth keeping even after the numbers go stale.
 
-## The replacement, now wired in
+**1. Bracket every question with a source-only and a kernel-only measurement
+before touching code.** The whole question turned on one 2-second command:
+`pluto_smoke` proving the radio delivers 3.000 MS/s. Without it, "the graph is
+short" and "the radio is short" produce identical symptoms and you can spend a
+day optimising the wrong half.
 
-`desktop_blocks/resamplers/rational_resampler.hpp` holds both the kernel
-`RationalResampler<INTERP, DECIM, TAPS_PER_PHASE>` and the block
-`RationalResamplerBlock<INTERP, DECIM, TAPS_PER_PHASE>`. Zero heap, all
-`std::array`. The block is a straight dbf-in/dbf-out `procedure()`; it caps the
-input by `((write_space - 1) * DECIM) / INTERP` rather than paying for an exact
-`outputs_for()` scan, which costs at most one output slot per call.
+**2. Measure throughput at the channels, for free.** Every SPSC drain path —
+`commit_read`, `readN`, `try_pop` — bumps `reader_.cumulativeReadCount_`, which
+is atomic, so any monitor thread can read it. `echo_ground_station`'s receiver
+polls it from the watermark probe that already ran every 200 ms.
 
-Kernel measurements (`pluto_sdr/apps/pluto_resamp_bench.cpp`), 5/6, 14
-taps/phase, 80 dB, flat across batch 509 / 4096 / 16384:
+Do **not** insert a pass-through counting block. `ThroughputBlock` costs a
+thread and a full-rate memcpy; at 3 MS/s complex float that is 24 MB/s of extra
+traffic on a box whose whole problem is that it is CPU-starved. It perturbs the
+number it is there to measure.
+
+The write-side counter (`producer_thread_cumulative_write_count()`) is a plain
+non-atomic `+=`. Reading it from another thread is a data race. Use the read
+counter.
+
+**3. Make the instrument prove itself with an invariant.** The chain divides by
+6 (M=5 channelizer, then 5/6), so `channelizer.in : lora_rx.in` must be exactly
+6.00 regardless of the absolute rate. It read `1/6.00` in every window of every
+run, before and after the change. That is what makes the absolute number
+believable; a counter that is silently wrong will usually break the ratio first.
+
+**4. Window the rate, and start the window after warmup.** A lifetime average
+folds process startup, socket connect and calibration into the denominator and
+understates the rate — conveniently in the direction you already suspect. Print
+a time series too: one average cannot show decay, and the per-window series is
+what proved the backlog was steady rather than transient.
+
+**5. Compute occupancy against real capacity.** `in.space()` on an empty channel,
+never the size you asked for.
+
+**6. The execution report cannot find your bottleneck.** With
+`CLWB_RECEIVER_BLOCK_STATS=1`, `CPU %` read 99.0-99.8 for *every* block in both
+the 50%-of-rate and the 88%-of-rate configuration — it is a per-island figure,
+not per-block attribution. `Success%` is the fraction of `procedure()` calls
+that returned `Empty{}`, which says how often a block found work, not what it
+cost. `AvgTime(us)` is thread lifetime over successful calls and reads in the
+millions for idle sinks. Use `block_costs()` after `stop()`, or bracket the
+kernel standalone.
+
+**7. Confirm the graph meets the rate before comparing any CPU number.** Stated
+in `PLUTO_BENCH_HANDOFF.md` before this session and violated anyway, at the cost
+of a whole set of published core counts.
+
+**8. Bracket the harness itself.** `measure_receiver.sh` enables
+`CLWB_RECEIVER_BLOCK_STATS=1`; that profiler costs 8.1% of throughput, and every
+receiver figure this project ever published was taken with it on. Run once with
+the measurement mode off. The same applies to any counter you add: if a probe
+cannot be shown to be free, it is part of the system under test.
+
+**9. Check that a counter can fail before trusting it as evidence.** `crc_ok`
+read 100% through every run in this project's history because `has_crc = false`
+makes it a constant. A pass from a counter that cannot fail is not evidence of
+anything. Ask what input would make it read false, and if there isn't one, stop
+citing it.
+
+## Four candidate levers for the remaining 5%
+
+Ranked by expected value over cost. None is measured yet. Note the gap is now
+~140 kS/s, small enough that lever 4 alone might close it — do not start with
+the expensive ones. **The open defect above is more valuable than any of these.**
+
+**1. `-ffast-math` on the ARM build. Cheapest, plausibly sufficient, untried.**
+The Pluto toolchain passes `-mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard` but not
+`-ffast-math`, so GCC will not vectorize a floating-point reduction (NEON
+single-precision is not fully IEEE, reassociation is barred). Both hot loops in
+this chain — the channelizer fold and the rational resampler subfilter — are
+scalar on the Pluto today. Estimated headroom on A9 dot products is 2-4x, which
+is far more than the 13% needed. Validate LoRa decode on-device afterwards:
+`-ffast-math` also changes NaN/Inf behaviour. Note this does *not* help clora,
+which is prebuilt separately.
+
+**2. Measure clora. The one unknown large enough to matter.**
+Four `lora_rx` blocks each consume 477 kS/s, 1.91 MS/s total. Nothing in this
+project has ever measured clora's demodulator standalone. Known kernel numbers
+for everything else: channelizer 13.3 MS/s, rational resampler 6.27 MS/s, source
+0.196 cores at 3 MS/s. Those account for roughly 0.8 cores of the 1.83 being
+spent. The rest is clora plus scheduling overhead, and which of those it is
+changes the whole plan. Bracket it the way `pluto_resamp_bench` brackets the
+resamplers.
+
+**3. Fold 5/6 into the channelizer, deleting all four resampler blocks.**
+Worth less than it was — the resamplers are now ~0.4 cores rather than ~1.5 —
+but it removes four blocks, four channels and four island boundaries from a
+scheduler running on two cores. A critically-sampled bank ties channel spacing
+to output rate (both Fs/M), so 500 kS/s outputs would force a 500 kHz grid, and
+**the 600 kHz grid is deployed on the air and cannot move.** The grid-preserving
+form is a rational bank: advance 5, decimate 6, folded into the filterbank as
+one pass.
+
+**4. Scheduler and buffer tuning. Cheapest, and the gap is now small enough
+that this alone might close it.**
+`channelizer.in` peaks at 72% occupancy in production and swings between 1 and
+27000 samples across windows, so there is a stall pattern left. `pinned_islands(2)` is already the measured-best config for this
+box (see `AGENTS.md` section 9) and `calibration_ms` / island boundaries have
+not been re-examined since the block mix changed.
+
+## Traps that cost time in this session
+
+- **`serve_out_socket` cannot stand in for echo.** The receiver's
+  `SocketSinkBlock` is `SOCK_DGRAM`; `serve_out_socket` is `SOCK_STREAM` and
+  handles one client at a time. Point the receiver at it and it blocks forever
+  in `block_until_connected()` — which happens *before* `fg.run()`, so the
+  process shows 1 thread and 0% CPU and an empty log, looking exactly like a
+  dead flowgraph. Stdout is block-buffered when redirected to a file, so nothing
+  appears until exit. Use echo, or a 6-line `AF_UNIX`/`SOCK_DGRAM` sink.
+- **The desktop file path stops silently at EOF**, leaving `channelizer.in` full
+  and every rate at zero. That is not backlog. `run_file` is still the right
+  place to validate probe changes before deploying — just give it enough data.
+- **Cross-building can ICE under memory pressure.** `firdespm.c` died with
+  `internal compiler error: Aborted` with ~1 GB free; identical build was clean
+  on retry. Not a code problem.
+- **`pkill -f <pattern>` matches your own shell's command line** and kills the
+  session. Kill by recorded PID.
+
+## Open defect: payloads reach echo corrupted, on the real channel
+
+This probably outranks the 5% rate gap.
+
+Per 40 s run with one srulik on channel 3 (975.8 MHz), typical:
 
 ```
-  liquid msresamp_crcf   1.65 MS/s
-  RationalResampler      6.27 MS/s      3.81x   (x86: 7.5x)
-  output count exact: 50000 from 60000
-
-frequency response, dB relative to DC:
-  tone kHz     100    200    240    250    260    300
-  ours        -0.0   -0.9   -4.4   -6.0   -8.0  -17.3
-  liquid      -0.0   -0.6   -3.4   -4.8   -6.5  -14.6
+ch2: payloads=35 crc_ok=35 sent=21 sock_bad_hdr=14
+ch3: payloads=35 crc_ok=35 sent=24 sock_bad_hdr=11
 ```
 
-### Correctness, since parity with liquid is impossible
+and echo logs, continuously, for the frames that do get through:
 
-`msresamp` is a different algorithm (fractional-delay bank with interpolation),
-so there is no sample-for-sample reference. What is checked instead:
+```
+sr_radio_mac.c:96: MAC: RX message decoding failed with error code:
+  Telemetry message FEC decode error, from channel 2, for src_id 0x00AF280C
+  ... same, from channel 3 ...
+```
 
-- `tests/desktop_blocks/test_resampler_blocks.cpp` —
-  `RationalResamplerBlockExactCountAndBatchContinuity` pushes a 60000-sample
-  stream through the block in 509 / 4096 / 16384-sample batches and requires the
-  output to equal, sample for sample, one whole-stream call to the bare kernel,
-  at exactly 50000 outputs. That is the batch-boundary continuity check.
-- `RationalResamplerBlockFrequencyResponse` — 100 kHz passes within 1 dB of DC,
-  300 kHz is more than 12 dB down.
-- On the air: ch2 and ch3 decode 32 payloads with `crc_ok = 32` in 30 s, up from
-  16/16 with liquid.
-- `echo_ground_station` ctest, all 13 pass, including
-  `test_adjacent_channel_isolation` and `test_step6_bin_replay`.
+What that chain says: clora emits 35 payloads, ~11-14 of them are rejected by
+`check_header()` in `SocketSinkBlock` and never leave the receiver, and of the
+~24 that do reach echo, Reed-Solomon fails. **ch3 is the channel the srulik is
+actually on**, not the adjacent duplicate, so this is not explained by the
+accepted adjacent-channel finding — ch2 failing is expected, ch3 failing is not.
 
-### Two traps, still true
+Why it went unnoticed: `crc_ok` cannot fail (see above), so the receiver has
+reported a clean bill of health throughout. The counter that would have caught
+this was disabled by `has_crc = false`.
 
-- **`msresamp`'s 256 phases do not make it sharper.** Transition width comes
-  from the span in input samples — 14 taps per phase in both. The phase count
-  only buys fractional-delay resolution, which a rational ratio does not need.
-- **`msresamp_crcf_get_num_output()` is a stub** in our vendored liquid
-  (`resamp.proto.c:298` logs "not implemented" and returns 0), so the
-  zero-copy-wrapper idea for the liquid path is dead.
+Where to start, in order:
+1. Turn `has_crc` on end to end (srulik TX included) and see whether clora's CRC
+   fails on the same frames echo's FEC rejects. That single change converts a
+   vacuous counter into the discriminator this needs, and tells you immediately
+   whether the bytes are already wrong when clora hands them over.
+2. If clora's CRC passes but echo's FEC fails, the corruption is between the
+   socket sink and the MAC — check `check_header()` and the DecodedFrame
+   framing, not the DSP.
+3. Compare against `pluto_decode_one_channel`, which runs radio → decimator →
+   clora with no channelizer and no resampler. If its payloads decode cleanly in
+   echo and the receiver's do not, the DSP chain is implicated after all.
 
-## What is still open
+**Do not add an RSSI or SNR gate** to suppress the ch2 copies — that discards,
+and losing a real frame is worse than a duplicate. See
+`echo_ground_station/tests/test_adjacent_channel_isolation.cpp`.
 
-**The receiver is at ~2.65 of 3.0 MS/s, using 1.829 of 2 cores.** Cost per
-delivered sample fell from 1.097 to 0.691 cores per MS/s, but the graph is now
-close to core-bound rather than starved: a naive linear extrapolation puts 3.0
-MS/s at ~2.07 cores, just past what the box has. That extrapolation is
-arithmetic, not a measurement — treat it as a reason to measure, not as a
-conclusion.
+## Open observations — not conclusions
 
-The resamplers are no longer the dominant cost, so the next measurement has to
-find what is. Do not guess it from
-the CPU table — `Success%` and the per-island `CPU %` in the execution report do
-not attribute cost to a block, and every conclusion in this project reached by
-arithmetic ahead of a measurement has been wrong. Bracket it: a kernel-only
-number for `clora`'s demodulator at 500 kS/s, and the already-known
-kernel-only numbers for the channelizer (13.3 MS/s) and the rational resampler
-(6.27 MS/s), against the whole-graph total.
-
-`-ffast-math` is the other untried lever: the Pluto toolchain does not pass it,
-so both the channelizer fold and the rational resampler subfilter are scalar on
-the A9 today, with an estimated 2-4x on those dot products. See the NEON note in
-`AGENTS.md` section 9.
+- Channelizer port 3 is computed and thrown into a null sink. M=5 with four
+  used channels. Whether an M=5 bank can skip one output cheaply is a question,
+  not a claim — the DFT across M produces all ports together.
+- `ECHO_CPU_CORES` reads 0.000 in `measure_receiver.sh`. The receiver is the
+  only measured consumer; echo's own cost is unaccounted for.
 
 ## Also unresolved: 600 -> 500 has no guard band
 
 The LoRa signal is 500 kHz wide and the output rate is 500 kS/s, so it fills the
 output band to Nyquist exactly. Both resamplers are ~6 dB down at 250 kHz and
-alias beyond it. That is inherent to the conversion, not to either
-implementation, and it is the same no-guard-band problem as the 600 kHz channel
-spacing (see the adjacent-channel duplicate finding in
-`echo_ground_station/tests/test_adjacent_channel_isolation.cpp`).
-
-Folding 5/6 into the channelizer would delete all four resamplers, but a
-critically-sampled bank ties channel spacing to output rate (both Fs/M), so
-500 kS/s outputs force a 500 kHz grid — and the 600 kHz grid is deployed on the
-air and cannot move. The grid-preserving version is a rational bank: spacing
-advance 5, decimation 6, folding the 5/6 into the filterbank as one pass. That
-is now a smaller prize than it was: the resamplers cost far less than they did.
+alias beyond it. Inherent to the conversion, not to either implementation, and
+the same no-guard-band problem as the 600 kHz channel spacing.

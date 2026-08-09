@@ -535,7 +535,13 @@ ratio held at exactly 1/6.00 throughout, which is the check that the counters
 themselves are sound. The source bracket is what separates "the radio is short"
 from "the graph is short" — take it every time. Replacing the four liquid
 resamplers with `RationalResamplerBlock<5,6,14>` moved the same graph to
-2.65 MS/s at 1.829 cores and doubled the decoded frame rate.
+2.862 MS/s and doubled the decoded frame rate.
+
+**Bracket the measurement harness too.** Those runs were driven by a script that
+exported `CLWB_RECEIVER_BLOCK_STATS=1`, and `collect_detailed_stats` costs
+**8.1% of throughput** — the same binary with no env var does 2.862 MS/s where
+the profiled run does 2.65. Enable detailed stats to compare blocks against each
+other, never to establish an absolute rate.
 
 ### Scheduler: take the extra worker on a 2-core target
 
