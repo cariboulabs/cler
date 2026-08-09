@@ -6,6 +6,7 @@
 #include "cler_platform.hpp"
 #include "task_policies/cler_task_policy_base.hpp"
 #include "schedulers/cler_scheduler_topology.hpp"
+#include "schedulers/cler_scheduler_park.hpp"
 #include "schedulers/cler_scheduler_partition.hpp"
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
@@ -334,11 +335,7 @@ namespace cler {
         size_t affinity_failure_count() const { return _affinity_failures.load(std::memory_order_relaxed); }
 
         uint64_t total_park_events() const {
-            uint64_t total = 0;
-            for (const auto& state : _park_states) {
-                total += state.park_events.load(std::memory_order_relaxed);
-            }
-            return total;
+            return _park_states.total_park_events();
         }
 
         const std::array<Edge, MaxEdges>& edges() const { return _edges; }
@@ -681,13 +678,9 @@ namespace cler {
         std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
         size_t _active_task_count{0};  // Track actual created tasks to fix stop() hang
 
-        struct alignas(platform::cache_line_size) WorkerParkState {
-            std::atomic<uint32_t> sleep_epoch{0};
-            std::atomic<bool> parked{false};
-            std::atomic<uint64_t> park_events{0};
-        };
-
-        static constexpr size_t kNoWorker = (std::numeric_limits<size_t>::max)();
+        using ParkGroup = sched::ParkGroup<TaskPolicy, DEFAULT_MAX_WORKERS>;
+        using WorkerParkState = typename ParkGroup::WorkerParkState;
+        static constexpr size_t kNoWorker = sched::kNoWorker;
         static constexpr uint32_t kNoRepartitionRequest = (std::numeric_limits<uint32_t>::max)();
                 static constexpr size_t CALIBRATION_DEADLINE_CHECK_PASSES = 256;
         
@@ -697,7 +690,7 @@ namespace cler {
         static constexpr uint32_t barrier_generation(uint64_t word) { return static_cast<uint32_t>(word >> 32); }
         static constexpr uint32_t barrier_arrived(uint64_t word) { return static_cast<uint32_t>(word); }
 
-        std::array<WorkerParkState, DEFAULT_MAX_WORKERS> _park_states;
+        ParkGroup _park_states;
         Partition _partition;
         std::atomic<uint32_t> _partition_epoch{0};
         std::atomic<uint32_t> _repartition_request{kNoRepartitionRequest};
@@ -767,22 +760,11 @@ namespace cler {
         }
 
         void wake_parked_workers(size_t self_id) {
-            for (size_t w = 0; w < _pinned_worker_count; ++w) {
-                if (w == self_id) continue;
-                WorkerParkState& state = _park_states[w];
-                if (!state.parked.load(std::memory_order_relaxed)) continue;
-                if (!state.parked.exchange(false, std::memory_order_acq_rel)) continue;
-                state.sleep_epoch.fetch_add(1, std::memory_order_release);
-                TaskPolicy::unpark(state.sleep_epoch);
-            }
+            _park_states.wake_others(self_id, _pinned_worker_count);
         }
 
         void unpark_everyone() {
-            for (auto& state : _park_states) {
-                state.parked.store(false, std::memory_order_relaxed);
-                state.sleep_epoch.fetch_add(1, std::memory_order_release);
-                TaskPolicy::unpark(state.sleep_epoch);
-            }
+            _park_states.wake_all();
             _partition_epoch.fetch_add(1, std::memory_order_release);
             TaskPolicy::unpark(_partition_epoch);
         }
@@ -794,11 +776,7 @@ namespace cler {
                 sample.ewma_ns_per_call_bits.store(0, std::memory_order_relaxed);
                 sample.ewma_items_per_call_bits.store(0, std::memory_order_relaxed);
             }
-            for (auto& state : _park_states) {
-                state.sleep_epoch.store(0, std::memory_order_relaxed);
-                state.parked.store(false, std::memory_order_relaxed);
-                state.park_events.store(0, std::memory_order_relaxed);
-            }
+            _park_states.reset();
             _partition = Partition{};
             _partition_epoch.store(0, std::memory_order_relaxed);
             _repartition_request.store(kNoRepartitionRequest, std::memory_order_relaxed);
