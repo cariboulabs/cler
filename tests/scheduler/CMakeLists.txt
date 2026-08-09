@@ -83,3 +83,15 @@ target_link_libraries(lifecycle_test
 )
 
 add_test(NAME lifecycle_test COMMAND lifecycle_test)
+
+add_executable(repartition_stress_test
+    test_repartition_stress.cpp
+)
+
+target_link_libraries(repartition_stress_test
+    gtest_main
+    cler::cler
+    Threads::Threads
+)
+
+add_test(NAME repartition_stress_test COMMAND repartition_stress_test)

@@ -813,6 +813,29 @@ Cler provides three scheduler types to optimize for different workload character
   - **multi-input blocks** take the **max of the per-call deltas**, not the sum, since an N-input block consumes N items per input for one item's worth of work. It must be the max of the deltas, never the delta of the lifetime maxima — an input holding the largest lifetime count while a different input advances would otherwise report zero.
   - a block whose input edge failed to resolve, or that has a resolved input it never reads (a control channel), falls back to output writes rather than reporting zero
 
+#### Repartition barrier: how to test changes to it
+
+The generation-keyed barrier transfers SPSC endpoint ownership between workers.
+A bug there does not crash — it leaves two workers owning one endpoint, and
+surfaces as reordered or duplicated samples. `tests/scheduler/test_repartition_stress.cpp`
+drives many repartitions under shifting per-block cost and asserts the stream
+stays strictly sequential end to end.
+
+Before changing barrier code, confirm the test still *fails* when the barrier is
+broken (delete the leader's wait loop in `repartition_barrier()` and it must
+report a backwards jump). A stress test that cannot fail proves nothing.
+
+Run it under ThreadSanitizer too. ASLR breaks TSan on recent kernels, so:
+
+```bash
+g++ -std=c++17 -O1 -g -fsanitize=thread -Iinclude stress.cpp -o stress -lpthread
+setarch $(uname -m) -R env TSAN_OPTIONS="halt_on_error=0" ./stress
+```
+
+TSan slows execution ~10x, which suppresses the drift check — verify the run
+actually reached a high `repartition_count()` (hundreds), otherwise it never
+exercised the barrier regardless of a clean report.
+
 #### Observability accessors and when they are valid
 `partition()`, `stats()`, `block_costs()`, `repartition_count()`, `total_park_events()` and `affinity_failure_count()` are safe to read after `stop()` has joined the workers. During a run they are best-effort: `block_costs()` and the stats counters are approximate (updated by workers without synchronization to the reader), and `partition()` is unsynchronized — a drift repartition can rewrite it while you read. Read them after `stop()` when you need exact values. All of them are reset at the start of every `run()`.
 
