@@ -6,13 +6,13 @@
 #include "cler_platform.hpp"
 #include "task_policies/cler_task_policy_base.hpp"
 #include "schedulers/cler_scheduler_config.hpp"
-#include "schedulers/cler_scheduler_topology.hpp"
-#include "schedulers/cler_scheduler_park.hpp"
-#include "schedulers/cler_scheduler_barrier.hpp"
+#include "schedulers/detail/cler_topology.hpp"
+#include "schedulers/detail/cler_park.hpp"
+#include "schedulers/detail/cler_barrier.hpp"
 #include "schedulers/cler_thread_per_block.hpp"
 #include "schedulers/cler_fixed_thread_pool.hpp"
 #include "schedulers/cler_pinned_islands.hpp"
-#include "schedulers/cler_scheduler_partition.hpp"
+#include "schedulers/detail/cler_partition.hpp"
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
 #include <complex> //again, a lot of cler blocks use complex numbers
@@ -323,7 +323,7 @@ namespace cler {
             }
 
             void collect_block_weights(const Partition& partition, std::array<double, _N>& weights) {
-                sched::collect_block_weights<_N>(_graph->_cost_samples, partition.block_ids,
+                sched::detail::collect_block_weights<_N>(_graph->_cost_samples, partition.block_ids,
                                                  partition.block_count, weights);
             }
 
@@ -482,8 +482,8 @@ namespace cler {
         std::array<BlockCost, _N> block_costs() const {
             std::array<BlockCost, _N> out{};
             for (size_t i = 0; i < _N; ++i) {
-                out[i].ewma_ns_per_call = sched::bits_to_double(_cost_samples[i].ewma_ns_per_call_bits.load(std::memory_order_relaxed));
-                out[i].ewma_items_per_call = sched::bits_to_double(_cost_samples[i].ewma_items_per_call_bits.load(std::memory_order_relaxed));
+                out[i].ewma_ns_per_call = sched::detail::bits_to_double(_cost_samples[i].ewma_ns_per_call_bits.load(std::memory_order_relaxed));
+                out[i].ewma_items_per_call = sched::detail::bits_to_double(_cost_samples[i].ewma_items_per_call_bits.load(std::memory_order_relaxed));
             }
             return out;
         }
@@ -619,7 +619,7 @@ namespace cler {
                     return runner.block->procedure(outs...);
                 }, runner.outputs);
             }
-            sample.calls_until_sample = sched::COST_SAMPLE_PERIOD_CALLS;
+            sample.calls_until_sample = sched::detail::COST_SAMPLE_PERIOD_CALLS;
 
             std::array<std::size_t, MaxEdges> input_snapshot{};
             const bool has_inputs = snapshot_input_reads(static_cast<uint8_t>(I), input_snapshot);
@@ -641,12 +641,12 @@ namespace cler {
                 const double observed_items =
                     static_cast<double>(read_delta > 0 ? read_delta : write_delta);
 
-                const double prev_ns = sched::bits_to_double(sample.ewma_ns_per_call_bits.load(std::memory_order_relaxed));
-                sample.ewma_ns_per_call_bits.store(sched::double_to_bits(prev_ns + (observed_ns - prev_ns) / 8.0),
+                const double prev_ns = sched::detail::bits_to_double(sample.ewma_ns_per_call_bits.load(std::memory_order_relaxed));
+                sample.ewma_ns_per_call_bits.store(sched::detail::double_to_bits(prev_ns + (observed_ns - prev_ns) / 8.0),
                                                    std::memory_order_relaxed);
 
-                const double prev_items = sched::bits_to_double(sample.ewma_items_per_call_bits.load(std::memory_order_relaxed));
-                sample.ewma_items_per_call_bits.store(sched::double_to_bits(prev_items + (observed_items - prev_items) / 8.0),
+                const double prev_items = sched::detail::bits_to_double(sample.ewma_items_per_call_bits.load(std::memory_order_relaxed));
+                sample.ewma_items_per_call_bits.store(sched::detail::double_to_bits(prev_items + (observed_items - prev_items) / 8.0),
                                                       std::memory_order_relaxed);
             }
 
@@ -815,7 +815,7 @@ namespace cler {
         std::atomic<bool> _stop_flag{false};
         FlowGraphConfig _config;
         std::array<BlockExecutionStats, _N> _stats;
-        std::array<sched::SchedulerCostSample, _N> _cost_samples;
+        std::array<sched::detail::SchedulerCostSample, _N> _cost_samples;
         std::array<const BlockBase*, _N> _block_bases{};
         std::array<Edge, MaxEdges> _edges{};
         size_t _edge_count = 0;
@@ -836,11 +836,11 @@ namespace cler {
             }
         }
         
-        sched::WorkerQueueScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> _worker_queues;
+        sched::detail::WorkerQueueScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> _worker_queues;
 
         void rebuild_partition_from(const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
                                     size_t worker_count, bool use_costs, Partition& out) {
-            sched::build_partition<_N, DEFAULT_MAX_WORKERS>(
+            sched::detail::build_partition<_N, DEFAULT_MAX_WORKERS>(
                 _edges.data(), _edge_count, _cost_samples,
                 regular_ids, regular_count, worker_count,
                 use_costs, _unresolved_edge_count == 0, out);
@@ -849,7 +849,7 @@ namespace cler {
         void reset_run_state() {
             for (auto& stats : _stats) stats = BlockExecutionStats{};
             for (auto& sample : _cost_samples) {
-                sample.calls_until_sample = sched::COST_SAMPLE_PERIOD_CALLS;
+                sample.calls_until_sample = sched::detail::COST_SAMPLE_PERIOD_CALLS;
                 sample.ewma_ns_per_call_bits.store(0, std::memory_order_relaxed);
                 sample.ewma_items_per_call_bits.store(0, std::memory_order_relaxed);
             }

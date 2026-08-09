@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cler_scheduler_partition.hpp"
+#include "detail/cler_partition.hpp"
 #include "../task_policies/cler_task_policy_base.hpp"
 #include <algorithm>
 #include <chrono>

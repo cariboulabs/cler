@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../cler_scheduler_config.hpp"
 #include <array>
 #include <algorithm>
 #include <cstddef>
@@ -7,12 +8,9 @@
 
 namespace cler {
 
-    struct Edge {
-        uint8_t producer;
-        uint8_t consumer;
-    };
 
     namespace sched {
+    namespace detail {
 
         template<size_t MaxBlocks>
         void topo_sort_blocks(const Edge* edges, size_t edge_count,
@@ -75,5 +73,6 @@ namespace cler {
             }
         }
 
+    }
     }
 }

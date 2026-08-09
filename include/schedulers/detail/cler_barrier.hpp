@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../cler_scheduler_config.hpp"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -7,6 +8,7 @@
 
 namespace cler {
     namespace sched {
+    namespace detail {
 
         template<typename TaskPolicy>
         class RepartitionBarrier {
@@ -98,5 +100,6 @@ namespace cler {
             std::atomic<size_t> _count{0};
         };
 
+    }
     }
 }

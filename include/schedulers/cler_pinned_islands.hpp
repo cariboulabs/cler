@@ -1,9 +1,9 @@
 #pragma once
 
 #include "cler_scheduler_config.hpp"
-#include "cler_scheduler_partition.hpp"
-#include "cler_scheduler_park.hpp"
-#include "cler_scheduler_barrier.hpp"
+#include "detail/cler_partition.hpp"
+#include "detail/cler_park.hpp"
+#include "detail/cler_barrier.hpp"
 #include "../task_policies/cler_task_policy_base.hpp"
 #include <algorithm>
 #include <array>
@@ -18,9 +18,9 @@ namespace cler {
         struct PinnedIslandsScheduler {
             using TaskPolicy = typename Host::TaskPolicyType;
             using Partition = typename Host::PartitionType;
-            using ParkGroup = sched::ParkGroup<TaskPolicy, DEFAULT_MAX_WORKERS>;
+            using ParkGroup = sched::detail::ParkGroup<TaskPolicy, DEFAULT_MAX_WORKERS>;
             using WorkerParkState = typename ParkGroup::WorkerParkState;
-            using RepartitionBarrier = sched::RepartitionBarrier<TaskPolicy>;
+            using RepartitionBarrier = sched::detail::RepartitionBarrier<TaskPolicy>;
 
             static constexpr size_t CALIBRATION_DEADLINE_CHECK_PASSES = 256;
             static constexpr size_t kLeaderWorker = 0;
@@ -44,7 +44,7 @@ namespace cler {
             struct WakePinnedWorkers {
                 State* state;
                 void operator()() const {
-                    state->park_states.wake_others(kNoWorker, state->pinned_worker_count);
+                    state->park_states.wake_others(detail::kNoWorker, state->pinned_worker_count);
                 }
             };
 
@@ -201,8 +201,8 @@ namespace cler {
                 Partition candidate;
                 host.rebuild_partition(state.pinned_worker_count, true, candidate);
 
-                return sched::max_island_weight(candidate, weights) <
-                       sched::REPARTITION_IMPROVEMENT_RATIO * sched::max_island_weight(state.partition, weights);
+                return sched::detail::max_island_weight(candidate, weights) <
+                       sched::detail::REPARTITION_IMPROVEMENT_RATIO * sched::detail::max_island_weight(state.partition, weights);
             }
 
             static void repartition_barrier(Host host, State& state, size_t worker_id, uint32_t generation,

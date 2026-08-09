@@ -1,6 +1,7 @@
 #pragma once
 
-#include "../cler_platform.hpp"
+#include "../cler_scheduler_config.hpp"
+#include "../../cler_platform.hpp"
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -9,6 +10,7 @@
 
 namespace cler {
     namespace sched {
+    namespace detail {
 
         static constexpr size_t kNoWorker = (std::numeric_limits<size_t>::max)();
 
@@ -63,5 +65,6 @@ namespace cler {
             std::array<WorkerParkState, MaxWorkers> _states;
         };
 
+    }
     }
 }

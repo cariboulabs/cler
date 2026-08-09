@@ -1,7 +1,8 @@
 #pragma once
 
-#include "cler_scheduler_topology.hpp"
-#include "../cler_platform.hpp"
+#include "cler_topology.hpp"
+#include "../cler_scheduler_config.hpp"
+#include "../../cler_platform.hpp"
 #include <array>
 #include <algorithm>
 #include <atomic>
@@ -12,12 +13,9 @@
 
 namespace cler {
 
-    #ifndef CLER_DEFAULT_MAX_WORKERS
-    #define CLER_DEFAULT_MAX_WORKERS (8)
-    #endif
-    constexpr size_t DEFAULT_MAX_WORKERS = CLER_DEFAULT_MAX_WORKERS;
 
     namespace sched {
+    namespace detail {
 
         static constexpr size_t COST_SAMPLE_PERIOD_CALLS = 61;
         static constexpr double CROSS_EDGE_PENALTY_NS = 200.0;
@@ -41,26 +39,6 @@ namespace cler {
             std::atomic<uint64_t> ewma_items_per_call_bits{0};
         };
 
-        template<size_t MaxBlocks, size_t MaxWorkers>
-        struct Partition {
-            std::array<uint8_t, MaxBlocks> block_ids{};
-            std::array<uint16_t, MaxWorkers + 1> island_begin{};
-            uint16_t block_count = 0;
-            uint16_t island_count = 0;
-
-            uint16_t island_size(size_t island) const {
-                return static_cast<uint16_t>(island_begin[island + 1] - island_begin[island]);
-            }
-
-            size_t island_of(uint8_t block_id) const {
-                for (size_t w = 0; w < island_count; ++w) {
-                    for (uint16_t k = island_begin[w]; k < island_begin[w + 1]; ++k) {
-                        if (block_ids[k] == block_id) return w;
-                    }
-                }
-                return island_count;
-            }
-        };
 
         template<size_t MaxBlocks>
         void collect_block_weights(const std::array<SchedulerCostSample, MaxBlocks>& samples,
@@ -267,5 +245,6 @@ namespace cler {
             }
         };
 
+    }
     }
 }
