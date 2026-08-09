@@ -1145,8 +1145,6 @@ namespace cler {
             _stop_flag.store(false, std::memory_order_release);
             reset_run_state();
 
-            assert(config.num_workers >= 2 && "FixedThreadPool requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
-
             initialize_block_stats();
 
             if (config.collect_detailed_stats) {
@@ -1166,7 +1164,8 @@ namespace cler {
             if (regular_count == 0) return;
 
             const size_t max_worker_count = (std::min)(DEFAULT_MAX_WORKERS, regular_count);
-            const size_t effective_worker_count = (std::max)(size_t{1}, (std::min)(config.num_workers, max_worker_count));
+            const size_t requested_workers = (std::max)(size_t{2}, config.num_workers);
+            const size_t effective_worker_count = (std::max)(size_t{1}, (std::min)(requested_workers, max_worker_count));
 
             if (effective_worker_count >= regular_count) {
                 for (size_t idx = 0; idx < regular_count; ++idx) {

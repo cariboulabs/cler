@@ -330,7 +330,11 @@ config.scheduler = cler::SchedulerType::ThreadPerBlock;        // Default: one t
 // config.scheduler = cler::SchedulerType::PinnedIslands;      // Core-pinned topo islands, cost-partitioned (best on core-constrained targets)
 
 // Worker configuration (for FixedThreadPool and PinnedIslands)
-config.num_workers = 4;  // Number of worker threads (minimum 2 for FixedThreadPool; PinnedIslands accepts 1)
+config.num_workers = 4;  // Number of worker threads
+// Worker-count policy (same in debug and release):
+//   FixedThreadPool clamps num_workers up to 2, then down to min(DEFAULT_MAX_WORKERS, regular block count)
+//   PinnedIslands   clamps num_workers up to 1, then down to the same ceiling
+//   0 and oversized values are clamped, never rejected
 
 // PinnedIslands: shorthand and tuning
 // auto cfg = cler::flowgraph_config::pinned_islands(2);  // cler_utils.hpp

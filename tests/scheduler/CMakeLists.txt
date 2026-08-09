@@ -71,3 +71,15 @@ target_link_libraries(idle_progress_contract_test
 )
 
 add_test(NAME idle_progress_contract_test COMMAND idle_progress_contract_test)
+
+add_executable(lifecycle_test
+    test_lifecycle.cpp
+)
+
+target_link_libraries(lifecycle_test
+    gtest_main
+    cler::cler
+    Threads::Threads
+)
+
+add_test(NAME lifecycle_test COMMAND lifecycle_test)
