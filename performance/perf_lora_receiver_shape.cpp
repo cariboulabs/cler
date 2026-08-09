@@ -122,7 +122,7 @@ TestResult run_test(const std::string& name, cler::FlowGraphConfig config, bool 
 
     FakePlutoSourceBlock source("Source");
     MultiStageResamplerBlock<std::complex<float>> resampler("Resampler", 1.5f, 60.0f, 16384);
-    PolyphaseChannelizerBlock channelizer("Channelizer", NUM_CHANNELS, 80.0f, 3, CHANNELIZER_IN_BUF);
+    PolyphaseChannelizerBlock<NUM_CHANNELS, 3> channelizer("Channelizer", 80.0f, CHANNELIZER_IN_BUF);
 
     BusyDecoderBlock decoder0("Decoder0");
     BusyDecoderBlock decoder1("Decoder1");

@@ -83,11 +83,9 @@ int main() {
 
     ThroughputBlock<std::complex<float>> throughput("Throughput");
 
-    PolyphaseChannelizerBlock channelizer(
+    PolyphaseChannelizerBlock<NUM_CHANNELS, 3> channelizer(
         "Polyphase Channelizer",
-        NUM_CHANNELS, // number of channels
-        80.0f, // kaiser attenuation
-        3 // kaiser filter semilength
+        80.0f // kaiser attenuation
     );
 
     PlotCSpectrumBlock plot_polyphase_cspectrum(

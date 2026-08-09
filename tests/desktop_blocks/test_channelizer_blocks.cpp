@@ -47,38 +47,30 @@ protected:
 
 // Test PolyphaseChannelizerBlock basic construction and parameters
 TEST_F(ChannelizerBlocksTest, PolyphaseChannelizerConstruction) {
-    const size_t num_channels = 4;
+    constexpr size_t num_channels = 4;
     const float kaiser_attenuation = 60.0f;
-    const size_t kaiser_filter_semilength = 4;
+    constexpr size_t kaiser_filter_semilength = 4;
     const size_t buffer_size = 4096; // Large enough for dbf
     
+    using Channelizer = PolyphaseChannelizerBlock<num_channels, kaiser_filter_semilength>;
+
     // Test successful construction
     EXPECT_NO_THROW({
-        PolyphaseChannelizerBlock channelizer("test_channelizer", 
-                                            num_channels, 
-                                            kaiser_attenuation, 
-                                            kaiser_filter_semilength, 
-                                            buffer_size);
+        Channelizer channelizer("test_channelizer", kaiser_attenuation, buffer_size);
     });
-    
-    // Test invalid parameters (these trigger assertions, so we expect program termination)
-    // Note: These tests are commented out because they cause assertion failures
-    // EXPECT_DEATH(PolyphaseChannelizerBlock("test", 0, 60.0f, 4, 1024), "");
-    // EXPECT_DEATH(PolyphaseChannelizerBlock("test", 4, 60.0f, 0, 1024), "");
-    // EXPECT_DEATH(PolyphaseChannelizerBlock("test", 4, 60.0f, 10, 1024), "");
+
+    // Zero num_channels / semilength are now static_assert failures, not runtime errors.
 }
 
 // Test PolyphaseChannelizerBlock with 4 channels - basic functionality
 TEST_F(ChannelizerBlocksTest, PolyphaseChannelizer4Channels) {
-    const size_t num_channels = 4;
+    constexpr size_t num_channels = 4;
     const float kaiser_attenuation = 60.0f;
-    const size_t kaiser_filter_semilength = 4;
+    constexpr size_t kaiser_filter_semilength = 4;
     const size_t buffer_size = 4096; // Large enough for dbf
     
-    PolyphaseChannelizerBlock channelizer("test_channelizer_4ch", 
-                                        num_channels, 
-                                        kaiser_attenuation, 
-                                        kaiser_filter_semilength, 
+    PolyphaseChannelizerBlock<num_channels, kaiser_filter_semilength> channelizer("test_channelizer_4ch",
+                                        kaiser_attenuation,
                                         buffer_size);
     
     // Create output channels
@@ -142,15 +134,13 @@ TEST_F(ChannelizerBlocksTest, PolyphaseChannelizer4Channels) {
 
 // Test PolyphaseChannelizerBlock with frequency separation
 TEST_F(ChannelizerBlocksTest, PolyphaseChannelizerFrequencySeparation) {
-    const size_t num_channels = 8;
+    constexpr size_t num_channels = 8;
     const float kaiser_attenuation = 60.0f;
-    const size_t kaiser_filter_semilength = 4;
+    constexpr size_t kaiser_filter_semilength = 4;
     const size_t buffer_size = 4096; // Large enough for dbf
     
-    PolyphaseChannelizerBlock channelizer("test_channelizer_freq", 
-                                        num_channels, 
-                                        kaiser_attenuation, 
-                                        kaiser_filter_semilength, 
+    PolyphaseChannelizerBlock<num_channels, kaiser_filter_semilength> channelizer("test_channelizer_freq",
+                                        kaiser_attenuation,
                                         buffer_size);
     
     // Create output channels
@@ -210,15 +200,13 @@ TEST_F(ChannelizerBlocksTest, PolyphaseChannelizerFrequencySeparation) {
 
 // Test PolyphaseChannelizerBlock with 2 channels (simplest case)
 TEST_F(ChannelizerBlocksTest, PolyphaseChannelizer2Channels) {
-    const size_t num_channels = 2;
+    constexpr size_t num_channels = 2;
     const float kaiser_attenuation = 60.0f;
-    const size_t kaiser_filter_semilength = 4;
+    constexpr size_t kaiser_filter_semilength = 4;
     const size_t buffer_size = 4096; // Large enough for dbf
     
-    PolyphaseChannelizerBlock channelizer("test_channelizer_2ch", 
-                                        num_channels, 
-                                        kaiser_attenuation, 
-                                        kaiser_filter_semilength, 
+    PolyphaseChannelizerBlock<num_channels, kaiser_filter_semilength> channelizer("test_channelizer_2ch",
+                                        kaiser_attenuation,
                                         buffer_size);
     
     cler::Channel<std::complex<float>> ch0(buffer_size);
@@ -259,15 +247,13 @@ TEST_F(ChannelizerBlocksTest, PolyphaseChannelizer2Channels) {
 
 // Test PolyphaseChannelizerBlock error conditions
 TEST_F(ChannelizerBlocksTest, PolyphaseChannelizerErrorConditions) {
-    const size_t num_channels = 4;
+    constexpr size_t num_channels = 4;
     const float kaiser_attenuation = 60.0f;
-    const size_t kaiser_filter_semilength = 4;
+    constexpr size_t kaiser_filter_semilength = 4;
     const size_t buffer_size = 4096;
     
-    PolyphaseChannelizerBlock channelizer("test_channelizer_errors", 
-                                        num_channels, 
-                                        kaiser_attenuation, 
-                                        kaiser_filter_semilength, 
+    PolyphaseChannelizerBlock<num_channels, kaiser_filter_semilength> channelizer("test_channelizer_errors",
+                                        kaiser_attenuation,
                                         buffer_size);
     
     cler::Channel<std::complex<float>> ch0(buffer_size);
@@ -293,15 +279,13 @@ TEST_F(ChannelizerBlocksTest, PolyphaseChannelizerErrorConditions) {
 
 // Test PolyphaseChannelizerBlock multiple processing runs
 TEST_F(ChannelizerBlocksTest, PolyphaseChannelizerMultipleRuns) {
-    const size_t num_channels = 4;
+    constexpr size_t num_channels = 4;
     const float kaiser_attenuation = 60.0f;
-    const size_t kaiser_filter_semilength = 4;
+    constexpr size_t kaiser_filter_semilength = 4;
     const size_t buffer_size = 4096 * num_channels;
     
-    PolyphaseChannelizerBlock channelizer("test_channelizer_multiple", 
-                                        num_channels, 
-                                        kaiser_attenuation, 
-                                        kaiser_filter_semilength, 
+    PolyphaseChannelizerBlock<num_channels, kaiser_filter_semilength> channelizer("test_channelizer_multiple",
+                                        kaiser_attenuation,
                                         buffer_size);
     
     cler::Channel<std::complex<float>> ch0(buffer_size);
@@ -348,15 +332,13 @@ TEST_F(ChannelizerBlocksTest, PolyphaseChannelizerMultipleRuns) {
 
 // Test PolyphaseChannelizerBlock with small buffer (may or may not trigger dbf exception)
 TEST_F(ChannelizerBlocksTest, PolyphaseChannelizerSmallBuffer) {
-    const size_t num_channels = 4;
+    constexpr size_t num_channels = 4;
     const float kaiser_attenuation = 60.0f;
-    const size_t kaiser_filter_semilength = 4;
+    constexpr size_t kaiser_filter_semilength = 4;
     const size_t small_buffer = 512; // Small buffer size
     
-    PolyphaseChannelizerBlock channelizer("test_channelizer_small", 
-                                        num_channels, 
-                                        kaiser_attenuation, 
-                                        kaiser_filter_semilength, 
+    PolyphaseChannelizerBlock<num_channels, kaiser_filter_semilength> channelizer("test_channelizer_small",
+                                        kaiser_attenuation,
                                         small_buffer);
     
     cler::Channel<std::complex<float>> ch0(4096);
@@ -386,4 +368,68 @@ TEST_F(ChannelizerBlocksTest, PolyphaseChannelizerSmallBuffer) {
         // If it throws, that's also acceptable for small buffers
         SUCCEED() << "Small buffer handling threw exception as expected: " << e.what();
     }
+}
+
+namespace {
+
+template <size_t M, size_t SEMILEN>
+void expect_analyzer_matches_liquid() {
+    constexpr float kaiser_attenuation = 100.0f;
+    constexpr size_t num_frames = 997;
+
+    std::vector<std::complex<float>> input(num_frames * M);
+    for (size_t i = 0; i < input.size(); ++i) {
+        const float t = static_cast<float>(i);
+        input[i] = std::complex<float>(std::cos(0.031f * t) + 0.5f * std::sin(0.7f * t),
+                                       std::sin(0.017f * t) - 0.25f * std::cos(0.3f * t));
+    }
+
+    std::vector<std::vector<std::complex<float>>> expected(
+        M, std::vector<std::complex<float>>(num_frames));
+    firpfbch_crcf reference = firpfbch_crcf_create_kaiser(
+        LIQUID_ANALYZER, M, SEMILEN, kaiser_attenuation);
+    std::array<std::complex<float>, M> frame_out;
+    for (size_t j = 0; j < num_frames; ++j) {
+        firpfbch_crcf_analyzer_execute(
+            reference,
+            reinterpret_cast<liquid_float_complex*>(input.data() + j * M),
+            reinterpret_cast<liquid_float_complex*>(frame_out.data()));
+        for (size_t k = 0; k < M; ++k) expected[k][j] = frame_out[k];
+    }
+    firpfbch_crcf_destroy(reference);
+
+    for (size_t batch_frames : {1u, 2u, 5u, 64u, 4096u}) {
+        PolyphaseAnalyzer<M, SEMILEN> analyzer(kaiser_attenuation);
+        std::vector<std::vector<std::complex<float>>> got(
+            M, std::vector<std::complex<float>>(num_frames));
+        std::array<std::complex<float>*, M> ports;
+
+        for (size_t j = 0; j < num_frames; j += batch_frames) {
+            const size_t n = std::min(batch_frames, num_frames - j);
+            for (size_t k = 0; k < M; ++k) ports[k] = got[k].data() + j;
+            analyzer.execute(input.data() + j * M, n, ports.data());
+        }
+
+        for (size_t k = 0; k < M; ++k) {
+            for (size_t j = 0; j < num_frames; ++j) {
+                EXPECT_NEAR(got[k][j].real(), expected[k][j].real(), 1e-4f)
+                    << "M=" << M << " batch=" << batch_frames << " k=" << k << " j=" << j;
+                EXPECT_NEAR(got[k][j].imag(), expected[k][j].imag(), 1e-4f)
+                    << "M=" << M << " batch=" << batch_frames << " k=" << k << " j=" << j;
+            }
+        }
+    }
+}
+
+}
+
+TEST_F(ChannelizerBlocksTest, AnalyzerMatchesLiquidFirpfbch) {
+    expect_analyzer_matches_liquid<2, 3>();
+    expect_analyzer_matches_liquid<3, 3>();
+    expect_analyzer_matches_liquid<4, 3>();
+    expect_analyzer_matches_liquid<5, 3>();
+    expect_analyzer_matches_liquid<6, 3>();
+    expect_analyzer_matches_liquid<8, 3>();
+    expect_analyzer_matches_liquid<5, 4>();
+    expect_analyzer_matches_liquid<4, 2>();
 }
