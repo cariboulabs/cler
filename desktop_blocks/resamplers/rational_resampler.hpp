@@ -1,6 +1,7 @@
 #pragma once
 
 #include "liquid.h"
+#include "cler.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -113,4 +114,45 @@ private:
     std::array<std::complex<float>, 2 * history> _carry{};
     size_t _phase = 0;
     size_t _input_until_next_output = 1;
+};
+
+template <size_t INTERP, size_t DECIM, size_t TAPS_PER_PHASE>
+struct RationalResamplerBlock : public cler::BlockBase {
+    using Sample = std::complex<float>;
+    cler::Channel<Sample> in;
+
+    RationalResamplerBlock(const char* name, const float attenuation,
+        const size_t buffer_size = 0)
+        : cler::BlockBase(name),
+          in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(Sample) : buffer_size),
+          _resampler(attenuation)
+    {
+        if (buffer_size > 0 && buffer_size * sizeof(Sample) < cler::DOUBLY_MAPPED_MIN_SIZE) {
+            cler::panic("Buffer size too small for doubly-mapped buffers");
+        }
+        if (attenuation < 0.0f) {
+            cler::panic("Attenuation must be non-negative.");
+        }
+    }
+
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<Sample>* out)
+    {
+        auto [read_ptr, read_size]   = in.read_dbf();
+        auto [write_ptr, write_size] = out->write_dbf();
+
+        if (read_size == 0)  return cler::Error::NotEnoughSamples;
+        if (write_size < 2)  return cler::Error::NotEnoughSpace;
+
+        const size_t inputs_that_fit = ((write_size - 1) * DECIM) / INTERP;
+        const size_t num_input = std::min(read_size, inputs_that_fit);
+        if (num_input == 0) return cler::Error::NotEnoughSpaceOrSamples;
+
+        const size_t produced = _resampler.process(read_ptr, num_input, write_ptr);
+        in.commit_read(num_input);
+        out->commit_write(produced);
+        return cler::Empty{};
+    }
+
+private:
+    RationalResampler<INTERP, DECIM, TAPS_PER_PHASE> _resampler;
 };
