@@ -19,10 +19,8 @@
 
 namespace cler {
 
-    //here so we can insure blocks use this feature
     constexpr size_t DOUBLY_MAPPED_MIN_SIZE = dro::details::DOUBLY_MAPPED_MIN_SIZE;
 
-    // Configurable at compile-time for different target platforms
     #ifndef CLER_DEFAULT_MAX_WORKERS
     #define CLER_DEFAULT_MAX_WORKERS (8)  // Conservative default for embedded systems
     #endif
@@ -31,15 +29,12 @@ namespace cler {
     enum class Error {
         OK,
 
-        // Non-fatal errors (< TERMINATE_FLOWGRAPH)
         Unknown,
         NotEnoughSamples,
         NotEnoughSpace,
         NotEnoughSpaceOrSamples, // for lazyness
         ProcedureError,
         BadData,
-        
-        // Fatal errors (>= TERMINATE_FLOWGRAPH)
         TERMINATE_FLOWGRAPH,
         TERM_InvalidChannelIndex,
         TERM_ProcedureError,
@@ -47,7 +42,6 @@ namespace cler {
         TERM_EOFReached,
     };
     
-    // Helper function for error classification
     constexpr bool is_fatal(Error error) {
         return error >= Error::TERMINATE_FLOWGRAPH;
     }
@@ -164,8 +158,6 @@ namespace cler {
             : block(blk), outputs(static_cast<Channels*>(outs)...) {}
     };
 
-    // C++17 deduction guide: automatically deduces channel base types from concrete channel types
-    // This allows: BlockRunner(&block, &channel) instead of BlockRunner<Block, ChannelBase<T>>(&block, &channel)
     template<typename Block, typename... Channels>
     BlockRunner(Block*, Channels*...) -> BlockRunner<Block, channel_to_base_t<Channels>...>;
 
@@ -319,26 +311,21 @@ namespace cler {
         
         template<typename Rep, typename Period>
         void run_for(const std::chrono::duration<Rep, Period>& duration, const FlowGraphConfig& config = FlowGraphConfig{}) {
-            // Start the flowgraph
             auto start_time = std::chrono::high_resolution_clock::now();
             run(config);
             
-            // For longer durations, use sleep_us to avoid busy waiting
             static constexpr int64_t PRECISE_TIMING_THRESHOLD_US = 100000;  // 100ms
             static constexpr int64_t PRECISE_TIMING_BUFFER_US = 50000;      // 50ms
             
             auto total_us = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
             if (total_us > PRECISE_TIMING_THRESHOLD_US) { // More than 100ms
-                // Sleep for most of the duration, leaving 50ms for precise timing
                 TaskPolicy::sleep_us(total_us - PRECISE_TIMING_BUFFER_US);
             }
             
-            // Use relax for the remaining time for precise timing
             while (std::chrono::high_resolution_clock::now() - start_time < duration) {
                 TaskPolicy::relax();
             }
             
-            // Stop the flowgraph
             stop();
         }
 
@@ -356,7 +343,6 @@ namespace cler {
             return _stop_flag.load(std::memory_order_acquire);
         }
 
-        // Immutable config accessor
         const FlowGraphConfig& config() const { return _config; }
         const std::array<BlockExecutionStats, _N>& stats() const { return _stats; }
 
@@ -551,11 +537,6 @@ namespace cler {
         }
 
     public:
-        // These methods must be public because they are called from lambdas passed to 
-        // TaskPolicy::create_task(). Even though the lambdas are created within the class,
-        // they are technically separate callable objects. Different compilers interpret 
-        // lambda access to private members differently - GCC allows it while Clang doesn't.
-        // Making these public ensures portability across compilers.
         
         struct NoProgressNotification {
             void operator()() const {}
@@ -566,7 +547,6 @@ namespace cler {
             void operator()() const { graph->wake_parked_workers(kNoWorker); }
         };
 
-        // C++17 compatible member template functions replacing templated lambdas
         template<std::size_t I, typename ProgressNotifier>
         void run_block_at_index_thread_per_block(const FlowGraphConfig& config,
                                                  ProgressNotifier notify_progress) {
@@ -656,7 +636,6 @@ namespace cler {
     private:  // Return to private section for internal implementation
         template<std::size_t... Is>
         void launch_tasks_impl(std::index_sequence<Is...>, const FlowGraphConfig& config) {
-            // C++17 fold expression: validates all indices are within bounds at compile time
             static_assert(((Is < _N) && ...), "All block indices must be within bounds");
             ((_tasks[Is] = TaskPolicy::create_task([this, config]() {
                 run_block_at_index_thread_per_block<Is>(config, NoProgressNotification{});
@@ -769,14 +748,12 @@ namespace cler {
         size_t _pinned_worker_count = 0;
         bool _cost_sampling_enabled = false;
 
-        // Initialize block stats with names (only if detailed stats enabled)
         void initialize_block_stats() {
             if (_config.collect_detailed_stats) {
                 init_stats_impl(std::make_index_sequence<_N>{});
             }
         }
         
-        // Helper for conditional timing
         auto get_time_if_needed(bool collect_stats) {
             return collect_stats ? std::chrono::high_resolution_clock::now() : 
                                  std::chrono::high_resolution_clock::time_point{};
