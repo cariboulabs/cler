@@ -5,6 +5,8 @@
 #include "cler_embeddable_string.hpp"
 #include "cler_platform.hpp"
 #include "task_policies/cler_task_policy_base.hpp"
+#include "schedulers/cler_scheduler_topology.hpp"
+#include "schedulers/cler_scheduler_partition.hpp"
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
 #include <complex> //again, a lot of cler blocks use complex numbers
@@ -168,11 +170,6 @@ namespace cler {
         return runner;
     }
 
-    struct Edge {
-        uint8_t producer;
-        uint8_t consumer;
-    };
-
     template<typename Runner>
     struct runner_output_count;
     template<typename Block, typename... Channels>
@@ -249,25 +246,7 @@ namespace cler {
             uint8_t consumer;
         };
 
-        struct Partition {
-            std::array<uint8_t, _N> block_ids{};
-            std::array<uint16_t, DEFAULT_MAX_WORKERS + 1> island_begin{};
-            uint16_t block_count = 0;
-            uint16_t island_count = 0;
-
-            uint16_t island_size(size_t island) const {
-                return static_cast<uint16_t>(island_begin[island + 1] - island_begin[island]);
-            }
-
-            size_t island_of(uint8_t block_id) const {
-                for (size_t w = 0; w < island_count; ++w) {
-                    for (uint16_t k = island_begin[w]; k < island_begin[w + 1]; ++k) {
-                        if (block_ids[k] == block_id) return w;
-                    }
-                }
-                return island_count;
-            }
-        };
+        using Partition = sched::Partition<_N, DEFAULT_MAX_WORKERS>;
 
         FlowGraph(BlockRunners... runners)
             : _runners(std::make_tuple(std::forward<BlockRunners>(std::move(runners))...)) {
@@ -349,8 +328,8 @@ namespace cler {
         std::array<BlockCost, _N> block_costs() const {
             std::array<BlockCost, _N> out{};
             for (size_t i = 0; i < _N; ++i) {
-                out[i].ewma_ns_per_call = bits_to_double(_cost_samples[i].ewma_ns_per_call_bits.load(std::memory_order_relaxed));
-                out[i].ewma_items_per_call = bits_to_double(_cost_samples[i].ewma_items_per_call_bits.load(std::memory_order_relaxed));
+                out[i].ewma_ns_per_call = sched::bits_to_double(_cost_samples[i].ewma_ns_per_call_bits.load(std::memory_order_relaxed));
+                out[i].ewma_items_per_call = sched::bits_to_double(_cost_samples[i].ewma_items_per_call_bits.load(std::memory_order_relaxed));
             }
             return out;
         }
@@ -442,25 +421,7 @@ namespace cler {
             collect_edges_impl(std::make_index_sequence<_N>{}, spans);
         }
 
-        static constexpr size_t COST_SAMPLE_PERIOD_CALLS = 61;
-
-        static uint64_t double_to_bits(double value) {
-            uint64_t bits;
-            std::memcpy(&bits, &value, sizeof(bits));
-            return bits;
-        }
-
-        static double bits_to_double(uint64_t bits) {
-            double value;
-            std::memcpy(&value, &bits, sizeof(value));
-            return value;
-        }
-
-        struct alignas(platform::cache_line_size) SchedulerCostSample {
-            size_t calls_until_sample = COST_SAMPLE_PERIOD_CALLS;
-            std::atomic<uint64_t> ewma_ns_per_call_bits{0};
-            std::atomic<uint64_t> ewma_items_per_call_bits{0};
-        };
+        
 
         template<typename... Channels>
         static std::size_t sum_output_cumulative_write_count(const std::tuple<Channels*...>& outputs) {
@@ -508,7 +469,7 @@ namespace cler {
                     return runner.block->procedure(outs...);
                 }, runner.outputs);
             }
-            sample.calls_until_sample = COST_SAMPLE_PERIOD_CALLS;
+            sample.calls_until_sample = sched::COST_SAMPLE_PERIOD_CALLS;
 
             std::array<std::size_t, MaxEdges> input_snapshot{};
             const bool has_inputs = snapshot_input_reads(static_cast<uint8_t>(I), input_snapshot);
@@ -530,12 +491,12 @@ namespace cler {
                 const double observed_items =
                     static_cast<double>(read_delta > 0 ? read_delta : write_delta);
 
-                const double prev_ns = bits_to_double(sample.ewma_ns_per_call_bits.load(std::memory_order_relaxed));
-                sample.ewma_ns_per_call_bits.store(double_to_bits(prev_ns + (observed_ns - prev_ns) / 8.0),
+                const double prev_ns = sched::bits_to_double(sample.ewma_ns_per_call_bits.load(std::memory_order_relaxed));
+                sample.ewma_ns_per_call_bits.store(sched::double_to_bits(prev_ns + (observed_ns - prev_ns) / 8.0),
                                                    std::memory_order_relaxed);
 
-                const double prev_items = bits_to_double(sample.ewma_items_per_call_bits.load(std::memory_order_relaxed));
-                sample.ewma_items_per_call_bits.store(double_to_bits(prev_items + (observed_items - prev_items) / 8.0),
+                const double prev_items = sched::bits_to_double(sample.ewma_items_per_call_bits.load(std::memory_order_relaxed));
+                sample.ewma_items_per_call_bits.store(sched::double_to_bits(prev_items + (observed_items - prev_items) / 8.0),
                                                       std::memory_order_relaxed);
             }
 
@@ -712,7 +673,7 @@ namespace cler {
         std::atomic<bool> _stop_flag{false};
         FlowGraphConfig _config;
         std::array<BlockExecutionStats, _N> _stats;
-        std::array<SchedulerCostSample, _N> _cost_samples;
+        std::array<sched::SchedulerCostSample, _N> _cost_samples;
         std::array<const BlockBase*, _N> _block_bases{};
         std::array<Edge, MaxEdges> _edges{};
         size_t _edge_count = 0;
@@ -733,10 +694,8 @@ namespace cler {
 
         static constexpr size_t kNoWorker = (std::numeric_limits<size_t>::max)();
         static constexpr uint32_t kNoRepartitionRequest = (std::numeric_limits<uint32_t>::max)();
-        static constexpr double CROSS_EDGE_PENALTY_NS = 200.0;
-        static constexpr size_t CALIBRATION_DEADLINE_CHECK_PASSES = 256;
-        static constexpr double REPARTITION_IMPROVEMENT_RATIO = 0.8;
-
+                static constexpr size_t CALIBRATION_DEADLINE_CHECK_PASSES = 256;
+        
         static constexpr uint64_t barrier_word(uint32_t generation, uint32_t arrived) {
             return (static_cast<uint64_t>(generation) << 32) | arrived;
         }
@@ -854,176 +813,20 @@ namespace cler {
         
         WorkerQueueScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> _worker_queues;
 
-        void topo_sort_blocks(const uint8_t* ids, size_t count, std::array<uint8_t, _N>& out) const {
-            std::array<uint16_t, _N> indegree{};
-            std::array<uint8_t, _N> in_set{};
-            std::array<uint8_t, _N> emitted{};
 
-            for (size_t i = 0; i < count; ++i) in_set[ids[i]] = 1;
-            for (size_t e = 0; e < _edge_count; ++e) {
-                const Edge& edge = _edges[e];
-                if (edge.producer == edge.consumer) continue;
-                if (in_set[edge.producer] && in_set[edge.consumer]) ++indegree[edge.consumer];
-            }
 
-            size_t emitted_count = 0;
-            bool progressed = true;
-            while (progressed) {
-                progressed = false;
-                for (size_t i = 0; i < count; ++i) {
-                    const uint8_t b = ids[i];
-                    if (emitted[b] || indegree[b] != 0) continue;
-                    emitted[b] = 1;
-                    out[emitted_count++] = b;
-                    progressed = true;
-                    for (size_t e = 0; e < _edge_count; ++e) {
-                        const Edge& edge = _edges[e];
-                        if (edge.producer != b || edge.producer == edge.consumer) continue;
-                        if (in_set[edge.consumer] && !emitted[edge.consumer]) --indegree[edge.consumer];
-                    }
-                }
-            }
-            for (size_t i = 0; i < count; ++i) {
-                if (!emitted[ids[i]]) out[emitted_count++] = ids[i];
-            }
-        }
 
-        void collect_block_weights(const std::array<uint8_t, _N>& order, size_t count,
-                                   std::array<double, _N>& weights) const {
-            std::array<double, _N> sorted{};
-            size_t sampled = 0;
 
-            for (size_t i = 0; i < count; ++i) {
-                const uint8_t id = order[i];
-                const auto& sample = _cost_samples[id];
-                const double ns = bits_to_double(sample.ewma_ns_per_call_bits.load(std::memory_order_relaxed));
-                const double items = bits_to_double(sample.ewma_items_per_call_bits.load(std::memory_order_relaxed));
-                weights[id] = ns > 0.0 ? ns / (std::max)(items, 1.0) : 0.0;
-                if (weights[id] > 0.0) sorted[sampled++] = weights[id];
-            }
 
-            double median = 1.0;
-            if (sampled > 0) {
-                std::sort(sorted.begin(), sorted.begin() + sampled);
-                median = sorted[sampled / 2];
-            }
-            for (size_t i = 0; i < count; ++i) {
-                if (weights[order[i]] <= 0.0) weights[order[i]] = median;
-            }
-        }
-
-        double max_island_weight(const Partition& partition, const std::array<double, _N>& weights) const {
-            double worst = 0.0;
-            for (size_t w = 0; w < partition.island_count; ++w) {
-                double island = 0.0;
-                for (uint16_t k = partition.island_begin[w]; k < partition.island_begin[w + 1]; ++k) {
-                    island += weights[partition.block_ids[k]];
-                }
-                worst = (std::max)(worst, island);
-            }
-            return worst;
-        }
-
-        void count_cut_crossings(const std::array<uint8_t, _N>& order, size_t count,
-                                 std::array<uint16_t, _N>& crossings) const {
-            std::array<uint16_t, _N> position{};
-            std::array<uint8_t, _N> in_order{};
-            for (size_t i = 0; i < count; ++i) {
-                position[order[i]] = static_cast<uint16_t>(i);
-                in_order[order[i]] = 1;
-            }
-
-            for (size_t e = 0; e < _edge_count; ++e) {
-                const Edge& edge = _edges[e];
-                if (!in_order[edge.producer] || !in_order[edge.consumer]) continue;
-                const uint16_t producer_pos = position[edge.producer];
-                const uint16_t consumer_pos = position[edge.consumer];
-                const uint16_t low = (std::min)(producer_pos, consumer_pos);
-                const uint16_t high = (std::max)(producer_pos, consumer_pos);
-                for (uint16_t cut = static_cast<uint16_t>(low + 1); cut <= high; ++cut) {
-                    ++crossings[cut];
-                }
-            }
-        }
-
-        void build_partition(size_t worker_count, bool use_costs, Partition& out) {
+        void rebuild_partition(size_t worker_count, bool use_costs, Partition& out) {
             std::array<uint8_t, _N> regular_ids{};
             size_t regular_count = 0;
             collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
 
-            const bool topology_is_complete = (_unresolved_edge_count == 0);
-
-            std::array<uint8_t, _N> order{};
-            if (topology_is_complete) {
-                topo_sort_blocks(regular_ids.data(), regular_count, order);
-            } else {
-                order = regular_ids;
-            }
-
-            const size_t islands = (std::max)(size_t{1}, (std::min)(worker_count, regular_count));
-            out.block_ids = order;
-            out.block_count = static_cast<uint16_t>(regular_count);
-            out.island_count = static_cast<uint16_t>(islands);
-
-            if (!use_costs || !topology_is_complete) {
-                size_t cursor = 0;
-                for (size_t w = 0; w < islands; ++w) {
-                    out.island_begin[w] = static_cast<uint16_t>(cursor);
-                    cursor += regular_count / islands + (w < regular_count % islands ? 1 : 0);
-                }
-                out.island_begin[islands] = static_cast<uint16_t>(regular_count);
-                return;
-            }
-
-            std::array<double, _N> weights{};
-            collect_block_weights(order, regular_count, weights);
-
-            std::array<double, _N + 1> prefix{};
-            for (size_t i = 0; i < regular_count; ++i) prefix[i + 1] = prefix[i] + weights[order[i]];
-
-            std::array<uint16_t, _N> crossings{};
-            count_cut_crossings(order, regular_count, crossings);
-
-            std::array<double, _N + 1> prev_max{};
-            std::array<double, _N + 1> prev_crossings{};
-            std::array<double, _N + 1> island_max{};
-            std::array<double, _N + 1> total_crossings{};
-            std::array<std::array<uint16_t, _N + 1>, DEFAULT_MAX_WORKERS + 1> choice{};
-
-            const double infinity = (std::numeric_limits<double>::max)();
-            for (size_t end = 0; end <= regular_count; ++end) {
-                prev_max[end] = (end == 0) ? 0.0 : infinity;
-                prev_crossings[end] = 0.0;
-            }
-
-            for (size_t k = 1; k <= islands; ++k) {
-                for (size_t end = 0; end <= regular_count; ++end) island_max[end] = infinity;
-                for (size_t end = k; end <= regular_count - (islands - k); ++end) {
-                    double best_objective = infinity;
-                    for (size_t start = k - 1; start < end; ++start) {
-                        if (prev_max[start] == infinity) continue;
-                        const double candidate_max = (std::max)(prev_max[start], prefix[end] - prefix[start]);
-                        const double candidate_crossings = prev_crossings[start] + (start > 0 ? crossings[start] : 0);
-                        const double objective = candidate_max + CROSS_EDGE_PENALTY_NS * candidate_crossings;
-                        if (objective < best_objective) {
-                            best_objective = objective;
-                            island_max[end] = candidate_max;
-                            total_crossings[end] = candidate_crossings;
-                            choice[k][end] = static_cast<uint16_t>(start);
-                        }
-                    }
-                }
-                prev_max = island_max;
-                prev_crossings = total_crossings;
-            }
-
-            size_t end = regular_count;
-            out.island_begin[islands] = static_cast<uint16_t>(regular_count);
-            for (size_t k = islands; k >= 1; --k) {
-                const uint16_t start = choice[k][end];
-                out.island_begin[k - 1] = start;
-                end = start;
-            }
+            sched::build_partition<_N, DEFAULT_MAX_WORKERS>(
+                _edges.data(), _edge_count, _cost_samples,
+                regular_ids, regular_count, worker_count,
+                use_costs, _unresolved_edge_count == 0, out);
         }
 
         bool leader_should_repartition(const FlowGraphConfig& config) {
@@ -1036,13 +839,14 @@ namespace cler {
             _next_repartition_check = now + std::chrono::milliseconds(config.repartition_check_ms);
 
             std::array<double, _N> weights{};
-            collect_block_weights(_partition.block_ids, _partition.block_count, weights);
+            sched::collect_block_weights<_N>(_cost_samples, _partition.block_ids,
+                                             _partition.block_count, weights);
 
             Partition candidate;
-            build_partition(_pinned_worker_count, true, candidate);
+            rebuild_partition(_pinned_worker_count, true, candidate);
 
-            return max_island_weight(candidate, weights) <
-                   REPARTITION_IMPROVEMENT_RATIO * max_island_weight(_partition, weights);
+            return sched::max_island_weight(candidate, weights) <
+                   sched::REPARTITION_IMPROVEMENT_RATIO * sched::max_island_weight(_partition, weights);
         }
 
         void apply_partition() {
@@ -1075,7 +879,7 @@ namespace cler {
         void reset_run_state() {
             for (auto& stats : _stats) stats = BlockExecutionStats{};
             for (auto& sample : _cost_samples) {
-                sample.calls_until_sample = COST_SAMPLE_PERIOD_CALLS;
+                sample.calls_until_sample = sched::COST_SAMPLE_PERIOD_CALLS;
                 sample.ewma_ns_per_call_bits.store(0, std::memory_order_relaxed);
                 sample.ewma_items_per_call_bits.store(0, std::memory_order_relaxed);
             }
@@ -1130,7 +934,7 @@ namespace cler {
 
             if (regular_count == 0) return;
 
-            build_partition(_pinned_worker_count, false, _partition);
+            rebuild_partition(_pinned_worker_count, false, _partition);
             apply_partition();
 
             for (size_t worker_id = 0; worker_id < _pinned_worker_count; ++worker_id) {
@@ -1317,7 +1121,7 @@ namespace cler {
             }
 
             if (!_stop_flag.load(std::memory_order_relaxed)) {
-                build_partition(_pinned_worker_count, true, _partition);
+                rebuild_partition(_pinned_worker_count, true, _partition);
                 apply_partition();
                 _next_repartition_check = std::chrono::steady_clock::now() +
                                           std::chrono::milliseconds(_config.repartition_check_ms);
