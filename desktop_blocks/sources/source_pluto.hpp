@@ -13,6 +13,7 @@
 #include <complex>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 
 // PlutoSDR (and any AD936x/IIO device) RX source via libiio.
@@ -73,6 +74,17 @@ struct SourcePlutoBlock : public cler::BlockBase {
         write_attr_or_panic(lo, "frequency", freq_hz);
         write_attr_or_panic(chn, "sampling_frequency", samp_rate_hz);
         write_attr_or_panic(chn, "rf_bandwidth", bandwidth_hz);
+
+        long long actual_rate = 0;
+        if (iio_channel_attr_read_longlong(chn, "sampling_frequency", &actual_rate) < 0 ||
+            std::llabs(actual_rate - samp_rate_hz) > samp_rate_hz / 100) {
+            char msg[160];
+            std::snprintf(msg, sizeof(msg),
+                          "Pluto: driver clamped sample rate to %lld Hz (requested %lld)",
+                          actual_rate, samp_rate_hz);
+            iio_context_destroy(_ctx);
+            cler::panic(msg);
+        }
         _lo = lo;
 
         if (gain_db < 0.0) {
