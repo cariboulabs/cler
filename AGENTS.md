@@ -935,8 +935,29 @@ out->commit_write(to_process);
 
 #### Fanout with Imbalanced Processing (different complexity per path)
 - **Scheduler**: PinnedIslands (cost-based partition isolates the heavy path after calibration)
-- **Workers**: CPU cores, or cores - 1 when a may_block source needs headroom
+- **Workers**: CPU cores. Do NOT subtract one for a may_block source.
 - **Expected**: Significantly better than FixedThreadPool for imbalanced loads
+
+Measured on a 2-core PlutoSDR (Cortex-A9), `SourcePluto(may_block) -> Mix ->
+FIR -> Sink`, at a rate every config could sustain (3 reps, spread +/- 0.004
+cores):
+
+| config | CPU cores | meets rate (light chain) | meets rate (loaded chain) |
+|---|---|---|---|
+| PinnedIslands(1) | 1.405 | yes | **no** (1.723 of 2.083 MSPS) |
+| PinnedIslands(2) | 1.419 | yes | **yes** (2.078) |
+| ThreadPerBlock | 1.524 | yes | no (1.897) |
+| FixedThreadPool(2) | 1.544 | yes | no (1.760) |
+
+`cores - 1` saves ~1% CPU when the chain has slack, and costs 17% of capacity
+when it does not. Take the extra worker: the may_block source spends nearly all
+its time blocked in the driver (measured at 0.196 cores for a 3 MS/s libiio
+source), so it does not need a core reserved for it. `embedded_optimized()` is
+`pinned_islands(2)` and is the right default on a 2-core target.
+
+The cost-based repartition is what makes 2 workers win: with the barrier
+suppressed, the same config drops to 1.760 MSPS. It only matters when per-block
+costs are uneven -- on a balanced chain it is pure overhead.
 
 #### Many Blocks (>20 blocks in flowgraph)
 - **Scheduler**: PinnedIslands or FixedThreadPool

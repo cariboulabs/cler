@@ -61,7 +61,6 @@ inline const char* error_to_cstring(Error error) {
 // Common configurations for typical use cases
 namespace flowgraph_config {
 
-    // Conservative embedded configuration
     inline FlowGraphConfig embedded_optimized() {
         FlowGraphConfig config;
         config.scheduler = SchedulerType::PinnedIslands;
