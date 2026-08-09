@@ -1002,6 +1002,24 @@ The symptom is diagnostic and worth recognising: **throughput short of the rate
 while the worker sits well under 1.0 core.** That is never a compute problem.
 Raising the input channel to 16385 or above fixed it with no other change.
 
+### ARM NEON: hand-written FP loops need -ffast-math to vectorize
+
+The Pluto toolchain passes `-mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard` but
+**not** `-ffast-math`. Without it GCC will not vectorize a floating-point
+reduction, because NEON single-precision is not fully IEEE and reassociation is
+barred. Every hand-written accumulate loop in this repo — the channelizer fold,
+the rational resampler subfilter — is therefore scalar on the Pluto today.
+
+Estimated headroom on A9 dot products is 2-4x, so this is worth measuring before
+writing intrinsics by hand. Validate LoRa decode on-device after enabling it;
+`-ffast-math` also changes NaN/Inf behaviour.
+
+Note for anyone reading older notes: liquid's own dot products are *not* the
+problem here. `dotprod_crcf.c` `#include`s `dotprod_crcf.neon.c`, `BUILD_NEON`
+is 1 in the armhf `liquid.config.h`, and `dotprod_crcf_execute_neon{,_1,_4}` are
+all present in the archive. A previous claim that liquid's CMake compiled only
+the portable scalar versions was wrong.
+
 ### Polyphase channelizer: batch the span, do not loop per frame
 
 Measured on a PlutoSDR (2x Cortex-A9 @ 667 MHz), M=5, 3.0 MS/s in: the block
