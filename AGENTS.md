@@ -1,218 +1,115 @@
 # AI Bringup Guide for Cler DSP Framework
 
-This comprehensive guide provides context and guidance for AI assistants (Claude Code, GitHub Copilot, etc.) when working with the Cler DSP framework codebase.
+Context for AI assistants working in this codebase. The framework is in early
+development — block names and APIs move, so treat the structure notes as a map,
+not a contract, and check the code.
 
 ## 1. Overview & Architecture
 
-Cler is a C++17 template-based DSP flowgraph framework for SDRs and embedded systems. It prioritizes compile-time safety, zero-cost abstractions, and minimal runtime footprint suitable for everything from desktop SDR applications to bare-metal MCUs.
+Cler is a C++17 template-based DSP flowgraph framework for SDRs and embedded
+systems: compile-time type safety, zero-cost abstractions, and a runtime small
+enough for bare-metal MCUs.
 
-### Platform Support
-- **Linux**: Fully supported (Ubuntu, Debian, and other distributions)
-- **macOS**: Fully supported (Intel and Apple Silicon)
-- **Windows**: Not natively supported. Windows users should use [Windows Subsystem for Linux (WSL2)](https://docs.microsoft.com/en-us/windows/wsl/install)
-  - WSL2 provides full POSIX compliance and allows you to use CLER exactly as on Linux
-  - No special Windows toolchain or modifications needed when using WSL2
+**Platforms**: Linux and macOS fully supported. Windows only via WSL2 (no
+special toolchain — WSL2 is used exactly like Linux).
 
-### Key Design Principles
-- **Template-based**: Compile-time type safety and optimization
-- **Two execution modes**: Flowgraph (threaded) vs Streamlined (manual control)
-- **Platform agnostic**: Desktop, FreeRTOS, ThreadX, Zephyr, baremetal
-- **Channel ownership**: Blocks own input channels, output channels passed as parameters
-- **Variadic outputs**: Blocks can have multiple output channels via template parameters
+**Design principles**
+- Template-based: compile-time type safety and optimization
+- Two execution models: flowgraph (threaded) and streamlined (manual)
+- Platform agnostic: desktop, FreeRTOS, ThreadX, Zephyr, baremetal
+- **Blocks own their input channels**; output channels are passed as parameters
+  to `procedure()`, so a block writes into the *downstream* block's channel
+- Variadic outputs via template parameter packs
 
-### Core Execution Models
+**Flowgraph mode** — the framework runs blocks on threads via a task policy,
+with flow control and error handling. **Streamlined mode** — you call
+`procedure()` yourself in a loop; no threading, no task policy.
 
-#### Flowgraph Mode (Threaded)
-- Framework manages block execution in separate threads
-- Requires task policy for platform abstraction
-- Automatic flow control and error handling
+## 2. Repository Map
 
-#### Streamlined Mode (Manual Control)  
-- User controls execution loop and data flow
-- No threading overhead
-- Direct procedure calls between blocks
+```
+include/                       header-only core, link cler::cler
+  cler.hpp                     Error/Result, ChannelBase/Channel, BlockBase,
+                               BlockRunner, FlowGraph
+  cler_spsc-queue.hpp          lock-free SPSC queue (from drogalis/SPSC-Queue)
+  cler_result.hpp              Result monad (no exceptions)
+  cler_utils.hpp               helpers incl. flowgraph_config::* shorthands
+  cler_desktop_utils.hpp       desktop-only: cler::panic, execution report
+  cler_embeddable_string.hpp   EmbeddableString<N>, no std::string
+  cler_embedded_allocators.hpp
+  task_policies/               desktop (std::thread), freertos, threadx, zephyr
+  schedulers/                  ThreadPerBlock, FixedThreadPool, PinnedIslands
+desktop_blocks/                link cler::desktop_blocks
+  sources/ sinks/ math/ plots/ channelizers/ resamplers/ noise/ utils/
+  gui/ ezgmsk_demod/ udp/
+desktop_examples/              hello_world, flowgraph, streamlined,
+                               polyphase_channelizer, SDR apps, UDP, GUI plots
+embedded_examples/             baremetal, FreeRTOS, ThreadX, Zephyr
+tests/                         spsc-queue/, desktop_blocks/, scheduler/ (gtest)
+performance/                   cler_throughput.cpp and perf_* benchmarks
+tools/cler_tools/              cler-validate, cler-viz (Python)
+docs/                          web documentation
+```
 
-## 2. Repository Structure
+## 3. Build & CMake
 
-**Note**: This framework is in early development - specific block names, locations, and APIs may change. Use this as a general guide and explore the actual codebase for current structure.
-
-### Core Framework (`/include/`)
-**Header-only core framework** - link with `cler::cler`:
-
-- **`cler.hpp`** - Main framework header containing:
-  - `Error` enum and `Result<T, Error>` type for error handling
-  - `ChannelBase<T>` interface and `Channel<T, N>` implementation (SPSC queues)
-  - `BlockBase` - Base class for all processing blocks
-  - `BlockRunner<Block, Channels...>` - Template for connecting blocks
-  - `FlowGraph<TaskPolicy, BlockRunners...>` - Multi-threaded execution engine
-  
-- **`cler_spsc-queue.hpp`** - Lock-free single-producer single-consumer queue implementation (modified from drogalis/SPSC-Queue)
-
-- **`cler_result.hpp`** - Result monad for error handling without exceptions
-
-- **`cler_utils.hpp`** - Utility functions and helpers
-
-- **`cler_desktop_utils.hpp`** - Desktop-specific utilities (requires std::ostream)
-
-- **`cler_embedded_allocators.hpp`** - Memory allocators for embedded systems
-
-- **`cler_embeddable_string.hpp`** - Fixed-size string implementation (`EmbeddableString<MaxLen>`) for embedded use without std::string dependency
-
-### Task Policies (`/include/task_policies/`)
-**Platform abstraction for threading**:
-
-- **`cler_task_policy_base.hpp`** - CRTP base class for task policies
-- **`cler_desktop_tpolicy.hpp`** - std::thread implementation + `make_desktop_flowgraph()`
-- **`cler_freertos_tpolicy.hpp`** - FreeRTOS task implementation  
-- **`cler_threadx_tpolicy.hpp`** - ThreadX thread implementation
-- **`cler_zephyr_tpolicy.hpp`** - Zephyr kernel thread implementation
-
-### Desktop Blocks Library (`/desktop_blocks/`)
-**General-purpose blocks** - link with `cler::desktop_blocks`:
-
-**Note**: Block names and organization may evolve as development continues.
-
-- **`sources/`** - Signal generators: CW, chirp, file, UDP, HackRF, CaribouLite
-- **`sinks/`** - Output blocks: file, UDP, null
-- **`math/`** - Math operations: add, gain, complex_demux
-- **`plots/`** - ImGui visualizations: timeseries, spectrum, spectrogram
-- **`channelizers/`** - DSP: polyphase channelizer (liquid-dsp)
-- **`resamplers/`** - Sample rate conversion
-- **`noise/`** - AWGN generator
-- **`utils/`** - throttle, fanout, throughput measurement
-- **`gui/`** - ImGui window management
-- **`ezgmsk_demod/`** - GMSK demodulation
-- **`udp/`** - Network communication blocks
-
-### Examples and Applications
-
-- **`/desktop_examples/`** - Key examples: hello_world, flowgraph (variadic), streamlined, polyphase_channelizer, SDR apps (HackRF/CaribouLite), UDP networking, GUI plots
-- **`/embedded_examples/`** - Platform examples: baremetal, FreeRTOS, ThreadX, Zephyr
-
-### Development Tools (`/tools/`)
-- **`cler_tools/`** - Python tools: flowgraph validation (`cler-validate`) and visualization (`cler-viz`)
-- **`integration/`** - Build system hooks: pre-commit, CMake, GitHub Actions
-
-### Performance and Utilities
-
-- **`/performance/`** - Benchmarking:
-  - `cler_throughput.cpp` - Performance measurement application
-
-- **`/logger/`** - Logging utilities:
-  - `logger.h/.c` - C logging interface
-  - `zf_log/` - Zero-allocation logging library
-
-### Testing Infrastructure
-
-- **`/tests/`** - Unit and integration tests:
-  - `test_channel.cpp` - Channel implementation tests
-  - `test_result.cpp` - Result type tests
-  - `test_embeddable_string.cpp` - String implementation tests
-  - Test runner and CMake integration
-
-### Documentation
-
-- **`/docs/`** - Web documentation and marketing site
-- **`README.md`** - Project overview and quick start guide
-- **`License`** - Project licensing information
-
-## 3. Build System & Compilation
-
-### Basic Build Commands
 ```bash
-# Standard build (Release mode is default with -O3)
 mkdir build && cd build
-cmake ..
+cmake ..                       # Release / -O3 is the default
 make -j"$(nproc --ignore=1)"
-
-# Debug build with -g symbols
-cmake -DCMAKE_BUILD_TYPE=Debug ..
+cmake -DCMAKE_BUILD_TYPE=Debug ..   # debug symbols
 ```
 
-### Running Examples
-```bash
-cd build/desktop_examples
-./hello_world                    # Basic flowgraph with GUI plot
-./flowgraph                      # Multi-output variadic example  
-./polyphase_channelizer          # N-channel DSP processing
-./streamlined                    # Manual control loop
-./mass_spring_damper             # Physics simulation
-./udp                           # Network communication
-```
+Examples land in `build/desktop_examples/` (`hello_world`, `flowgraph`,
+`polyphase_channelizer`, `streamlined`, `udp`, ...).
 
-## 4. CMake Integration Patterns
+Two link targets:
 
-### Library Targets
 ```cmake
-# Core framework only (header-only)
-target_link_libraries(app PRIVATE cler::cler)
+target_link_libraries(app PRIVATE cler::cler)            # header-only core
+target_link_libraries(app PRIVATE cler::desktop_blocks)  # + GUI/plots/hardware
 
-# Desktop development with GUI/plots/hardware support
-target_link_libraries(app PRIVATE cler::desktop_blocks)
-```
-
-### CMake Structure Examples
-```cmake
-# Simple executable with core framework
-add_executable(simple_app main.cpp)
-target_link_libraries(simple_app PRIVATE cler::cler)
-
-# Desktop application with full blocks library
-add_executable(desktop_app main.cpp)  
-target_link_libraries(desktop_app PRIVATE cler::desktop_blocks)
-
-# Custom block library
 add_library(my_blocks INTERFACE)
 target_include_directories(my_blocks INTERFACE include/)
 target_link_libraries(my_blocks INTERFACE cler::cler)
 ```
 
-## 5. Core Functionality & Block Implementation
+## 4. Writing a Block
 
-### Block Implementation Pattern
-Blocks inherit from `cler::BlockBase` and implement `procedure()` with variadic output channels:
+A block inherits `cler::BlockBase`, owns its input channels as members, and
+implements `procedure()` taking output channels as parameters. Fixed output
+count takes a concrete `cler::ChannelBase<T>*`; variable output count takes a
+parameter pack.
 
 ```cpp
-struct MyBlock : public cler::BlockBase {
-    cler::Channel<float> in;  // Input channels owned by block instance
-    
-    MyBlock(const char* name) : BlockBase(name), in(BUFFER_SIZE) {}
-    
-    // Output channels provided as variadic parameters to procedure()
-    template<typename... OChannels>
-    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
-        constexpr size_t num_outs = sizeof...(OChannels);
-        
-        // Process data: read from input channels, write to output channels
-        size_t transferable = std::min({in.size(), outs->space()...});
-        
-        for (size_t i = 0; i < transferable; ++i) {
-            float sample;
-            in.pop(sample);
-            
-            // Process sample...
-            
-            // Push to all outputs using fold expression
-            ((outs->push(processed_sample)), ...);
-        }
-        
+struct GainBlock : public cler::BlockBase {
+    cler::Channel<float> in;
+
+    GainBlock(const char* name, float gain)
+        : BlockBase(name), in(BUFFER_SIZE), _gain(gain) {}
+
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
+        auto [rptr, rsize] = in.read_dbf();
+        auto [wptr, wsize] = out->write_dbf();
+        size_t n = std::min(rsize, wsize);
+        if (n == 0) return cler::Error::NotEnoughSamples;
+
+        for (size_t i = 0; i < n; ++i) wptr[i] = rptr[i] * _gain;
+
+        in.commit_read(n);
+        out->commit_write(n);
         return cler::Empty{};
     }
+private:
+    float _gain;
 };
 ```
 
-**Key Architecture Points:**
-- **Input channels**: owned by block instance (`block.in`, `block.in[0]`)
-- **Output channels**: passed as variadic parameters to `procedure()`
-- **Multiple outputs**: Use variadic templates and fold expressions
-- **Channel ownership**: Blocks own input channels, output channels owned by downstream blocks
+### The channel count is a template parameter, never a constructor argument
 
-### Example: Polyphase Channelizer with N Outputs
-
-The channel count is a template parameter, not a constructor argument. It has to
-be: `procedure` takes its outputs as a variadic pack, so the count is already
-fixed at compile time by every call site. A runtime copy of it can only ever
-disagree by mistake, and the mismatch is a buffer overrun.
+`procedure()` takes its outputs as a pack, so the count is already fixed at
+compile time by every call site. A runtime copy of it can only ever disagree by
+mistake, and the mismatch is a buffer overrun.
 
 ```cpp
 template <size_t NUM_CHANNELS, size_t FILTER_SEMILENGTH>
@@ -226,7 +123,6 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
         auto [read_ptr, read_size] = in.read_dbf();
         if (read_size < NUM_CHANNELS) return cler::Error::NotEnoughSamples;
 
-        // Collect one contiguous write span per output, take the smallest.
         std::array<std::complex<float>*, NUM_CHANNELS> ports;
         size_t min_write_space = std::numeric_limits<size_t>::max();
         size_t idx = 0;
@@ -253,267 +149,31 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
 };
 ```
 
-**Batch the whole span, do not loop per frame.** This block was 3x faster on a
-Cortex-A9 after the per-frame `liquid` call was replaced by one batched
-allocation-free kernel; see "Polyphase channelizer" under Performance Notes.
-
-### Two Programming Models
-
-#### 1. Flowgraph Mode (Threaded)
-**Required includes**: Both `cler.hpp` and a task policy header:
-```cpp
-#include "cler.hpp"
-#include "task_policies/cler_desktop_tpolicy.hpp"
-
-int main() {
-    // Create blocks
-    SourceCWBlock<float> source("Source", 1.0f, 10.0f, 1000);
-    AddBlock<float, 2> adder("Adder");
-    ThrottleBlock<float> throttle("Throttle", 1000);
-    PlotTimeSeriesBlock plot("Plot", {"Signal"}, 1000, 3.0f);
-    
-    // Create flowgraph with variadic outputs
-    auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&source, &adder.in[0]),           // single output
-        cler::BlockRunner(&source2, &adder.in[1]),          
-        cler::BlockRunner(&adder, &throttle.in),            
-        cler::BlockRunner(&throttle, &plot.in[0]),
-        cler::BlockRunner(&channelizer,                     // multiple outputs
-            &plot1.in[0], &plot1.in[1], &plot1.in[2]),     // variadic parameters
-        cler::BlockRunner(&plot)                            // no outputs (sink)
-    );
-    
-    // Configure and run
-    cler::FlowGraphConfig config;
-    flowgraph.run(config);
-    
-    // GUI loop...
-    while (!gui.should_close()) {
-        gui.begin_frame();
-        plot.render();
-        gui.end_frame();
-    }
-    
-    flowgraph.stop();
-    return 0;
-}
-```
-
-#### 2. Streamlined Mode (Manual Control)
-```cpp
-#include "cler.hpp"
-// No task policy needed for streamlined mode
-
-int main() {
-    SourceBlock source("Source");
-    AdderBlock adder("Adder");
-    GainBlock gain("Gain", 2.0f);
-    SinkBlock sink("Sink");
-    
-    // Manual control loop
-    while (true) {
-        auto res1 = source.procedure(&adder.in0, &adder.in1);  // multiple outputs
-        auto res2 = adder.procedure(&gain.in);                 // single output
-        auto res3 = gain.procedure(&sink.in);
-        auto res4 = sink.procedure();                          // no outputs
-        
-        // Handle errors if needed...
-    }
-}
-```
-
-### Required Includes for Flowgraph Mode
-```cpp
-#include "cler.hpp"
-#include "task_policies/cler_desktop_tpolicy.hpp"  // Platform-specific policy
-```
-
-### Flowgraph Construction and Scheduler Configuration
-```cpp
-auto flowgraph = cler::make_desktop_flowgraph(
-    cler::BlockRunner(&source, &adder.in[0]),           // single output
-    cler::BlockRunner(&source2, &adder.in[1]),          
-    cler::BlockRunner(&adder, &throttle.in),            
-    cler::BlockRunner(&channelizer,                     // multiple outputs
-        &plot1.in[0], &plot1.in[1], &plot1.in[2]),     // variadic parameters
-    cler::BlockRunner(&plot)                            // no outputs (sink)
-);
-
-// Configure scheduler and performance options
-cler::FlowGraphConfig config;
-
-// Choose scheduler type
-config.scheduler = cler::SchedulerType::ThreadPerBlock;        // Default: one thread per block
-// config.scheduler = cler::SchedulerType::FixedThreadPool;    // Fixed worker pool (num_workers required)
-// config.scheduler = cler::SchedulerType::PinnedIslands;      // Core-pinned topo islands, cost-partitioned (best on core-constrained targets)
-
-// Worker configuration (for FixedThreadPool and PinnedIslands)
-config.num_workers = 4;  // Number of worker threads
-// Worker-count policy (same in debug and release):
-//   FixedThreadPool clamps num_workers up to 2, then down to min(DEFAULT_MAX_WORKERS, regular block count)
-//   PinnedIslands   clamps num_workers up to 1, then down to the same ceiling
-//   0 and oversized values are clamped, never rejected
-
-// PinnedIslands: shorthand and tuning
-// auto cfg = cler::flowgraph_config::pinned_islands(2);  // cler_utils.hpp
-// config.calibration_ms = 500;         // measure block costs, then repartition once
-// config.repartition_check_ms = 5000;  // periodic drift check thereafter (0 = off)
-// config.cpu_id_offset = 0;            // first core to pin workers to
-// PinnedIslands ALWAYS pins its workers (config.pin_workers is ignored by it).
-// Blocks whose procedure() can block (hardware refill, blocking I/O) declare
-// `static constexpr bool may_block = true;` and automatically get a dedicated
-// thread instead of sharing a pool/island worker.
-
-// Optional core pinning for FixedThreadPool (PinnedIslands does not consult this)
-config.pin_workers = false;
-
-flowgraph.run(config);
-```
-
-## 6. Channel Management & Buffer Access
-
-### Channel Buffer Types
-```cpp
-// Stack allocation (compile-time size)
-cler::Channel<float, 1024> static_channel;
-
-// Heap allocation (runtime size)  
-cler::Channel<float> dynamic_channel(1024);
-
-// Used in block constructors
-AdderBlock(const char* name) : BlockBase(name), 
-    in0(CHANNEL_SIZE),        // heap allocated
-    in1(CHANNEL_SIZE) {}      // heap allocated
-
-struct GainBlock : public cler::BlockBase {
-    cler::Channel<float, CHANNEL_SIZE> in;  // stack allocated
-    // ...
-};
-```
-
-#### Buffer Access Patterns (Benchmarked Performance Order)
-
-**Performance Characteristics**:
-- **read_dbf/write_dbf**: True zero-copy - PREFERRED DEFAULT (needs heap channel >= 4KB)
-- **ReadN/WriteN**: Good baseline - use when an external API needs its own contiguous buffer
-- **Peek/Commit**: ~5% faster than readN/writeN but easy to misuse (forgotten commit, ignored second segment)
-- **Push/Pop**: Orders of magnitude slower (AVOID for high-throughput)
-
-```cpp
-// TECHNIQUE 1: ReadN/WriteN
-// Bulk transfer with single memory copy - simple and performant
-size_t transferable = std::min({in.size(), out->space(), BUFFER_SIZE});
-in.readN(buffer, transferable);
-// Process buffer...
-for (size_t i = 0; i < transferable; ++i) {
-    buffer[i] *= gain;
-}
-out->writeN(buffer, transferable);
-
-// TECHNIQUE 2: read_dbf/write_dbf (PREFERRED DEFAULT)
-// Doubly-mapped buffers: True zero-copy
-// NOTE: If dbf is unavailable (buffer too small or stack-allocated): assert in debug, {nullptr, 0} in release
-// Buffer must be >= 4KB (DOUBLY_MAPPED_MIN_SIZE) and heap-allocated
-auto [read_ptr, read_size] = in.read_dbf();
-auto [write_ptr, write_size] = out->write_dbf();
-
-// Direct processing between doubly-mapped buffers
-size_t to_process = std::min(read_size, write_size);
-if (to_process > 0 && read_ptr && write_ptr) {
-    for (size_t i = 0; i < to_process; ++i) {
-        write_ptr[i] = read_ptr[i] * gain; // Process directly
-    }
-    in.commit_read(to_process);
-    out->commit_write(to_process);
-}
-
-// TECHNIQUE 3: Peek/Commit (ZERO-COPY READ)
-// Inspect before processing, still needs one copy for output
-const float* ptr1, *ptr2;
-size_t size1, size2;
-size_t available = in.peek_read(ptr1, size1, ptr2, size2);
-if (available > 0) {
-    // Process first segment
-    size_t from_seg1 = std::min(size1, BUFFER_SIZE);
-    for (size_t i = 0; i < from_seg1; ++i) {
-        buffer[i] = ptr1[i] * gain;
-    }
-    // Handle second segment if needed...
-    in.commit_read(processed_count);
-    out->writeN(buffer, processed_count);
-}
-
-// TECHNIQUE 4: Push/Pop (AVOID)
-// Single sample processing - EXTREMELY SLOW
-float sample;
-in.pop(sample);
-sample *= gain;
-out->push(sample);
-```
-
-**Performance Recommendations**:
-- **Use DBF as default** - zero-copy, mandatory for hardware interfaces (SDRs, ADCs, DACs), best for pure data movement and multi-IO blocks
-- **Use ReadN/WriteN when** an external API (liquid-dsp, decoders) needs its own contiguous buffer anyway
-- **Never use Push/Pop** - Orders of magnitude slower due to per-sample overhead
-- **Skip Peek/Commit** - Easy to misuse (forgotten commit, ignored second segment), only ~5% faster than ReadN/WriteN
-
-**Hardware Interface Guidelines**:
-- **SDR Source Blocks**: Always use DBF - zero-copy is essential for maintaining sample rates
-- **Hardware Sinks**: Use DBF to minimize latency to output devices
-- **High-Speed Sensors**: DBF prevents buffer underruns at high data rates
-- Examples: HackRF (20 MSPS), USRP (200+ MSPS), high-speed ADCs (100+ MSPS)
-
-**Implementation Trade-offs**:
-- **ReadN/WriteN**: Requires allocating and managing temporary buffers, but provides clean separation
-- **DBF**: Simpler for multi-IO blocks and critical for hardware interfaces
-- Choose based on your use case - hardware interfaces almost always benefit from DBF
-
-### Channel Implementation Notes
-- **read_dbf()/write_dbf()**: noexcept; when doubly-mapped buffers are unavailable they assert in debug and return `{nullptr, 0}` in release
-- **Requirements**: Buffers must be heap-allocated and page-aligned (minimum DOUBLY_MAPPED_MIN_SIZE = 4KB)
-- **No Fallbacks**: desktop_blocks validate buffer size at construction (`cler::panic` if too small) to enforce dbf availability
-
-### Recommended Block Pattern
-```cpp
-cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-    // DEFAULT PATTERN: DBF zero-copy
-    auto [rptr, rsize] = in.read_dbf();
-    auto [wptr, wsize] = out->write_dbf();
-    size_t n = std::min(rsize, wsize);
-    if (n == 0) return cler::Error::NotEnoughSamples;
-
-    for (size_t i = 0; i < n; ++i) {
-        wptr[i] = rptr[i] * _gain;
-    }
-
-    in.commit_read(n);
-    out->commit_write(n);
-    return cler::Empty{};
-}
-```
+**Batch the whole span, do not loop per frame.** This block got 3x faster on a
+Cortex-A9 when the per-frame `liquid` call became one batched kernel — see
+section 8.
 
 ### Progress Contract (mandatory)
 
-**A successful return means the block moved at least one sample.** Schedulers treat
-`cler::Empty{}` as evidence of progress: it resets the idle backoff ladder and wakes
-parked workers. A `procedure()` that returns success after doing nothing pins a core at
-100% and defeats PinnedIslands entirely.
+**A successful return means the block moved at least one sample.** Schedulers
+treat `cler::Empty{}` as evidence of progress: it resets the idle backoff ladder
+and wakes parked workers. A `procedure()` that returns success after doing
+nothing pins a core at 100% and defeats PinnedIslands entirely.
 
 If you consumed nothing and produced nothing, return an error:
 - No input → `cler::Error::NotEnoughSamples`
 - No output space → `cler::Error::NotEnoughSpace`
 - Either/both, don't care which → `cler::Error::NotEnoughSpaceOrSamples`
 
-These are non-fatal; the framework retries and backs off. This applies to every early-out:
-a device timeout, an overflow with no samples recovered, a config-in-progress skip, a
-callback-driven block whose `procedure()` is a no-op — all of them return an error, never
-`Empty{}`.
+These are non-fatal; the framework retries and backs off. This applies to every
+early-out: a device timeout, an overflow with no samples recovered, a
+config-in-progress skip, a callback-driven block whose `procedure()` is a no-op.
 
-**The contract has a second half: a retryable error must mean nothing was consumed.**
-`NotEnoughSamples` / `NotEnoughSpace` / `NotEnoughSpaceOrSamples` tell the framework "call
-me again"; if the block already committed reads before bailing, that data is counted twice
-in the statistics and, on multi-channel hardware, the channels silently lose alignment.
-Validate every channel *before* committing on any of them:
+**The second half of the contract: a retryable error must mean nothing was
+consumed.** Those errors tell the framework "call me again"; if the block
+already committed reads before bailing, that data is counted twice in the
+statistics and, on multi-channel hardware, the channels silently lose alignment.
+Validate every channel *before* committing on any of them.
 
 ```cpp
 // WRONG - channel 0 consumed, then a retryable error reported
@@ -529,9 +189,10 @@ for (size_t i = 0; i < n; ++i) {
 for (size_t i = 0; i < n; ++i) { send(in[i]); in[i].commit_read(need); }
 ```
 
-A block that has already made progress must report success, then surface the shortfall on
-the next call. Also watch for paths that *compute* their way to zero — a ratio or frame
-size that truncates to `0` items — not just paths guarded on an empty channel.
+A block that has already made progress must report success and surface the
+shortfall on the next call. Watch for paths that *compute* their way to zero — a
+ratio or frame size that truncates to `0` items — not just paths guarded on an
+empty channel.
 
 ```cpp
 // WRONG - scheduler sees progress, never parks
@@ -546,419 +207,340 @@ in.commit_read(n);
 return cler::Empty{};
 ```
 
-### Error Handling Pattern
+### Errors
+
+The full list is `enum class Error` in `cler.hpp`. Everything at or after
+`TERMINATE_FLOWGRAPH` is fatal and stops the graph (`cler::is_fatal`); the
+`NotEnough*` values are retryable. Use `TERM_ProcedureError` for unrecoverable
+runtime failures and `cler::panic()` for unrecoverable *init* failures.
+
+### Blocks that can block
+
+A block whose `procedure()` can block (hardware refill, blocking I/O) declares
+`static constexpr bool may_block = true;` and automatically gets a dedicated
+thread instead of sharing a pool/island worker.
+
+## 5. Channels & Buffer Access
+
 ```cpp
-cler::Result<cler::Empty, cler::Error> procedure(/* outputs */) {
-    // Check input availability
-    if (in.size() < required_samples) {
-        return cler::Error::NotEnoughSamples;  // Framework will retry
-    }
-    
-    // Check output space
-    if (out->space() < required_space) {
-        return cler::Error::NotEnoughSpace;    // Framework will retry  
-    }
-    
-    // Process data...
-    
-    return cler::Empty{};  // Success
-    
-    // For unrecoverable errors:
-    // return cler::Error::TERM_ProcedureError;  // Terminates flowgraph
+cler::Channel<float, 1024> static_channel;   // stack, compile-time size
+cler::Channel<float>       dynamic_channel(1024);  // heap, runtime size
+```
+
+Ranked by measured performance:
+
+1. **`read_dbf`/`write_dbf`** — true zero-copy, **the default**. Needs a
+   heap channel of at least `DOUBLY_MAPPED_MIN_SIZE` (4 KB). Mandatory for
+   hardware interfaces (SDRs, ADCs, DACs), best for pure data movement and
+   multi-IO blocks. When doubly-mapped memory is unavailable these assert in
+   debug and return `{nullptr, 0}` in release; desktop_blocks validate the size
+   at construction and `cler::panic` rather than fall back silently.
+2. **`readN`/`writeN`** — good baseline. Use when an external API (liquid-dsp, a
+   decoder) needs its own contiguous buffer anyway.
+3. **`peek_read`/`peek_write` + commit** — only ~5% faster than `readN`/`writeN`
+   and easy to misuse (forgotten commit, ignored second segment). Not worth it.
+   Both segments must be handled: `peek_*` returns two pointers and two sizes by
+   reference, and `total = size1 + size2`.
+4. **`push`/`pop`** — orders of magnitude slower. Never in a hot path.
+
+```cpp
+// readN/writeN
+size_t transferable = std::min({in.size(), out->space(), BUFFER_SIZE});
+in.readN(buffer, transferable);
+for (size_t i = 0; i < transferable; ++i) buffer[i] *= gain;
+out->writeN(buffer, transferable);
+
+// read_dbf/write_dbf (preferred)
+auto [read_ptr, read_size]   = in.read_dbf();
+auto [write_ptr, write_size] = out->write_dbf();
+size_t to_process = std::min(read_size, write_size);
+if (to_process > 0 && read_ptr && write_ptr) {
+    for (size_t i = 0; i < to_process; ++i) write_ptr[i] = read_ptr[i] * gain;
+    in.commit_read(to_process);
+    out->commit_write(to_process);
 }
 ```
 
-## 7. Platform Support & Task Policies
+Each channel also carries a cumulative read counter
+(`consumer_thread_cumulative_read_count()`, atomic) and write counter
+(`producer_thread_cumulative_write_count()`, **not** atomic — only safe on the
+producer thread). Every drain path bumps the read counter, so polling it from a
+monitor thread measures throughput at zero cost, with no extra block in the
+chain. Note that `space()` on a fresh channel is the *real* capacity: cler
+rounds a requested size up, so occupancy percentages computed against the
+requested size are wrong.
 
-### Task Policy Abstraction
-Different embedded platforms require different threading models:
+## 6. Flowgraph & Schedulers
 
-```cpp
-// Desktop (Linux/macOS): std::thread
-#include "task_policies/cler_desktop_tpolicy.hpp"
-auto flowgraph = cler::make_desktop_flowgraph(/* runners */);
-
-// FreeRTOS: xTaskCreate
-#include "task_policies/cler_freertos_tpolicy.hpp"
-auto flowgraph = cler::FlowGraph<cler::FreeRTOSTaskPolicy, /* runners */>(/* runners */);
-
-// ThreadX: tx_thread_create
-#include "task_policies/cler_threadx_tpolicy.hpp"
-
-// Zephyr: k_thread_create
-#include "task_policies/cler_zephyr_tpolicy.hpp"
-
-// Baremetal: no threading - use streamlined mode only
-```
-
-### Embedded Considerations
-- **Minimal dependencies**: C++17 standard library only
-- **Static allocation**: Compile-time buffer sizing for deterministic memory
-- **No exceptions**: Use `cler::Result` for error handling
-- **Configurable buffer sizes**: Template parameters for memory control
-
-### Embedded Examples Structure
-```
-embedded_examples/
-├── baremetal_examples/     # No OS, direct hardware
-├── freertos_examples/      # FreeRTOS integration
-├── threadx_examples/       # ThreadX integration
-└── zephyr_examples/        # Zephyr RTOS integration
-```
-
-### Baremetal Example (No Threading)
-```cpp
-#include "cler.hpp"
-// No task policy needed
-
-struct SimpleBlock : public cler::BlockBase {
-    cler::Channel<float, 64> in;  // Stack allocated, fixed size
-    
-    SimpleBlock(const char* name) : BlockBase(name) {}
-    
-    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
-        // Minimal processing...
-        return cler::Empty{};
-    }
-};
-
-int main() {
-    SimpleBlock block("Block");
-    
-    // Streamlined mode only for baremetal
-    while (true) {
-        block.procedure(/* outputs */);
-        // Hardware-specific timing...
-    }
-}
-```
-
-## 8. Desktop Blocks Library Details
-
-**Philosophy**: Desktop blocks prioritize generality and ease of use over minimal resource usage. Everything that can go on the heap goes on the heap. Not optimized for minimal work sizes.
-
-### Key Block Categories
-
-#### Sources (No Input Channels)
-```cpp
-// Continuous wave generator
-SourceCWBlock<float> cw_source("CW", amplitude, freq_hz, sample_rate);
-
-// File reader
-SourceFileBlock<std::complex<float>> file_source("File", "input.bin");
-
-// Network receiver
-SourceUDPBlock<float> udp_source("UDP", port, buffer_size);
-
-// Hardware interfaces
-SourceHackRFBlock hackrf("HackRF", center_freq, sample_rate);
-SourceCaribouliteBlock caribou("Caribou", center_freq, sample_rate);
-```
-
-#### Processing Blocks
-```cpp
-// Math operations
-AddBlock<float, NUM_INPUTS> adder("Adder");  // Input count is a template parameter
-GainBlock<float> gain("Gain", gain_value);
-ComplexDemuxBlock demux("Demux");
-
-// DSP processing
-PolyphaseChannelizerBlock<NUM_CHANNELS, FILTER_SEMILEN> channelizer("PFB", attenuation);
-MultistageResamplerBlock resampler("Resampler", input_rate, output_rate);
-NoiseAWGNBlock<std::complex<float>> noise("AWGN", noise_power);
-
-// Utilities
-ThrottleBlock<float> throttle("Throttle", sample_rate);
-FanoutBlock<float> fanout("Fanout", num_outputs);
-ThroughputBlock<float> throughput("Throughput");  // Performance measurement
-```
-
-#### Sinks (No Output Channels) 
-```cpp
-// File writer
-SinkFileBlock<float> file_sink("File", "output.bin");
-
-// Network transmitter  
-SinkUDPBlock<float> udp_sink("UDP", host, port);
-
-// Null sink (discard data)
-SinkNullBlock<float> null_sink("Null");
-
-// GUI plots
-PlotTimeSeriesBlock plot("TimeSeries", {"Signal1", "Signal2"}, sample_rate, duration);
-PlotCSpectrumBlock spectrum("Spectrum", {"Ch1", "Ch2"}, sample_rate, fft_size);
-PlotCSpectrogramBlock spectrogram("Spectrogram", sample_rate, fft_size);
-```
-
-### Superblock Pattern (Composition)
-Desktop blocks can compose other blocks internally - chain their `procedure()` calls to create complex functionality.
-
-## 9. Block Implementation Examples
-
-### Basic Block Pattern
-```cpp
-struct MyBlock : public cler::BlockBase {
-    cler::Channel<float> in;  // Input channels owned by block
-    
-    MyBlock(const char* name) : BlockBase(name), in(BUFFER_SIZE) {}
-    
-    // Output channels passed as variadic parameters
-    template<typename... OChannels>
-    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
-        // Check input/output availability
-        if (in.size() < required_samples) return cler::Error::NotEnoughSamples;
-        if (std::min({outs->space()...}) == 0) return cler::Error::NotEnoughSpace;
-        
-        // Process data efficiently
-        size_t transferable = std::min({in.size(), outs->space()...});
-        for (size_t i = 0; i < transferable; ++i) {
-            float sample;
-            in.pop(sample);
-            float processed = process(sample);
-            // Push to all outputs using fold expression
-            ((outs->push(processed)), ...);
-        }
-        
-        return cler::Empty{};
-    }
-};
-```
-
-### Multiple Output Example (Variadic)
-```cpp
-struct ChannelizerBlock : public cler::BlockBase {
-    cler::Channel<std::complex<float>> in;
-    
-    template <typename... OChannels>
-    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
-        constexpr size_t num_outs = sizeof...(OChannels);
-        
-        if (in.size() < num_outs) return cler::Error::NotEnoughSamples;
-        
-        // Read frame, process, distribute to outputs
-        in.readN(_tmp_in, num_outs);
-        process_channels(_tmp_in, _tmp_out);
-        
-        // Push outputs using fold expression
-        size_t idx = 0;
-        ((outs->push(_tmp_out[idx++])), ...);
-        
-        return cler::Empty{};
-    }
-};
-```
-
-### Complete Flowgraph Example
 ```cpp
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 
-int main() {
-    // Create blocks
-    SourceCWBlock<float> source("Source", 1.0f, 10.0f, 1000);
-    AddBlock<float, 2> adder("Adder");
-    PlotTimeSeriesBlock plot("Plot", {"Signal"}, 1000, 3.0f);
-    
-    // Create flowgraph with connections
-    auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&source, &adder.in[0]),     // single output
-        cler::BlockRunner(&channelizer,               // multiple outputs
-            &plot1.in[0], &plot2.in[0], &plot3.in[0]), // variadic params
-        cler::BlockRunner(&plot)                      // no outputs (sink)
-    );
-    
-    flowgraph.run();
-    // GUI loop, then flowgraph.stop();
-}
+auto flowgraph = cler::make_desktop_flowgraph(
+    cler::BlockRunner(&source,  &adder.in[0]),        // single output
+    cler::BlockRunner(&source2, &adder.in[1]),
+    cler::BlockRunner(&adder,   &throttle.in),
+    cler::BlockRunner(&channelizer,                   // multiple outputs
+        &plot1.in[0], &plot1.in[1], &plot1.in[2]),
+    cler::BlockRunner(&plot)                          // sink, no outputs
+);
+
+cler::FlowGraphConfig config;
+config.scheduler = cler::SchedulerType::ThreadPerBlock;   // default
+// config.scheduler = cler::SchedulerType::FixedThreadPool;  // needs num_workers
+// config.scheduler = cler::SchedulerType::PinnedIslands;    // core-constrained targets
+config.num_workers = 4;
+config.pin_workers = false;    // FixedThreadPool only; PinnedIslands ignores it
+
+flowgraph.run(config);
+// ... application loop ...
+flowgraph.stop();
+cler::print_flowgraph_execution_report(flowgraph);
 ```
 
-### Streamlined Mode (Manual Control)
+Streamlined mode needs no task policy — call the procedures in order:
+
 ```cpp
-// Manual control without threading
 while (true) {
-    auto res1 = source.procedure(&adder.in0, &adder.in1);  // multiple outputs
-    auto res2 = adder.procedure(&gain.in);                 // single output
-    auto res3 = gain.procedure(&sink.in);
-    auto res4 = sink.procedure();                          // no outputs
+    source.procedure(&adder.in0, &adder.in1);
+    adder.procedure(&gain.in);
+    gain.procedure(&sink.in);
+    sink.procedure();
 }
 ```
 
-## 10. Development Tools
+Worker-count policy (same in debug and release): `FixedThreadPool` clamps
+`num_workers` up to 2, `PinnedIslands` up to 1, then both down to
+`min(DEFAULT_MAX_WORKERS, regular block count)`. Zero and oversized values are
+clamped, never rejected.
 
-```bash
-# Install tools
-cd tools && uv pip install -e .
+### ThreadPerBlock (default)
+One thread per block. Simple and predictable; thread overhead grows with block
+count. Best for small graphs and debugging.
 
-# Validate flowgraphs
-cler-validate desktop_examples/*.cpp
+### FixedThreadPool
+Fixed workers process blocks round-robin. Lower thread overhead and better cache
+behaviour than ThreadPerBlock, but suffers when work is imbalanced. Requires
+`config.num_workers` (minimum 2). Pinning is optional via `config.pin_workers`.
 
-# Generate visualizations  
-cler-viz file.cpp -o output.svg
+### PinnedIslands
+Blocks are split into contiguous topo-order islands with one pinned worker each.
+Costs are measured during `calibration_ms`, then the partition is recomputed
+once, then a drift check runs every `repartition_check_ms` (0 disables). Best on
+core-constrained targets and imbalanced chains.
+
+```cpp
+auto cfg = cler::flowgraph_config::pinned_islands(2);   // cler_utils.hpp
+cfg.calibration_ms = 500;
+cfg.repartition_check_ms = 5000;
+cfg.cpu_id_offset = 0;
 ```
 
-Tools check for: missing BlockRunners, invalid connections, unconnected channels.
+- **Pinning is always attempted.** PinnedIslands pins every worker to
+  `cpu_id_offset + worker_id` and does not consult `config.pin_workers`.
+  Affinity failures are counted (`affinity_failure_count()`), never fatal. Real
+  pinning exists only where `TaskPolicy::pin_to_core` is implemented: desktop
+  and embedded **Linux** (`pthread_setaffinity_np`, so Pluto and RPi work). The
+  FreeRTOS/ThreadX/Zephyr policies inherit the base implementation, which pins
+  nothing and returns `false` — there the scheduler is "PinnedIslands" in name
+  only. (The base used to return `true`, making a no-op indistinguishable from
+  success.)
+- **Telemetry**: per-block cost sampling (`block_costs()`) is collected only
+  under this scheduler; the others report zeros.
+- **Idle**: workers escalate through a backoff ladder, then park on a futex with
+  a 1 ms timeout. `config.park_after_zero_passes` (default 4) trades wake
+  latency for idle CPU.
+- **Cost units**: block weight is `ns / items_moved`, derived automatically with
+  no block-side annotation. Because a producer's output channel is physically
+  owned by the consuming block, edge derivation already identifies each block's
+  inputs; the scheduler counts input consumption where inputs resolve and falls
+  back to output writes otherwise. Sources → output writes. Sinks → input reads
+  (these previously collapsed to `ns/call`, a different unit). Fanout and
+  channelizer → input reads, so weight does not shrink as output count grows.
+  Multi-input blocks take the **max of the per-call deltas**, never the sum
+  (an N-input block consumes N items for one item's worth of work) and never the
+  delta of the lifetime maxima (one input holding the largest lifetime count
+  while another advances would report zero). A block whose input edge failed to
+  resolve, or that has a resolved input it never reads (a control channel),
+  falls back to output writes rather than reporting zero.
 
-## 11. Performance & Debugging
+**Observability accessors** — `partition()`, `stats()`, `block_costs()`,
+`repartition_count()`, `total_park_events()`, `affinity_failure_count()` — are
+exact only after `stop()` has joined the workers. During a run they are
+best-effort: the cost and stats values are updated without synchronization to
+the reader, and a drift repartition can rewrite `partition()` while you read it.
+All are reset at the start of every `run()`.
 
-### Scheduler Types and Performance Optimization
+### Repartition barrier: the invariant
 
-Cler provides three scheduler types to optimize for different workload characteristics:
+`sched::RepartitionBarrier` enforces one rule: **block ownership must not change
+until every regular worker has stopped executing its old island.** Each
+`Channel` is an SPSC queue with exactly one reader and one writer; if a worker
+still runs a block while another takes ownership, that queue briefly has two
+consumers and the stream silently duplicates or reorders.
 
-#### ThreadPerBlock (Default)
-- **Best for**: Small flowgraphs, debugging, uniform workloads
-- **Characteristics**: One dedicated thread per block
-- **Pros**: Simple, predictable, no thread contention
-- **Cons**: Thread overhead, poor scalability with many blocks
+A generation counter is packed with an arrival count in one 64-bit word. Every
+worker CASes its arrival. Non-leaders park on `_partition_epoch` until the
+generation advances. The leader spins until `arrived == worker_count`, then
+repartitions, publishes a new generation, and bumps the epoch to release the
+others. `arrive()` takes `is_leader` explicitly rather than assuming worker 0,
+and takes stop/wake/repartition as callables, so the barrier owns the protocol
+and nothing else.
 
-#### FixedThreadPool
-- **Best for**: Uniform workloads with balanced processing
-- **Characteristics**: Fixed number of worker threads processing blocks round-robin
-- **Pros**: Lower thread overhead, better CPU cache utilization
-- **Cons**: Can suffer from work imbalance
-- **Requires**: `config.num_workers` (minimum 2)
-- **Pinning**: optional, via `config.pin_workers = true`
+**Testing changes to it.** A bug here does not crash; it surfaces as reordered
+or duplicated samples. `tests/scheduler/test_repartition_stress.cpp` drives many
+repartitions under shifting per-block cost and asserts the stream stays strictly
+sequential end to end. Before changing barrier code, confirm the test still
+*fails* when the barrier is broken (delete the leader's wait loop — it must
+report a backwards jump), and confirm it fails **repeatably**: run the broken
+build 5-6 times, not once. The detector is probabilistic — an earlier, gentler
+version of this test caught a broken barrier only 1 run in 6, indistinguishable
+from a pass on any single run. Detection needs the heavy/light cost contrast to
+be large enough that partitions genuinely change; the current constants detect
+6/6.
 
-#### PinnedIslands
-- **Best for**: Core-constrained targets and imbalanced chains (the Pluto/ARM case)
-- **Characteristics**: blocks split into contiguous topo-order islands, one pinned worker per island; costs measured during `calibration_ms`, then one repartition, then a drift check every `repartition_check_ms` (0 disables)
-- **Pinning**: **attempted always** — PinnedIslands pins every worker to `cpu_id_offset + worker_id` by design and does not consult `config.pin_workers`. Affinity failures are counted (`affinity_failure_count()`), never fatal. If you want optional pinning, use FixedThreadPool with `pin_workers`.
-  - Real pinning exists only where `TaskPolicy::pin_to_core` is implemented: **desktop/Linux** (`pthread_setaffinity_np`, so it works on embedded Linux targets like Pluto and RPi). The FreeRTOS, ThreadX and Zephyr policies inherit the base implementation, which pins nothing and returns `false` — so on those targets `affinity_failure_count()` equals the worker count and the scheduler is "PinnedIslands" in name only. The base used to return `true`, which made a no-op indistinguishable from success.
-- **Telemetry**: per-block cost sampling (`block_costs()`) is only collected under this scheduler; ThreadPerBlock/FixedThreadPool skip it and report zeros
-- **Idle**: workers escalate through the backoff ladder and then park on a futex with a 1 ms timeout
-- **Cost units**: block weight is `ns / items_moved`, and *items moved* is derived automatically — no block-side annotation. Because a producer's output channel is physically owned by the consuming block, edge derivation already identifies each block's inputs; the scheduler counts a block's input consumption where it has resolved inputs, and falls back to output writes otherwise. This keeps every block in the same unit:
-  - **sources** have no inputs → output writes
-  - **sinks** have no outputs → input reads (previously collapsed to `ns/call`, a different unit)
-  - **fanout/channelizer** → input reads, so weight does not shrink as output count grows
-  - **multi-input blocks** take the **max of the per-call deltas**, not the sum, since an N-input block consumes N items per input for one item's worth of work. It must be the max of the deltas, never the delta of the lifetime maxima — an input holding the largest lifetime count while a different input advances would otherwise report zero.
-  - a block whose input edge failed to resolve, or that has a resolved input it never reads (a control channel), falls back to output writes rather than reporting zero
-
-#### Repartition barrier: the invariant
-
-`sched::RepartitionBarrier` exists to enforce one rule: **block ownership must not
-change until every regular worker has stopped executing its old island.** Each
-`Channel` is an SPSC queue with exactly one reader and one writer; if a worker is
-still running a block while another worker takes ownership of it, that queue
-briefly has two consumers and the stream silently duplicates or reorders.
-
-The protocol: a generation counter is packed with an arrival count into one
-64-bit word. Every worker CASes its arrival. Non-leaders park on
-`_partition_epoch` until the generation advances. The leader spins until
-`arrived == worker_count`, and only then repartitions, publishes a new
-generation, and bumps the epoch to release the others.
-
-`arrive()` takes `is_leader` explicitly rather than assuming worker 0, and takes
-stop / wake / repartition as callables so the barrier owns the protocol and
-nothing else.
-
-#### Repartition barrier: how to test changes to it
-
-The generation-keyed barrier transfers SPSC endpoint ownership between workers.
-A bug there does not crash — it leaves two workers owning one endpoint, and
-surfaces as reordered or duplicated samples. `tests/scheduler/test_repartition_stress.cpp`
-drives many repartitions under shifting per-block cost and asserts the stream
-stays strictly sequential end to end.
-
-Before changing barrier code, confirm the test still *fails* when the barrier is
-broken (delete the leader's wait loop and it must report a backwards jump), and
-confirm it fails **repeatably** — run the broken build 5-6 times, not once. The
-detector is probabilistic: an earlier, gentler version of this test caught a
-broken barrier only 1 run in 6, which is indistinguishable from a passing test
-on any single run. Detection depends on the heavy/light cost contrast being
-large enough that partitions genuinely change; the current constants detect 6/6.
-
-Run it under ThreadSanitizer too. ASLR breaks TSan on recent kernels, so:
+Run it under ThreadSanitizer too. ASLR breaks TSan on recent kernels:
 
 ```bash
 g++ -std=c++17 -O1 -g -fsanitize=thread -Iinclude stress.cpp -o stress -lpthread
 setarch $(uname -m) -R env TSAN_OPTIONS="halt_on_error=0" ./stress
 ```
 
-TSan slows execution ~10x, which suppresses the drift check — verify the run
+TSan slows execution ~10x, which suppresses the drift check — confirm the run
 actually reached a high `repartition_count()` (hundreds), otherwise it never
 exercised the barrier regardless of a clean report.
 
-#### Observability accessors and when they are valid
-`partition()`, `stats()`, `block_costs()`, `repartition_count()`, `total_park_events()` and `affinity_failure_count()` are safe to read after `stop()` has joined the workers. During a run they are best-effort: `block_costs()` and the stats counters are approximate (updated by workers without synchronization to the reader), and `partition()` is unsynchronized — a drift repartition can rewrite it while you read. Read them after `stop()` when you need exact values. All of them are reset at the start of every `run()`.
+### Choosing a scheduler
 
-### Execution Statistics and Block Performance
+| workload | scheduler | workers |
+|---|---|---|
+| simple linear chain | ThreadPerBlock | — |
+| fanout, uniform paths | FixedThreadPool | min(N/2, cores) |
+| fanout, imbalanced paths | PinnedIslands | CPU cores |
+| >20 blocks | PinnedIslands or FixedThreadPool | 4-8 |
+| sparse/intermittent data | PinnedIslands (workers park) | — |
+
+## 7. Platform Support & Task Policies
+
 ```cpp
-// Configure for optimal performance based on workload
-cler::FlowGraphConfig config;
+#include "task_policies/cler_desktop_tpolicy.hpp"   // std::thread
+auto fg = cler::make_desktop_flowgraph(/* runners */);
 
-// Example 1: Uniform workload (e.g., simple signal processing chain)
-config.scheduler = cler::SchedulerType::FixedThreadPool;
-config.num_workers = 4;
+#include "task_policies/cler_freertos_tpolicy.hpp"  // xTaskCreate
+auto fg = cler::FlowGraph<cler::FreeRTOSTaskPolicy, /* runners */>(/* runners */);
 
-flowgraph.run(config);
-
-// After stopping, get detailed report with performance metrics
-flowgraph.stop();
-cler::print_flowgraph_execution_report(flowgraph);
-
-// BlockExecutionStats now includes (calculated post-execution):
-// - Successful/failed procedure counts
-// - CPU utilization percentage
-// - Average execution time per procedure
-// - Throughput in samples/second
+#include "task_policies/cler_threadx_tpolicy.hpp"   // tx_thread_create
+#include "task_policies/cler_zephyr_tpolicy.hpp"    // k_thread_create
+// baremetal: no policy, streamlined mode only
 ```
 
-### Benchmarking
-```bash
-# Run comprehensive performance suite
-cd build/performance
+Embedded constraints: C++17 standard library only, static allocation via
+compile-time buffer sizes, no exceptions (`cler::Result` instead), template
+parameters for memory control. `embedded_examples/` has one directory per
+platform.
 
-# Compare different read/write techniques
-./perf_read_write_techniques
+## 8. Desktop Blocks Library
 
-# Compare scheduler configurations
-./perf_simple_linear_flow
+**Philosophy**: generality and ease of use over minimal resource usage.
+Everything that can go on the heap goes on the heap. Not tuned for tiny work
+sizes.
 
-# Compare fanout workload strategies  
-./perf_fanout_workloads
-```
-
-**Read/Write Technique Performance**:
-- **read_dbf/write_dbf**: PREFERRED - zero-copy
-- **readN/writeN**: Good - use when external API needs a contiguous scratch buffer
-- **peek/commit**: Easy to misuse - Only ~5% faster than readN/writeN, not worth it
-- **push/pop**: AVOID - orders of magnitude slower
-
-### Common Performance Patterns
 ```cpp
-// Efficient bulk transfer with correct peek_write usage
-size_t available = std::min({in.size(), out->space()});
-float* write_ptr1, *write_ptr2;
-size_t write_size1, write_size2;
-size_t writable = out->peek_write(write_ptr1, write_size1, write_ptr2, write_size2);
-size_t to_process = std::min(available, write_size1);  // Use first segment
+// sources (no input channels)
+SourceCWBlock<float> cw("CW", amplitude, freq_hz, sample_rate);
+SourceFileBlock<std::complex<float>> file("File", "input.bin");
+SourceUDPBlock<float> udp("UDP", port, buffer_size);
+SourceHackRFBlock hackrf("HackRF", center_freq, sample_rate);
+SourceCaribouliteBlock caribou("Caribou", center_freq, sample_rate);
 
-// Process directly in output buffer
-for (size_t i = 0; i < to_process; ++i) {
-    float sample;
-    in.pop(sample);
-    write_ptr1[i] = process(sample);
-}
-out->commit_write(to_process);
+// processing
+AddBlock<float, NUM_INPUTS> adder("Adder");     // input count is a template arg
+GainBlock<float> gain("Gain", gain_value);
+ComplexDemuxBlock demux("Demux");
+PolyphaseChannelizerBlock<NUM_CHANNELS, FILTER_SEMILEN> pfb("PFB", attenuation);
+MultiStageResamplerBlock<std::complex<float>> res("Res", ratio, attenuation);
+RationalResamplerBlock<INTERP, DECIM, TAPS_PER_PHASE> rat("Rat", attenuation);
+NoiseAWGNBlock<std::complex<float>> noise("AWGN", noise_power);
+ThrottleBlock<float> throttle("Throttle", sample_rate);
+FanoutBlock<float> fanout("Fanout", num_outputs);
+ThroughputBlock<float> tp("Throughput");
+
+// sinks (no output channels)
+SinkFileBlock<float> file_sink("File", "output.bin");
+SinkUDPBlock<float> udp_sink("UDP", host, port);
+SinkNullBlock<float> null_sink("Null");
+PlotTimeSeriesBlock plot("TimeSeries", {"S1", "S2"}, sample_rate, duration);
+PlotCSpectrumBlock spectrum("Spectrum", {"Ch1", "Ch2"}, sample_rate, fft_size);
+PlotCSpectrogramBlock spectrogram("Spectrogram", sample_rate, fft_size);
 ```
 
-### Performance Recommendations by Use Case
+**Superblocks**: a desktop block may own other blocks and chain their
+`procedure()` calls internally.
 
-#### Simple Linear Chain (Source → A → B → C → Sink)
-- **Scheduler**: ThreadPerBlock (simple, predictable)
-- **Expected**: Good performance, easy debugging
+### Two resamplers, different jobs
 
-#### Fanout with Uniform Processing (Source → Fanout → [N similar paths] → Sinks)
-- **Scheduler**: FixedThreadPool with workers = min(N/2, CPU cores)
-- **Expected**: Better than ThreadPerBlock due to reduced thread overhead
+`MultiStageResamplerBlock` wraps liquid's `msresamp` and takes an arbitrary
+runtime ratio. `RationalResamplerBlock<INTERP, DECIM, TAPS_PER_PHASE>` is a
+compile-time rational bank: zero heap, all `std::array`, one subfilter of
+`TAPS_PER_PHASE` real-by-complex MACs per output over a window read in place
+from the caller's span, with a `TAPS_PER_PHASE-1` carry between calls. Prefer
+the rational one whenever the ratio is a fixed fraction — see section 9 for the
+measured difference. Note `msresamp_crcf_get_num_output()` is a stub in the
+vendored liquid (`resamp.proto.c:298` logs "not implemented" and returns 0), so
+the exact output count of the liquid path cannot be queried in advance.
 
-#### Fanout with Imbalanced Processing (different complexity per path)
-- **Scheduler**: PinnedIslands (cost-based partition isolates the heavy path after calibration)
-- **Workers**: CPU cores. Do NOT subtract one for a may_block source.
-- **Expected**: Significantly better than FixedThreadPool for imbalanced loads
+## 9. Measured Performance Notes
 
-Measured on a 2-core PlutoSDR (Cortex-A9), `SourcePluto(may_block) -> Mix ->
-FIR -> Sink`, at a rate every config could sustain (3 reps, spread +/- 0.004
-cores):
+All figures below were measured, mostly on a PlutoSDR (2x Cortex-A9 @ 667 MHz).
+Do not delete one without re-measuring it.
+
+### Sizing a block's input channel against a blocking driver
+
+A block downstream of a hardware source must give its input channel **at least
+the driver's buffer size**, or the driver's refill stalls the whole graph.
+
+`SourcePlutoBlock` allocates a 16384-sample iio buffer and `iio_buffer_refill`
+blocks for roughly one buffer duration — 5.5 ms at 3 MS/s. With the polyphase
+channelizer's default input channel of `DOUBLY_MAPPED_MIN_SIZE/8 * M` = 2560
+samples (0.85 ms of stream at that rate) the consumer drained the channel and
+starved through every refill, capping the graph at 98% of the required rate.
+
+The symptom is diagnostic: **throughput short of the rate while the worker sits
+well under 1.0 core.** That is never a compute problem. Raising the input
+channel to 16385 or above fixed it with no other change.
+
+### Confirm the graph meets the rate before comparing any CPU number
+
+CPU-per-wall-second is not comparable between configurations that deliver
+different sample counts. Every measurement must first show `msps ≈ rate`.
+
+The cheap way to get that number needs no extra block: poll
+`Channel::consumer_thread_cumulative_read_count()` from a monitor thread and
+divide by wall time over a window that starts after warmup. Inserting a
+pass-through counting block instead costs a thread and a full-rate memcpy, which
+perturbs exactly the measurement being taken.
+
+A worked example — the `echo_ground_station` receiver on the Pluto, asked for
+3.0 MS/s, `pinned_islands(2)`, 30 s window:
+
+| probe | measured | required |
+|---|---|---|
+| source alone (`pluto_smoke`) | 3.000 MS/s | 3.0 MS/s |
+| `channelizer.in`, full graph | 1.513 MS/s | 3.0 MS/s |
+| one `lora_rx.in`, full graph | 252.2 kS/s | 500 kS/s |
+
+The graph ran at a self-consistent 50.4% of rate, with `channelizer.in` pinned
+at 100.0% occupancy in every window, at 1.660 CPU cores of 2. The per-stage
+ratio held at exactly 1/6.00 throughout, which is the check that the counters
+themselves are sound. The source bracket is what separates "the radio is short"
+from "the graph is short" — take it every time. Replacing the four liquid
+resamplers with `RationalResamplerBlock<5,6,14>` moved the same graph to
+2.65 MS/s at 1.829 cores and doubled the decoded frame rate.
+
+### Scheduler: take the extra worker on a 2-core target
+
+`SourcePluto(may_block) -> Mix -> FIR -> Sink`, 2.083 MSPS, 3 reps, spread
+±0.004 cores:
 
 | config | CPU cores | meets rate (light chain) | meets rate (loaded chain) |
 |---|---|---|---|
@@ -967,74 +549,30 @@ cores):
 | ThreadPerBlock | 1.524 | yes | no (1.897) |
 | FixedThreadPool(2) | 1.544 | yes | no (1.760) |
 
-`cores - 1` saves ~1% CPU when the chain has slack, and costs 17% of capacity
-when it does not. Take the extra worker: the may_block source spends nearly all
-its time blocked in the driver (measured at 0.196 cores for a 3 MS/s libiio
-source), so it does not need a core reserved for it. `embedded_optimized()` is
-`pinned_islands(2)` and is the right default on a 2-core target.
+`cores - 1` saves ~1% CPU when the chain has slack and costs 17% of capacity
+when it does not. The `may_block` source spends nearly all its time blocked in
+the driver (measured at 0.196 cores for a 3 MS/s libiio source), so it does not
+need a core reserved for it. `embedded_optimized()` is `pinned_islands(2)` and
+is the right default on a 2-core target.
 
 The cost-based repartition is what makes 2 workers win: with the barrier
-suppressed, the same config drops to 1.760 MSPS. It only matters when per-block
-costs are uneven -- on a balanced chain it is pure overhead.
-
-#### Many Blocks (>20 blocks in flowgraph)
-- **Scheduler**: PinnedIslands or FixedThreadPool
-- **Workers**: 4-8 depending on CPU
-- **Rationale**: ThreadPerBlock creates too many threads
-
-#### Sparse/Intermittent Data (sensors, network packets)
-- **Scheduler**: PinnedIslands (idle workers park on a futex instead of spinning)
-- **Tuning**: `config.park_after_zero_passes` (default 4) trades wake latency for idle CPU
-- **Expected**: near-zero CPU while the graph has nothing to do
-
-### Sizing a block's input channel against a blocking driver
-
-A block downstream of a hardware source must give its input channel **at least
-the driver's buffer size**, or the driver's refill stalls the whole graph.
-
-`SourcePlutoBlock` allocates a 16384-sample iio buffer and `iio_buffer_refill`
-blocks for roughly one buffer duration -- 5.5 ms at 3 MS/s. With the polyphase
-channelizer's default input channel of `DOUBLY_MAPPED_MIN_SIZE/8 * M` = 2560
-samples (0.85 ms of stream at that rate) the consumer drained the channel and
-starved through every refill, capping the graph at 98% of the required rate.
-
-The symptom is diagnostic and worth recognising: **throughput short of the rate
-while the worker sits well under 1.0 core.** That is never a compute problem.
-Raising the input channel to 16385 or above fixed it with no other change.
-
-### ARM NEON: hand-written FP loops need -ffast-math to vectorize
-
-The Pluto toolchain passes `-mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard` but
-**not** `-ffast-math`. Without it GCC will not vectorize a floating-point
-reduction, because NEON single-precision is not fully IEEE and reassociation is
-barred. Every hand-written accumulate loop in this repo — the channelizer fold,
-the rational resampler subfilter — is therefore scalar on the Pluto today.
-
-Estimated headroom on A9 dot products is 2-4x, so this is worth measuring before
-writing intrinsics by hand. Validate LoRa decode on-device after enabling it;
-`-ffast-math` also changes NaN/Inf behaviour.
-
-Note for anyone reading older notes: liquid's own dot products are *not* the
-problem here. `dotprod_crcf.c` `#include`s `dotprod_crcf.neon.c`, `BUILD_NEON`
-is 1 in the armhf `liquid.config.h`, and `dotprod_crcf_execute_neon{,_1,_4}` are
-all present in the archive. A previous claim that liquid's CMake compiled only
-the portable scalar versions was wrong.
+suppressed the same config drops to 1.760 MSPS. It only matters when per-block
+costs are uneven — on a balanced chain it is pure overhead.
 
 ### Polyphase channelizer: batch the span, do not loop per frame
 
-Measured on a PlutoSDR (2x Cortex-A9 @ 667 MHz), M=5, 3.0 MS/s in: the block
-went from 194.3 to 600.1 kS/s per port, 3.09x, by replacing a per-frame
-`firpfbch_crcf_analyzer_execute` with one batched kernel. The kernel alone is
-~10x (1.33 -> 13.3 MS/s on-device).
+M=5, 3.0 MS/s in: the block went from 194.3 to 600.1 kS/s per port, 3.09x, by
+replacing a per-frame `firpfbch_crcf_analyzer_execute` with one batched kernel.
+The kernel alone is ~10x (1.33 → 13.3 MS/s on-device).
 
-Almost none of that was arithmetic -- the total real-multiply count only fell
+Almost none of that was arithmetic — the total real-multiply count fell only
 1.7x. The rest was liquid's per-call plumbing: per 5 input samples it pushed 5
 `windowcf` buffers, ran 5 dot products through a runtime-selected function
 pointer, and dispatched a DFT, all to perform 30 multiply-accumulates.
 
 The structural trick is to fold the subfilter bank over the frame index. liquid
-keeps M sliding windows advancing one sample per frame; substituting `k = M-1-i`
-into its own output reversal gives
+keeps M sliding windows advancing one sample per frame; substituting
+`k = M-1-i` into its own output reversal gives
 
 ```
 X[k](j) = sum over n of h[n*M + M-1-k] * x[(j-n)*M + k]
@@ -1050,113 +588,101 @@ General lesson for any liquid-backed block: if you are calling a liquid
 `_execute` once per sample or once per frame, the wrapper is probably costing
 more than the DSP.
 
-## 12. Development Guidelines & Code Style
+### Rational resampler beats liquid's msresamp at a fixed ratio
 
-### Core Principles
-- **Templates over virtual functions** for performance-critical paths
-- **Avoid `std::function`** - use function pointers or lambdas when needed
-- **Composition over inheritance** except for simple interfaces like `BlockBase`
-- **Heavy implementations in `.cpp`** when dealing with single data types
+5/6, 14 taps/phase, 80 dB, single threaded, flat across batch sizes
+509 / 4096 / 16384:
 
-### Style Rules (mandatory)
-- **No throw/try/catch in our code.** Recoverable runtime errors → `cler::Result`. Unrecoverable init/invariant failures → `cler::panic(msg)` (`cler_desktop_utils.hpp`; prints + aborts; desktop-only — embedded targets lack printf). try/catch is fine at the boundary with external libraries whose intended API is exception-based (UHD, SoapySDR) — catch their exceptions, never our own.
-- **Minimal comments.** Prefer self-evident code. Keep a comment only for non-obvious constraints: hardware quirks, units, protocol/timing requirements, DSP math rationale.
-- **Prefer `read_dbf`/`write_dbf` over `readN`/`writeN`** in `procedure()` when the channel is heap-allocated and >= 4KB (always true for desktop_blocks defaults). Mandatory for hardware interfaces. `readN`/`writeN` acceptable when an external API needs a separate contiguous buffer anyway.
-- **Never push/pop in hot paths.**
+| | Cortex-A9 | x86 |
+|---|---|---|
+| liquid `msresamp_crcf` | 1.65 MS/s | — |
+| `RationalResampler` | 6.27 MS/s (3.81x) | 7.5x |
 
-### Framework Internals
-- **EmbeddableString**: Fixed-size strings without std::string dependency
-- **Result<T,E>**: Error handling without exceptions
-- **Template-based connections**: Type-safe at compile time
-- **BlockExecutionStats**: Optimized structure storing only runtime data
-  - Runtime fields: successful/failed procedures, samples processed, dead time, runtime
-  - Post-processing calculations: avg execution time, CPU utilization %, throughput
-  - Memory optimized: ~32 bytes smaller per block vs calculating at runtime
+Output count is exact (50000 from 60000). Frequency response, dB relative to DC:
 
-### Additional Implementation Notes
+| tone kHz | 100 | 200 | 240 | 250 | 260 | 300 |
+|---|---|---|---|---|---|---|
+| ours | -0.0 | -0.9 | -4.4 | -6.0 | -8.0 | -17.3 |
+| liquid | -0.0 | -0.6 | -3.4 | -4.8 | -6.5 | -14.6 |
 
-#### Channel Buffer Access (Corrected)
-The `peek_write()` and `peek_read()` methods use a two-segment circular buffer design. Both segments must be handled:
+Ours is marginally *sharper* everywhere past 200 kHz. Two traps when comparing
+them: `msresamp`'s 256 phases do **not** make it a sharper filter — transition
+width is set by the span in input samples, 14 taps per phase in both cases, and
+the phase count only buys fractional-delay resolution that a rational ratio does
+not need. And the two cannot be pinned to each other sample-for-sample:
+`msresamp` is a different algorithm (fractional-delay bank with interpolation),
+so correctness has to be response shape, exact output count, continuity across
+batch boundaries, and end-to-end decode rate.
 
-```cpp
-// Correct peek_write usage - variables passed by reference
-T* ptr1, *ptr2;
-size_t size1, size2;
-size_t total = channel.peek_write(ptr1, size1, ptr2, size2);
-// total = size1 + size2 (total writable space)
+### ARM NEON: hand-written FP loops need -ffast-math to vectorize
 
-// Write to first segment
-for (size_t i = 0; i < size1; ++i) {
-    ptr1[i] = data[i];
-}
+The Pluto toolchain passes `-mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard` but
+**not** `-ffast-math`. Without it GCC will not vectorize a floating-point
+reduction, because NEON single-precision is not fully IEEE and reassociation is
+barred. Every hand-written accumulate loop in this repo — the channelizer fold,
+the rational resampler subfilter — is therefore scalar on the Pluto today.
 
-// Write to second segment if needed
-for (size_t i = 0; i < size2; ++i) {
-    ptr2[i] = data[size1 + i];
-}
+Estimated headroom on A9 dot products is 2-4x, so this is worth measuring before
+writing intrinsics by hand. Validate decode on-device after enabling it;
+`-ffast-math` also changes NaN/Inf behaviour.
 
-channel.commit_write(size1 + size2);
+liquid's own dot products are *not* the problem here. `dotprod_crcf.c`
+`#include`s `dotprod_crcf.neon.c`, `BUILD_NEON` is 1 in the armhf
+`liquid.config.h`, and `dotprod_crcf_execute_neon{,_1,_4}` are all present in the
+archive. A previous claim that liquid's CMake compiled only the portable scalar
+versions was wrong.
+
+### Benchmarks
+
+```bash
+cd build/performance
+./perf_read_write_techniques     # dbf vs readN vs peek vs push/pop
+./perf_simple_linear_flow        # scheduler configurations
+./perf_fanout_workloads          # fanout strategies
 ```
 
-#### Error Codes Reference
-```cpp
-enum class Error : int {
-    Success = 0,
-    NotEnoughSamples = 1,
-    NotEnoughSpace = 2,
-    
-    // Terminal errors (negative values)
-    TERM_ChannelClosed = -1,
-    TERM_ChannelError = -2,
-    TERM_ProcedureError = -3,
-    TERM_Requested = -4
-};
+## 10. Development Tools
+
+```bash
+cd tools && uv pip install -e .
+cler-validate desktop_examples/*.cpp     # missing runners, bad connections
+cler-viz file.cpp -o output.svg
 ```
 
-### Common Template Errors & Solutions
-- **Missing runner**: Every block needs a `BlockRunner` 
-- **Connection mismatch**: Output channel type must match input channel type
-- **Missing policy**: Flowgraph mode requires task policy include
-- **Template explosion**: Use LLM assistance for complex template errors
+## 11. Code Style (mandatory)
 
-## 13. Quick Reference - Common Patterns
+- **No throw/try/catch in our code.** Recoverable runtime errors →
+  `cler::Result`. Unrecoverable init/invariant failures → `cler::panic(msg)`
+  (`cler_desktop_utils.hpp`; prints and aborts; desktop-only — embedded targets
+  lack printf). try/catch is fine only at the boundary with external libraries
+  whose intended API is exception-based (UHD, SoapySDR): catch theirs, never
+  raise your own.
+- **Minimal comments.** Prefer self-evident code with named constants and helper
+  functions. Keep a comment only for a non-obvious constraint: a hardware quirk,
+  a unit, a protocol/timing requirement, DSP math rationale.
+- **Never allocate in `procedure()`.** It is the hot path. Allocate in the
+  constructor, into members. Prefer `std::array` and compile-time shapes;
+  C-arrays with new/delete are acceptable, and `std::vector` only where many
+  failure points make RAII a real simplification.
+- **Prefer `read_dbf`/`write_dbf`** over `readN`/`writeN` in `procedure()` when
+  the channel is heap-allocated and ≥4 KB (always true for desktop_blocks
+  defaults). Mandatory for hardware interfaces. `readN`/`writeN` is fine when an
+  external API needs a separate contiguous buffer anyway.
+- **Never `push`/`pop` in hot paths.**
+- Templates over virtual functions on performance-critical paths; avoid
+  `std::function`; composition over inheritance except for simple interfaces
+  like `BlockBase`; heavy single-type implementations belong in a `.cpp`.
 
-### Block Creation Checklist
-1. Inherit from `cler::BlockBase`
-2. Declare input channels as member variables
-3. Initialize channels in constructor (with size)
-4. Implement `procedure()` with variadic output parameters
-5. Check input availability and output space
-6. Process data efficiently (bulk operations preferred)
-7. Return appropriate error codes
+## 12. Common Pitfalls
 
-### Flowgraph Creation Checklist
-1. Include `cler.hpp` and appropriate task policy
-2. Create all block instances
-3. Create `BlockRunner` for each block with connections
-4. Use `make_desktop_flowgraph()` or construct `FlowGraph`
-5. Configure and run flowgraph
-6. Handle GUI loop if using plots
-7. Stop flowgraph before cleanup
-
-### Performance Tips
-1. **CRITICAL: Never allocate memory in `procedure()`** - It's the hot path called repeatedly
-   - Generally speaking we prefer c-arrays with new/delete,
-   but if there are many failure points, and RAII principles simplify by alot, cpp vectors can be used
-2. Use bulk read/write operations (`readN`/`writeN`)
-3. Prefer `peek_read`/`peek_write` for zero-copy processing
-4. Avoid single-sample `push`/`pop` in hot paths
-5. Process multiple samples per `procedure()` call
-6. Use compile-time channel sizes when possible
-7. Use PinnedIslands when idle CPU matters - its workers park instead of spinning
-
-### Common Pitfalls
-1. **Allocating memory in `procedure()`** - Use member variables instead (hot path!)
-2. Forgetting task policy include for flowgraph mode
-3. Incorrect `peek_write` usage (pass by reference, not pointer)
-4. Not checking channel space before writing
-5. Missing `BlockRunner` for a block
-6. Type mismatch between connected channels
-7. Not handling terminal errors appropriately
-
-This comprehensive guide provides accurate context for AI assistants working with the Cler DSP framework, with all corrections applied based on the actual codebase structure and API usage.
+1. Allocating in `procedure()`.
+2. Returning `cler::Empty{}` without moving a sample — see the progress
+   contract.
+3. Committing a read and then returning a retryable error.
+4. Missing `BlockRunner` for a block, or a type mismatch between connected
+   channels.
+5. Forgetting the task policy include in flowgraph mode.
+6. Misusing `peek_write` — arguments are by reference, and the second segment
+   must be handled.
+7. Sizing a block's input channel below the upstream driver's buffer.
+8. Comparing CPU numbers between runs that did not both meet the rate.
