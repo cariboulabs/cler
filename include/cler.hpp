@@ -23,11 +23,6 @@ namespace cler {
 
     constexpr size_t DOUBLY_MAPPED_MIN_SIZE = dro::details::DOUBLY_MAPPED_MIN_SIZE;
 
-    #ifndef CLER_DEFAULT_MAX_WORKERS
-    #define CLER_DEFAULT_MAX_WORKERS (8)  // Conservative default for embedded systems
-    #endif
-    constexpr size_t DEFAULT_MAX_WORKERS = CLER_DEFAULT_MAX_WORKERS;
-
     enum class Error {
         OK,
 
@@ -725,93 +720,9 @@ namespace cler {
         }
         
         
-        template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
-        class WorkerQueueScheduler {
-            using block_index_t = uint8_t;
-
-            static_assert(MaxBlocksParam >= 1, "Must support at least one block");
-            static_assert(MaxWorkers >= 1, "Must support at least one worker");
-            static_assert(MaxBlocksParam <= (std::numeric_limits<block_index_t>::max)(),
-                          "MaxBlocksParam exceeds block_index_t capacity");
-
-            struct alignas(platform::cache_line_size) WorkerQueue {
-                std::array<block_index_t, MaxBlocksParam> blocks;
-                uint32_t count = 0;
-                uint32_t current = 0;
-
-                bool get_block(size_t& block_idx_out) {
-                    if (current < count) {
-                        block_idx_out = blocks[current++];
-                        return true;
-                    }
-                    return false;
-                }
-
-                void reset() {
-                    current = 0;
-                }
-            };
-
-            static_assert(sizeof(WorkerQueue) <= platform::cache_line_size * 4,
-                          "WorkerQueue is too large, consider reducing MaxBlocksParam");
-
-            static constexpr size_t kNoOwner = (std::numeric_limits<size_t>::max)();
-
-            std::array<WorkerQueue, MaxWorkers> queues;
-            std::array<size_t, MaxBlocksParam> block_owner;
-
-        public:
-            void initialize(const block_index_t* block_ids, size_t block_id_count, size_t workers) {
-                for (auto& q : queues) {
-                    q.count = 0;
-                    q.current = 0;
-                }
-                block_owner.fill(kNoOwner);
-
-                const size_t per = (block_id_count + workers - 1) / workers;
-                size_t idx = 0;
-                for (size_t w = 0; w < workers && idx < block_id_count; ++w) {
-                    auto& q = queues[w];
-                    for (size_t k = 0; k < per && idx < block_id_count; ++k, ++idx) {
-                        block_index_t bidx = block_ids[idx];
-                        q.blocks[q.count++] = bidx;
-                        block_owner[bidx] = w;
-                    }
-                }
-            }
-
-            void initialize_islands(const block_index_t* block_ids, const uint16_t* island_begin, size_t island_count) {
-                for (auto& q : queues) {
-                    q.count = 0;
-                    q.current = 0;
-                }
-                block_owner.fill(kNoOwner);
-
-                for (size_t w = 0; w < island_count && w < MaxWorkers; ++w) {
-                    auto& q = queues[w];
-                    for (uint16_t k = island_begin[w]; k < island_begin[w + 1]; ++k) {
-                        block_index_t bidx = block_ids[k];
-                        q.blocks[q.count++] = bidx;
-                        block_owner[bidx] = w;
-                    }
-                }
-            }
-
-            bool get_next_block(size_t worker_id, size_t& block_idx_out) {
-                return queues[worker_id].get_block(block_idx_out);
-            }
-
-            void reset_pass(size_t worker_id) {
-                queues[worker_id].reset();
-            }
-
-            bool is_block_owner(size_t worker_id, size_t block_idx) const {
-                return block_idx < block_owner.size() && block_owner[block_idx] == worker_id;
-            }
-        };
         
         
-        WorkerQueueScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> _worker_queues;
+        sched::WorkerQueueScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> _worker_queues;
 
 
 
