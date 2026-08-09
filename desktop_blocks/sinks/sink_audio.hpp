@@ -25,6 +25,7 @@ inline void pa_check(PaError err) {
 }
 
 struct SinkAudioBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
     cler::Channel<float> in;
 
     SinkAudioBlock(const char* name,
@@ -68,19 +69,20 @@ struct SinkAudioBlock : public cler::BlockBase {
         }
 
         auto [read_ptr, read_size] = in.read_dbf();
-
-        if (read_size > 0) {
-            PaError err = Pa_WriteStream(_stream, read_ptr, read_size);
-
-            if (err == paOutputUnderflowed) {
-                in.commit_read(read_size);
-                return cler::Empty{};
-            } else if (err != paNoError) {
-                return cler::Error::TERM_IOError;
-            }
-
-            in.commit_read(read_size);
+        if (read_size == 0) {
+            return cler::Error::NotEnoughSamples;
         }
+
+        PaError err = Pa_WriteStream(_stream, read_ptr, read_size);
+
+        if (err == paOutputUnderflowed) {
+            in.commit_read(read_size);
+            return cler::Empty{};
+        } else if (err != paNoError) {
+            return cler::Error::TERM_IOError;
+        }
+
+        in.commit_read(read_size);
 
         return cler::Empty{};
     }

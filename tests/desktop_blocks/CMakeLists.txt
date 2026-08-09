@@ -73,3 +73,17 @@ else()
     message(STATUS "Skipping channelizer_blocks_test because CLER_BUILD_BLOCKS_LIQUID is OFF")
     message(STATUS "Skipping resampler_blocks_test because CLER_BUILD_BLOCKS_LIQUID is OFF")
 endif()
+if(HACKRF_FOUND)
+    add_executable(hackrf_blocks_test
+        test_hackrf_blocks.cpp
+    )
+
+    target_link_libraries(hackrf_blocks_test
+        gtest_main
+        cler::desktop_blocks
+    )
+
+    add_test(NAME hackrf_blocks_test COMMAND hackrf_blocks_test)
+else()
+    message(STATUS "Skipping hackrf_blocks_test because HACKRF_FOUND is OFF")
+endif()

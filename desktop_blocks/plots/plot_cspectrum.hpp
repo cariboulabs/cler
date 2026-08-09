@@ -5,11 +5,13 @@
 #include "spectral_windows.hpp"
 #include "imgui.h"
 #include <vector>
-#include <mutex> 
+#include <mutex>
 #include <vector>
+#include <type_traits>
 
 struct PlotCSpectrumBlock : public cler::BlockBase {
     const size_t BUFFER_SIZE_MULTIPLIER = 3;
+    static constexpr size_t MAX_INPUT_CHANNEL_SLOTS = 16;
 
     cler::Channel<std::complex<float>>* in;
 
@@ -60,6 +62,8 @@ private:
     SpectralWindow _window_type;
 
     cler::Channel<std::complex<float>>* _signal_channels;
+
+    std::aligned_storage_t<sizeof(cler::Channel<std::complex<float>>), alignof(cler::Channel<std::complex<float>>)> _in_storage[MAX_INPUT_CHANNEL_SLOTS];
 
     std::complex<float>** _snapshot_buffers = nullptr;
     std::complex<float>* _tmp_buffer = nullptr;

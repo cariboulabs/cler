@@ -250,7 +250,7 @@ struct PolyphaseChannelizerBlock : public cler::BlockBase {
 int main() {
     // Create blocks
     SourceCWBlock<float> source("Source", 1.0f, 10.0f, 1000);
-    AddBlock<float> adder("Adder", 2);
+    AddBlock<float, 2> adder("Adder");
     ThrottleBlock<float> throttle("Throttle", 1000);
     PlotTimeSeriesBlock plot("Plot", {"Signal"}, 1000, 3.0f);
     
@@ -267,7 +267,6 @@ int main() {
     
     // Configure and run
     cler::FlowGraphConfig config;
-    // config.adaptive_sleep = true;  // Optional: for sparse/intermittent data only
     flowgraph.run(config);
     
     // GUI loop...
@@ -325,25 +324,30 @@ auto flowgraph = cler::make_desktop_flowgraph(
 // Configure scheduler and performance options
 cler::FlowGraphConfig config;
 
-// Choose scheduler type (new in recent versions)
+// Choose scheduler type
 config.scheduler = cler::SchedulerType::ThreadPerBlock;        // Default: one thread per block
 // config.scheduler = cler::SchedulerType::FixedThreadPool;    // Fixed worker pool (num_workers required)
-// config.scheduler = cler::SchedulerType::AdaptiveLoadBalancing; // Dynamic work distribution
+// config.scheduler = cler::SchedulerType::PinnedIslands;      // Core-pinned topo islands, cost-partitioned (best on core-constrained targets)
 
-// Worker configuration (for FixedThreadPool and AdaptiveLoadBalancing)
-config.num_workers = 4;  // Number of worker threads (minimum 2, ignored for ThreadPerBlock)
+// Worker configuration (for FixedThreadPool and PinnedIslands)
+config.num_workers = 4;  // Number of worker threads
+// Worker-count policy (same in debug and release):
+//   FixedThreadPool clamps num_workers up to 2, then down to min(DEFAULT_MAX_WORKERS, regular block count)
+//   PinnedIslands   clamps num_workers up to 1, then down to the same ceiling
+//   0 and oversized values are clamped, never rejected
 
-// Adaptive sleep configuration (works with all scheduler types)
-// WARNING: Can significantly reduce throughput - only use for sparse/intermittent data
-config.adaptive_sleep = true;  // CAUTION: reduces CPU usage but may impact throughput
-config.adaptive_sleep_multiplier = 1.5;       // How aggressively to increase sleep time
-config.adaptive_sleep_max_us = 5000.0;        // Maximum sleep time in microseconds
-config.adaptive_sleep_fail_threshold = 10;    // Start sleeping after N consecutive fails
+// PinnedIslands: shorthand and tuning
+// auto cfg = cler::flowgraph_config::pinned_islands(2);  // cler_utils.hpp
+// config.calibration_ms = 500;         // measure block costs, then repartition once
+// config.repartition_check_ms = 5000;  // periodic drift check thereafter (0 = off)
+// config.cpu_id_offset = 0;            // first core to pin workers to
+// PinnedIslands ALWAYS pins its workers (config.pin_workers is ignored by it).
+// Blocks whose procedure() can block (hardware refill, blocking I/O) declare
+// `static constexpr bool may_block = true;` and automatically get a dedicated
+// thread instead of sharing a pool/island worker.
 
-// Load balancing (only for AdaptiveLoadBalancing scheduler)
-config.load_balancing = true;                 // Enable dynamic rebalancing
-config.load_balancing_interval = 1000;        // Rebalance every N procedure calls
-config.load_balancing_threshold = 0.2;        // 20% imbalance triggers rebalancing
+// Optional core pinning for FixedThreadPool (PinnedIslands does not consult this)
+config.pin_workers = false;
 
 flowgraph.run(config);
 ```
@@ -470,6 +474,60 @@ cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) 
 }
 ```
 
+### Progress Contract (mandatory)
+
+**A successful return means the block moved at least one sample.** Schedulers treat
+`cler::Empty{}` as evidence of progress: it resets the idle backoff ladder and wakes
+parked workers. A `procedure()` that returns success after doing nothing pins a core at
+100% and defeats PinnedIslands entirely.
+
+If you consumed nothing and produced nothing, return an error:
+- No input → `cler::Error::NotEnoughSamples`
+- No output space → `cler::Error::NotEnoughSpace`
+- Either/both, don't care which → `cler::Error::NotEnoughSpaceOrSamples`
+
+These are non-fatal; the framework retries and backs off. This applies to every early-out:
+a device timeout, an overflow with no samples recovered, a config-in-progress skip, a
+callback-driven block whose `procedure()` is a no-op — all of them return an error, never
+`Empty{}`.
+
+**The contract has a second half: a retryable error must mean nothing was consumed.**
+`NotEnoughSamples` / `NotEnoughSpace` / `NotEnoughSpaceOrSamples` tell the framework "call
+me again"; if the block already committed reads before bailing, that data is counted twice
+in the statistics and, on multi-channel hardware, the channels silently lose alignment.
+Validate every channel *before* committing on any of them:
+
+```cpp
+// WRONG - channel 0 consumed, then a retryable error reported
+for (size_t i = 0; i < n; ++i) {
+    if (in[i].size() < need) return cler::Error::NotEnoughSamples;
+    send(in[i]); in[i].commit_read(need);
+}
+
+// RIGHT - check all, then commit all
+for (size_t i = 0; i < n; ++i) {
+    if (in[i].size() < need) return cler::Error::NotEnoughSamples;
+}
+for (size_t i = 0; i < n; ++i) { send(in[i]); in[i].commit_read(need); }
+```
+
+A block that has already made progress must report success, then surface the shortfall on
+the next call. Also watch for paths that *compute* their way to zero — a ratio or frame
+size that truncates to `0` items — not just paths guarded on an empty channel.
+
+```cpp
+// WRONG - scheduler sees progress, never parks
+size_t n = in.size();
+in.commit_read(n);
+return cler::Empty{};
+
+// RIGHT
+size_t n = in.size();
+if (n == 0) return cler::Error::NotEnoughSamples;
+in.commit_read(n);
+return cler::Empty{};
+```
+
 ### Error Handling Pattern
 ```cpp
 cler::Result<cler::Empty, cler::Error> procedure(/* outputs */) {
@@ -582,7 +640,7 @@ SourceCaribouliteBlock caribou("Caribou", center_freq, sample_rate);
 #### Processing Blocks
 ```cpp
 // Math operations
-AddBlock<float> adder("Adder", num_inputs);  // Variable number of inputs
+AddBlock<float, NUM_INPUTS> adder("Adder");  // Input count is a template parameter
 GainBlock<float> gain("Gain", gain_value);
 ComplexDemuxBlock demux("Demux");
 
@@ -680,7 +738,7 @@ struct ChannelizerBlock : public cler::BlockBase {
 int main() {
     // Create blocks
     SourceCWBlock<float> source("Source", 1.0f, 10.0f, 1000);
-    AddBlock<float> adder("Adder", 2);
+    AddBlock<float, 2> adder("Adder");
     PlotTimeSeriesBlock plot("Plot", {"Signal"}, 1000, 3.0f);
     
     // Create flowgraph with connections
@@ -740,6 +798,69 @@ Cler provides three scheduler types to optimize for different workload character
 - **Pros**: Lower thread overhead, better CPU cache utilization
 - **Cons**: Can suffer from work imbalance
 - **Requires**: `config.num_workers` (minimum 2)
+- **Pinning**: optional, via `config.pin_workers = true`
+
+#### PinnedIslands
+- **Best for**: Core-constrained targets and imbalanced chains (the Pluto/ARM case)
+- **Characteristics**: blocks split into contiguous topo-order islands, one pinned worker per island; costs measured during `calibration_ms`, then one repartition, then a drift check every `repartition_check_ms` (0 disables)
+- **Pinning**: **attempted always** — PinnedIslands pins every worker to `cpu_id_offset + worker_id` by design and does not consult `config.pin_workers`. Affinity failures are counted (`affinity_failure_count()`), never fatal. If you want optional pinning, use FixedThreadPool with `pin_workers`.
+  - Real pinning exists only where `TaskPolicy::pin_to_core` is implemented: **desktop/Linux** (`pthread_setaffinity_np`, so it works on embedded Linux targets like Pluto and RPi). The FreeRTOS, ThreadX and Zephyr policies inherit the base implementation, which pins nothing and returns `false` — so on those targets `affinity_failure_count()` equals the worker count and the scheduler is "PinnedIslands" in name only. The base used to return `true`, which made a no-op indistinguishable from success.
+- **Telemetry**: per-block cost sampling (`block_costs()`) is only collected under this scheduler; ThreadPerBlock/FixedThreadPool skip it and report zeros
+- **Idle**: workers escalate through the backoff ladder and then park on a futex with a 1 ms timeout
+- **Cost units**: block weight is `ns / items_moved`, and *items moved* is derived automatically — no block-side annotation. Because a producer's output channel is physically owned by the consuming block, edge derivation already identifies each block's inputs; the scheduler counts a block's input consumption where it has resolved inputs, and falls back to output writes otherwise. This keeps every block in the same unit:
+  - **sources** have no inputs → output writes
+  - **sinks** have no outputs → input reads (previously collapsed to `ns/call`, a different unit)
+  - **fanout/channelizer** → input reads, so weight does not shrink as output count grows
+  - **multi-input blocks** take the **max of the per-call deltas**, not the sum, since an N-input block consumes N items per input for one item's worth of work. It must be the max of the deltas, never the delta of the lifetime maxima — an input holding the largest lifetime count while a different input advances would otherwise report zero.
+  - a block whose input edge failed to resolve, or that has a resolved input it never reads (a control channel), falls back to output writes rather than reporting zero
+
+#### Repartition barrier: the invariant
+
+`sched::RepartitionBarrier` exists to enforce one rule: **block ownership must not
+change until every regular worker has stopped executing its old island.** Each
+`Channel` is an SPSC queue with exactly one reader and one writer; if a worker is
+still running a block while another worker takes ownership of it, that queue
+briefly has two consumers and the stream silently duplicates or reorders.
+
+The protocol: a generation counter is packed with an arrival count into one
+64-bit word. Every worker CASes its arrival. Non-leaders park on
+`_partition_epoch` until the generation advances. The leader spins until
+`arrived == worker_count`, and only then repartitions, publishes a new
+generation, and bumps the epoch to release the others.
+
+`arrive()` takes `is_leader` explicitly rather than assuming worker 0, and takes
+stop / wake / repartition as callables so the barrier owns the protocol and
+nothing else.
+
+#### Repartition barrier: how to test changes to it
+
+The generation-keyed barrier transfers SPSC endpoint ownership between workers.
+A bug there does not crash — it leaves two workers owning one endpoint, and
+surfaces as reordered or duplicated samples. `tests/scheduler/test_repartition_stress.cpp`
+drives many repartitions under shifting per-block cost and asserts the stream
+stays strictly sequential end to end.
+
+Before changing barrier code, confirm the test still *fails* when the barrier is
+broken (delete the leader's wait loop and it must report a backwards jump), and
+confirm it fails **repeatably** — run the broken build 5-6 times, not once. The
+detector is probabilistic: an earlier, gentler version of this test caught a
+broken barrier only 1 run in 6, which is indistinguishable from a passing test
+on any single run. Detection depends on the heavy/light cost contrast being
+large enough that partitions genuinely change; the current constants detect 6/6.
+
+Run it under ThreadSanitizer too. ASLR breaks TSan on recent kernels, so:
+
+```bash
+g++ -std=c++17 -O1 -g -fsanitize=thread -Iinclude stress.cpp -o stress -lpthread
+setarch $(uname -m) -R env TSAN_OPTIONS="halt_on_error=0" ./stress
+```
+
+TSan slows execution ~10x, which suppresses the drift check — verify the run
+actually reached a high `repartition_count()` (hundreds), otherwise it never
+exercised the barrier regardless of a clean report.
+
+#### Observability accessors and when they are valid
+`partition()`, `stats()`, `block_costs()`, `repartition_count()`, `total_park_events()` and `affinity_failure_count()` are safe to read after `stop()` has joined the workers. During a run they are best-effort: `block_costs()` and the stats counters are approximate (updated by workers without synchronization to the reader), and `partition()` is unsynchronized — a drift repartition can rewrite it while you read. Read them after `stop()` when you need exact values. All of them are reset at the start of every `run()`.
 
 ### Execution Statistics and Block Performance
 ```cpp
@@ -749,7 +870,6 @@ cler::FlowGraphConfig config;
 // Example 1: Uniform workload (e.g., simple signal processing chain)
 config.scheduler = cler::SchedulerType::FixedThreadPool;
 config.num_workers = 4;
-// config.adaptive_sleep = true;  // Optional: only if data is sparse
 
 flowgraph.run(config);
 
@@ -762,7 +882,6 @@ cler::print_flowgraph_execution_report(flowgraph);
 // - CPU utilization percentage
 // - Average execution time per procedure
 // - Throughput in samples/second
-// - Adaptive sleep final value (if enabled)
 ```
 
 ### Benchmarking
@@ -808,30 +927,47 @@ out->commit_write(to_process);
 
 #### Simple Linear Chain (Source → A → B → C → Sink)
 - **Scheduler**: ThreadPerBlock (simple, predictable)
-- **Adaptive Sleep**: Yes for sparse data, No for continuous streams
 - **Expected**: Good performance, easy debugging
 
 #### Fanout with Uniform Processing (Source → Fanout → [N similar paths] → Sinks)
 - **Scheduler**: FixedThreadPool with workers = min(N/2, CPU cores)
-- **Adaptive Sleep**: Optional based on data rate
 - **Expected**: Better than ThreadPerBlock due to reduced thread overhead
 
 #### Fanout with Imbalanced Processing (different complexity per path)
-- **Scheduler**: AdaptiveLoadBalancing with load_balancing enabled
-- **Workers**: Start with CPU cores - 1
-- **Load Balancing**: interval=500-1000, threshold=0.1-0.2
+- **Scheduler**: PinnedIslands (cost-based partition isolates the heavy path after calibration)
+- **Workers**: CPU cores. Do NOT subtract one for a may_block source.
 - **Expected**: Significantly better than FixedThreadPool for imbalanced loads
 
+Measured on a 2-core PlutoSDR (Cortex-A9), `SourcePluto(may_block) -> Mix ->
+FIR -> Sink`, at a rate every config could sustain (3 reps, spread +/- 0.004
+cores):
+
+| config | CPU cores | meets rate (light chain) | meets rate (loaded chain) |
+|---|---|---|---|
+| PinnedIslands(1) | 1.405 | yes | **no** (1.723 of 2.083 MSPS) |
+| PinnedIslands(2) | 1.419 | yes | **yes** (2.078) |
+| ThreadPerBlock | 1.524 | yes | no (1.897) |
+| FixedThreadPool(2) | 1.544 | yes | no (1.760) |
+
+`cores - 1` saves ~1% CPU when the chain has slack, and costs 17% of capacity
+when it does not. Take the extra worker: the may_block source spends nearly all
+its time blocked in the driver (measured at 0.196 cores for a 3 MS/s libiio
+source), so it does not need a core reserved for it. `embedded_optimized()` is
+`pinned_islands(2)` and is the right default on a 2-core target.
+
+The cost-based repartition is what makes 2 workers win: with the barrier
+suppressed, the same config drops to 1.760 MSPS. It only matters when per-block
+costs are uneven -- on a balanced chain it is pure overhead.
+
 #### Many Blocks (>20 blocks in flowgraph)
-- **Scheduler**: AdaptiveLoadBalancing or FixedThreadPool
+- **Scheduler**: PinnedIslands or FixedThreadPool
 - **Workers**: 4-8 depending on CPU
 - **Rationale**: ThreadPerBlock creates too many threads
 
 #### Sparse/Intermittent Data (sensors, network packets)
-- **Scheduler**: Any (ThreadPerBlock is fine for simplicity)
-- **Adaptive Sleep**: REQUIRED - aggressive settings
-- **Settings**: multiplier=2.0, max_us=10000, fail_threshold=5
-- **Expected**: >90% reduction in CPU usage during idle
+- **Scheduler**: PinnedIslands (idle workers park on a futex instead of spinning)
+- **Tuning**: `config.park_after_zero_passes` (default 4) trades wake latency for idle CPU
+- **Expected**: near-zero CPU while the graph has nothing to do
 
 ## 12. Development Guidelines & Code Style
 
@@ -931,7 +1067,7 @@ enum class Error : int {
 4. Avoid single-sample `push`/`pop` in hot paths
 5. Process multiple samples per `procedure()` call
 6. Use compile-time channel sizes when possible
-7. Enable adaptive sleep for better CPU usage
+7. Use PinnedIslands when idle CPU matters - its workers park instead of spinning
 
 ### Common Pitfalls
 1. **Allocating memory in `procedure()`** - Use member variables instead (hot path!)

@@ -37,6 +37,7 @@ inline void ffmpeg_check(int err, const char* context) {
 
 template <typename T = float>
 struct SourceAudioFileBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
     typedef void (*on_eof)(const char* filename);
 
     SourceAudioFileBlock(const char* name,
@@ -131,13 +132,10 @@ struct SourceAudioFileBlock : public cler::BlockBase {
             }
         }
 
-        if (samples_written > 0) {
-            out->commit_write(samples_written);
+        if (samples_written == 0) {
+            return cler::Error::NotEnoughSamples;
         }
-
-        if (_eof_reached && samples_written == 0) {
-            return cler::Empty{};
-        }
+        out->commit_write(samples_written);
 
         return cler::Empty{};
     }

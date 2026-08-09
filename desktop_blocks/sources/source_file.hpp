@@ -7,6 +7,7 @@
 
 template <typename T>
 struct SourceFileBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
     typedef void (*on_eof)(const char* filename);
 
     SourceFileBlock(const char* name, const char* filename, const bool repeat = true, on_eof callback = nullptr)
@@ -46,13 +47,13 @@ struct SourceFileBlock : public cler::BlockBase {
             if (_file.eof() && _repeat) {
                 _file.clear();
                 _file.seekg(0, std::ios::beg);
-                return cler::Empty{}; // Don't return an error, just let the flowgraph/loop call this again
+                return cler::Error::NotEnoughSamples;
             } else {
                 if (_callback) {
                     _callback(_filename.c_str());
                 }
                 if (_file.is_open()) {_file.close();}
-                return cler::Empty{};
+                return cler::Error::NotEnoughSamples;
             }
         }
         

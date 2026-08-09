@@ -214,7 +214,7 @@ TestResult run_imbalanced_baseline_test(std::chrono::seconds test_duration) {
     
     // Fanout with IMBALANCED workload (different path complexity):
     // Source -> Fanout -> [Path1: Light gain -> Sink, Path2: Heavy noise+gain -> Sink, Path3: Very light -> Sink]
-    // This should favor FixedThreadPool with adaptive sleep or more workers
+    // This should favor cost-partitioned islands or more workers
     
     SourceCWBlock<std::complex<float>> source("CW_Source", 1.0f, 1000.0f, 48000);
     FanoutBlock<std::complex<float>> fanout("Fanout_3way", 3);
@@ -284,7 +284,7 @@ TestResult run_imbalanced_test(const std::string& name, cler::FlowGraphConfig co
     
     // Fanout with IMBALANCED workload (different path complexity):
     // Source -> Fanout -> [Path1: Light gain -> Sink, Path2: Heavy noise+gain -> Sink, Path3: Very light -> Sink]
-    // This should favor FixedThreadPool with adaptive sleep or more workers
+    // This should favor cost-partitioned islands or more workers
     
     SourceCWBlock<std::complex<float>> source("CW_Source", 1.0f, 1000.0f, 48000);
     FanoutBlock<std::complex<float>> fanout("Fanout_3way", 3);
@@ -511,7 +511,7 @@ int main() {
     std::cout << "2. IMBALANCED fanout (different path complexity) -> WorkStealing should excel" << std::endl;
     std::cout << "3. HEAVY fanout (many parallel paths) -> Load balancing should excel" << std::endl;
     std::cout << "BASELINE: ThreadPerBlock scheduler with no feature extensions" << std::endl;
-    std::cout << "ADAPTIVE SLEEP: Tests both with/without adaptive sleep for CPU efficiency" << std::endl;
+    std::cout << "PINNED ISLANDS: Cost-partitioned islands compared against pooled workers" << std::endl;
     std::cout << "Test Duration: " << test_duration.count() << " seconds per test" << std::endl;
     std::cout << "Metrics: Throughput + CPU Efficiency (successful/total procedures)" << std::endl;
     std::cout << "========================================" << std::endl;
@@ -536,10 +536,9 @@ int main() {
     auto fixed_config = cler::flowgraph_config::desktop_performance();
     test_idx++; results.push_back(run_enhanced_test("FixedThreadPool (4 workers)", fixed_config, test_duration));
     
-    // Test 2: FixedThreadPool + Adaptive Sleep
-    auto fixed_config_sleep = cler::flowgraph_config::desktop_performance();
-    fixed_config_sleep.adaptive_sleep = true;
-    test_idx++; results.push_back(run_enhanced_test("FixedThreadPool + adaptive sleep", fixed_config_sleep, test_duration));
+    // Test 2: PinnedIslands (2 workers)
+    auto pinned_islands_config = cler::flowgraph_config::pinned_islands(2);
+    test_idx++; results.push_back(run_enhanced_test("PinnedIslands (2 workers)", pinned_islands_config, test_duration));
     
     // Test 3: Additional FixedThreadPool test (cache-optimized)
     auto additional_fixed_config = cler::flowgraph_config::desktop_performance();
@@ -564,8 +563,8 @@ int main() {
     // Test 6: FixedThreadPool (should struggle with imbalanced load)
     test_idx++; results.push_back(run_imbalanced_test("FixedThreadPool (4 workers)", fixed_config, test_duration));
     
-    // Test 7: FixedThreadPool + Adaptive Sleep (should improve CPU efficiency)
-    test_idx++; results.push_back(run_imbalanced_test("FixedThreadPool + adaptive sleep", fixed_config_sleep, test_duration));
+    // Test 7: PinnedIslands (cost-partitioned islands)
+    test_idx++; results.push_back(run_imbalanced_test("PinnedIslands (2 workers)", pinned_islands_config, test_duration));
     
     // Test 8: FixedThreadPool with more workers (additional parallelism)
     test_idx++; results.push_back(run_imbalanced_test("FixedThreadPool (8 workers)", additional_fixed_config, test_duration));
@@ -576,7 +575,7 @@ int main() {
     std::cout << "\n🚀 HEAVY FANOUT TESTS (8 parallel paths):" << std::endl;
     std::cout << "Pipeline: Source -> Fanout -> [8x Gain->Sink paths] (18 blocks total)" << std::endl;
     std::cout << "Expected: Load balancing should excel with many blocks to distribute" << std::endl;
-    std::cout << "Adaptive sleep may help with thread contention and back-pressure" << std::endl;
+    std::cout << "PinnedIslands should isolate the heavy path after calibration" << std::endl;
     
     // Test 12: Baseline ThreadPerBlock (heavy fanout workload)
     heavy_baseline_idx = test_idx++;
@@ -585,8 +584,8 @@ int main() {
     // Test 13: FixedThreadPool (should handle many blocks reasonably)
     test_idx++; results.push_back(run_heavy_fanout_test("FixedThreadPool (4 workers)", fixed_config, test_duration));
     
-    // Test 14: FixedThreadPool + Adaptive Sleep
-    test_idx++; results.push_back(run_heavy_fanout_test("FixedThreadPool + adaptive sleep", fixed_config_sleep, test_duration));
+    // Test 14: PinnedIslands (cost-partitioned islands)
+    test_idx++; results.push_back(run_heavy_fanout_test("PinnedIslands (2 workers)", pinned_islands_config, test_duration));
     
     // Test 15: FixedThreadPool with more workers (should excel with many blocks)
     test_idx++; results.push_back(run_heavy_fanout_test("FixedThreadPool (8 workers)", additional_fixed_config, test_duration));
@@ -603,10 +602,10 @@ int main() {
         result.print();
     }
     
-    // Analysis - All comparisons vs ThreadPerBlock baseline + with/without adaptive sleep
+    // Analysis - All comparisons vs ThreadPerBlock baseline
     std::cout << "========================================" << std::endl;
     std::cout << "Performance Analysis vs BASELINE (ThreadPerBlock)" << std::endl;
-    std::cout << "With/Without Adaptive Sleep Comparisons" << std::endl;
+    std::cout << "Pooled vs Pinned-Island Comparisons" << std::endl;
     std::cout << "========================================" << std::endl;
     
     if (results.size() >= 5) {
@@ -616,7 +615,7 @@ int main() {
         
         std::cout << "\n🔄 UNIFORM FANOUT Analysis:" << std::endl;
         printf("%-45s | %12s | %10s | %12s | %13s\n",
-            "Configuration", "Throughput", "CPU Eff", "vs Baseline", "vs No Sleep");
+            "Configuration", "Throughput", "CPU Eff", "vs Baseline", "vs FixedPool");
         printf("%s\n", std::string(105, '-').c_str());
         
         printf("%-45s | %10.1f MS | %8.1f%% | %11s | %12s\n",
@@ -631,7 +630,7 @@ int main() {
                 ((results[uniform_baseline_idx+1].throughput - uniform_baseline_throughput) / uniform_baseline_throughput) * 100.0, "---");
             
             printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %+10.1f%%\n",
-                "FixedThreadPool + adaptive sleep",
+                "PinnedIslands (2 workers)",
                 results[uniform_baseline_idx+2].throughput/1e6, results[uniform_baseline_idx+2].cpu_efficiency*100,
                 ((results[uniform_baseline_idx+2].throughput - uniform_baseline_throughput) / uniform_baseline_throughput) * 100.0,
                 ((results[uniform_baseline_idx+2].throughput - results[uniform_baseline_idx+1].throughput) / results[uniform_baseline_idx+1].throughput) * 100.0);
@@ -648,7 +647,7 @@ int main() {
         if (results.size() >= 11) {
             std::cout << "\n\n⚖️ IMBALANCED FANOUT Analysis:" << std::endl;
             printf("%-45s | %12s | %10s | %12s | %13s\n",
-                "Configuration", "Throughput", "CPU Eff", "vs Baseline", "vs No Sleep");
+                "Configuration", "Throughput", "CPU Eff", "vs Baseline", "vs FixedPool");
             printf("%s\n", std::string(105, '-').c_str());
             
             // Use tracked imbalanced baseline index
@@ -666,7 +665,7 @@ int main() {
                 ((results[imbalanced_baseline_idx+1].throughput - imbalanced_baseline_throughput) / imbalanced_baseline_throughput) * 100.0, "---");
             
             printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %+10.1f%%\n",
-                "FixedThreadPool + adaptive sleep",
+                "PinnedIslands (2 workers)",
                 results[imbalanced_baseline_idx+2].throughput/1e6, results[imbalanced_baseline_idx+2].cpu_efficiency*100,
                 ((results[imbalanced_baseline_idx+2].throughput - imbalanced_baseline_throughput) / imbalanced_baseline_throughput) * 100.0,
                 ((results[imbalanced_baseline_idx+2].throughput - results[imbalanced_baseline_idx+1].throughput) / results[imbalanced_baseline_idx+1].throughput) * 100.0);
@@ -681,7 +680,7 @@ int main() {
         if (results.size() > heavy_baseline_idx && heavy_baseline_idx > 0) {
             std::cout << "\n\n🚀 HEAVY FANOUT Analysis:" << std::endl;
             printf("%-45s | %12s | %10s | %12s | %13s\n",
-                "Configuration", "Throughput", "CPU Eff", "vs Baseline", "vs No Sleep");
+                "Configuration", "Throughput", "CPU Eff", "vs Baseline", "vs FixedPool");
             printf("%s\n", std::string(105, '-').c_str());
             
             // Use tracked heavy baseline index
@@ -700,7 +699,7 @@ int main() {
                     ((results[heavy_baseline_idx+1].throughput - heavy_baseline_throughput) / heavy_baseline_throughput) * 100.0, "---");
                 
                 printf("%-45s | %10.1f MS | %8.1f%% | %+10.1f%% | %+10.1f%%\n",
-                    "FixedThreadPool + adaptive sleep",
+                    "PinnedIslands (2 workers)",
                     results[heavy_baseline_idx+2].throughput/1e6, results[heavy_baseline_idx+2].cpu_efficiency*100,
                     ((results[heavy_baseline_idx+2].throughput - heavy_baseline_throughput) / heavy_baseline_throughput) * 100.0,
                     ((results[heavy_baseline_idx+2].throughput - results[heavy_baseline_idx+1].throughput) / results[heavy_baseline_idx+1].throughput) * 100.0);

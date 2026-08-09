@@ -1,9 +1,12 @@
 #pragma once
 #include "shared.hpp"
 #include "../blob.hpp"
+#include "cler_desktop_utils.hpp"
+#include <new>
 
 template<typename T>
 struct SinkUDPSocketBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
     static constexpr bool IS_BLOB = std::is_same_v<T, Blob>;
 
     cler::Channel<T> in;
@@ -19,19 +22,30 @@ struct SinkUDPSocketBlock : public cler::BlockBase {
           in(buffer_size),
           _socket(UDPBlock::GenericDatagramSocket::make_sender(type, dest_host_or_path)),
           _callback(callback),
-          _callback_context(callback_context) {}
+          _callback_context(callback_context),
+          _buffer_size(buffer_size) {
+
+        _buffer = new (std::nothrow) T[_buffer_size];
+        if (!_buffer) {
+            cler::panic("Failed to allocate temporary buffer");
+        }
+    }
+
+    ~SinkUDPSocketBlock() {
+        delete[] _buffer;
+    }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
         if (!_socket.is_valid()) {
             return cler::Error::TERM_IOError;
         }
 
-        size_t available = in.size();
+        size_t available = std::min(in.size(), _buffer_size);
         if (available == 0) {
-            return cler::Empty{};
+            return cler::Error::NotEnoughSamples;
         }
 
-        T buffer[available];
+        T* buffer = _buffer;
         in.readN(buffer, available);
 
         for (size_t i = 0; i < available; ++i) {
@@ -62,4 +76,6 @@ private:
     UDPBlock::GenericDatagramSocket _socket;
     OnSendCallback _callback = nullptr;
     void* _callback_context = nullptr;
+    size_t _buffer_size;
+    T* _buffer = nullptr;
 };

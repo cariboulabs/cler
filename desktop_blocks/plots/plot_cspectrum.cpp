@@ -21,6 +21,9 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
     if (_num_inputs < 1) {
         cler::panic("PlotCSpectrumBlock requires at least one input channel");
     }
+    if (_num_inputs > MAX_INPUT_CHANNEL_SLOTS) {
+        cler::panic("PlotCSpectrumBlock: too many input channels for MAX_INPUT_CHANNEL_SLOTS");
+    }
     if (n_fft_samples <= 2 || n_fft_samples % 2 != 0) {
         cler::panic("FFT size must be > 2 and even");
     }
@@ -41,9 +44,7 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
         _buffer_size = min_buffer_size;
     }
 
-    in = static_cast<cler::Channel<std::complex<float>>*>(
-        ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
-    );
+    in = reinterpret_cast<cler::Channel<std::complex<float>>*>(_in_storage);
     for (size_t i = 0; i < _num_inputs; ++i) {
         new (&in[i]) cler::Channel<std::complex<float>>(_buffer_size);
     }
@@ -89,7 +90,6 @@ PlotCSpectrumBlock::~PlotCSpectrumBlock() {
         in[i].~ComplexChannel();
         _signal_channels[i].~ComplexChannel();
     }
-    ::operator delete[](in);
     ::operator delete[](_signal_channels);
 
     for (size_t i = 0; i < _num_inputs; ++i) {

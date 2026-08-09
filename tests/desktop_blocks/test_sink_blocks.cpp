@@ -316,10 +316,10 @@ TEST_F(SinkBlocksTest, SinkFileBlockEmptyInput) {
     {
         SinkFileBlock<float> sink_block("test_sink_file_empty", test_filename.c_str(), buffer_size);
         
-        // Run with empty input
         auto result = sink_block.procedure();
-        EXPECT_TRUE(result.is_ok());
-        
+        ASSERT_TRUE(result.is_err());
+        EXPECT_EQ(result.unwrap_err(), cler::Error::NotEnoughSamples);
+
         // Verify input is still empty
         EXPECT_EQ(sink_block.in.size(), 0);
         

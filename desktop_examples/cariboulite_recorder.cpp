@@ -37,9 +37,7 @@ int main() {
         cler::BlockRunner(&sink_file)
     );
 
-    flowgraph.run(cler::FlowGraphConfig{
-        .adaptive_sleep = false,
-    });
+    flowgraph.run(cler::FlowGraphConfig{});
 
 
     printf("Press Ctrl+C to stop recording...\n");

@@ -30,9 +30,7 @@ int main() {
     cler::GuiManager gui(800, 400, "Hackrf Receiver Example");
     plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f);
 
-    flowgraph.run(cler::FlowGraphConfig{
-        .adaptive_sleep = true,
-    });
+    flowgraph.run(cler::FlowGraphConfig{});
 
 
     while (gui.should_close() == false) {

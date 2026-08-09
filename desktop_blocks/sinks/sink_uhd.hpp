@@ -20,6 +20,7 @@
 #include <string>
 #include <sstream>
 #include <numeric>
+#include <type_traits>
 
 struct AsyncTxEvent {
     bool event_occurred = false;
@@ -30,6 +31,8 @@ struct AsyncTxEvent {
 
 template<typename T>
 struct SinkUHDBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
+    static constexpr size_t MAX_INPUT_CHANNEL_SLOTS = 16;
 
     cler::Channel<T>* in = nullptr;
 
@@ -48,6 +51,9 @@ struct SinkUHDBlock : public cler::BlockBase {
         if (_num_channels == 0) {
             cler::panic("SinkUHDBlock: num_channels must be at least 1");
         }
+        if (_num_channels > MAX_INPUT_CHANNEL_SLOTS) {
+            cler::panic("SinkUHDBlock: too many input channels for MAX_INPUT_CHANNEL_SLOTS");
+        }
 
         size_t actual_buffer_size = (channel_size == 0) ?
                 cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : channel_size;
@@ -56,9 +62,7 @@ struct SinkUHDBlock : public cler::BlockBase {
             cler::panic("Channel size too small for doubly-mapped buffers");
         }
 
-        in = static_cast<cler::Channel<T>*>(
-            ::operator new[](_num_channels * sizeof(cler::Channel<T>))
-        );
+        in = reinterpret_cast<cler::Channel<T>*>(_in_storage);
         for (size_t i = 0; i < _num_channels; ++i) {
             new (&in[i]) cler::Channel<T>(actual_buffer_size);
         }
@@ -107,8 +111,9 @@ struct SinkUHDBlock : public cler::BlockBase {
     }
 
     ~SinkUHDBlock() {
-        if (in) {
-            cleanup_channels(in, _num_channels);
+        using TChannel = cler::Channel<T>;
+        for (size_t i = 0; i < _num_channels; ++i) {
+            in[i].~TChannel();
         }
         if (underflow_count > 0) {
             std::cout << "SinkUHDBlock: Total underflows: " << underflow_count << std::endl;
@@ -154,32 +159,46 @@ struct SinkUHDBlock : public cler::BlockBase {
 
     cler::Result<cler::Empty, cler::Error> procedure() {
         if (_configuring.load(std::memory_order_acquire)) {
-            return cler::Empty{};  // Skip this iteration
+            return cler::Error::NotEnoughSamples;
         }
+        const size_t min_samples = (cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) / 4;
         for (size_t i = 0; i < _num_channels; ++i) {
             auto [ptr, size] = in[i].read_dbf();
             _read_ptrs[i] = ptr;
             _read_sizes[i] = size;
 
-            if (_read_sizes[i] < (cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T)) / 4) {
+            if (_read_sizes[i] < min_samples) {
                 return cler::Error::NotEnoughSamples;
             }
+        }
+
+        size_t aligned = _read_sizes[0];
+        for (size_t i = 1; i < _num_channels; ++i) {
+            aligned = std::min(aligned, _read_sizes[i]);
+        }
+
+        size_t sent_min = aligned;
+        for (size_t i = 0; i < _num_channels; ++i) {
             uhd::tx_metadata_t md;
             md.start_of_burst = false;
             md.end_of_burst = false;
-            md.has_time_spec = false;               
+            md.has_time_spec = false;
 
             size_t sent = 0;
             try {
-                sent = _tx_stream->send(_read_ptrs[i],
-                                _read_sizes[i],
-                                md,
-                                0.1);  // 100ms timeout
+                sent = _tx_stream->send(_read_ptrs[i], aligned, md, 0.1);
             } catch (const std::exception& e) {
                 std::cerr << "SinkUHDBlock: send failed: " << e.what() << std::endl;
                 return cler::Error::TERM_ProcedureError;
             }
-            in[i].commit_read(sent);
+            sent_min = std::min(sent_min, sent);
+        }
+
+        if (sent_min == 0) {
+            return cler::Error::NotEnoughSpace;
+        }
+        for (size_t i = 0; i < _num_channels; ++i) {
+            in[i].commit_read(sent_min);
         }
 
         handle_async_events();
@@ -245,20 +264,12 @@ private:
         }
     }
 
-    static void cleanup_channels(cler::Channel<T>* channels, size_t count) {
-        if (channels) {
-            using TChannel = cler::Channel<T>;
-            for (size_t i = 0; i < count; ++i) {
-                channels[i].~TChannel();
-            }
-            ::operator delete[](channels);
-        }
-    }
+    std::aligned_storage_t<sizeof(cler::Channel<T>), alignof(cler::Channel<T>)> _in_storage[MAX_INPUT_CHANNEL_SLOTS];
 
     uhd::usrp::multi_usrp::sptr _usrp;
     uhd::tx_streamer::sptr _tx_stream;
 
-    UHDConfig _current_config; 
+    UHDConfig _current_config;
     std::string _device_address;
     size_t _num_channels;
     std::string _wire_format;

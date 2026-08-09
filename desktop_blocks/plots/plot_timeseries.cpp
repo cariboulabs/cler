@@ -15,6 +15,9 @@ PlotTimeSeriesBlock::PlotTimeSeriesBlock(const char* name,
     if (_num_inputs < 1) {
         cler::panic("PlotTimeSeriesBlock requires at least one input channel");
     }
+    if (_num_inputs > MAX_INPUT_CHANNEL_SLOTS) {
+        cler::panic("PlotTimeSeriesBlock: too many input channels for MAX_INPUT_CHANNEL_SLOTS");
+    }
     if (duration_s <= 0) {
         cler::panic("Duration must be greater than zero.");
     }
@@ -26,9 +29,7 @@ PlotTimeSeriesBlock::PlotTimeSeriesBlock(const char* name,
         _buffer_size = min_buffer_size;
     }
 
-    in = static_cast<cler::Channel<float>*>(
-        ::operator new[](_num_inputs * sizeof(cler::Channel<float>))
-    );
+    in = reinterpret_cast<cler::Channel<float>*>(_in_storage);
     for (size_t i = 0; i < _num_inputs; ++i) {
         new (&in[i]) cler::Channel<float>(_buffer_size);
     }
@@ -58,7 +59,6 @@ PlotTimeSeriesBlock::~PlotTimeSeriesBlock() {
         in[i].~FloatChannel();
         _y_channels[i].~FloatChannel();
     }
-    ::operator delete[](in);
     ::operator delete[](_y_channels);
     delete _x_channel;
 

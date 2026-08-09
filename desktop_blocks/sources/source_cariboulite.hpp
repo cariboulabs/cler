@@ -24,13 +24,8 @@ template <typename T>
 struct SourceCaribouliteBlock : public cler::BlockBase {
     static_assert(std::is_same_v<T, std::complex<short>> || std::is_same_v<T, std::complex<float>>,
             "SourceCaribouliteBlock only supports std::complex<short> or std::complex<float>");
+    static constexpr bool may_block = true;
 
-    // bw_hz: optional IF anti-alias filter cutoff. The AT86RF215's RX
-    // bandwidth is independent of sample_rate; if left at 0 the driver
-    // keeps its previous value (typically the radio default, which can
-    // pass aliases at lower sample rates). Pass non-zero to mirror what
-    // GNU Radio / SoapySDR users do via setBandwidth(). Range is
-    // determined by the driver; out-of-range values throw.
     SourceCaribouliteBlock(const char* name,
         CaribouLiteRadio::RadioType radio_type,
         float freq_hz,
@@ -105,12 +100,13 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
 
             size_t to_read = std::min(space, _max_samples_to_read);
             int ret = _radio->ReadSamples(ptr, to_read);
-            if (ret > 0) {
-                out->commit_write(ret);
-            }
             if (ret < 0) {
                 return cler::Error::ProcedureError;
             }
+            if (ret == 0) {
+                return cler::Error::NotEnoughSamples;
+            }
+            out->commit_write(ret);
             return cler::Empty{};
         }
 
