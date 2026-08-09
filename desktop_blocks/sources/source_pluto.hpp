@@ -20,6 +20,16 @@
 //   "ip:192.168.2.1"  - Pluto over USB-ethernet / network
 //   "usb:"            - Pluto over raw USB
 //   "local:"          - running ON the Pluto itself
+enum class PlutoAgcMode { FastAttack, SlowAttack };
+
+inline const char* to_iio_gain_control_mode(PlutoAgcMode mode) {
+    switch (mode) {
+        case PlutoAgcMode::FastAttack: return "fast_attack";
+        case PlutoAgcMode::SlowAttack: return "slow_attack";
+    }
+    cler::panic("Pluto: unknown PlutoAgcMode");
+}
+
 struct SourcePlutoBlock : public cler::BlockBase {
     static constexpr bool may_block = true;
 
@@ -27,9 +37,10 @@ struct SourcePlutoBlock : public cler::BlockBase {
                      const char* uri,          // e.g. "ip:192.168.2.1"
                      long long freq_hz,
                      long long samp_rate_hz,
-                     double gain_db = -1.0,    // <0 => slow_attack AGC, >=0 => manual gain
+                     double gain_db = -1.0,    // <0 => AGC (agc_mode), >=0 => manual gain
                      long long bandwidth_hz = 0, // 0 => same as sample rate
-                     size_t buffer_size = 1 << 14)
+                     size_t buffer_size = 1 << 14,
+                     PlutoAgcMode agc_mode = PlutoAgcMode::FastAttack)
         : cler::BlockBase(name),
           _freq_hz(freq_hz),
           _samp_rate_hz(samp_rate_hz),
@@ -65,7 +76,7 @@ struct SourcePlutoBlock : public cler::BlockBase {
         _lo = lo;
 
         if (gain_db < 0.0) {
-            iio_channel_attr_write(chn, "gain_control_mode", "slow_attack");
+            iio_channel_attr_write(chn, "gain_control_mode", to_iio_gain_control_mode(agc_mode));
         } else {
             iio_channel_attr_write(chn, "gain_control_mode", "manual");
             iio_channel_attr_write_double(chn, "hardwaregain", gain_db);
@@ -90,7 +101,7 @@ struct SourcePlutoBlock : public cler::BlockBase {
                   << "  Frequency: " << freq_hz / 1e6 << " MHz\n"
                   << "  Sample rate: " << samp_rate_hz / 1e6 << " MSPS\n"
                   << "  Bandwidth: " << bandwidth_hz / 1e6 << " MHz\n"
-                  << "  Gain: " << (gain_db < 0.0 ? std::string("AGC (slow_attack)")
+                  << "  Gain: " << (gain_db < 0.0 ? std::string("AGC (") + to_iio_gain_control_mode(agc_mode) + ")"
                                                   : std::to_string(gain_db) + " dB")
                   << std::endl;
     }
