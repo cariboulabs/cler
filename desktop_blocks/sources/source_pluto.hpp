@@ -16,6 +16,10 @@
 #include <cstdlib>
 #include <string>
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 // PlutoSDR (and any AD936x/IIO device) RX source via libiio.
 // Works with the same code over any libiio URI:
 //   "ip:192.168.2.1"  - Pluto over USB-ethernet / network
@@ -146,12 +150,7 @@ struct SourcePlutoBlock : public cler::BlockBase {
 
         const int16_t* samples = static_cast<const int16_t*>(iio_buffer_start(_buf));
         size_t n = std::min(_available - _consumed, write_size);
-        for (size_t i = 0; i < n; ++i) {
-            // AD936x delivers 12-bit samples in int16 containers -> scale by 2^11
-            write_ptr[i] = std::complex<float>(
-                samples[2 * (_consumed + i)]     / 2048.0f,
-                samples[2 * (_consumed + i) + 1] / 2048.0f);
-        }
+        convert_i16_to_cf32(samples + 2 * _consumed, write_ptr, n);
         _consumed += n;
         out->commit_write(n);
         return cler::Empty{};
@@ -168,6 +167,26 @@ struct SourcePlutoBlock : public cler::BlockBase {
     }
 
 private:
+    static void convert_i16_to_cf32(const int16_t* src, std::complex<float>* dst, size_t n) {
+        constexpr float scale = 1.0f / 2048.0f;
+        size_t i = 0;
+#if defined(__ARM_NEON)
+        float* out = reinterpret_cast<float*>(dst);
+        const size_t n_floats = 2 * n;
+        for (; i + 8 <= n_floats; i += 8) {
+            int16x8_t v = vld1q_s16(src + i);
+            float32x4_t lo = vcvtq_f32_s32(vmovl_s16(vget_low_s16(v)));
+            float32x4_t hi = vcvtq_f32_s32(vmovl_s16(vget_high_s16(v)));
+            vst1q_f32(out + i,     vmulq_n_f32(lo, scale));
+            vst1q_f32(out + i + 4, vmulq_n_f32(hi, scale));
+        }
+        i /= 2;
+#endif
+        for (; i < n; ++i) {
+            dst[i] = std::complex<float>(src[2 * i] * scale, src[2 * i + 1] * scale);
+        }
+    }
+
     void write_attr_or_panic(iio_channel* ch, const char* attr, long long val) {
         int ret = iio_channel_attr_write_longlong(ch, attr, val);
         if (ret < 0) {
