@@ -557,9 +557,19 @@ namespace cler {
         // lambda access to private members differently - GCC allows it while Clang doesn't.
         // Making these public ensures portability across compilers.
         
+        struct NoProgressNotification {
+            void operator()() const {}
+        };
+
+        struct WakePinnedWorkers {
+            FlowGraph* graph;
+            void operator()() const { graph->wake_parked_workers(kNoWorker); }
+        };
+
         // C++17 compatible member template functions replacing templated lambdas
-        template<std::size_t I>
-        void run_block_at_index_thread_per_block(const FlowGraphConfig& config) {
+        template<std::size_t I, typename ProgressNotifier>
+        void run_block_at_index_thread_per_block(const FlowGraphConfig& config,
+                                                 ProgressNotifier notify_progress) {
             static_assert(I < _N, "Block index out of bounds");
             auto& runner = std::get<I>(_runners);
             auto& stats = _stats[I];
@@ -626,9 +636,7 @@ namespace cler {
 
                 if (did_work_in_batch) {
                     TaskPolicy::backoff_reset(backoff_state);
-                    if (_pinned_worker_count > 0) {
-                        wake_parked_workers(kNoWorker);
-                    }
+                    notify_progress();
                 } else if (batch_failed) {
                     TaskPolicy::backoff(backoff_state);
                 }
@@ -651,7 +659,7 @@ namespace cler {
             // C++17 fold expression: validates all indices are within bounds at compile time
             static_assert(((Is < _N) && ...), "All block indices must be within bounds");
             ((_tasks[Is] = TaskPolicy::create_task([this, config]() {
-                run_block_at_index_thread_per_block<Is>(config);
+                run_block_at_index_thread_per_block<Is>(config, NoProgressNotification{});
             })), ...);
             _active_task_count = _N;  // ThreadPerBlock creates one task per block
         }
@@ -682,24 +690,27 @@ namespace cler {
             (collect_regular_block_id_for_index<Is>(ids, count), ...);
         }
 
-        template<std::size_t I>
-        void launch_may_block_task_for_index(const FlowGraphConfig& config) {
+        template<std::size_t I, typename ProgressNotifier>
+        void launch_may_block_task_for_index(const FlowGraphConfig& config, ProgressNotifier notify_progress) {
             if (std::get<I>(_runners).may_block) {
-                _tasks[_active_task_count++] = TaskPolicy::create_task([this, config]() {
-                    run_block_at_index_thread_per_block<I>(config);
+                _tasks[_active_task_count++] = TaskPolicy::create_task([this, config, notify_progress]() {
+                    run_block_at_index_thread_per_block<I>(config, notify_progress);
                 });
             }
         }
 
-        template<std::size_t... Is>
-        void launch_may_block_tasks_impl(std::index_sequence<Is...>, const FlowGraphConfig& config) {
-            (launch_may_block_task_for_index<Is>(config), ...);
+        template<typename ProgressNotifier, std::size_t... Is>
+        void launch_may_block_tasks_impl(std::index_sequence<Is...>, const FlowGraphConfig& config,
+                                         ProgressNotifier notify_progress) {
+            (launch_may_block_task_for_index<Is>(config, notify_progress), ...);
         }
 
-        template<std::size_t... Is>
-        void launch_thread_per_block_task_dispatch_impl(std::index_sequence<Is...>, size_t index, const FlowGraphConfig& config) {
-            (void)((index == Is ? (_tasks[_active_task_count++] = TaskPolicy::create_task([this, config]() {
-                run_block_at_index_thread_per_block<Is>(config);
+        template<typename ProgressNotifier, std::size_t... Is>
+        void launch_thread_per_block_task_dispatch_impl(std::index_sequence<Is...>, size_t index,
+                                                        const FlowGraphConfig& config,
+                                                        ProgressNotifier notify_progress) {
+            (void)((index == Is ? (_tasks[_active_task_count++] = TaskPolicy::create_task([this, config, notify_progress]() {
+                run_block_at_index_thread_per_block<Is>(config, notify_progress);
             }), true) : false) || ...);
         }
 
@@ -1133,7 +1144,8 @@ namespace cler {
                 ? 0
                 : (std::max)(size_t{1}, (std::min)(config.num_workers, max_worker_count));
 
-            launch_may_block_tasks_impl(std::make_index_sequence<_N>{}, config);
+            launch_may_block_tasks_impl(std::make_index_sequence<_N>{}, config,
+                                        WakePinnedWorkers{this});
 
             if (regular_count == 0) return;
 
@@ -1167,7 +1179,8 @@ namespace cler {
             size_t regular_count = 0;
             collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
 
-            launch_may_block_tasks_impl(std::make_index_sequence<_N>{}, config);
+            launch_may_block_tasks_impl(std::make_index_sequence<_N>{}, config,
+                                        NoProgressNotification{});
 
             if (regular_count == 0) return;
 
@@ -1176,7 +1189,8 @@ namespace cler {
 
             if (effective_worker_count >= regular_count) {
                 for (size_t idx = 0; idx < regular_count; ++idx) {
-                    launch_thread_per_block_task_dispatch_impl(std::make_index_sequence<_N>{}, regular_ids[idx], config);
+                    launch_thread_per_block_task_dispatch_impl(std::make_index_sequence<_N>{}, regular_ids[idx], config,
+                                                               NoProgressNotification{});
                 }
             } else {
                 _worker_queues.initialize(regular_ids.data(), regular_count, effective_worker_count);
