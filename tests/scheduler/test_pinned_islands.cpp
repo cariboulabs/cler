@@ -262,6 +262,7 @@ TEST(PinnedIslandsTest, BurstyFlowParksWithoutDeadlock) {
     EXPECT_GT(fg.total_park_events(), 0u);
     EXPECT_GT(emitted, BURST * 1000u);
     EXPECT_GT(received, emitted - 4 * CAPACITY);
+    EXPECT_LE(received, emitted);
 }
 
 TEST(PinnedIslandsTest, DedicatedMayBlockThreadWakesParkedWorkers) {
@@ -290,6 +291,7 @@ TEST(PinnedIslandsTest, DedicatedMayBlockThreadWakesParkedWorkers) {
     EXPECT_GT(fg.total_park_events(), 0u);
     EXPECT_GT(source.emitted.load(), BURST * 100u);
     EXPECT_GT(sink.received.load(), source.emitted.load() - 4 * CAPACITY);
+    EXPECT_LE(sink.received.load(), source.emitted.load());
 }
 
 TEST(PinnedIslandsTest, DegenerateWorkerCountsStayBounded) {

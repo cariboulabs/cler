@@ -11,6 +11,7 @@
 #include "schedulers/cler_scheduler_barrier.hpp"
 #include "schedulers/cler_thread_per_block.hpp"
 #include "schedulers/cler_fixed_thread_pool.hpp"
+#include "schedulers/cler_pinned_islands.hpp"
 #include "schedulers/cler_scheduler_partition.hpp"
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
@@ -254,6 +255,7 @@ namespace cler {
         class SchedulerHost {
         public:
             using TaskPolicyType = TaskPolicy;
+            using PartitionType = Partition;
             static constexpr size_t block_count = _N;
 
             explicit SchedulerHost(FlowGraph& graph) : _graph(&graph) {}
@@ -289,6 +291,40 @@ namespace cler {
             void launch_may_block_tasks(const FlowGraphConfig& config) {
                 _graph->template launch_may_block_tasks_impl<false>(
                     std::make_index_sequence<_N>{}, config, NoProgressNotification{});
+            }
+
+            template<typename ProgressNotifier>
+            void launch_may_block_tasks_sampled(const FlowGraphConfig& config, ProgressNotifier notify_progress) {
+                _graph->template launch_may_block_tasks_impl<true>(
+                    std::make_index_sequence<_N>{}, config, notify_progress);
+            }
+
+            void warn_unresolved_edges() {
+                for (size_t i = 0; i < _graph->_unresolved_edge_count; ++i) {
+                    TaskPolicy::warn_unresolved_edge(_graph->block_name(_graph->_unresolved_edges[i].producer),
+                                                     _graph->_unresolved_edges[i].address);
+                }
+            }
+
+            void note_affinity_failure() {
+                _graph->_affinity_failures.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            void rebuild_partition(size_t worker_count, bool use_costs, Partition& out) {
+                std::array<uint8_t, _N> ids{};
+                const size_t count = collect_regular_ids(ids);
+                _graph->rebuild_partition_from(ids, count, worker_count, use_costs, out);
+            }
+
+            void apply_partition(const Partition& partition) {
+                _graph->_worker_queues.initialize_islands(partition.block_ids.data(),
+                                                          partition.island_begin.data(),
+                                                          partition.island_count);
+            }
+
+            void collect_block_weights(const Partition& partition, std::array<double, _N>& weights) {
+                sched::collect_block_weights<_N>(_graph->_cost_samples, partition.block_ids,
+                                                 partition.block_count, weights);
             }
 
             size_t regular_block_count() {
@@ -330,6 +366,10 @@ namespace cler {
                 return _graph->template execute_block_at_index<false>(index, config);
             }
 
+            bool execute_block_sampled(size_t index, const FlowGraphConfig& config) {
+                return _graph->template execute_block_at_index<true>(index, config);
+            }
+
             void add_block_dead_time(size_t index, double seconds) {
                 _graph->_stats[index].total_dead_time_s += seconds;
             }
@@ -356,6 +396,7 @@ namespace cler {
 
         using ThreadPerBlockScheduler = sched::ThreadPerBlockScheduler<SchedulerHost>;
         using FixedThreadPoolScheduler = sched::FixedThreadPoolScheduler<SchedulerHost>;
+        using PinnedIslandsScheduler = sched::PinnedIslandsScheduler<SchedulerHost>;
 
         void run(const FlowGraphConfig& config = FlowGraphConfig{}) {
             _config = config;
@@ -375,9 +416,11 @@ namespace cler {
                     break;
                 }
 
-                case SchedulerType::PinnedIslands:
-                    run_pinned_islands(config);
+                case SchedulerType::PinnedIslands: {
+                    SchedulerHost host(*this);
+                    PinnedIslandsScheduler::start(host, _pinned_state, config);
                     break;
+                }
             }
         }
         
@@ -417,9 +460,11 @@ namespace cler {
                     break;
                 }
 
-                case SchedulerType::PinnedIslands:
-                    unpark_everyone();
+                case SchedulerType::PinnedIslands: {
+                    SchedulerHost host(*this);
+                    PinnedIslandsScheduler::notify_stop(host, _pinned_state);
                     break;
+                }
             }
 
             for (size_t i = 0; i < _active_task_count; ++i) {
@@ -443,12 +488,12 @@ namespace cler {
             return out;
         }
 
-        const Partition& partition() const { return _partition; }
-        size_t repartition_count() const { return _barrier.count(); }
+        const Partition& partition() const { return _pinned_state.partition; }
+        size_t repartition_count() const { return _pinned_state.barrier.count(); }
         size_t affinity_failure_count() const { return _affinity_failures.load(std::memory_order_relaxed); }
 
         uint64_t total_park_events() const {
-            return _park_states.total_park_events();
+            return _pinned_state.park_states.total_park_events();
         }
 
         const std::array<Edge, MaxEdges>& edges() const { return _edges; }
@@ -615,11 +660,6 @@ namespace cler {
             void operator()() const {}
         };
 
-        struct WakePinnedWorkers {
-            FlowGraph* graph;
-            void operator()() const { graph->wake_parked_workers(kNoWorker); }
-        };
-
         template<std::size_t I, bool CostSampling, typename ProgressNotifier>
         void run_block_at_index_thread_per_block(const FlowGraphConfig& config,
                                                  ProgressNotifier notify_progress) {
@@ -769,6 +809,7 @@ namespace cler {
 
         typename ThreadPerBlockScheduler::State _thread_state;
         typename FixedThreadPoolScheduler::State _fixed_state;
+        typename PinnedIslandsScheduler::State _pinned_state;
         std::tuple<BlockRunners...> _runners;
         std::array<typename TaskPolicy::task_type, _N> _tasks;
         std::atomic<bool> _stop_flag{false};
@@ -787,20 +828,7 @@ namespace cler {
         std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
         size_t _active_task_count{0};  // Track actual created tasks to fix stop() hang
 
-        using ParkGroup = sched::ParkGroup<TaskPolicy, DEFAULT_MAX_WORKERS>;
-        using WorkerParkState = typename ParkGroup::WorkerParkState;
-        static constexpr size_t kNoWorker = sched::kNoWorker;
-        static constexpr size_t CALIBRATION_DEADLINE_CHECK_PASSES = 256;
-        static constexpr size_t kLeaderWorker = 0;
-        using RepartitionBarrier = sched::RepartitionBarrier<TaskPolicy>;
-
-        ParkGroup _park_states;
-        Partition _partition;
-        RepartitionBarrier _barrier;
         std::atomic<size_t> _affinity_failures{0};
-        std::chrono::steady_clock::time_point _calibration_deadline;
-        std::chrono::steady_clock::time_point _next_repartition_check;
-        size_t _pinned_worker_count = 0;
 
         void initialize_block_stats() {
             if (_config.collect_detailed_stats) {
@@ -808,65 +836,14 @@ namespace cler {
             }
         }
         
-        auto get_time_if_needed(bool collect_stats) {
-            return collect_stats ? std::chrono::high_resolution_clock::now() : 
-                                 std::chrono::high_resolution_clock::time_point{};
-        }
-        
-        
-        
-        
         sched::WorkerQueueScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> _worker_queues;
 
-
-
-
-
-
-        void rebuild_partition(size_t worker_count, bool use_costs, Partition& out) {
-            std::array<uint8_t, _N> regular_ids{};
-            size_t regular_count = 0;
-            collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
-
+        void rebuild_partition_from(const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
+                                    size_t worker_count, bool use_costs, Partition& out) {
             sched::build_partition<_N, DEFAULT_MAX_WORKERS>(
                 _edges.data(), _edge_count, _cost_samples,
                 regular_ids, regular_count, worker_count,
                 use_costs, _unresolved_edge_count == 0, out);
-        }
-
-        bool leader_should_repartition(const FlowGraphConfig& config) {
-            const bool calibrated = _barrier.count() != 0;
-            if (calibrated && config.repartition_check_ms == 0) return false;
-
-            const auto now = std::chrono::steady_clock::now();
-            if (!calibrated) return now >= _calibration_deadline;
-            if (now < _next_repartition_check) return false;
-            _next_repartition_check = now + std::chrono::milliseconds(config.repartition_check_ms);
-
-            std::array<double, _N> weights{};
-            sched::collect_block_weights<_N>(_cost_samples, _partition.block_ids,
-                                             _partition.block_count, weights);
-
-            Partition candidate;
-            rebuild_partition(_pinned_worker_count, true, candidate);
-
-            return sched::max_island_weight(candidate, weights) <
-                   sched::REPARTITION_IMPROVEMENT_RATIO * sched::max_island_weight(_partition, weights);
-        }
-
-        void apply_partition() {
-            _worker_queues.initialize_islands(_partition.block_ids.data(),
-                                              _partition.island_begin.data(),
-                                              _partition.island_count);
-        }
-
-        void wake_parked_workers(size_t self_id) {
-            _park_states.wake_others(self_id, _pinned_worker_count);
-        }
-
-        void unpark_everyone() {
-            _park_states.wake_all();
-            _barrier.bump_epoch_and_unpark();
         }
 
         void reset_run_state() {
@@ -876,176 +853,11 @@ namespace cler {
                 sample.ewma_ns_per_call_bits.store(0, std::memory_order_relaxed);
                 sample.ewma_items_per_call_bits.store(0, std::memory_order_relaxed);
             }
-            _park_states.reset();
-            _partition = Partition{};
-            _barrier.reset();
+            _pinned_state.reset();
             _affinity_failures.store(0, std::memory_order_relaxed);
             _active_task_count = 0;
-            _pinned_worker_count = 0;
         }
 
-        void run_pinned_islands(const FlowGraphConfig& config) {
-            _stop_flag.store(false, std::memory_order_release);
-            reset_run_state();
-
-            initialize_block_stats();
-
-            if (config.collect_detailed_stats) {
-                auto start_time = std::chrono::high_resolution_clock::now();
-                for (size_t i = 0; i < _N; ++i) {
-                    _block_start_times[i] = start_time;
-                }
-            }
-
-            for (size_t i = 0; i < _unresolved_edge_count; ++i) {
-                TaskPolicy::warn_unresolved_edge(block_name(_unresolved_edges[i].producer),
-                                                 _unresolved_edges[i].address);
-            }
-
-            std::array<uint8_t, _N> regular_ids{};
-            size_t regular_count = 0;
-            collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
-
-            _calibration_deadline = std::chrono::steady_clock::now() +
-                                    std::chrono::milliseconds(config.calibration_ms);
-            _next_repartition_check = _calibration_deadline;
-
-            const size_t max_worker_count = (std::min)(DEFAULT_MAX_WORKERS, regular_count);
-            _pinned_worker_count = regular_count == 0
-                ? 0
-                : (std::max)(size_t{1}, (std::min)(config.num_workers, max_worker_count));
-
-            launch_may_block_tasks_impl<true>(std::make_index_sequence<_N>{}, config,
-                                              WakePinnedWorkers{this});
-
-            if (regular_count == 0) return;
-
-            rebuild_partition(_pinned_worker_count, false, _partition);
-            apply_partition();
-
-            for (size_t worker_id = 0; worker_id < _pinned_worker_count; ++worker_id) {
-                _tasks[_active_task_count] = TaskPolicy::create_task([this, worker_id, config]() {
-                    run_pinned_islands_worker(worker_id, config);
-                });
-                _active_task_count++;
-            }
-        }
-
-    public:
-        void run_pinned_islands_worker(size_t worker_id, const FlowGraphConfig& config) {
-            TaskPolicy::configure_thread_for_low_latency_sleep();
-            if (!TaskPolicy::pin_to_core(config.cpu_id_offset + worker_id)) {
-                _affinity_failures.fetch_add(1, std::memory_order_relaxed);
-            }
-
-            WorkerParkState& park_state = _park_states[worker_id];
-            BackoffState backoff_state{};
-            size_t zero_progress_passes = 0;
-            size_t passes_since_deadline_check = 0;
-            bool park_armed = false;
-            bool pass_follows_park = false;
-            uint32_t observed_sleep_epoch = 0;
-
-            while (!_stop_flag.load(std::memory_order_relaxed)) {
-                _worker_queues.reset_pass(worker_id);
-                bool did_work_in_pass = false;
-                size_t block_idx;
-
-                while (_worker_queues.get_next_block(worker_id, block_idx)) {
-                    if (_stop_flag.load(std::memory_order_relaxed)) break;
-
-                    auto t_before = get_time_if_needed(config.collect_detailed_stats);
-
-                    bool block_did_work = execute_block_at_index<true>(block_idx, config);
-
-                    if (!block_did_work && config.collect_detailed_stats) {
-                        auto t_after = std::chrono::high_resolution_clock::now();
-                        std::chrono::duration<double> dt = t_after - t_before;
-                        _stats[block_idx].total_dead_time_s += dt.count();
-                    }
-
-                    did_work_in_pass = did_work_in_pass || block_did_work;
-                }
-
-                const bool deadline_check_due =
-                    ++passes_since_deadline_check >= CALIBRATION_DEADLINE_CHECK_PASSES || pass_follows_park;
-                pass_follows_park = false;
-
-                if (worker_id == kLeaderWorker && deadline_check_due && !_barrier.has_request()) {
-                    passes_since_deadline_check = 0;
-                    if (leader_should_repartition(config)) {
-                        _barrier.request_current_epoch();
-                        wake_parked_workers(worker_id);
-                    }
-                }
-
-                const uint32_t requested_generation = _barrier.requested_generation();
-                if (requested_generation != RepartitionBarrier::kNoRequest) {
-                    if (park_armed) {
-                        park_armed = false;
-                        park_state.parked.store(false, std::memory_order_relaxed);
-                    }
-                    repartition_barrier(worker_id, requested_generation);
-                    zero_progress_passes = 0;
-                    TaskPolicy::backoff_reset(backoff_state);
-                    continue;
-                }
-
-                if (did_work_in_pass) {
-                    zero_progress_passes = 0;
-                    park_armed = false;
-                    if (park_state.parked.load(std::memory_order_relaxed)) {
-                        park_state.parked.store(false, std::memory_order_relaxed);
-                    }
-                    TaskPolicy::backoff_reset(backoff_state);
-                    wake_parked_workers(worker_id);
-                    continue;
-                }
-
-                ++zero_progress_passes;
-
-                if (zero_progress_passes <= config.park_after_zero_passes) {
-                    TaskPolicy::backoff(backoff_state);
-                } else if (!park_armed) {
-                    park_armed = true;
-                    observed_sleep_epoch = park_state.sleep_epoch.load(std::memory_order_acquire);
-                    park_state.parked.store(true, std::memory_order_release);
-                } else {
-                    park_state.park_events.fetch_add(1, std::memory_order_relaxed);
-                    TaskPolicy::park(park_state.sleep_epoch, observed_sleep_epoch);
-                    park_armed = false;
-                    pass_follows_park = true;
-                    park_state.parked.store(false, std::memory_order_relaxed);
-                }
-            }
-
-            park_state.parked.store(false, std::memory_order_relaxed);
-
-            if (config.collect_detailed_stats) {
-                auto end_time = std::chrono::high_resolution_clock::now();
-                for (size_t i = 0; i < _N; ++i) {
-                    if (_worker_queues.is_block_owner(worker_id, i)) {
-                        std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
-                        _stats[i].total_runtime_s = total_runtime.count();
-                    }
-                }
-            }
-        }
-
-        void repartition_barrier(size_t worker_id, uint32_t generation) {
-            _barrier.arrive(
-                worker_id == kLeaderWorker, generation, _pinned_worker_count,
-                [this]() { return _stop_flag.load(std::memory_order_relaxed); },
-                [this, worker_id]() { wake_parked_workers(worker_id); },
-                [this]() {
-                    rebuild_partition(_pinned_worker_count, true, _partition);
-                    apply_partition();
-                    _next_repartition_check = std::chrono::steady_clock::now() +
-                                              std::chrono::milliseconds(_config.repartition_check_ms);
-                });
-        }
-
-    private:  // Return to private section for internal implementation details
         template<size_t I, bool CostSampling>
         bool execute_block_at_index_helper(const FlowGraphConfig& config) {
             static_assert(I < _N, "Block index out of bounds");
