@@ -8,6 +8,7 @@
 #include "schedulers/cler_scheduler_topology.hpp"
 #include "schedulers/cler_scheduler_park.hpp"
 #include "schedulers/cler_scheduler_barrier.hpp"
+#include "schedulers/cler_thread_per_block.hpp"
 #include "schedulers/cler_scheduler_partition.hpp"
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
@@ -265,15 +266,47 @@ namespace cler {
         OnErrTerminateCallback on_err_terminate_cb() const { return _on_err_terminate_cb; }
         void* on_err_terminate_context() const { return _on_err_terminate_context; }
 
+        class SchedulerHost {
+        public:
+            using TaskPolicyType = TaskPolicy;
+            static constexpr size_t block_count = _N;
+
+            explicit SchedulerHost(FlowGraph& graph) : _graph(&graph) {}
+
+            bool stop_requested() const {
+                return _graph->_stop_flag.load(std::memory_order_relaxed);
+            }
+
+            void request_stop() {
+                _graph->_stop_flag.store(true, std::memory_order_release);
+            }
+
+            void prepare_run() {
+                _graph->reset_run_state();
+                _graph->initialize_block_stats();
+            }
+
+            void launch_all_blocks(const FlowGraphConfig& config) {
+                _graph->launch_tasks_impl(std::make_index_sequence<_N>{}, config);
+            }
+
+        private:
+            FlowGraph* _graph;
+        };
+
+        using ThreadPerBlockScheduler = sched::ThreadPerBlockScheduler<SchedulerHost>;
+
         void run(const FlowGraphConfig& config = FlowGraphConfig{}) {
             _config = config;
             _stop_flag.store(false, std::memory_order_release);
             
             
             switch (config.scheduler) {
-                case SchedulerType::ThreadPerBlock:
-                    run_thread_per_block(config);
+                case SchedulerType::ThreadPerBlock: {
+                    SchedulerHost host(*this);
+                    ThreadPerBlockScheduler::start(host, _thread_state, config);
                     break;
+                }
                     
                 case SchedulerType::FixedThreadPool:
                     run_fixed_thread_pool(config);
@@ -307,9 +340,22 @@ namespace cler {
 
         void stop() {
             _stop_flag.store(true, std::memory_order_release);
-            if (_config.scheduler == SchedulerType::PinnedIslands) {
-                unpark_everyone();
+
+            switch (_config.scheduler) {
+                case SchedulerType::ThreadPerBlock: {
+                    SchedulerHost host(*this);
+                    ThreadPerBlockScheduler::notify_stop(host, _thread_state);
+                    break;
+                }
+
+                case SchedulerType::FixedThreadPool:
+                    break;
+
+                case SchedulerType::PinnedIslands:
+                    unpark_everyone();
+                    break;
             }
+
             for (size_t i = 0; i < _active_task_count; ++i) {
                 TaskPolicy::join_task(_tasks[i]);
             }
@@ -655,12 +701,7 @@ namespace cler {
         }
 
 
-        void run_thread_per_block(const FlowGraphConfig& config) {
-            reset_run_state();
-            initialize_block_stats();
-            launch_tasks_impl(std::make_index_sequence<_N>{}, config);
-        }
-
+        typename ThreadPerBlockScheduler::State _thread_state;
         std::tuple<BlockRunners...> _runners;
         std::array<typename TaskPolicy::task_type, _N> _tasks;
         std::atomic<bool> _stop_flag{false};
