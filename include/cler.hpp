@@ -7,6 +7,7 @@
 #include "task_policies/cler_task_policy_base.hpp"
 #include "schedulers/cler_scheduler_topology.hpp"
 #include "schedulers/cler_scheduler_park.hpp"
+#include "schedulers/cler_scheduler_barrier.hpp"
 #include "schedulers/cler_scheduler_partition.hpp"
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
@@ -331,7 +332,7 @@ namespace cler {
         }
 
         const Partition& partition() const { return _partition; }
-        size_t repartition_count() const { return _repartition_count.load(std::memory_order_acquire); }
+        size_t repartition_count() const { return _barrier.count(); }
         size_t affinity_failure_count() const { return _affinity_failures.load(std::memory_order_relaxed); }
 
         uint64_t total_park_events() const {
@@ -681,21 +682,13 @@ namespace cler {
         using ParkGroup = sched::ParkGroup<TaskPolicy, DEFAULT_MAX_WORKERS>;
         using WorkerParkState = typename ParkGroup::WorkerParkState;
         static constexpr size_t kNoWorker = sched::kNoWorker;
-        static constexpr uint32_t kNoRepartitionRequest = (std::numeric_limits<uint32_t>::max)();
-                static constexpr size_t CALIBRATION_DEADLINE_CHECK_PASSES = 256;
-        
-        static constexpr uint64_t barrier_word(uint32_t generation, uint32_t arrived) {
-            return (static_cast<uint64_t>(generation) << 32) | arrived;
-        }
-        static constexpr uint32_t barrier_generation(uint64_t word) { return static_cast<uint32_t>(word >> 32); }
-        static constexpr uint32_t barrier_arrived(uint64_t word) { return static_cast<uint32_t>(word); }
+        static constexpr size_t CALIBRATION_DEADLINE_CHECK_PASSES = 256;
+        static constexpr size_t kLeaderWorker = 0;
+        using RepartitionBarrier = sched::RepartitionBarrier<TaskPolicy>;
 
         ParkGroup _park_states;
         Partition _partition;
-        std::atomic<uint32_t> _partition_epoch{0};
-        std::atomic<uint32_t> _repartition_request{kNoRepartitionRequest};
-        std::atomic<uint64_t> _repartition_barrier{0};
-        std::atomic<size_t> _repartition_count{0};
+        RepartitionBarrier _barrier;
         std::atomic<size_t> _affinity_failures{0};
         std::chrono::steady_clock::time_point _calibration_deadline;
         std::chrono::steady_clock::time_point _next_repartition_check;
@@ -734,7 +727,7 @@ namespace cler {
         }
 
         bool leader_should_repartition(const FlowGraphConfig& config) {
-            const bool calibrated = _repartition_count.load(std::memory_order_relaxed) != 0;
+            const bool calibrated = _barrier.count() != 0;
             if (calibrated && config.repartition_check_ms == 0) return false;
 
             const auto now = std::chrono::steady_clock::now();
@@ -765,8 +758,7 @@ namespace cler {
 
         void unpark_everyone() {
             _park_states.wake_all();
-            _partition_epoch.fetch_add(1, std::memory_order_release);
-            TaskPolicy::unpark(_partition_epoch);
+            _barrier.bump_epoch_and_unpark();
         }
 
         void reset_run_state() {
@@ -778,10 +770,7 @@ namespace cler {
             }
             _park_states.reset();
             _partition = Partition{};
-            _partition_epoch.store(0, std::memory_order_relaxed);
-            _repartition_request.store(kNoRepartitionRequest, std::memory_order_relaxed);
-            _repartition_barrier.store(barrier_word(0, 0), std::memory_order_relaxed);
-            _repartition_count.store(0, std::memory_order_relaxed);
+            _barrier.reset();
             _affinity_failures.store(0, std::memory_order_relaxed);
             _active_task_count = 0;
             _pinned_worker_count = 0;
@@ -917,18 +906,16 @@ namespace cler {
                     ++passes_since_deadline_check >= CALIBRATION_DEADLINE_CHECK_PASSES || pass_follows_park;
                 pass_follows_park = false;
 
-                if (worker_id == 0 && deadline_check_due &&
-                    _repartition_request.load(std::memory_order_relaxed) == kNoRepartitionRequest) {
+                if (worker_id == kLeaderWorker && deadline_check_due && !_barrier.has_request()) {
                     passes_since_deadline_check = 0;
                     if (leader_should_repartition(config)) {
-                        _repartition_request.store(_partition_epoch.load(std::memory_order_relaxed),
-                                                   std::memory_order_release);
+                        _barrier.request_current_epoch();
                         wake_parked_workers(worker_id);
                     }
                 }
 
-                const uint32_t requested_generation = _repartition_request.load(std::memory_order_relaxed);
-                if (requested_generation != kNoRepartitionRequest) {
+                const uint32_t requested_generation = _barrier.requested_generation();
+                if (requested_generation != RepartitionBarrier::kNoRequest) {
                     if (park_armed) {
                         park_armed = false;
                         park_state.parked.store(false, std::memory_order_relaxed);
@@ -980,47 +967,17 @@ namespace cler {
             }
         }
 
-        bool arrive_at_repartition_barrier(uint32_t generation) {
-            uint64_t word = _repartition_barrier.load(std::memory_order_acquire);
-            while (barrier_generation(word) == generation) {
-                if (_repartition_barrier.compare_exchange_weak(word, word + 1,
-                                                               std::memory_order_acq_rel,
-                                                               std::memory_order_acquire)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
         void repartition_barrier(size_t worker_id, uint32_t generation) {
-            if (!arrive_at_repartition_barrier(generation)) return;
-
-            if (worker_id != 0) {
-                while (_partition_epoch.load(std::memory_order_acquire) == generation &&
-                       !_stop_flag.load(std::memory_order_relaxed)) {
-                    TaskPolicy::park(_partition_epoch, generation);
-                }
-                return;
-            }
-
-            while (barrier_arrived(_repartition_barrier.load(std::memory_order_acquire)) < _pinned_worker_count &&
-                   !_stop_flag.load(std::memory_order_relaxed)) {
-                wake_parked_workers(worker_id);
-                TaskPolicy::yield();
-            }
-
-            if (!_stop_flag.load(std::memory_order_relaxed)) {
-                rebuild_partition(_pinned_worker_count, true, _partition);
-                apply_partition();
-                _next_repartition_check = std::chrono::steady_clock::now() +
-                                          std::chrono::milliseconds(_config.repartition_check_ms);
-                _repartition_count.fetch_add(1, std::memory_order_relaxed);
-            }
-
-            _repartition_barrier.store(barrier_word(generation + 1, 0), std::memory_order_release);
-            _repartition_request.store(kNoRepartitionRequest, std::memory_order_release);
-            _partition_epoch.fetch_add(1, std::memory_order_release);
-            TaskPolicy::unpark(_partition_epoch);
+            _barrier.arrive(
+                worker_id == kLeaderWorker, generation, _pinned_worker_count,
+                [this]() { return _stop_flag.load(std::memory_order_relaxed); },
+                [this, worker_id]() { wake_parked_workers(worker_id); },
+                [this]() {
+                    rebuild_partition(_pinned_worker_count, true, _partition);
+                    apply_partition();
+                    _next_repartition_check = std::chrono::steady_clock::now() +
+                                              std::chrono::milliseconds(_config.repartition_check_ms);
+                });
         }
 
         void run_fixed_thread_pool_worker(size_t worker_id, const FlowGraphConfig& config) {

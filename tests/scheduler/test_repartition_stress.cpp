@@ -45,7 +45,7 @@ struct ShiftingCostBlock : public cler::BlockBase {
         const auto now = std::chrono::steady_clock::now().time_since_epoch();
         const auto slot = std::chrono::duration_cast<std::chrono::milliseconds>(now).count() / 20;
         const bool heavy = ((static_cast<size_t>(slot) + _phase) % 3) == 0;
-        const int spins = heavy ? 4000 : 50;
+        const int spins = heavy ? 40000 : 20;
         for (volatile int i = 0; i < spins; ++i) {}
 
         double buf[kChunk];
@@ -126,7 +126,7 @@ TEST(RepartitionStressTest, OwnershipTransferPreservesStreamOrder) {
     config.repartition_check_ms = 5;
 
     fg.run(config);
-    std::this_thread::sleep_for(std::chrono::seconds(3));
+    std::this_thread::sleep_for(std::chrono::seconds(8));
     fg.stop();
 
     EXPECT_EQ(sink.violations(), 0u)
@@ -140,29 +140,35 @@ TEST(RepartitionStressTest, OwnershipTransferPreservesStreamOrder) {
         << " repartitions; the stress test never exercised the barrier";
 }
 
-TEST(RepartitionStressTest, RepeatedRunsRepartitionFromCleanState) {
+TEST(RepartitionStressTest, RepeatedRunsReuseTheSameBarrier) {
+    SequenceSource source("Source");
+    ShiftingCostBlock a("A", kCapacity, 0);
+    ShiftingCostBlock b("B", kCapacity, 2);
+    SequenceSink sink("Sink", kCapacity);
+
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, &a.in),
+        cler::BlockRunner(&a, &b.in),
+        cler::BlockRunner(&b, &sink.in),
+        cler::BlockRunner(&sink)
+    );
+
+    auto config = cler::flowgraph_config::pinned_islands(2);
+    config.calibration_ms = 20;
+    config.repartition_check_ms = 5;
+
+    size_t previous_received = 0;
     for (int iteration = 0; iteration < 3; ++iteration) {
-        SequenceSource source("Source");
-        ShiftingCostBlock a("A", kCapacity, 0);
-        ShiftingCostBlock b("B", kCapacity, 2);
-        SequenceSink sink("Sink", kCapacity);
-
-        auto fg = cler::make_desktop_flowgraph(
-            cler::BlockRunner(&source, &a.in),
-            cler::BlockRunner(&a, &b.in),
-            cler::BlockRunner(&b, &sink.in),
-            cler::BlockRunner(&sink)
-        );
-
-        auto config = cler::flowgraph_config::pinned_islands(2);
-        config.calibration_ms = 20;
-        config.repartition_check_ms = 5;
-
         fg.run(config);
-        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
         fg.stop();
 
         EXPECT_EQ(sink.violations(), 0u) << "iteration " << iteration;
-        EXPECT_GT(sink.received(), 0u) << "iteration " << iteration;
+        EXPECT_GT(sink.received(), previous_received)
+            << "iteration " << iteration << " moved no new samples";
+        EXPECT_GT(fg.repartition_count(), 0u)
+            << "iteration " << iteration
+            << " did not repartition; barrier state did not reset across run()";
+        previous_received = sink.received();
     }
 }

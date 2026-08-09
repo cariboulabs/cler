@@ -813,6 +813,24 @@ Cler provides three scheduler types to optimize for different workload character
   - **multi-input blocks** take the **max of the per-call deltas**, not the sum, since an N-input block consumes N items per input for one item's worth of work. It must be the max of the deltas, never the delta of the lifetime maxima — an input holding the largest lifetime count while a different input advances would otherwise report zero.
   - a block whose input edge failed to resolve, or that has a resolved input it never reads (a control channel), falls back to output writes rather than reporting zero
 
+#### Repartition barrier: the invariant
+
+`sched::RepartitionBarrier` exists to enforce one rule: **block ownership must not
+change until every regular worker has stopped executing its old island.** Each
+`Channel` is an SPSC queue with exactly one reader and one writer; if a worker is
+still running a block while another worker takes ownership of it, that queue
+briefly has two consumers and the stream silently duplicates or reorders.
+
+The protocol: a generation counter is packed with an arrival count into one
+64-bit word. Every worker CASes its arrival. Non-leaders park on
+`_partition_epoch` until the generation advances. The leader spins until
+`arrived == worker_count`, and only then repartitions, publishes a new
+generation, and bumps the epoch to release the others.
+
+`arrive()` takes `is_leader` explicitly rather than assuming worker 0, and takes
+stop / wake / repartition as callables so the barrier owns the protocol and
+nothing else.
+
 #### Repartition barrier: how to test changes to it
 
 The generation-keyed barrier transfers SPSC endpoint ownership between workers.
@@ -822,8 +840,12 @@ drives many repartitions under shifting per-block cost and asserts the stream
 stays strictly sequential end to end.
 
 Before changing barrier code, confirm the test still *fails* when the barrier is
-broken (delete the leader's wait loop in `repartition_barrier()` and it must
-report a backwards jump). A stress test that cannot fail proves nothing.
+broken (delete the leader's wait loop and it must report a backwards jump), and
+confirm it fails **repeatably** — run the broken build 5-6 times, not once. The
+detector is probabilistic: an earlier, gentler version of this test caught a
+broken barrier only 1 run in 6, which is indistinguishable from a passing test
+on any single run. Detection depends on the heavy/light cost contrast being
+large enough that partitions genuinely change; the current constants detect 6/6.
 
 Run it under ThreadSanitizer too. ASLR breaks TSan on recent kernels, so:
 
