@@ -492,12 +492,18 @@ namespace cler {
             return max_delta;
         }
 
-        template<std::size_t I>
+        template<std::size_t I, bool CostSampling>
         Result<Empty, Error> sample_and_invoke_procedure() {
             auto& runner = std::get<I>(_runners);
+
+            if constexpr (!CostSampling) {
+                return std::apply([&](auto*... outs) {
+                    return runner.block->procedure(outs...);
+                }, runner.outputs);
+            } else {
             auto& sample = _cost_samples[I];
 
-            if (!_cost_sampling_enabled || --sample.calls_until_sample != 0) {
+            if (--sample.calls_until_sample != 0) {
                 return std::apply([&](auto*... outs) {
                     return runner.block->procedure(outs...);
                 }, runner.outputs);
@@ -534,6 +540,7 @@ namespace cler {
             }
 
             return result;
+            }
         }
 
     public:
@@ -547,7 +554,7 @@ namespace cler {
             void operator()() const { graph->wake_parked_workers(kNoWorker); }
         };
 
-        template<std::size_t I, typename ProgressNotifier>
+        template<std::size_t I, bool CostSampling, typename ProgressNotifier>
         void run_block_at_index_thread_per_block(const FlowGraphConfig& config,
                                                  ProgressNotifier notify_progress) {
             static_assert(I < _N, "Block index out of bounds");
@@ -582,7 +589,7 @@ namespace cler {
                         t_last = t_now;
                     }
 
-                    Result<Empty, Error> result = sample_and_invoke_procedure<I>();
+                    Result<Empty, Error> result = sample_and_invoke_procedure<I, CostSampling>();
 
                     if (result.is_err()) {
                         if (config.collect_detailed_stats) {
@@ -638,7 +645,7 @@ namespace cler {
         void launch_tasks_impl(std::index_sequence<Is...>, const FlowGraphConfig& config) {
             static_assert(((Is < _N) && ...), "All block indices must be within bounds");
             ((_tasks[Is] = TaskPolicy::create_task([this, config]() {
-                run_block_at_index_thread_per_block<Is>(config, NoProgressNotification{});
+                run_block_at_index_thread_per_block<Is, false>(config, NoProgressNotification{});
             })), ...);
             _active_task_count = _N;  // ThreadPerBlock creates one task per block
         }
@@ -649,11 +656,11 @@ namespace cler {
             ((_stats[Is].name = std::get<Is>(_runners).block->name()), ...);
         }
         
-        template<std::size_t... Is>
+        template<bool CostSampling, std::size_t... Is>
         bool execute_block_dispatch_impl(std::index_sequence<Is...>, size_t index, const FlowGraphConfig& config) {
             static_assert(((Is < _N) && ...), "All block indices must be within bounds");
             bool result = false;
-            (void)((index == Is ? (result = execute_block_at_index_helper<Is>(config), true) : false) || ...);
+            (void)((index == Is ? (result = execute_block_at_index_helper<Is, CostSampling>(config), true) : false) || ...);
             return result;
         }
 
@@ -669,27 +676,27 @@ namespace cler {
             (collect_regular_block_id_for_index<Is>(ids, count), ...);
         }
 
-        template<std::size_t I, typename ProgressNotifier>
+        template<std::size_t I, bool CostSampling, typename ProgressNotifier>
         void launch_may_block_task_for_index(const FlowGraphConfig& config, ProgressNotifier notify_progress) {
             if (std::get<I>(_runners).may_block) {
                 _tasks[_active_task_count++] = TaskPolicy::create_task([this, config, notify_progress]() {
-                    run_block_at_index_thread_per_block<I>(config, notify_progress);
+                    run_block_at_index_thread_per_block<I, CostSampling>(config, notify_progress);
                 });
             }
         }
 
-        template<typename ProgressNotifier, std::size_t... Is>
+        template<bool CostSampling, typename ProgressNotifier, std::size_t... Is>
         void launch_may_block_tasks_impl(std::index_sequence<Is...>, const FlowGraphConfig& config,
                                          ProgressNotifier notify_progress) {
-            (launch_may_block_task_for_index<Is>(config, notify_progress), ...);
+            (launch_may_block_task_for_index<Is, CostSampling>(config, notify_progress), ...);
         }
 
-        template<typename ProgressNotifier, std::size_t... Is>
+        template<bool CostSampling, typename ProgressNotifier, std::size_t... Is>
         void launch_thread_per_block_task_dispatch_impl(std::index_sequence<Is...>, size_t index,
                                                         const FlowGraphConfig& config,
                                                         ProgressNotifier notify_progress) {
             (void)((index == Is ? (_tasks[_active_task_count++] = TaskPolicy::create_task([this, config, notify_progress]() {
-                run_block_at_index_thread_per_block<Is>(config, notify_progress);
+                run_block_at_index_thread_per_block<Is, CostSampling>(config, notify_progress);
             }), true) : false) || ...);
         }
 
@@ -746,7 +753,6 @@ namespace cler {
         std::chrono::steady_clock::time_point _calibration_deadline;
         std::chrono::steady_clock::time_point _next_repartition_check;
         size_t _pinned_worker_count = 0;
-        bool _cost_sampling_enabled = false;
 
         void initialize_block_stats() {
             if (_config.collect_detailed_stats) {
@@ -1086,13 +1092,11 @@ namespace cler {
             _affinity_failures.store(0, std::memory_order_relaxed);
             _active_task_count = 0;
             _pinned_worker_count = 0;
-            _cost_sampling_enabled = false;
         }
 
         void run_pinned_islands(const FlowGraphConfig& config) {
             _stop_flag.store(false, std::memory_order_release);
             reset_run_state();
-            _cost_sampling_enabled = true;
 
             initialize_block_stats();
 
@@ -1121,8 +1125,8 @@ namespace cler {
                 ? 0
                 : (std::max)(size_t{1}, (std::min)(config.num_workers, max_worker_count));
 
-            launch_may_block_tasks_impl(std::make_index_sequence<_N>{}, config,
-                                        WakePinnedWorkers{this});
+            launch_may_block_tasks_impl<true>(std::make_index_sequence<_N>{}, config,
+                                              WakePinnedWorkers{this});
 
             if (regular_count == 0) return;
 
@@ -1156,8 +1160,8 @@ namespace cler {
             size_t regular_count = 0;
             collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
 
-            launch_may_block_tasks_impl(std::make_index_sequence<_N>{}, config,
-                                        NoProgressNotification{});
+            launch_may_block_tasks_impl<false>(std::make_index_sequence<_N>{}, config,
+                                               NoProgressNotification{});
 
             if (regular_count == 0) return;
 
@@ -1166,8 +1170,8 @@ namespace cler {
 
             if (effective_worker_count >= regular_count) {
                 for (size_t idx = 0; idx < regular_count; ++idx) {
-                    launch_thread_per_block_task_dispatch_impl(std::make_index_sequence<_N>{}, regular_ids[idx], config,
-                                                               NoProgressNotification{});
+                    launch_thread_per_block_task_dispatch_impl<false>(std::make_index_sequence<_N>{}, regular_ids[idx], config,
+                                                                      NoProgressNotification{});
                 }
             } else {
                 _worker_queues.initialize(regular_ids.data(), regular_count, effective_worker_count);
@@ -1206,7 +1210,7 @@ namespace cler {
 
                     auto t_before = get_time_if_needed(config.collect_detailed_stats);
 
-                    bool block_did_work = execute_block_at_index(block_idx, config);
+                    bool block_did_work = execute_block_at_index<true>(block_idx, config);
 
                     if (!block_did_work && config.collect_detailed_stats) {
                         auto t_after = std::chrono::high_resolution_clock::now();
@@ -1345,7 +1349,7 @@ namespace cler {
 
                     auto t_before = get_time_if_needed(config.collect_detailed_stats);
 
-                    bool block_did_work = execute_block_at_index(block_idx, config);
+                    bool block_did_work = execute_block_at_index<false>(block_idx, config);
 
                     if (!block_did_work && config.collect_detailed_stats) {
                         auto t_after = std::chrono::high_resolution_clock::now();
@@ -1375,7 +1379,7 @@ namespace cler {
         }
 
     private:  // Return to private section for internal implementation details
-        template<size_t I>
+        template<size_t I, bool CostSampling>
         bool execute_block_at_index_helper(const FlowGraphConfig& config) {
             static_assert(I < _N, "Block index out of bounds");
 
@@ -1384,7 +1388,7 @@ namespace cler {
             bool did_work = false;
 
             for (size_t c = 0; c < config.max_calls_per_tick; ++c) {
-                auto result = sample_and_invoke_procedure<I>();
+                auto result = sample_and_invoke_procedure<I, CostSampling>();
 
                 if (result.is_err()) {
                     if (config.collect_detailed_stats) {
@@ -1412,8 +1416,9 @@ namespace cler {
             return did_work;
         }
 
+        template<bool CostSampling>
         bool execute_block_at_index(size_t index, const FlowGraphConfig& config) {
-            return execute_block_dispatch_impl(std::make_index_sequence<_N>{}, index, config);
+            return execute_block_dispatch_impl<CostSampling>(std::make_index_sequence<_N>{}, index, config);
         }
         
     };
