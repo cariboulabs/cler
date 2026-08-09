@@ -1,11 +1,9 @@
 #pragma once
 
+#include "cler_scheduler_config.hpp"
 #include <cstddef>
 
 namespace cler {
-
-    struct FlowGraphConfig;
-
     namespace sched {
 
         template<typename Host>

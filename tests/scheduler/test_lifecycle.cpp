@@ -91,6 +91,23 @@ struct BlockingSink : public cler::BlockBase {
     }
 };
 
+struct PassThrough : public cler::BlockBase {
+    cler::Channel<float> in;
+
+    PassThrough(std::string name, size_t capacity) : BlockBase(std::move(name)), in(capacity) {}
+
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<float>* out) {
+        const size_t n = (std::min)({in.size(), out->space(), size_t{32}});
+        if (n == 0) {
+            return cler::Error::NotEnoughSpaceOrSamples;
+        }
+        float buf[32];
+        in.readN(buf, n);
+        out->writeN(buf, n);
+        return cler::Empty{};
+    }
+};
+
 struct FatalSource : public cler::BlockBase {
     explicit FatalSource(std::string name) : BlockBase(std::move(name)) {}
 
@@ -249,5 +266,45 @@ TEST(LifecycleTest, WorkerCountEdgeValuesAreClamped) {
             EXPECT_GT(sink.consumed(), 0u)
                 << "num_workers=" << workers << " produced no work";
         }
+    }
+}
+
+TEST(LifecycleTest, DetailedStatsArePopulatedForEachScheduler) {
+    for (const auto& base : all_schedulers()) {
+        CountingSource source("Source");
+        PassThrough a("A", kCapacity);
+        PassThrough b("B", kCapacity);
+        PassThrough c("C", kCapacity);
+        CountingSink sink("Sink", kCapacity);
+
+        auto fg = cler::make_desktop_flowgraph(
+            cler::BlockRunner(&source, &a.in),
+            cler::BlockRunner(&a, &b.in),
+            cler::BlockRunner(&b, &c.in),
+            cler::BlockRunner(&c, &sink.in),
+            cler::BlockRunner(&sink)
+        );
+
+        cler::FlowGraphConfig config = base;
+        config.collect_detailed_stats = true;
+        config.num_workers = 2;
+
+        fg.run(config);
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        fg.stop();
+
+        const auto& stats = fg.stats();
+        size_t with_runtime = 0;
+        size_t with_successes = 0;
+        for (size_t i = 0; i < stats.size(); ++i) {
+            if (stats[i].total_runtime_s > 0.0) ++with_runtime;
+            if (stats[i].successful_procedures > 0) ++with_successes;
+        }
+
+        EXPECT_GT(with_successes, 0u)
+            << scheduler_name(base) << " recorded no successful procedures";
+        EXPECT_GT(with_runtime, 0u)
+            << scheduler_name(base) << " recorded no per-block runtime; the "
+               "detailed-stats path in the shared worker loop did not run";
     }
 }

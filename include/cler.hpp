@@ -5,10 +5,12 @@
 #include "cler_embeddable_string.hpp"
 #include "cler_platform.hpp"
 #include "task_policies/cler_task_policy_base.hpp"
+#include "schedulers/cler_scheduler_config.hpp"
 #include "schedulers/cler_scheduler_topology.hpp"
 #include "schedulers/cler_scheduler_park.hpp"
 #include "schedulers/cler_scheduler_barrier.hpp"
 #include "schedulers/cler_thread_per_block.hpp"
+#include "schedulers/cler_fixed_thread_pool.hpp"
 #include "schedulers/cler_scheduler_partition.hpp"
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
@@ -200,23 +202,6 @@ namespace cler {
         double ewma_items_per_call = 0.0;
     };
 
-    enum class SchedulerType {
-        ThreadPerBlock,
-        FixedThreadPool,
-        PinnedIslands
-    };
-    
-    struct FlowGraphConfig {
-        SchedulerType scheduler = SchedulerType::ThreadPerBlock;
-        size_t num_workers = 4;
-        bool collect_detailed_stats = false;
-        size_t max_calls_per_tick = 4;
-        bool pin_workers = false;
-        size_t calibration_ms = 500;
-        size_t repartition_check_ms = 5000;
-        size_t cpu_id_offset = 0;
-        size_t park_after_zero_passes = 4;
-    };
 
     template<typename TaskPolicy, typename... BlockRunners>
     class FlowGraph {
@@ -290,11 +275,87 @@ namespace cler {
                 _graph->launch_tasks_impl(std::make_index_sequence<_N>{}, config);
             }
 
+            void reset_stop_flag() {
+                _graph->_stop_flag.store(false, std::memory_order_release);
+            }
+
+            void mark_block_start_times() {
+                auto start_time = std::chrono::high_resolution_clock::now();
+                for (size_t i = 0; i < _N; ++i) {
+                    _graph->_block_start_times[i] = start_time;
+                }
+            }
+
+            void launch_may_block_tasks(const FlowGraphConfig& config) {
+                _graph->template launch_may_block_tasks_impl<false>(
+                    std::make_index_sequence<_N>{}, config, NoProgressNotification{});
+            }
+
+            size_t regular_block_count() {
+                std::array<uint8_t, _N> ids{};
+                return collect_regular_ids(ids);
+            }
+
+            void launch_task_per_regular_block(const FlowGraphConfig& config) {
+                std::array<uint8_t, _N> ids{};
+                const size_t count = collect_regular_ids(ids);
+                for (size_t idx = 0; idx < count; ++idx) {
+                    _graph->template launch_thread_per_block_task_dispatch_impl<false>(
+                        std::make_index_sequence<_N>{}, ids[idx], config, NoProgressNotification{});
+                }
+            }
+
+            void initialize_worker_queues(size_t worker_count) {
+                std::array<uint8_t, _N> ids{};
+                const size_t count = collect_regular_ids(ids);
+                _graph->_worker_queues.initialize(ids.data(), count, worker_count);
+            }
+
+            template<typename Callable>
+            void add_task(Callable&& callable) {
+                _graph->_tasks[_graph->_active_task_count] =
+                    TaskPolicy::create_task(std::forward<Callable>(callable));
+                _graph->_active_task_count++;
+            }
+
+            void reset_worker_pass(size_t worker_id) {
+                _graph->_worker_queues.reset_pass(worker_id);
+            }
+
+            bool next_worker_block(size_t worker_id, size_t& block_idx) {
+                return _graph->_worker_queues.get_next_block(worker_id, block_idx);
+            }
+
+            bool execute_block(size_t index, const FlowGraphConfig& config) {
+                return _graph->template execute_block_at_index<false>(index, config);
+            }
+
+            void add_block_dead_time(size_t index, double seconds) {
+                _graph->_stats[index].total_dead_time_s += seconds;
+            }
+
+            void finalize_worker_stats(size_t worker_id) {
+                auto end_time = std::chrono::high_resolution_clock::now();
+                for (size_t i = 0; i < _N; ++i) {
+                    if (_graph->_worker_queues.is_block_owner(worker_id, i)) {
+                        std::chrono::duration<double> total_runtime = end_time - _graph->_block_start_times[i];
+                        _graph->_stats[i].total_runtime_s = total_runtime.count();
+                    }
+                }
+            }
+
         private:
+            size_t collect_regular_ids(std::array<uint8_t, _N>& ids) {
+                size_t count = 0;
+                _graph->collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, ids, count);
+                return count;
+            }
+
             FlowGraph* _graph;
         };
 
         using ThreadPerBlockScheduler = sched::ThreadPerBlockScheduler<SchedulerHost>;
+        using FixedThreadPoolScheduler = sched::FixedThreadPoolScheduler<SchedulerHost>;
 
         void run(const FlowGraphConfig& config = FlowGraphConfig{}) {
             _config = config;
@@ -308,9 +369,11 @@ namespace cler {
                     break;
                 }
                     
-                case SchedulerType::FixedThreadPool:
-                    run_fixed_thread_pool(config);
+                case SchedulerType::FixedThreadPool: {
+                    SchedulerHost host(*this);
+                    FixedThreadPoolScheduler::start(host, _fixed_state, config);
                     break;
+                }
 
                 case SchedulerType::PinnedIslands:
                     run_pinned_islands(config);
@@ -348,8 +411,11 @@ namespace cler {
                     break;
                 }
 
-                case SchedulerType::FixedThreadPool:
+                case SchedulerType::FixedThreadPool: {
+                    SchedulerHost host(*this);
+                    FixedThreadPoolScheduler::notify_stop(host, _fixed_state);
                     break;
+                }
 
                 case SchedulerType::PinnedIslands:
                     unpark_everyone();
@@ -702,6 +768,7 @@ namespace cler {
 
 
         typename ThreadPerBlockScheduler::State _thread_state;
+        typename FixedThreadPoolScheduler::State _fixed_state;
         std::tuple<BlockRunners...> _runners;
         std::array<typename TaskPolicy::task_type, _N> _tasks;
         std::atomic<bool> _stop_flag{false};
@@ -864,50 +931,7 @@ namespace cler {
             }
         }
 
-        void run_fixed_thread_pool(const FlowGraphConfig& config) {
-            _stop_flag.store(false, std::memory_order_release);
-            reset_run_state();
-
-            initialize_block_stats();
-
-            if (config.collect_detailed_stats) {
-                auto start_time = std::chrono::high_resolution_clock::now();
-                for (size_t i = 0; i < _N; ++i) {
-                    _block_start_times[i] = start_time;
-                }
-            }
-
-            std::array<uint8_t, _N> regular_ids{};
-            size_t regular_count = 0;
-            collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, regular_ids, regular_count);
-
-            launch_may_block_tasks_impl<false>(std::make_index_sequence<_N>{}, config,
-                                               NoProgressNotification{});
-
-            if (regular_count == 0) return;
-
-            const size_t max_worker_count = (std::min)(DEFAULT_MAX_WORKERS, regular_count);
-            const size_t requested_workers = (std::max)(size_t{2}, config.num_workers);
-            const size_t effective_worker_count = (std::max)(size_t{1}, (std::min)(requested_workers, max_worker_count));
-
-            if (effective_worker_count >= regular_count) {
-                for (size_t idx = 0; idx < regular_count; ++idx) {
-                    launch_thread_per_block_task_dispatch_impl<false>(std::make_index_sequence<_N>{}, regular_ids[idx], config,
-                                                                      NoProgressNotification{});
-                }
-            } else {
-                _worker_queues.initialize(regular_ids.data(), regular_count, effective_worker_count);
-
-                for (size_t worker_id = 0; worker_id < effective_worker_count; ++worker_id) {
-                    _tasks[_active_task_count] = TaskPolicy::create_task([this, worker_id, config]() {
-                        run_fixed_thread_pool_worker(worker_id, config);
-                    });
-                    _active_task_count++;
-                }
-            }
-        }
-        
-    public:  // Making run_fixed_thread_pool_worker public for lambda access (see comment above)
+    public:
         void run_pinned_islands_worker(size_t worker_id, const FlowGraphConfig& config) {
             TaskPolicy::configure_thread_for_low_latency_sleep();
             if (!TaskPolicy::pin_to_core(config.cpu_id_offset + worker_id)) {
@@ -1019,53 +1043,6 @@ namespace cler {
                     _next_repartition_check = std::chrono::steady_clock::now() +
                                               std::chrono::milliseconds(_config.repartition_check_ms);
                 });
-        }
-
-        void run_fixed_thread_pool_worker(size_t worker_id, const FlowGraphConfig& config) {
-            TaskPolicy::configure_thread_for_low_latency_sleep();
-            if (config.pin_workers) {
-                TaskPolicy::pin_to_core(worker_id);
-            }
-
-            BackoffState backoff_state{};
-
-            while (!_stop_flag.load(std::memory_order_relaxed)) {
-                _worker_queues.reset_pass(worker_id);
-                bool did_work_in_pass = false;
-                size_t block_idx;
-
-                while (_worker_queues.get_next_block(worker_id, block_idx)) {
-                    if (_stop_flag.load(std::memory_order_relaxed)) break;
-
-                    auto t_before = get_time_if_needed(config.collect_detailed_stats);
-
-                    bool block_did_work = execute_block_at_index<false>(block_idx, config);
-
-                    if (!block_did_work && config.collect_detailed_stats) {
-                        auto t_after = std::chrono::high_resolution_clock::now();
-                        std::chrono::duration<double> dt = t_after - t_before;
-                        _stats[block_idx].total_dead_time_s += dt.count();
-                    }
-
-                    did_work_in_pass = did_work_in_pass || block_did_work;
-                }
-
-                if (did_work_in_pass) {
-                    TaskPolicy::backoff_reset(backoff_state);
-                } else {
-                    TaskPolicy::backoff(backoff_state);
-                }
-            }
-
-            if (config.collect_detailed_stats) {
-                auto end_time = std::chrono::high_resolution_clock::now();
-                for (size_t i = 0; i < _N; ++i) {
-                    if (_worker_queues.is_block_owner(worker_id, i)) {
-                        std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
-                        _stats[i].total_runtime_s = total_runtime.count();
-                    }
-                }
-            }
         }
 
     private:  // Return to private section for internal implementation details
