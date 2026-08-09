@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <chrono>
 #include "cler_scheduler_config.hpp"
+#include <array>
 #include <cstddef>
+#include <cstdint>
 
 namespace cler {
     namespace sched {
@@ -14,9 +16,11 @@ namespace cler {
         struct FixedThreadPoolScheduler {
             using TaskPolicy = typename Host::TaskPolicyType;
 
-            struct State {};
+            struct State {
+                detail::WorkerQueueScheduler<Host::block_count, DEFAULT_MAX_WORKERS> queues;
+            };
 
-            static void start(Host host, State&, const FlowGraphConfig& config) {
+            static void start(Host host, State& state, const FlowGraphConfig& config) {
                 host.reset_stop_flag();
                 host.prepare_run();
 
@@ -24,7 +28,8 @@ namespace cler {
                     host.mark_block_start_times();
                 }
 
-                const size_t regular_count = host.regular_block_count();
+                std::array<uint8_t, Host::block_count> regular_ids{};
+                const size_t regular_count = host.collect_regular_blocks(regular_ids);
 
                 host.launch_may_block_tasks(config);
 
@@ -37,11 +42,12 @@ namespace cler {
                 if (effective_worker_count >= regular_count) {
                     host.launch_task_per_regular_block(config);
                 } else {
-                    host.initialize_worker_queues(effective_worker_count);
+                    state.queues.initialize(regular_ids.data(), regular_count, effective_worker_count);
 
                     for (size_t worker_id = 0; worker_id < effective_worker_count; ++worker_id) {
-                        host.add_task([host, worker_id, config]() {
-                            worker_loop(host, worker_id, config);
+                        State* state_ptr = &state;
+                        host.add_task([host, state_ptr, worker_id, config]() {
+                            worker_loop(host, *state_ptr, worker_id, config);
                         });
                     }
                 }
@@ -50,7 +56,7 @@ namespace cler {
             static void notify_stop(Host, State&) {}
 
         private:
-            static void worker_loop(Host host, size_t worker_id, const FlowGraphConfig& config) {
+            static void worker_loop(Host host, State& state, size_t worker_id, const FlowGraphConfig& config) {
                 TaskPolicy::configure_thread_for_low_latency_sleep();
                 if (config.pin_workers) {
                     TaskPolicy::pin_to_core(worker_id);
@@ -59,11 +65,11 @@ namespace cler {
                 BackoffState backoff_state{};
 
                 while (!host.stop_requested()) {
-                    host.reset_worker_pass(worker_id);
+                    state.queues.reset_pass(worker_id);
                     bool did_work_in_pass = false;
                     size_t block_idx;
 
-                    while (host.next_worker_block(worker_id, block_idx)) {
+                    while (state.queues.get_next_block(worker_id, block_idx)) {
                         if (host.stop_requested()) break;
 
                         auto t_before = config.collect_detailed_stats
@@ -89,7 +95,11 @@ namespace cler {
                 }
 
                 if (config.collect_detailed_stats) {
-                    host.finalize_worker_stats(worker_id);
+                    for (size_t i = 0; i < Host::block_count; ++i) {
+                        if (state.queues.is_block_owner(worker_id, i)) {
+                            host.set_block_runtime_from_start(i);
+                        }
+                    }
                 }
             }
         };

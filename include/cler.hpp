@@ -316,19 +316,12 @@ namespace cler {
                 _graph->rebuild_partition_from(ids, count, worker_count, use_costs, out);
             }
 
-            void apply_partition(const Partition& partition) {
-                _graph->_worker_queues.initialize_islands(partition.block_ids.data(),
-                                                          partition.island_begin.data(),
-                                                          partition.island_count);
-            }
-
             void collect_block_weights(const Partition& partition, std::array<double, _N>& weights) {
                 sched::detail::collect_block_weights<_N>(_graph->_cost_samples, partition.block_ids,
                                                  partition.block_count, weights);
             }
 
-            size_t regular_block_count() {
-                std::array<uint8_t, _N> ids{};
+            size_t collect_regular_blocks(std::array<uint8_t, _N>& ids) {
                 return collect_regular_ids(ids);
             }
 
@@ -341,25 +334,11 @@ namespace cler {
                 }
             }
 
-            void initialize_worker_queues(size_t worker_count) {
-                std::array<uint8_t, _N> ids{};
-                const size_t count = collect_regular_ids(ids);
-                _graph->_worker_queues.initialize(ids.data(), count, worker_count);
-            }
-
             template<typename Callable>
             void add_task(Callable&& callable) {
                 _graph->_tasks[_graph->_active_task_count] =
                     TaskPolicy::create_task(std::forward<Callable>(callable));
                 _graph->_active_task_count++;
-            }
-
-            void reset_worker_pass(size_t worker_id) {
-                _graph->_worker_queues.reset_pass(worker_id);
-            }
-
-            bool next_worker_block(size_t worker_id, size_t& block_idx) {
-                return _graph->_worker_queues.get_next_block(worker_id, block_idx);
             }
 
             bool execute_block(size_t index, const FlowGraphConfig& config) {
@@ -374,14 +353,10 @@ namespace cler {
                 _graph->_stats[index].total_dead_time_s += seconds;
             }
 
-            void finalize_worker_stats(size_t worker_id) {
+            void set_block_runtime_from_start(size_t index) {
                 auto end_time = std::chrono::high_resolution_clock::now();
-                for (size_t i = 0; i < _N; ++i) {
-                    if (_graph->_worker_queues.is_block_owner(worker_id, i)) {
-                        std::chrono::duration<double> total_runtime = end_time - _graph->_block_start_times[i];
-                        _graph->_stats[i].total_runtime_s = total_runtime.count();
-                    }
-                }
+                std::chrono::duration<double> total_runtime = end_time - _graph->_block_start_times[index];
+                _graph->_stats[index].total_runtime_s = total_runtime.count();
             }
 
         private:
@@ -836,7 +811,6 @@ namespace cler {
             }
         }
         
-        sched::detail::WorkerQueueScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> _worker_queues;
 
         void rebuild_partition_from(const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
                                     size_t worker_count, bool use_costs, Partition& out) {

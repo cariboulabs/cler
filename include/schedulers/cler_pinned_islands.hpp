@@ -26,6 +26,7 @@ namespace cler {
             static constexpr size_t kLeaderWorker = 0;
 
             struct State {
+                detail::WorkerQueueScheduler<Host::block_count, DEFAULT_MAX_WORKERS> queues;
                 ParkGroup park_states;
                 Partition partition;
                 RepartitionBarrier barrier;
@@ -58,7 +59,8 @@ namespace cler {
 
                 host.warn_unresolved_edges();
 
-                const size_t regular_count = host.regular_block_count();
+                std::array<uint8_t, Host::block_count> regular_ids{};
+                const size_t regular_count = host.collect_regular_blocks(regular_ids);
 
                 state.calibration_deadline = std::chrono::steady_clock::now() +
                                              std::chrono::milliseconds(config.calibration_ms);
@@ -74,7 +76,9 @@ namespace cler {
                 if (regular_count == 0) return;
 
                 host.rebuild_partition(state.pinned_worker_count, false, state.partition);
-                host.apply_partition(state.partition);
+                state.queues.initialize_islands(state.partition.block_ids.data(),
+                                                state.partition.island_begin.data(),
+                                                state.partition.island_count);
 
                 State* state_ptr = &state;
                 for (size_t worker_id = 0; worker_id < state.pinned_worker_count; ++worker_id) {
@@ -105,11 +109,11 @@ namespace cler {
                 uint32_t observed_sleep_epoch = 0;
 
                 while (!host.stop_requested()) {
-                    host.reset_worker_pass(worker_id);
+                    state.queues.reset_pass(worker_id);
                     bool did_work_in_pass = false;
                     size_t block_idx;
 
-                    while (host.next_worker_block(worker_id, block_idx)) {
+                    while (state.queues.get_next_block(worker_id, block_idx)) {
                         if (host.stop_requested()) break;
 
                         auto t_before = config.collect_detailed_stats
@@ -182,7 +186,11 @@ namespace cler {
                 park_state.parked.store(false, std::memory_order_relaxed);
 
                 if (config.collect_detailed_stats) {
-                    host.finalize_worker_stats(worker_id);
+                    for (size_t i = 0; i < Host::block_count; ++i) {
+                        if (state.queues.is_block_owner(worker_id, i)) {
+                            host.set_block_runtime_from_start(i);
+                        }
+                    }
                 }
             }
 
@@ -213,7 +221,9 @@ namespace cler {
                     [&state, worker_id]() { state.park_states.wake_others(worker_id, state.pinned_worker_count); },
                     [host, &state, &config]() mutable {
                         host.rebuild_partition(state.pinned_worker_count, true, state.partition);
-                        host.apply_partition(state.partition);
+                        state.queues.initialize_islands(state.partition.block_ids.data(),
+                                                state.partition.island_begin.data(),
+                                                state.partition.island_count);
                         state.next_repartition_check = std::chrono::steady_clock::now() +
                                                        std::chrono::milliseconds(config.repartition_check_ms);
                     });
