@@ -16,6 +16,15 @@
 #include <atomic>
 #include <cstring>
 
+inline void hackrf_pack_iq(const std::complex<float>* src, uint8_t* dst, size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        const float i_val = std::max(-1.0f, std::min(1.0f, src[i].real()));
+        const float q_val = std::max(-1.0f, std::min(1.0f, src[i].imag()));
+        dst[2 * i]     = static_cast<uint8_t>(static_cast<int8_t>(i_val * 127.0f));
+        dst[2 * i + 1] = static_cast<uint8_t>(static_cast<int8_t>(q_val * 127.0f));
+    }
+}
+
 struct SinkHackRFBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
 
@@ -102,12 +111,7 @@ struct SinkHackRFBlock : public cler::BlockBase {
         }
 
         const size_t n = std::min(read_size, write_size / 2);
-        for (size_t i = 0; i < n; ++i) {
-            const float i_val = std::max(-1.0f, std::min(1.0f, read_ptr[i].real()));
-            const float q_val = std::max(-1.0f, std::min(1.0f, read_ptr[i].imag()));
-            write_ptr[2 * i]     = static_cast<uint8_t>(static_cast<int8_t>(i_val * 127.0f));
-            write_ptr[2 * i + 1] = static_cast<uint8_t>(static_cast<int8_t>(q_val * 127.0f));
-        }
+        hackrf_pack_iq(read_ptr, write_ptr, n);
 
         in.commit_read(n);
         _iq.commit_write(2 * n);
