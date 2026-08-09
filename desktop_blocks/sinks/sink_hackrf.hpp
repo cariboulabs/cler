@@ -30,7 +30,8 @@ struct SinkHackRFBlock : public cler::BlockBase {
           _freq_hz(freq_hz),
           _samp_rate_hz(samp_rate_hz),
           _txvga_gain_db(txvga_gain_db),
-          _amp_enable(amp_enable)
+          _amp_enable(amp_enable),
+          _iq(2 * (buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size))
     {
         if (buffer_size > 0 && buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
             cler::panic("Buffer size too small for doubly-mapped buffers");
@@ -90,7 +91,27 @@ struct SinkHackRFBlock : public cler::BlockBase {
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
-        return cler::Error::NotEnoughSamples;
+        auto [read_ptr, read_size] = in.read_dbf();
+        if (read_ptr == nullptr || read_size == 0) {
+            return cler::Error::NotEnoughSamples;
+        }
+
+        auto [write_ptr, write_size] = _iq.write_dbf();
+        if (write_ptr == nullptr || write_size < 2) {
+            return cler::Error::NotEnoughSpace;
+        }
+
+        const size_t n = std::min(read_size, write_size / 2);
+        for (size_t i = 0; i < n; ++i) {
+            const float i_val = std::max(-1.0f, std::min(1.0f, read_ptr[i].real()));
+            const float q_val = std::max(-1.0f, std::min(1.0f, read_ptr[i].imag()));
+            write_ptr[2 * i]     = static_cast<uint8_t>(static_cast<int8_t>(i_val * 127.0f));
+            write_ptr[2 * i + 1] = static_cast<uint8_t>(static_cast<int8_t>(q_val * 127.0f));
+        }
+
+        in.commit_read(n);
+        _iq.commit_write(2 * n);
+        return cler::Empty{};
     }
 
     size_t get_underrun_count() const { return _underrun_count.load(); }
@@ -103,41 +124,26 @@ private:
     int _txvga_gain_db;
     bool _amp_enable;
 
+    cler::Channel<uint8_t> _iq;
     std::atomic<size_t> _underrun_count{0};
 
     static int tx_callback(hackrf_transfer* transfer) {
         SinkHackRFBlock* self = static_cast<SinkHackRFBlock*>(transfer->tx_ctx);
         uint8_t* buf = transfer->buffer;
-        const int buffer_length = transfer->buffer_length;
+        const size_t bytes_needed = static_cast<size_t>(transfer->buffer_length);
 
-        // HackRF wire format: int8_t IQ pairs, 2 bytes per complex sample
-        const size_t samples_needed = buffer_length / 2;
+        auto [read_ptr, read_size] = self->_iq.read_dbf();
+        const size_t bytes_to_send = (read_ptr == nullptr) ? 0 : std::min(read_size, bytes_needed);
 
-        auto [read_ptr, read_size] = self->in.read_dbf();
-
-        if (read_ptr == nullptr || read_size == 0) {
-            std::memset(buf, 0, buffer_length);
-            self->_underrun_count++;
-            return 0;
+        if (bytes_to_send > 0) {
+            std::memcpy(buf, read_ptr, bytes_to_send);
+            self->_iq.commit_read(bytes_to_send);
         }
 
-        size_t samples_to_send = std::min(read_size, samples_needed);
-
-        for (size_t i = 0; i < samples_to_send; ++i) {
-            std::complex<float> sample = read_ptr[i];
-            float i_val = std::max(-1.0f, std::min(1.0f, sample.real()));
-            float q_val = std::max(-1.0f, std::min(1.0f, sample.imag()));
-            // [-1.0, 1.0] -> int8_t [-127, 127]
-            buf[2*i]     = static_cast<int8_t>(i_val * 127.0f);
-            buf[2*i + 1] = static_cast<int8_t>(q_val * 127.0f);
-        }
-
-        if (samples_to_send < samples_needed) {
-            std::memset(&buf[2 * samples_to_send], 0, 2 * (samples_needed - samples_to_send));
+        if (bytes_to_send < bytes_needed) {
+            std::memset(&buf[bytes_to_send], 0, bytes_needed - bytes_to_send);
             self->_underrun_count++;
         }
-
-        self->in.commit_read(samples_to_send);
 
         return 0;
     }

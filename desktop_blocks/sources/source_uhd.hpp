@@ -52,6 +52,7 @@ struct SourceUHDBlock : public cler::BlockBase {
         }
         _write_ptrs.resize(num_channels);
         _write_sizes.resize(num_channels);
+        _rx_counts.resize(num_channels);
         uhd::set_thread_priority_safe(0.5, true);
         for (size_t ch = 0; ch < num_channels; ++ch) {
             usrp->set_rx_rate(sample_rate, ch);
@@ -196,8 +197,8 @@ struct SourceUHDBlock : public cler::BlockBase {
 
         uhd::rx_metadata_t md;
         cler::Error result_error = cler::Error::OK;
-        size_t total_rx = 0;
         size_t recv_ch = 0;
+        for (size_t i = 0; i < num_outs; ++i) _rx_counts[i] = 0;
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
             ([&](OChannels* out) {
                 const size_t ch = recv_ch++;
@@ -227,8 +228,7 @@ struct SourceUHDBlock : public cler::BlockBase {
                     return;
                 }
 
-                out->commit_write(num_rx);
-                total_rx += num_rx;
+                _rx_counts[ch] = num_rx;
             }(outs), ...);
         }(std::make_index_sequence<num_outs>{});
 
@@ -237,9 +237,17 @@ struct SourceUHDBlock : public cler::BlockBase {
         if (result_error != cler::Error::OK) {
             return result_error;
         }
-        if (total_rx == 0) {
+
+        size_t aligned = _rx_counts[0];
+        for (size_t i = 1; i < num_outs; ++i) {
+            aligned = std::min(aligned, _rx_counts[i]);
+        }
+        if (aligned == 0) {
             return cler::Error::NotEnoughSamples;
         }
+
+        ([&](OChannels* out) { out->commit_write(aligned); }(outs), ...);
+
         return cler::Empty{};
 
 
@@ -258,6 +266,7 @@ private:
     size_t _num_channels;
     std::vector<T*> _write_ptrs;
     std::vector<size_t> _write_sizes;
+    std::vector<size_t> _rx_counts;
     std::string wire_format;
     bool _quiet;
     std::atomic<bool> _configuring;

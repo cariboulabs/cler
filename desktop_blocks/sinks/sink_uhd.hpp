@@ -172,23 +172,33 @@ struct SinkUHDBlock : public cler::BlockBase {
             }
         }
 
+        size_t aligned = _read_sizes[0];
+        for (size_t i = 1; i < _num_channels; ++i) {
+            aligned = std::min(aligned, _read_sizes[i]);
+        }
+
+        size_t sent_min = aligned;
         for (size_t i = 0; i < _num_channels; ++i) {
             uhd::tx_metadata_t md;
             md.start_of_burst = false;
             md.end_of_burst = false;
-            md.has_time_spec = false;               
+            md.has_time_spec = false;
 
             size_t sent = 0;
             try {
-                sent = _tx_stream->send(_read_ptrs[i],
-                                _read_sizes[i],
-                                md,
-                                0.1);  // 100ms timeout
+                sent = _tx_stream->send(_read_ptrs[i], aligned, md, 0.1);
             } catch (const std::exception& e) {
                 std::cerr << "SinkUHDBlock: send failed: " << e.what() << std::endl;
                 return cler::Error::TERM_ProcedureError;
             }
-            in[i].commit_read(sent);
+            sent_min = std::min(sent_min, sent);
+        }
+
+        if (sent_min == 0) {
+            return cler::Error::NotEnoughSpace;
+        }
+        for (size_t i = 0; i < _num_channels; ++i) {
+            in[i].commit_read(sent_min);
         }
 
         handle_async_events();

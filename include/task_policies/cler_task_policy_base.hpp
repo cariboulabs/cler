@@ -34,7 +34,7 @@ struct TaskPolicyBase {
         Derived::sleep_us(1);
     }
 
-    static inline bool pin_to_core(size_t) { return true; }
+    static inline bool pin_to_core(size_t) { return false; }
 
     static inline void warn_unresolved_edge(const char*, const void*) {}
 
