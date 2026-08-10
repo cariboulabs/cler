@@ -293,6 +293,17 @@ the user never has to wonder what the canvas did to their file.
 Same menu: copy the block's C++ declaration, show the resolved template
 arguments, reveal the header the type came from.
 
+**The code drawer.** A collapsible bottom drawer (toggled from the top bar,
+`Ctrl+backtick`) showing the live source of the open file — re-rendered from
+the session after every edit, so a committed param visibly changes its C++
+line. Strictly read-only: editing stays in commands; a second free-text
+writer would reopen every class the critics closed. Sync both ways through
+the byte spans every element already carries: selecting a block highlights
+and scrolls to its declaration and runner; clicking inside a block's span
+selects it on canvas. Read-only elements show their reason inline at their
+span. The backend exposes the session's source text (DocumentState gains
+it); fixtures bundle theirs so browser mode keeps working.
+
 ### M7 — block library
 
 Promote the palette extractor into a browsable library: search, categories
