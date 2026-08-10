@@ -304,7 +304,7 @@ selects it on canvas. Read-only elements show their reason inline at their
 span. The backend exposes the session's source text (DocumentState gains
 it); fixtures bundle theirs so browser mode keeps working.
 
-### M7 — block library
+### M7 — block library, and building your own
 
 Promote the palette extractor into a browsable library: search, categories
 (sources / sinks / math / plots / channelizers / resamplers / hardware),
@@ -313,31 +313,56 @@ alongside `desktop_blocks/`, and a preview of the constructor signature
 before you place anything. Blocks defined in the open file appear in it
 automatically — they already do in the extractor.
 
-### M8 — assistant panel
+**New block wizard.** Users build their own blocks, and the palette's
+zero-registration discovery makes this cheap: anything that appears in the
+open file or an include root is already in the library. The wizard is the
+deterministic tier — name, ports, params in a form → a skeleton generated
+correctly by construction per AGENTS.md: progress contract respected,
+`read_dbf`/`write_dbf`, allocation in the constructor, template parameters
+where counts belong. The struct lands in the open file or a new header as a
+reviewed diff, and the palette shows it immediately. No AI required; M8
+fills in the DSP.
 
-A chat panel that explains and proposes. Two hard rules:
+### M8 — the assistant is the authoring path
 
-1. **It emits commands, not text.** The assistant's output is the same
-   command objects the canvas emits, applied through the same
-   `DocumentSession` with the same validation, refusal reasons, atomicity and
-   undo. It cannot write bytes directly, so it inherits every guarantee M0
-   was hardened for. A proposed change renders as a diff to accept or reject.
-2. **Explaining is the default, acting is opt-in.** "What does this
-   channelizer do", "why is this edge read-only", "why is my graph not
-   meeting the rate" are answerable from the model plus AGENTS.md and cost
-   nothing but tokens. Structural edits need an explicit accept.
+Expectation set by the user: flowgraphs will mostly be written *with* AI,
+not by hand. So M8 is not an explainer bolted onto a manual tool — it is
+the primary way graphs get built, with the canvas and the code drawer as
+the review surface. Flux's Copilot arc (advisor → co-designer that
+interprets intent and wires the schematic) is the reference.
 
-Needs a Claude API key, is off without one, and costs real money per
-question — so it is last, and it is never on the path of anything else
-working.
+Scope, in order: explain (graph, edge, refusal reason, rate problems —
+answerable from the model plus AGENTS.md); edit the open graph from
+natural language; author whole graphs from a prompt (new-file generation
+already exists as a canonical template); fill in `procedure()` bodies for
+wizard-created blocks from a description.
+
+Rules, unchanged in spirit and now load-bearing:
+
+1. **Graph work is commands, never text.** A proposed change — one wire or
+   a thirty-command build-out — is the same command objects the canvas
+   emits, applied through the same `DocumentSession`: validated, atomic,
+   refusable with reasons, undoable as one gesture. Proposals render as
+   highlighted elements plus the code drawer's diff; accept or reject.
+2. **Block bodies are the one free-text surface, with their own authority.**
+   Generated C++ lands only as a reviewed diff into a new struct or new
+   file — never inside the flowgraph grammar region — and the compile
+   ladder (M4) validates before accept lights up. For graph edits our
+   validator is the authority; for generated DSP the compiler is.
+3. **Explaining is the default, acting is opt-in.**
+
+Needs a Claude API key, off without one, costs money per question — but no
+longer last-by-default: after M3 and the code drawer exist, M8 outranks
+polish work, because it is how users are expected to work.
 
 ### Sequencing
 
-M5 and M6 are cheap, land inside the existing architecture, and make the tool
-visibly better — do them first, in that order. M7 is a UI investment over an
-extractor that already works. M8 is the largest and the only one with an
-external dependency and a running cost. None of them changes the one rule:
-the `.cpp` is still the document.
+M5 and M6 are cheap, land inside the existing architecture, and make the
+tool visibly better — first, in that order. Then M3 (topology commands are
+the assistant's vocabulary — it cannot build graphs before they exist),
+then M7's wizard, then M8. M4's compile-and-run ladder slots in alongside
+M8, which needs it as the authority for generated block bodies. None of
+this changes the one rule: the `.cpp` is still the document.
 
 ## Standing risks
 
