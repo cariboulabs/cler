@@ -217,6 +217,16 @@ framework. `tools/mermaid` is deleted at M1.
 
 ## Milestones
 
+**M0 status: complete.** 160 tests, corpus 16/22 fully editable and 22/22
+rendered, palette 39 structs with 0 wrong authorities and 1 Unknown
+(`FusedBlock`), `spike.cpp` round-trip p95 14.5 ms against a 50 ms gate.
+Three adversarial critics produced 47 findings against the first cut; all
+confirmed defects are fixed and their attack tests live on, assertions
+flipped, in `tests/regressions_{parse,palette,apply}.rs`. Corrections to
+this document from that review: `desktop_blocks` holds **39** block structs,
+not 36; `spike.cpp` parses fully editable (no read-only elements) so its M1
+value is scale, not degradation; nine corpus files lack a trailing newline.
+
 - **M0 — the crate, proven on the corpus.** `parse` emits a per-file status
   table for all 22 flowgraph examples: sites found, blocks, edges,
   editable/read-only per element — target 15/22 fully editable, 22/22
