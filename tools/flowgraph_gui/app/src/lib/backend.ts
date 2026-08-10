@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { fixtures, fixtureSources } from '../fixtures';
+import type { BlockSpec } from './palette';
 import type { Command, DocumentState } from './schema';
 
 export type Invoker = (command: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -72,6 +73,11 @@ export function applyCommands(
   baseRevision: number
 ): Promise<DocumentState> {
   return documentCall('apply_commands', { path, commands, baseRevision });
+}
+
+export async function loadPalette(path: string): Promise<BlockSpec[]> {
+  const specs = await invoker('palette', { path });
+  return Array.isArray(specs) ? (specs as BlockSpec[]) : [];
 }
 
 export function onExternalChange(handler: (path: string) => void): Promise<UnlistenFn> {
@@ -168,6 +174,21 @@ function undescribed(rejection: unknown, record: Record<string, unknown> | null)
   const text = plainText(rejection)?.trim() ?? '';
   if (text.length === 0) return NO_REASON;
   return READABLE.test(text) ? text : refused(clipped(text));
+}
+
+export function errorRecord(rejection: unknown): Record<string, unknown> | null {
+  return parsed(rejection);
+}
+
+export function spansOf(record: Record<string, unknown> | null): { start: number; end: number }[] {
+  if (!record || !Array.isArray(record.spans)) return [];
+  return record.spans.filter(
+    (span): span is { start: number; end: number } =>
+      typeof span === 'object' &&
+      span !== null &&
+      typeof (span as { start: unknown }).start === 'number' &&
+      typeof (span as { end: unknown }).end === 'number'
+  );
 }
 
 export function describeApplyError(rejection: unknown): string {

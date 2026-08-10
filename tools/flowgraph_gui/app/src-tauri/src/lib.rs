@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use cler_graph::BlockSpec;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::Value;
@@ -82,6 +83,11 @@ fn reload_document(path: String, docs: State<'_, Documents>) -> Result<DocumentS
 #[tauri::command]
 fn parse_file(path: String, docs: State<'_, Documents>) -> Result<String, String> {
     document::parse_file(&docs, &path)
+}
+
+#[tauri::command]
+fn palette(path: String, docs: State<'_, Documents>) -> Result<Vec<BlockSpec>, String> {
+    document::palette(&docs, &path)
 }
 
 #[tauri::command]
@@ -196,6 +202,7 @@ pub fn run() {
             redo,
             reload_document,
             parse_file,
+            palette,
             open_in_editor
         ])
         .run(tauri::generate_context!())

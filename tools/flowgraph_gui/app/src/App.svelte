@@ -9,17 +9,21 @@
   } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import { untrack } from 'svelte';
-  import Actions from './lib/Actions.svelte';
+  import Actions, { type EdgeInfo } from './lib/Actions.svelte';
+  import AddBlock from './lib/AddBlock.svelte';
   import BlockNode from './lib/BlockNode.svelte';
   import Inspector from './lib/Inspector.svelte';
+  import Palette from './lib/Palette.svelte';
   import RoutedEdge from './lib/RoutedEdge.svelte';
   import TypeLegend from './lib/TypeLegend.svelte';
   import {
     applyCommands,
     closeDocument,
     describeApplyError,
+    errorRecord,
     inTauri,
     loadFixture,
+    loadPalette,
     onExternalChange,
     openDocument,
     openInEditor,
@@ -27,22 +31,45 @@
     queued,
     redoDocument,
     reloadDocument,
+    spansOf,
     undoDocument
   } from './lib/backend';
   import { layout } from './lib/layout';
   import {
+    addBlockCommand,
+    addRefusal,
+    connectPlan,
+    DRAG_TYPE,
+    reconnectPlan,
+    specFor,
+    specOfBlock,
+    specsFromSites,
+    type AddForm,
+    type BlockSpec,
+    type ConnectPlan,
+    type FieldRefusal,
+    type Wire
+  } from './lib/palette';
+  import {
     anchorSpans,
     blockSpans,
+    edgeAtId,
+    edgeIndexById,
     mergeProjection,
+    parsePortId,
+    problemsOf,
     projectSite,
     readOnlyNotes,
     targetAt,
     typeColors,
     type BlockNode as BlockNodeType,
+    type EdgePoint,
+    type Problem,
     type RoutedEdge as RoutedEdgeType
   } from './lib/project';
   import {
     lineOfOffset,
+    lineTextAt,
     siteLabel,
     siteViewIds,
     type Command,
@@ -59,7 +86,8 @@
   const edgeTypes: EdgeTypes = { routed: RoutedEdge as unknown as EdgeTypes[string] };
 
   function initialFixture(): string {
-    const requested = new URLSearchParams(window.location.search).get('fixture');
+    const search = new URLSearchParams(window.location.search);
+    const requested = search.get('example') ?? search.get('fixture');
     return requested && fixtureNames.includes(requested) ? requested : 'hello_world';
   }
 
@@ -67,6 +95,7 @@
   const DISK_DRIFT = 'changed on disk';
   const LEFT_PANEL = 'cler.panel.left';
   const RIGHT_PANEL = 'cler.panel.right';
+  const BLOCKS_PANEL = 'cler.panel.blocks';
   const DRAWER_PANEL = 'cler.panel.drawer';
   const DRAWER_HEIGHT = 'cler.panel.drawer.height';
   const DEFAULT_DRAWER_HEIGHT = 260;
@@ -100,11 +129,18 @@
   let viewKey = $state('');
   let leftOpen = $state(storedOpen(LEFT_PANEL, true));
   let rightOpen = $state(storedOpen(RIGHT_PANEL, true));
+  let blocksOpen = $state(storedOpen(BLOCKS_PANEL, true));
   let drawerOpen = $state(storedOpen(DRAWER_PANEL, false));
   let drawerHeight = $state(storedHeight());
   let drawer = $state<typeof CodeDrawer | null>(null);
   let inspector = $state<Inspector | null>(null);
+  let adder = $state<AddBlock | null>(null);
+  let specs = $state.raw<BlockSpec[]>([]);
+  let selectedEdge = $state<string | null>(null);
+  let focus = $state<Span | null>(null);
+  let refusal = $state<{ block: string; spans: Span[] } | null>(null);
   let generation = 0;
+  let pinned = new Map<string, EdgePoint>();
 
   const site = $derived<Site | undefined>(doc.model.sites[siteIndex]);
   const viewIds = $derived(siteViewIds(doc.model.sites));
@@ -112,14 +148,24 @@
   const notes = $derived(site ? readOnlyNotes(site) : []);
   const legend = $derived<[string, string][]>(site ? [...typeColors(site)] : []);
   const needsReload = $derived(changedOnDisk || doc.externalChange);
-  const hits = $derived<Span[]>(site && selected ? blockSpans(site, selected) : []);
+  const hits = $derived<Span[]>(
+    focus ? [focus] : site && selected ? blockSpans(site, selected) : []
+  );
   const marks = $derived<CodeMark[]>(
     notes.map((note) => ({ span: note.span, reason: note.reason }))
   );
   const anchors = $derived<Span[]>(anchorSpans(doc.model.sites));
+  const shownSpecs = $derived(editable ? specs : specsFromSites(doc.model.sites, doc.path));
+  const problems = $derived<Problem[]>(problemsOf(site));
+  const declared = $derived(site ? site.blocks.map((block) => block.var) : []);
+  const selectedSpec = $derived.by(() => {
+    const block = site?.blocks.find((candidate) => candidate.var === selected);
+    return block ? specOfBlock(specs, block) : undefined;
+  });
 
   $effect(() => storeOpen(LEFT_PANEL, leftOpen));
   $effect(() => storeOpen(RIGHT_PANEL, rightOpen));
+  $effect(() => storeOpen(BLOCKS_PANEL, blocksOpen));
   $effect(() => storeOpen(DRAWER_PANEL, drawerOpen));
   $effect(() => localStorage.setItem(DRAWER_HEIGHT, String(drawerHeight)));
 
@@ -147,14 +193,15 @@
       viewKey = '';
       return;
     }
-    const fresh = projectSite(current);
+    const fresh = projectSite(current, specs, editable);
     if (untrack(() => viewKey) === key) {
-      const merged = mergeProjection(untrack(() => ({ nodes, edges })), fresh);
+      const merged = mergeProjection(untrack(() => ({ nodes, edges })), fresh, pinned);
       nodes = merged.nodes;
       edges = merged.edges;
       return;
     }
     let stale = false;
+    pinned = new Map();
     layout(fresh).then((laid) => {
       if (stale) return;
       nodes = laid.nodes;
@@ -177,6 +224,9 @@
     if (count === 1) siteIndex = 0;
     const current = doc.model.sites[siteIndex];
     if (selected && !current?.blocks.some((block) => block.var === selected)) selected = null;
+    if (selectedEdge && current && edgeIndexById(current, selectedEdge) === null) {
+      selectedEdge = null;
+    }
   }
 
   function adopt(next: DocumentState) {
@@ -189,9 +239,13 @@
     doc = next;
     generation += 1;
     changedOnDisk = false;
+    refusal = null;
+    focus = null;
+    void refreshPalette(next.path);
     if (fresh) {
       siteIndex = 0;
       selected = null;
+      selectedEdge = null;
     }
     clampContext();
     inspector?.discardDrafts();
@@ -216,7 +270,7 @@
       const message = describeApplyError(error);
       if (message.includes(DISK_DRIFT) && era === generation) changedOnDisk = true;
       status = message;
-      return { ok: false, message };
+      return { ok: false, message, record: errorRecord(error) };
     }
   }
 
@@ -234,14 +288,43 @@
     inspector?.discardDrafts();
   }
 
-  async function submit(command: Command): Promise<Outcome> {
-    if (!editable) return { ok: false, message: 'fixture mode is a read-only viewer' };
-    return run((path) => applyCommands(path, [command], doc.revision));
+  const VIEWER_ONLY = 'example mode is a read-only viewer';
+
+  async function submitAll(commands: Command[]): Promise<Outcome> {
+    if (!editable) {
+      status = VIEWER_ONLY;
+      return { ok: false, message: VIEWER_ONLY, record: null };
+    }
+    if (commands.length === 0) return { ok: true };
+    return run((path) => applyCommands(path, commands, doc.revision));
+  }
+
+  function submit(command: Command): Promise<Outcome> {
+    return submitAll([command]);
+  }
+
+  function refuse(message: string): Outcome {
+    status = message;
+    return { ok: false, message, record: null };
+  }
+
+  function submitPlan(plan: ConnectPlan): Promise<Outcome> {
+    if ('refusal' in plan) return Promise.resolve(refuse(plan.refusal));
+    return submitAll(plan.commands);
+  }
+
+  async function refreshPalette(path: string) {
+    if (!editable) return;
+    try {
+      specs = await loadPalette(path);
+    } catch {
+      specs = [];
+    }
   }
 
   async function openFile() {
     if (!editable) {
-      status = 'file dialog needs the desktop shell — pick a fixture below';
+      status = 'file dialog needs the desktop shell — pick an example below';
       return;
     }
     status = '';
@@ -265,7 +348,149 @@
 
   function selectNode(id: string) {
     selected = id;
+    selectedEdge = null;
+    focus = null;
     rightOpen = true;
+  }
+
+  function selectEdge(id: string) {
+    selectedEdge = id;
+    focus = null;
+    edges = edges.map((edge) => ({ ...edge, selected: edge.id === id }));
+  }
+
+  function clearSelection() {
+    selected = null;
+    selectedEdge = null;
+    focus = null;
+  }
+
+  function edgeInfo(id: string): EdgeInfo | null {
+    const edge = site ? edgeAtId(site, id) : null;
+    if (!edge) return null;
+    const type = edge.type_conflict
+      ? `type conflict: ${edge.source_type ?? '?'} → ${edge.sample_type ?? '?'}`
+      : (edge.sample_type ?? edge.source_type ?? 'type unresolved');
+    return {
+      title: `${edge.from} → ${edge.to}.${edge.port.name}${edge.port.index === null ? '' : `[${edge.port.index}]`}`,
+      detail: type,
+      editable: edge.editable,
+      reason: edge.read_only_reason ? `this wire is read-only: ${edge.read_only_reason.replace(/_/g, ' ')}` : null
+    };
+  }
+
+  function wire(connection: {
+    source: string;
+    target: string;
+    targetHandle?: string | null;
+  }): void {
+    if (!site) return;
+    const slot = parsePortId(connection.targetHandle ?? 'in');
+    const wanted: Wire = {
+      from: connection.source,
+      to: connection.target,
+      port: slot.port,
+      portIndex: slot.index
+    };
+    void submitPlan(connectPlan(siteIndex, site, specs, wanted));
+  }
+
+  function rewire(
+    previous: { id: string },
+    next: { source: string; target: string; targetHandle?: string | null }
+  ): void {
+    if (!site) return;
+    const index = edgeIndexById(site, previous.id);
+    if (index === null) return;
+    const slot = parsePortId(next.targetHandle ?? 'in');
+    void submitPlan(
+      reconnectPlan(siteIndex, site, specs, index, {
+        from: next.source,
+        to: next.target,
+        port: slot.port,
+        portIndex: slot.index
+      })
+    );
+  }
+
+  function disconnect(id: string): void {
+    if (!site) return;
+    const edge = edgeAtId(site, id);
+    const index = edgeIndexById(site, id);
+    if (!edge || index === null) return;
+    if (!edge.editable) {
+      refuse(edgeInfo(id)?.reason ?? 'this wire is read-only');
+      return;
+    }
+    selectedEdge = null;
+    void submit({ command: 'disconnect', site: siteIndex, edge: index });
+  }
+
+  function removeFromGraph(block: string): void {
+    void submit({ command: 'remove_from_graph', site: siteIndex, block });
+  }
+
+  async function deleteBlock(block: string): Promise<void> {
+    const outcome = await submit({ command: 'delete_block', site: siteIndex, block });
+    if (outcome.ok) return;
+    if (outcome.record?.error !== 'references_outside_graph') return;
+    refusal = { block, spans: spansOf(outcome.record) };
+  }
+
+  function jumpTo(span: Span) {
+    focus = span;
+    drawerOpen = true;
+  }
+
+  function pickProblem(problem: Problem) {
+    if (problem.edge) {
+      if (problem.block) selected = problem.block;
+      selectEdge(problem.edge);
+      return;
+    }
+    jumpTo(problem.span);
+  }
+
+  async function addBlock(
+    spec: BlockSpec,
+    form: AddForm,
+    at: EdgePoint
+  ): Promise<FieldRefusal | null> {
+    const varName = form.varName.trim();
+    pinned.set(varName, at);
+    const outcome = await submit(addBlockCommand(siteIndex, spec, form));
+    if (outcome.ok) {
+      selectNode(varName);
+      return null;
+    }
+    pinned.delete(varName);
+    return addRefusal(outcome.record, form) ?? { field: null, message: outcome.message };
+  }
+
+  function droppedSpec(event: DragEvent): BlockSpec | null {
+    const name = event.dataTransfer?.getData(DRAG_TYPE);
+    return name ? (specFor(shownSpecs, name) ?? null) : null;
+  }
+
+  function onDrop(event: DragEvent) {
+    const spec = droppedSpec(event);
+    if (!spec) return;
+    event.preventDefault();
+    if (!editable) {
+      status = VIEWER_ONLY;
+      return;
+    }
+    adder?.openAt(event.clientX, event.clientY, spec);
+  }
+
+  function onDragOver(event: DragEvent) {
+    if (!event.dataTransfer?.types.includes(DRAG_TYPE)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }
+
+  function addHere(clientX: number, clientY: number) {
+    adder?.openAt(clientX, clientY);
   }
 
   function declarationOf(blockVar: string): Span | null {
@@ -353,6 +578,15 @@
         </section>
       {/if}
 
+      <Palette
+        specs={shownSpecs}
+        documentPath={doc.path}
+        enabled={editable}
+        open={blocksOpen}
+        ontoggle={() => (blocksOpen = !blocksOpen)}
+        onpick={(spec) => adder?.openAt(window.innerWidth / 2, window.innerHeight / 2, spec)}
+      />
+
       {#if site}
         <section>
           <h2>Graph</h2>
@@ -387,7 +621,7 @@
       </section>
 
       <section class="spacer">
-        <h2>Fixture</h2>
+        <h2>Example</h2>
         <select bind:value={fixtureName} onchange={openFixture}>
           {#each fixtureNames as name (name)}
             <option value={name}>{name}</option>
@@ -399,7 +633,7 @@
         <p class="status" data-testid="status">{status}</p>
       {/if}
 
-      <span class="attribution">Caribou Labs</span>
+      <span class="attribution">CaribouLabs</span>
     </div>
   </aside>
 
@@ -424,19 +658,35 @@
           colorMode="dark"
           fitView
           fitViewOptions={{ padding: 0.15 }}
-          nodesConnectable={false}
+          nodesConnectable={editable}
           elementsSelectable={true}
           deleteKey={null}
           minZoom={0.1}
           proOptions={{ hideAttribution: false }}
+          ondrop={onDrop}
+          ondragover={onDragOver}
           onnodeclick={({ node }) => selectNode(node.id)}
-          onpaneclick={() => (selected = null)}
+          onedgeclick={({ edge }) => selectEdge(edge.id)}
+          onpaneclick={clearSelection}
+          onbeforeconnect={(connection) => {
+            wire(connection);
+            return null;
+          }}
+          onbeforereconnect={(next, previous) => {
+            rewire(previous, next);
+            return null;
+          }}
         >
           <Background bgColor="var(--bg-0)" patternColor="var(--border)" gap={18} size={2} />
           <Actions
             canUndo={doc.canUndo}
             canRedo={doc.canRedo}
             canOpenEditor={editable}
+            canEdit={editable}
+            selectedNode={selected}
+            {selectedEdge}
+            {problems}
+            edgeAt={edgeInfo}
             onundo={() => void run(undoDocument)}
             onredo={() => void run(redoDocument)}
             onopen={() => void openFile()}
@@ -446,12 +696,48 @@
             onviewsource={viewSource}
             oncopydeclaration={(block) => void copyDeclaration(block)}
             onopeneditor={(block) => void openEditor(block)}
+            onremove={removeFromGraph}
+            ondeleteblock={(block) => void deleteBlock(block)}
+            ondisconnect={disconnect}
+            onaddhere={addHere}
+            onproblem={pickProblem}
+          />
+          <AddBlock
+            bind:this={adder}
+            specs={shownSpecs}
+            documentPath={doc.path}
+            taken={declared}
+            onadd={addBlock}
           />
           <Controls showLock={false} />
           <TypeLegend entries={legend} />
           <MiniMap bgColor="var(--bg-1)" maskColor="var(--scrim)" nodeColor="var(--border-hi)" />
         </SvelteFlow>
       {/key}
+
+      {#if refusal}
+        <div class="dialog" role="dialog" aria-modal="true" data-testid="delete-refusal">
+          <h2>{refusal.block} cannot be deleted</h2>
+          <p>
+            Its declaration is still referenced in {refusal.spans.length}
+            {refusal.spans.length === 1 ? 'place' : 'places'} outside the flowgraph. Remove those
+            references first — the editor will not rewrite code it does not own.
+          </p>
+          <ul>
+            {#each refusal.spans as span (span.start)}
+              <li>
+                <button data-reference={span.start} onclick={() => jumpTo(span)}>
+                  <span class="line">line {lineOfOffset(doc.source, span.start)}</span>
+                  <code>{lineTextAt(doc.source, span.start)}</code>
+                </button>
+              </li>
+            {/each}
+          </ul>
+          <footer>
+            <button data-testid="refusal-close" onclick={() => (refusal = null)}>Close</button>
+          </footer>
+        </div>
+      {/if}
 
       {#if drawer}
         {@const Drawer = drawer}
@@ -479,6 +765,7 @@
     {site}
     {siteIndex}
     {selected}
+    spec={selectedSpec}
     enabled={editable}
     {submit}
     open={rightOpen}
@@ -651,6 +938,76 @@
   .banner button {
     margin-left: auto;
     flex: none;
+  }
+  .dialog {
+    position: absolute;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 25;
+    width: min(560px, calc(100% - 2 * var(--sp-4)));
+    max-height: 60%;
+    overflow-y: auto;
+    padding: var(--sp-3);
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--danger-border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+  .dialog h2 {
+    margin: 0 0 var(--sp-2);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--danger-fg);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .dialog p {
+    margin: 0 0 var(--sp-2);
+    font-size: 11.5px;
+    color: var(--fg);
+  }
+  .dialog ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .dialog ul button {
+    display: flex;
+    gap: var(--sp-3);
+    width: 100%;
+    padding: 2px var(--sp-2);
+    background: transparent;
+    border-color: transparent;
+    text-align: left;
+  }
+  .dialog ul button:hover {
+    background: var(--bg-2);
+    border-color: transparent;
+  }
+  .dialog .line {
+    flex: none;
+    width: 62px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .dialog code {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dialog footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--sp-3);
   }
   @media (prefers-reduced-motion: reduce) {
     .sidebar,

@@ -183,7 +183,7 @@ function installFakeBackend(setup: FakeSetup) {
         ).text = command.new_text;
       } else if (command.command === 'set_display_name') {
         block(command.site, command.block).display_name = command.new_text;
-      } else {
+      } else if (command.command === 'set_config') {
         const config = need(site(command.site).config, 'config');
         need(
           config.assignments.find((entry) => entry.path === command.path),
@@ -340,7 +340,8 @@ describe('editing against a fake backend', () => {
   let editor: Page;
 
   const sent = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.log);
-  const calls = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.calls);
+  const rawCalls = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.calls);
+  const calls = async () => (await rawCalls()).filter((name) => name !== 'palette');
 
   async function select(blockVar: string) {
     await editor.click(`.svelte-flow__node[data-id="${blockVar}"]`);
@@ -538,7 +539,8 @@ describe('top bar, context menu and shortcuts', () => {
 
   const PANE_SPOT = { x: 40, y: 400 };
 
-  const calls = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.calls);
+  const rawCalls = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.calls);
+  const calls = async () => (await rawCalls()).filter((name) => name !== 'palette');
   const menu = () => editor.locator('[data-testid="context-menu"]');
   const param = () => editor.locator('input[data-field="source1.ctor.1"]');
 

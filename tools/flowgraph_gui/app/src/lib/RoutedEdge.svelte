@@ -1,5 +1,11 @@
 <script lang="ts">
-  import { BaseEdge, EdgeLabel, getBezierPath, type EdgeProps } from '@xyflow/svelte';
+  import {
+    BaseEdge,
+    EdgeLabel,
+    EdgeReconnectAnchor,
+    getBezierPath,
+    type EdgeProps
+  } from '@xyflow/svelte';
   import type { EdgePoint, RoutedEdge } from './project';
 
   const props: EdgeProps<RoutedEdge> = $props();
@@ -51,6 +57,18 @@
   <title>{props.data.title}</title>
 {/if}
 <BaseEdge id={props.id} {path} markerEnd={props.markerEnd} style={props.style} />
+{#if props.data?.reconnectable}
+  <EdgeReconnectAnchor
+    type="source"
+    position={{ x: props.sourceX, y: props.sourceY }}
+    class="cler-anchor"
+  />
+  <EdgeReconnectAnchor
+    type="target"
+    position={{ x: props.targetX, y: props.targetY }}
+    class="cler-anchor"
+  />
+{/if}
 {#if props.data?.conflict}
   <EdgeLabel x={props.targetX - BADGE_OFFSET} y={props.targetY - 11} class="cler-type-badge">
     type

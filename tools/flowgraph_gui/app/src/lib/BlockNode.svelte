@@ -2,7 +2,8 @@
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
   import { typeSignature, type BlockNode, type BlockNodeData } from './project';
 
-  const { data }: NodeProps<BlockNode> = $props();
+  const props: NodeProps<BlockNode> = $props();
+  const data = $derived(props.data);
   const block: BlockNodeData['block'] = $derived(data.block);
 </script>
 
@@ -26,15 +27,20 @@
 
   <div class="ports">
     {#each data.inputs as slot (slot.id)}
-      <div class="port">
-        <Handle type="target" position={Position.Left} id={slot.id} isConnectable={false} />
+      <div class="port" class:grow={slot.grow}>
+        <Handle
+          type="target"
+          position={Position.Left}
+          id={slot.id}
+          isConnectable={props.isConnectable}
+        />
         <span class="port-label">{slot.label}</span>
       </div>
     {/each}
   </div>
 
   {#if data.hasOutput}
-    <Handle type="source" position={Position.Right} id="out" isConnectable={false} />
+    <Handle type="source" position={Position.Right} id="out" isConnectable={props.isConnectable} />
   {/if}
 </div>
 
@@ -128,5 +134,13 @@
     font-size: 11px;
     color: var(--muted);
     font-family: var(--mono);
+  }
+  .port.grow .port-label {
+    color: var(--faint);
+    font-style: italic;
+  }
+  .port.grow :global(.svelte-flow__handle) {
+    border-style: dashed;
+    background: transparent;
   }
 </style>

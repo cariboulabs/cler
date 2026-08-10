@@ -1,11 +1,12 @@
 import type { Edge as FlowEdge, Node as FlowNode } from '@xyflow/svelte';
+import { authorityOf, countOf, specOfBlock, type BlockSpec } from './palette';
 import type { Block, Edge, Port, Site, Span } from './schema';
 
 export const NODE_WIDTH = 230;
 const HEADER_HEIGHT = 74;
 const PORT_ROW_HEIGHT = 18;
 
-export type PortSlot = { id: string; label: string };
+export type PortSlot = { id: string; label: string; port: string; index: number | null; grow: boolean };
 
 export type BlockNodeData = {
   block: Block;
@@ -17,7 +18,12 @@ export type BlockNode = FlowNode<BlockNodeData, 'block'>;
 
 export type EdgePoint = { x: number; y: number };
 
-export type RoutedEdgeData = { bends: EdgePoint[]; title?: string; conflict?: boolean };
+export type RoutedEdgeData = {
+  bends: EdgePoint[];
+  title?: string;
+  conflict?: boolean;
+  reconnectable?: boolean;
+};
 
 export type RoutedEdge = FlowEdge<RoutedEdgeData, 'routed'>;
 
@@ -50,18 +56,58 @@ export function typeSignature(block: Block): string {
   return `${block.type_name}<${block.template_args.map((a) => a.text).join(', ')}>`;
 }
 
-function inputSlots(site: Site, blockVar: string): PortSlot[] {
+export function parsePortId(id: string): { port: string; index: number | null } {
+  const found = /^(.*)\[(\d+)\]$/.exec(id);
+  if (!found || found[1] === undefined || found[2] === undefined) return { port: id, index: null };
+  return { port: found[1], index: Number(found[2]) };
+}
+
+function slotOf(port: string, index: number | null, grow: boolean): PortSlot {
+  const id = index === null ? port : `${port}[${index}]`;
+  return { id, label: id, port, index, grow };
+}
+
+function declaredSlots(block: Block, spec: BlockSpec): PortSlot[] {
+  const slots: PortSlot[] = [];
+  const authority = authorityOf(spec.input_count);
+  for (const port of spec.ports) {
+    if (port.direction !== 'input') continue;
+    if (!port.variable) {
+      slots.push(slotOf(port.name, null, false));
+      continue;
+    }
+    const declared = countOf(block, spec.input_count) ?? 0;
+    for (let index = 0; index < declared; index++) slots.push(slotOf(port.name, index, false));
+    if (authority.kind !== 'fixed' && block.editable) {
+      slots.push(slotOf(port.name, declared, true));
+    }
+  }
+  return slots;
+}
+
+function inputSlots(site: Site, block: Block, spec: BlockSpec | undefined): PortSlot[] {
   const seen = new Map<string, PortSlot>();
   for (const edge of site.edges) {
-    if (edge.to !== blockVar) continue;
-    const id = portLabel(edge.port);
-    if (!seen.has(id)) seen.set(id, { id, label: id });
+    if (edge.to !== block.var) continue;
+    const found = portLabel(edge.port);
+    if (!seen.has(found)) seen.set(found, slotOf(edge.port.name, edge.port.index, false));
+  }
+  if (spec) {
+    for (const slot of declaredSlots(block, spec)) {
+      if (!seen.has(slot.id)) seen.set(slot.id, slot);
+    }
   }
   return [...seen.values()].sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true }));
 }
 
 function hasOutgoing(site: Site, blockVar: string): boolean {
   return site.edges.some((edge) => edge.from === blockVar);
+}
+
+function offersOutput(site: Site, block: Block, spec: BlockSpec | undefined): boolean {
+  if (hasOutgoing(site, block.var)) return true;
+  if (!spec || !block.editable) return false;
+  return spec.ports.some((port) => port.direction === 'output');
 }
 
 export const TYPE_TOKENS = ['--type-1', '--type-2', '--type-3', '--type-4', '--type-5', '--type-6'];
@@ -71,9 +117,27 @@ export function edgeSampleType(edge: Edge): string | null {
   return edge.sample_type ?? edge.source_type ?? null;
 }
 
-function wiredEdges(site: Site): Edge[] {
+function wiredEntries(site: Site): { edge: Edge; index: number }[] {
   const declared = new Set(site.blocks.map((block) => block.var));
-  return site.edges.filter((edge) => declared.has(edge.from) && declared.has(edge.to));
+  return site.edges
+    .map((edge, index) => ({ edge, index }))
+    .filter(({ edge }) => declared.has(edge.from) && declared.has(edge.to));
+}
+
+function wiredEdges(site: Site): Edge[] {
+  return wiredEntries(site).map(({ edge }) => edge);
+}
+
+export function edgeIndexById(site: Site, id: string): number | null {
+  const entries = wiredEntries(site);
+  const ids = edgeIds(entries.map(({ edge }) => edge));
+  const at = ids.indexOf(id);
+  return at === -1 ? null : (entries[at]?.index ?? null);
+}
+
+export function edgeAtId(site: Site, id: string): Edge | null {
+  const index = edgeIndexById(site, id);
+  return index === null ? null : (site.edges[index] ?? null);
 }
 
 export function typeColors(site: Site): Map<string, string> {
@@ -107,22 +171,28 @@ function edgeStyle(edge: Edge, colors: Map<string, string>): string | undefined 
   return `--edge-color: var(${colors.get(type) ?? NEUTRAL_TOKEN})`;
 }
 
-function toNode(site: Site, block: Block): BlockNode {
-  const inputs = inputSlots(site, block.var);
+function toNode(site: Site, block: Block, specs: BlockSpec[], connectable: boolean): BlockNode {
+  const spec = specOfBlock(specs, block);
+  const inputs = inputSlots(site, block, spec);
   return {
     id: block.var,
     type: 'block',
     position: { x: 0, y: 0 },
     width: NODE_WIDTH,
     height: nodeHeight(inputs.length),
-    data: { block, inputs, hasOutput: hasOutgoing(site, block.var) },
+    data: { block, inputs, hasOutput: offersOutput(site, block, spec) },
     draggable: true,
-    connectable: false,
+    connectable: connectable && block.editable,
     deletable: false
   };
 }
 
-function toEdge(edge: Edge, id: string, colors: Map<string, string>): RoutedEdge {
+function toEdge(
+  edge: Edge,
+  id: string,
+  colors: Map<string, string>,
+  connectable: boolean
+): RoutedEdge {
   return {
     id,
     type: 'routed',
@@ -130,7 +200,12 @@ function toEdge(edge: Edge, id: string, colors: Map<string, string>): RoutedEdge
     target: edge.to,
     sourceHandle: 'out',
     targetHandle: portLabel(edge.port),
-    data: { bends: [], title: edgeTitle(edge), conflict: edge.type_conflict },
+    data: {
+      bends: [],
+      title: edgeTitle(edge),
+      conflict: edge.type_conflict,
+      reconnectable: connectable && edge.editable
+    },
     animated: false,
     selectable: true,
     deletable: false,
@@ -139,13 +214,19 @@ function toEdge(edge: Edge, id: string, colors: Map<string, string>): RoutedEdge
   };
 }
 
-export function projectSite(site: Site): Projection {
+export function projectSite(
+  site: Site,
+  specs: BlockSpec[] = [],
+  connectable = false
+): Projection {
   const wired = wiredEdges(site);
   const ids = edgeIds(wired);
   const colors = typeColors(site);
   return {
-    nodes: site.blocks.map((block) => toNode(site, block)),
-    edges: wired.map((edge, index) => toEdge(edge, ids[index] ?? edgeKey(edge), colors))
+    nodes: site.blocks.map((block) => toNode(site, block, specs, connectable)),
+    edges: wired.map((edge, index) =>
+      toEdge(edge, ids[index] ?? edgeKey(edge), colors, connectable)
+    )
   };
 }
 
@@ -181,7 +262,11 @@ function spotFor(
   };
 }
 
-export function mergeProjection(previous: Projection, next: Projection): Projection {
+export function mergeProjection(
+  previous: Projection,
+  next: Projection,
+  pinned: Map<string, EdgePoint> = new Map()
+): Projection {
   const kept = new Map(previous.nodes.map((node) => [node.id, node]));
   const bends = new Map(previous.edges.map((edge) => [edge.id, edge.data?.bends ?? []]));
   const placed = new Map<string, EdgePoint>();
@@ -194,6 +279,11 @@ export function mergeProjection(previous: Projection, next: Projection): Project
     nodes: next.nodes.map((node) => {
       const before = kept.get(node.id);
       if (before) return { ...node, position: before.position, selected: before.selected };
+      const dropped = pinned.get(node.id);
+      if (dropped) {
+        placed.set(node.id, dropped);
+        return { ...node, position: dropped };
+      }
       const spot = spotFor(node.id, next.edges, placed, added++);
       placed.set(node.id, spot);
       return { ...node, position: spot };
@@ -257,6 +347,48 @@ export function anchorSpans(sites: Site[]): Span[] {
     ...site.blocks.map((block) => block.span),
     ...site.runners.map((runner) => runner.span)
   ]);
+}
+
+export type Problem = {
+  id: string;
+  kind: 'conflict' | 'unresolved';
+  title: string;
+  detail: string;
+  span: Span;
+  edge: string | null;
+  block: string | null;
+};
+
+export function problemsOf(site: Site | undefined): Problem[] {
+  if (!site) return [];
+  const problems: Problem[] = [];
+  const entries = wiredEntries(site);
+  const ids = edgeIds(entries.map(({ edge }) => edge));
+  for (const [at, { edge }] of entries.entries()) {
+    if (!edge.type_conflict) continue;
+    const id = ids[at] ?? `${edge.from}->${edge.to}`;
+    problems.push({
+      id: `conflict:${id}`,
+      kind: 'conflict',
+      title: `${edge.from} → ${edge.to}`,
+      detail: `${edge.source_type ?? '?'} out into ${edge.sample_type ?? '?'} in`,
+      span: edge.span,
+      edge: id,
+      block: edge.to
+    });
+  }
+  for (const [at, item] of site.unresolved.entries()) {
+    problems.push({
+      id: `unresolved:${at}`,
+      kind: 'unresolved',
+      title: item.text,
+      detail: item.reason.replace(/_/g, ' '),
+      span: item.span,
+      edge: null,
+      block: null
+    });
+  }
+  return problems;
 }
 
 export type CodeTarget = { siteIndex: number; block: string };

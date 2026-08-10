@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use cler_graph::{
-    palette_specs, BlockSpec, Command, DocumentSession, FileModel, Transaction, SCHEMA_VERSION,
+    extract_specs, palette_specs, BlockSpec, Command, DocumentSession, FileModel, Transaction,
+    SCHEMA_VERSION,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -144,6 +145,24 @@ pub fn parse_file(docs: &Documents, path: &str) -> Result<String, String> {
     let session = DocumentSession::open(&target).map_err(|cause| cause.to_string())?;
     serde_json::to_string(&model_of(&session, &nearby_palette(&target)))
         .map_err(|cause| cause.to_string())
+}
+
+pub fn palette(docs: &Documents, path: &str) -> Result<Vec<BlockSpec>, String> {
+    let map = lock(docs);
+    let key = resolve(&map, path).ok_or_else(|| format!("no open document for {path}"))?;
+    let doc = map
+        .get(&key)
+        .ok_or_else(|| format!("no open document for {path}"))?;
+    let mut specs = extract_specs(doc.session.source(), &key.display().to_string());
+    let local: Vec<&str> = specs.iter().map(|spec| spec.name.as_str()).collect();
+    let shipped: Vec<BlockSpec> = doc
+        .palette
+        .iter()
+        .filter(|spec| !local.contains(&spec.name.as_str()))
+        .cloned()
+        .collect();
+    specs.extend(shipped);
+    Ok(specs)
 }
 
 pub fn note_disk_event(docs: &Documents, path: &Path) -> bool {

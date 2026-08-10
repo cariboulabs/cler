@@ -496,7 +496,9 @@ describe('the node context menu reaches the code', () => {
       expect(await page.locator('[data-testid="context-menu"] button').allTextContents()).toEqual([
         'View sourceCtrl+`',
         'Copy declaration',
-        'Open in editor'
+        'Open in editor',
+        'Remove from graphDel',
+        'Delete block…'
       ]);
       expect(await page.locator('[data-testid="menu-open-editor"]').isDisabled()).toBe(false);
 
@@ -559,7 +561,7 @@ describe('the node context menu reaches the code', () => {
         await page.locator('[data-testid="context-menu"] button').evaluateAll((buttons) =>
           buttons.map((button) => button.getAttribute('data-testid'))
         )
-      ).toEqual(['menu-undo', 'menu-redo', 'menu-fit']);
+      ).toEqual(['menu-add-here', 'menu-undo', 'menu-redo', 'menu-fit']);
       await page.close();
     },
     CASE

@@ -58,6 +58,14 @@ export type SiteConfig = Capability & {
   run_call_span: Span;
 };
 
+export type Unresolved = {
+  text: string;
+  span: Span;
+  runner_index: number;
+  arg_index: number;
+  reason: string;
+};
+
 export type Site = Capability & {
   function: string;
   call_offset: number;
@@ -67,7 +75,7 @@ export type Site = Capability & {
   edges: Edge[];
   runners: Runner[];
   config: SiteConfig | null;
-  unresolved: unknown[];
+  unresolved: Unresolved[];
 };
 
 export type FileModel = {
@@ -95,6 +103,13 @@ export function lineOfOffset(source: string, offset: number): number {
   return upto.split('\n').length;
 }
 
+export function lineTextAt(source: string, offset: number): string {
+  const at = Math.max(0, Math.min(offset, source.length));
+  const start = source.lastIndexOf('\n', at - 1) + 1;
+  const end = source.indexOf('\n', at);
+  return source.slice(start, end === -1 ? source.length : end).trim();
+}
+
 export type Command =
   | { command: 'set_param'; site: number; block: string; ctor_arg_index: number; new_text: string }
   | {
@@ -105,7 +120,26 @@ export type Command =
       new_text: string;
     }
   | { command: 'set_display_name'; site: number; block: string; new_text: string }
-  | { command: 'set_config'; site: number; path: string; new_value: string };
+  | { command: 'set_config'; site: number; path: string; new_value: string }
+  | {
+      command: 'connect';
+      site: number;
+      from: string;
+      to: string;
+      port: string;
+      port_index: number | null;
+    }
+  | { command: 'disconnect'; site: number; edge: number }
+  | {
+      command: 'add_block';
+      site: number;
+      type: string;
+      template_args: string[];
+      ctor_args: string[];
+      var_name: string;
+    }
+  | { command: 'remove_from_graph'; site: number; block: string }
+  | { command: 'delete_block'; site: number; block: string };
 
 export function siteViewIds(sites: Site[]): string[] {
   const seen = new Map<string, number>();

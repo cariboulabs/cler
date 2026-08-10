@@ -926,7 +926,9 @@ describe('C. exactly one command per intentional commit', () => {
       await page.click('[data-testid="undo"]');
       await page.waitForTimeout(1800);
 
-      const observed = (await names(page)).filter((name) => name !== 'open_document');
+      const observed = (await names(page)).filter(
+        (name) => name !== 'open_document' && name !== 'palette'
+      );
       expect(observed, 'the draft commits first, the undo follows, neither is dropped').toEqual([
         'apply_commands',
         'apply_commands',

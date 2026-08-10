@@ -9,6 +9,7 @@
     type FieldAction,
     type Outcome
   } from './inspector';
+  import type { BlockSpec } from './palette';
   import { blockPorts, typeSignature } from './project';
   import type { Command, Site } from './schema';
 
@@ -17,13 +18,15 @@
     site: Site | undefined;
     siteIndex: number;
     selected: string | null;
+    spec: BlockSpec | undefined;
     enabled: boolean;
     submit: (command: Command) => Promise<Outcome>;
     open: boolean;
     ontoggle: () => void;
   };
 
-  const { path, site, siteIndex, selected, enabled, submit, open, ontoggle }: Props = $props();
+  const { path, site, siteIndex, selected, spec, enabled, submit, open, ontoggle }: Props =
+    $props();
 
   const IME_KEY_CODE = 229;
 
@@ -33,7 +36,7 @@
 
   const scope = $derived(`${path}::${siteIndex}::`);
   const block = $derived(site?.blocks.find((candidate) => candidate.var === selected));
-  const fields = $derived(block ? blockFields(siteIndex, block) : []);
+  const fields = $derived(block ? blockFields(siteIndex, block, spec) : []);
   const config = $derived(site?.config ?? null);
   const configRows = $derived(config ? configFields(siteIndex, config) : []);
   const ports = $derived(site && block ? blockPorts(site, block.var) : null);
@@ -118,7 +121,10 @@
 
 {#snippet fieldRow(field: Field, ownerReason: string | null)}
   <label class="field" class:ro={!field.editable}>
-    <span class="label">{field.label}</span>
+    <span class="label"
+      >{field.label}{#if field.slot}<span class="slot" data-slot={field.id}>{field.slot}</span
+        >{/if}</span
+    >
     <input
       type="text"
       data-field={field.id}
@@ -249,7 +255,7 @@
 
     {#if !enabled}
       <p class="muted" data-testid="viewer-note">
-        fixture mode — read-only viewer, editing needs the desktop shell
+        example mode — read-only viewer, editing needs the desktop shell
       </p>
     {/if}
   </div>
@@ -380,8 +386,16 @@
     gap: 2px;
   }
   .label {
+    display: flex;
+    gap: var(--sp-2);
     font-size: 11px;
     color: var(--muted);
+  }
+  .slot {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
   }
   input {
     width: 100%;
