@@ -98,8 +98,13 @@ export type Command =
   | { command: 'set_display_name'; site: number; block: string; new_text: string }
   | { command: 'set_config'; site: number; path: string; new_value: string };
 
-export function siteId(site: Site): string {
-  return `${site.function}@${site.call_offset}`;
+export function siteViewIds(sites: Site[]): string[] {
+  const seen = new Map<string, number>();
+  return sites.map((site) => {
+    const ordinal = seen.get(site.function) ?? 0;
+    seen.set(site.function, ordinal + 1);
+    return `${site.function}#${ordinal}`;
+  });
 }
 
 export function siteLabel(site: Site): string {

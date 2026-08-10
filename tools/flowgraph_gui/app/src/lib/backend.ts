@@ -27,6 +27,21 @@ export async function pickFile(): Promise<string | null> {
   return typeof picked === 'string' ? picked : null;
 }
 
+const tails = new Map<string, Promise<unknown>>();
+
+export function queued<T>(path: string, task: () => Promise<T>): Promise<T> {
+  const tail = tails.get(path) ?? Promise.resolve();
+  const next = tail.then(task, task);
+  tails.set(
+    path,
+    next.then(
+      () => undefined,
+      () => undefined
+    )
+  );
+  return next;
+}
+
 async function documentCall(command: string, args: Record<string, unknown>): Promise<DocumentState> {
   return (await invoker(command, args)) as DocumentState;
 }
@@ -81,25 +96,29 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+const NO_REASON = 'the edit was refused but no reason was given';
+const READABLE = /[a-z]{3}/i;
+const MAX_RAW = 200;
+
 function asText(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
 function phrase(value: unknown): string {
   return asText(value)?.replace(/_/g, ' ') ?? 'unknown error';
 }
 
-function rawText(rejection: unknown): string {
+function plainText(rejection: unknown): string | null {
   if (typeof rejection === 'string') return rejection;
   if (rejection instanceof Error) return rejection.message;
-  return String(rejection);
+  return null;
 }
 
 function parsed(rejection: unknown): Record<string, unknown> | null {
-  const direct = asRecord(rejection);
-  if (direct) return direct;
+  const text = plainText(rejection);
+  if (text === null) return asRecord(rejection);
   try {
-    return asRecord(JSON.parse(rawText(rejection)));
+    return asRecord(JSON.parse(text));
   } catch {
     return null;
   }
@@ -109,10 +128,46 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
+function clipped(text: string): string {
+  return text.length <= MAX_RAW ? text : `${text.slice(0, MAX_RAW)}…`;
+}
+
+function asJson(value: unknown): string | null {
+  try {
+    const text = JSON.stringify(value);
+    return typeof text === 'string' ? clipped(text) : null;
+  } catch {
+    return null;
+  }
+}
+
+function detailOf(record: Record<string, unknown>): string | null {
+  return (
+    asText(record.detail) ??
+    asText(record.message) ??
+    asText(record.reason) ??
+    asText(record.element) ??
+    asText(record.block) ??
+    asText(record.text) ??
+    asText(record.var_name)
+  );
+}
+
+function refused(what: string | null): string {
+  return what === null ? NO_REASON : `the backend refused: ${what}`;
+}
+
+function undescribed(rejection: unknown, record: Record<string, unknown> | null): string {
+  if (record) return refused(detailOf(record) ?? asJson(record));
+  const text = plainText(rejection)?.trim() ?? '';
+  if (text.length === 0) return NO_REASON;
+  return READABLE.test(text) ? text : refused(clipped(text));
+}
+
 export function describeApplyError(rejection: unknown): string {
   const record = parsed(rejection);
   const kind = record ? asText(record.error) : null;
-  if (!record || !kind) return rawText(rejection);
+  if (!record || !kind) return undescribed(rejection, record);
 
   switch (kind) {
     case 'not_editable': {
@@ -136,11 +191,7 @@ export function describeApplyError(rejection: unknown): string {
     case 'file_has_errors':
       return 'the file has parse errors — fix them before editing';
     default: {
-      const detail =
-        asText(record.element) ??
-        asText(record.block) ??
-        asText(record.text) ??
-        asText(record.var_name);
+      const detail = detailOf(record);
       return detail ? `${phrase(kind)}: ${detail}` : phrase(kind);
     }
   }

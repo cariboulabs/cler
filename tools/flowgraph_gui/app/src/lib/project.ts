@@ -27,8 +27,18 @@ export function portLabel(port: Port): string {
   return port.index === null ? port.name : `${port.name}[${port.index}]`;
 }
 
-export function edgeId(edge: Edge): string {
-  return `e${edge.runner_index}.${edge.arg_index}`;
+function edgeKey(edge: Edge): string {
+  return `${edge.from}->${edge.to}.${edge.port.name}[${edge.port.index ?? ''}]`;
+}
+
+export function edgeIds(edges: Edge[]): string[] {
+  const taken = new Map<string, number>();
+  return edges.map((edge) => {
+    const key = edgeKey(edge);
+    const ordinal = taken.get(key) ?? 0;
+    taken.set(key, ordinal + 1);
+    return `${key}#${ordinal}`;
+  });
 }
 
 export function nodeHeight(inputCount: number): number {
@@ -69,9 +79,9 @@ function toNode(site: Site, block: Block): BlockNode {
   };
 }
 
-function toEdge(edge: Edge): RoutedEdge {
+function toEdge(edge: Edge, id: string): RoutedEdge {
   return {
-    id: edgeId(edge),
+    id,
     type: 'routed',
     source: edge.from,
     target: edge.to,
@@ -87,22 +97,62 @@ function toEdge(edge: Edge): RoutedEdge {
 
 export function projectSite(site: Site): Projection {
   const declared = new Set(site.blocks.map((block) => block.var));
+  const wired = site.edges.filter((edge) => declared.has(edge.from) && declared.has(edge.to));
+  const ids = edgeIds(wired);
   return {
     nodes: site.blocks.map((block) => toNode(site, block)),
-    edges: site.edges
-      .filter((edge) => declared.has(edge.from) && declared.has(edge.to))
-      .map(toEdge)
+    edges: wired.map((edge, index) => toEdge(edge, ids[index] ?? edgeKey(edge)))
+  };
+}
+
+const NEW_NODE_GAP = 60;
+
+function neighboursOf(id: string, edges: RoutedEdge[], placed: Map<string, EdgePoint>): EdgePoint[] {
+  const spots: EdgePoint[] = [];
+  for (const edge of edges) {
+    const other = edge.source === id ? edge.target : edge.target === id ? edge.source : null;
+    const at = other === null ? undefined : placed.get(other);
+    if (at) spots.push(at);
+  }
+  return spots;
+}
+
+function spotFor(
+  id: string,
+  edges: RoutedEdge[],
+  placed: Map<string, EdgePoint>,
+  ordinal: number
+): EdgePoint {
+  const near = neighboursOf(id, edges, placed);
+  if (near.length > 0) {
+    const x = near.reduce((sum, spot) => sum + spot.x, 0) / near.length;
+    const y = near.reduce((sum, spot) => sum + spot.y, 0) / near.length;
+    return { x: x + NODE_WIDTH + NEW_NODE_GAP, y: y + NEW_NODE_GAP * (ordinal + 1) };
+  }
+  const all = [...placed.values()];
+  if (all.length === 0) return { x: NEW_NODE_GAP, y: NEW_NODE_GAP * (ordinal + 1) };
+  return {
+    x: Math.min(...all.map((spot) => spot.x)),
+    y: Math.max(...all.map((spot) => spot.y)) + nodeHeight(1) + NEW_NODE_GAP * (ordinal + 1)
   };
 }
 
 export function mergeProjection(previous: Projection, next: Projection): Projection {
   const kept = new Map(previous.nodes.map((node) => [node.id, node]));
   const bends = new Map(previous.edges.map((edge) => [edge.id, edge.data?.bends ?? []]));
+  const placed = new Map<string, EdgePoint>();
+  for (const node of next.nodes) {
+    const before = kept.get(node.id);
+    if (before) placed.set(node.id, before.position);
+  }
+  let added = 0;
   return {
     nodes: next.nodes.map((node) => {
       const before = kept.get(node.id);
-      if (!before) return node;
-      return { ...node, position: before.position, selected: before.selected };
+      if (before) return { ...node, position: before.position, selected: before.selected };
+      const spot = spotFor(node.id, next.edges, placed, added++);
+      placed.set(node.id, spot);
+      return { ...node, position: spot };
     }),
     edges: next.edges.map((edge) => ({ ...edge, data: { bends: bends.get(edge.id) ?? [] } }))
   };

@@ -1,30 +1,37 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import {
     blockFields,
     blurAction,
     configFields,
     keyAction,
     type Field,
-    type FieldAction
+    type FieldAction,
+    type Outcome
   } from './inspector';
   import { blockPorts, typeSignature } from './project';
   import type { Command, Site } from './schema';
 
   type Props = {
+    path: string;
     site: Site | undefined;
     siteIndex: number;
     selected: string | null;
     enabled: boolean;
-    submit: (command: Command) => Promise<string | null>;
+    submit: (command: Command) => Promise<Outcome>;
     open: boolean;
     ontoggle: () => void;
   };
 
-  const { site, siteIndex, selected, enabled, submit, open, ontoggle }: Props = $props();
+  const { path, site, siteIndex, selected, enabled, submit, open, ontoggle }: Props = $props();
+
+  const IME_KEY_CODE = 229;
 
   let drafts = $state<Record<string, string>>({});
   let errors = $state<Record<string, string>>({});
+  let inFlight = $state<Record<string, string>>({});
 
+  const scope = $derived(`${path}::${siteIndex}::`);
   const block = $derived(site?.blocks.find((candidate) => candidate.var === selected));
   const fields = $derived(block ? blockFields(siteIndex, block) : []);
   const config = $derived(site?.config ?? null);
@@ -38,17 +45,70 @@
         : 'Expand inspector  ]'
   );
 
-  function omit(map: Record<string, string>, id: string): Record<string, string> {
-    return Object.fromEntries(Object.entries(map).filter(([key]) => key !== id));
+  $effect(() => {
+    const prefix = scope;
+    untrack(() => {
+      drafts = within(drafts, prefix);
+      errors = within(errors, prefix);
+      inFlight = within(inFlight, prefix);
+    });
+  });
+
+  export function discardDrafts(): void {
+    drafts = {};
+    errors = {};
   }
 
-  async function run(field: Field, action: FieldAction) {
+  function keyOf(field: Field): string {
+    return scope + field.id;
+  }
+
+  function omit(map: Record<string, string>, key: string): Record<string, string> {
+    return Object.fromEntries(Object.entries(map).filter(([entry]) => entry !== key));
+  }
+
+  function within(map: Record<string, string>, prefix: string): Record<string, string> {
+    return Object.fromEntries(Object.entries(map).filter(([entry]) => entry.startsWith(prefix)));
+  }
+
+  function fieldElement(id: string): HTMLInputElement | null {
+    return document.querySelector<HTMLInputElement>(`input[data-field="${id}"]`);
+  }
+
+  function restoreFocus(id: string, hadFocus: boolean) {
+    if (!hadFocus) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    fieldElement(id)?.focus();
+  }
+
+  async function commit(field: Field, key: string, text: string) {
+    inFlight = { ...inFlight, [key]: text };
+    const hadFocus = document.activeElement === fieldElement(field.id);
+    const outcome = await submit(field.toCommand(text));
+    inFlight = omit(inFlight, key);
+    if (!key.startsWith(scope)) return;
+    drafts = omit(drafts, key);
+    errors = outcome.ok ? omit(errors, key) : { ...errors, [key]: outcome.message };
+    restoreFocus(field.id, hadFocus);
+  }
+
+  function run(field: Field, action: FieldAction) {
     if (action.kind === 'none') return;
-    drafts = omit(drafts, field.id);
-    errors = omit(errors, field.id);
-    if (action.kind !== 'commit') return;
-    const message = await submit(field.toCommand(action.text));
-    if (message) errors = { ...errors, [field.id]: message };
+    const key = keyOf(field);
+    if (action.kind === 'revert') {
+      if (inFlight[key] !== undefined) return;
+      drafts = omit(drafts, key);
+      errors = omit(errors, key);
+      return;
+    }
+    if (inFlight[key] === action.text) return;
+    void commit(field, key, action.text);
+  }
+
+  function onKeydown(event: KeyboardEvent, field: Field) {
+    if (event.isComposing || event.keyCode === IME_KEY_CODE) return;
+    run(field, keyAction(event.key, drafts[keyOf(field)], field.value));
   }
 
   function readable(text: string): string {
@@ -56,22 +116,22 @@
   }
 </script>
 
-{#snippet fieldRow(field: Field)}
+{#snippet fieldRow(field: Field, ownerReason: string | null)}
   <label class="field" class:ro={!field.editable}>
     <span class="label">{field.label}</span>
     <input
       type="text"
       data-field={field.id}
-      value={drafts[field.id] ?? field.value}
+      value={drafts[keyOf(field)] ?? field.value}
       disabled={!enabled || !field.editable}
       title={field.hint ? readable(field.hint) : undefined}
-      oninput={(event) => (drafts[field.id] = event.currentTarget.value)}
-      onblur={() => run(field, blurAction(drafts[field.id], field.value))}
-      onkeydown={(event) => run(field, keyAction(event.key, drafts[field.id], field.value))}
+      oninput={(event) => (drafts[keyOf(field)] = event.currentTarget.value)}
+      onblur={() => run(field, blurAction(drafts[keyOf(field)], field.value))}
+      onkeydown={(event) => onKeydown(event, field)}
     />
-    {#if errors[field.id]}
-      <span class="err" data-error={field.id}>{errors[field.id]}</span>
-    {:else if field.hint && field.hint !== block?.read_only_reason}
+    {#if errors[keyOf(field)]}
+      <span class="err" data-error={field.id}>{errors[keyOf(field)]}</span>
+    {:else if field.hint && field.hint !== ownerReason}
       <span class="hint">{readable(field.hint)}</span>
     {/if}
   </label>
@@ -135,7 +195,7 @@
         <h2>Parameters</h2>
         <div class="fields">
           {#each fields as field (field.id)}
-            {@render fieldRow(field)}
+            {@render fieldRow(field, block.read_only_reason)}
           {/each}
         </div>
       </section>
@@ -172,7 +232,7 @@
         {:else}
           <div class="fields">
             {#each configRows as field (field.id)}
-              {@render fieldRow(field)}
+              {@render fieldRow(field, config.read_only_reason)}
             {/each}
           </div>
         {/if}
@@ -228,10 +288,10 @@
   }
   h1 {
     margin: 0;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--faint);
+    color: var(--muted);
     font-weight: 600;
   }
   .collapsed h1 {
@@ -256,10 +316,10 @@
   }
   h2 {
     margin: 0 0 var(--sp-2);
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--faint);
+    color: var(--muted);
     font-weight: 600;
   }
   .source {
@@ -298,7 +358,7 @@
     border: 1px solid var(--danger-border);
     background: var(--danger-bg);
     border-radius: var(--radius-sm);
-    color: var(--danger);
+    color: var(--danger-fg);
     font-size: 11px;
   }
   .fields {
@@ -335,21 +395,20 @@
   }
   input:disabled {
     color: var(--muted);
-    background: color-mix(in srgb, var(--bg-2) 60%, transparent);
+    background: var(--bg-1);
     border-style: dashed;
-    opacity: 0.75;
     cursor: not-allowed;
   }
   .field.ro .label {
-    color: var(--faint);
+    color: var(--muted);
   }
   .hint {
-    font-size: 10px;
-    color: var(--faint);
+    font-size: 11px;
+    color: var(--muted);
   }
   .err {
-    font-size: 10px;
-    color: var(--danger);
+    font-size: 11px;
+    color: var(--danger-fg);
   }
   .ports {
     margin: 0;
@@ -365,16 +424,16 @@
     align-items: baseline;
   }
   .dir {
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--faint);
+    color: var(--muted);
     width: 22px;
     flex: none;
   }
   .port {
     font-family: var(--mono);
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--muted);
   }
   .muted {

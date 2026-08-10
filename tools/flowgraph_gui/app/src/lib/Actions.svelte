@@ -4,7 +4,6 @@
   type Props = {
     canUndo: boolean;
     canRedo: boolean;
-    busy: boolean;
     onundo: () => void;
     onredo: () => void;
     onopen: () => void;
@@ -23,7 +22,6 @@
   const {
     canUndo,
     canRedo,
-    busy,
     onundo,
     onredo,
     onopen,
@@ -72,9 +70,9 @@
   let savedTimer = 0;
 
   const actions = $derived<Action[]>([
-    { id: 'open', label: 'Open file', shortcut: 'Ctrl+O', enabled: !busy, run: onopen },
-    { id: 'undo', label: 'Undo', shortcut: 'Ctrl+Z', enabled: canUndo && !busy, run: onundo },
-    { id: 'redo', label: 'Redo', shortcut: 'Ctrl+Shift+Z', enabled: canRedo && !busy, run: onredo },
+    { id: 'open', label: 'Open file', shortcut: 'Ctrl+O', enabled: true, run: onopen },
+    { id: 'undo', label: 'Undo', shortcut: 'Ctrl+Z', enabled: canUndo, run: onundo },
+    { id: 'redo', label: 'Redo', shortcut: 'Ctrl+Shift+Z', enabled: canRedo, run: onredo },
     {
       id: 'zoom-out',
       label: 'Zoom out',
@@ -243,10 +241,10 @@
     color: var(--fg);
   }
   .tagline {
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--faint);
+    color: var(--muted);
   }
   .grow {
     flex: 1;
@@ -266,6 +264,9 @@
     place-items: center;
     background: transparent;
     border-color: transparent;
+    color: var(--fg);
+  }
+  .icon:disabled {
     color: var(--muted);
   }
   .icon:hover:not(:disabled) {
@@ -302,8 +303,8 @@
   }
   .key {
     font-family: var(--mono);
-    font-size: 10.5px;
-    color: var(--faint);
+    font-size: 11px;
+    color: var(--muted);
   }
   .toast {
     position: absolute;

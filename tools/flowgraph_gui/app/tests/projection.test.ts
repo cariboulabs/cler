@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fixtures } from '../src/fixtures';
 import { layout } from '../src/lib/layout';
-import { edgeId, projectSite, readOnlyNotes, type Projection } from '../src/lib/project';
+import { edgeIds, projectSite, readOnlyNotes, type Projection } from '../src/lib/project';
 import type { ParseResult, Site } from '../src/lib/schema';
 
 function fixture(name: string): ParseResult {
@@ -169,6 +169,6 @@ describe('spike', () => {
     const site = firstSite('spike');
     const projection = await laidOut(site);
     expect(projection.nodes.length).toBe(site.blocks.length);
-    expect(projection.edges.map((edge) => edge.id)).toEqual(site.edges.map(edgeId));
+    expect(projection.edges.map((edge) => edge.id)).toEqual(edgeIds(site.edges));
   });
 });

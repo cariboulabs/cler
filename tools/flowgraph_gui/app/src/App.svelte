@@ -22,6 +22,7 @@
     onExternalChange,
     openDocument,
     pickFile,
+    queued,
     redoDocument,
     reloadDocument,
     undoDocument
@@ -34,8 +35,15 @@
     type BlockNode as BlockNodeType,
     type RoutedEdge as RoutedEdgeType
   } from './lib/project';
-  import { siteId, siteLabel, type Command, type DocumentState, type Site } from './lib/schema';
+  import {
+    siteLabel,
+    siteViewIds,
+    type Command,
+    type DocumentState,
+    type Site
+  } from './lib/schema';
   import { fixtureNames } from './fixtures';
+  import type { Outcome } from './lib/inspector';
 
   const nodeTypes: NodeTypes = { block: BlockNode as unknown as NodeTypes[string] };
   const edgeTypes: EdgeTypes = { routed: RoutedEdge as unknown as EdgeTypes[string] };
@@ -69,12 +77,15 @@
   let nodes = $state.raw<BlockNodeType[]>([]);
   let edges = $state.raw<RoutedEdgeType[]>([]);
   let status = $state('');
-  let busy = $state(false);
   let viewKey = $state('');
   let leftOpen = $state(storedOpen(LEFT_PANEL));
   let rightOpen = $state(storedOpen(RIGHT_PANEL));
+  let inspector = $state<Inspector | null>(null);
+  let generation = 0;
 
   const site = $derived<Site | undefined>(doc.model.sites[siteIndex]);
+  const viewIds = $derived(siteViewIds(doc.model.sites));
+  const viewId = $derived(viewIds[siteIndex] ?? '');
   const notes = $derived(site ? readOnlyNotes(site) : []);
   const needsReload = $derived(changedOnDisk || doc.externalChange);
 
@@ -93,7 +104,7 @@
 
   $effect(() => {
     const current = site;
-    const key = current ? `${doc.path}#${siteId(current)}` : '';
+    const key = current ? `${doc.path}#${viewId}` : '';
     if (!current) {
       nodes = [];
       edges = [];
@@ -119,36 +130,76 @@
     };
   });
 
-  function show(next: DocumentState) {
+  function clampContext() {
+    const count = doc.model.sites.length;
+    if (count === 0) {
+      siteIndex = 0;
+      selected = null;
+      return;
+    }
+    if (siteIndex >= count || siteIndex < 0) siteIndex = count - 1;
+    if (count === 1) siteIndex = 0;
+    const current = doc.model.sites[siteIndex];
+    if (selected && !current?.blocks.some((block) => block.var === selected)) selected = null;
+  }
+
+  function adopt(next: DocumentState) {
+    if (next.path === doc.path && next.revision < doc.revision) return;
     doc = next;
-    siteIndex = 0;
-    selected = null;
+    clampContext();
+  }
+
+  function install(next: DocumentState, fresh: boolean) {
+    doc = next;
+    generation += 1;
     changedOnDisk = false;
+    if (fresh) {
+      siteIndex = 0;
+      selected = null;
+    }
+    clampContext();
+    inspector?.discardDrafts();
     status = next.model.sites.length === 0 ? 'no flowgraph site found in this file' : '';
   }
 
-  async function run(action: (path: string) => Promise<DocumentState>): Promise<string | null> {
-    busy = true;
+  function reset(next: DocumentState) {
+    install(next, true);
+  }
+
+  async function attempt(
+    action: (path: string) => Promise<DocumentState>,
+    take: (next: DocumentState) => void
+  ): Promise<Outcome> {
+    const era = generation;
     try {
-      doc = await action(doc.path);
+      const next = await action(doc.path);
       status = '';
-      return null;
+      take(next);
+      return { ok: true };
     } catch (error) {
       const message = describeApplyError(error);
-      if (message.includes(DISK_DRIFT)) changedOnDisk = true;
+      if (message.includes(DISK_DRIFT) && era === generation) changedOnDisk = true;
       status = message;
-      return message;
-    } finally {
-      busy = false;
+      return { ok: false, message };
     }
   }
 
-  async function reload() {
-    if (!(await run(reloadDocument))) changedOnDisk = false;
+  function run(action: (path: string) => Promise<DocumentState>): Promise<Outcome> {
+    const path = doc.path;
+    return queued(path, () => attempt(action, adopt));
   }
 
-  async function submit(command: Command): Promise<string | null> {
-    if (!editable) return 'fixture mode is a read-only viewer';
+  async function reload() {
+    const outcome = await attempt(reloadDocument, (next) => install(next, false));
+    if (!outcome.ok) changedOnDisk = true;
+  }
+
+  function discardOnReload() {
+    inspector?.discardDrafts();
+  }
+
+  async function submit(command: Command): Promise<Outcome> {
+    if (!editable) return { ok: false, message: 'fixture mode is a read-only viewer' };
     return run((path) => applyCommands(path, [command], doc.revision));
   }
 
@@ -157,7 +208,6 @@
       status = 'file dialog needs the desktop shell — pick a fixture below';
       return;
     }
-    busy = true;
     status = '';
     try {
       const path = await pickFile();
@@ -166,17 +216,15 @@
       const next = await openDocument(path);
       opened = path;
       if (previous && previous !== path) void closeDocument(previous).catch(() => undefined);
-      show(next);
+      reset(next);
     } catch (error) {
       status = describeApplyError(error);
-    } finally {
-      busy = false;
     }
   }
 
   function openFixture() {
     opened = null;
-    show(loadFixture(fixtureName));
+    reset(loadFixture(fixtureName));
   }
 
   function selectNode(id: string) {
@@ -201,7 +249,7 @@
     </div>
 
     <div class="body">
-      <button class="primary" onclick={openFile} disabled={busy}>Open file…</button>
+      <button class="primary" onclick={openFile}>Open file…</button>
 
       <section>
         <h2>File</h2>
@@ -220,7 +268,7 @@
         <section>
           <h2>Site</h2>
           <select bind:value={siteIndex}>
-            {#each doc.model.sites as candidate, i (siteId(candidate))}
+            {#each doc.model.sites as candidate, i (viewIds[i] ?? i)}
               <option value={i}>{siteLabel(candidate)}</option>
             {/each}
           </select>
@@ -284,7 +332,7 @@
           >This file changed on disk. Reloading replaces the open document and
           <strong>discards the undo history</strong>.</span
         >
-        <button onclick={reload} disabled={busy}>Reload</button>
+        <button onpointerdown={discardOnReload} onclick={reload}>Reload</button>
       </div>
     {/if}
 
@@ -310,7 +358,6 @@
           <Actions
             canUndo={doc.canUndo}
             canRedo={doc.canRedo}
-            {busy}
             onundo={() => void run(undoDocument)}
             onredo={() => void run(redoDocument)}
             onopen={() => void openFile()}
@@ -325,10 +372,12 @@
   </main>
 
   <Inspector
+    bind:this={inspector}
+    path={doc.path}
     {site}
     {siteIndex}
     {selected}
-    enabled={editable && !busy}
+    enabled={editable}
     {submit}
     open={rightOpen}
     ontoggle={() => (rightOpen = !rightOpen)}
@@ -364,10 +413,10 @@
   }
   h1 {
     margin: 0;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--faint);
+    color: var(--muted);
     font-weight: 600;
   }
   .collapsed h1 {
@@ -404,15 +453,15 @@
   }
   h2 {
     margin: 0 0 var(--sp-2);
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--faint);
+    color: var(--muted);
     font-weight: 600;
   }
   .path {
     font-family: var(--mono);
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--muted);
     word-break: break-all;
   }
@@ -449,8 +498,8 @@
   }
   .reason {
     font-family: var(--mono);
-    font-size: 10px;
-    color: var(--muted);
+    font-size: 11px;
+    color: var(--danger-fg);
   }
   .muted {
     margin: 0;
@@ -467,12 +516,12 @@
     background: var(--danger-bg);
     border-radius: var(--radius-sm);
     font-size: 11px;
-    color: var(--danger);
+    color: var(--danger-fg);
   }
   .attribution {
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.06em;
-    color: var(--faint);
+    color: var(--muted);
   }
   main {
     position: relative;

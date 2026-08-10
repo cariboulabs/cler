@@ -11,6 +11,8 @@ export type Field = {
 
 export type FieldAction = { kind: 'commit'; text: string } | { kind: 'revert' } | { kind: 'none' };
 
+export type Outcome = { ok: true } | { ok: false; message: string };
+
 const NO_DISPLAY_NAME = 'this block has no display-name argument';
 
 export function blurAction(draft: string | undefined, committed: string): FieldAction {

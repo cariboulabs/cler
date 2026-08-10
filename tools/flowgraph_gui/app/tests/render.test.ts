@@ -94,6 +94,22 @@ function viewportTransform(target: Page): Promise<string> {
   });
 }
 
+async function settledViewport(target: Page): Promise<string> {
+  let last = '';
+  await expect
+    .poll(
+      async () => {
+        const now = await viewportTransform(target);
+        const stable = now !== '' && now === last;
+        last = now;
+        return stable;
+      },
+      { interval: 250, timeout: 6000 }
+    )
+    .toBe(true);
+  return last;
+}
+
 function scaleOf(transform: string): number {
   const found = /scale\(([\d.]+)\)/.exec(transform)?.[1];
   if (!found) throw new Error(`no scale in "${transform}"`);
@@ -658,7 +674,7 @@ describe('top bar, context menu and shortcuts', () => {
   it(
     'zooms and refits from the keyboard',
     async () => {
-      const fitted = await viewportTransform(editor);
+      const fitted = await settledViewport(editor);
       const base = scaleOf(fitted);
 
       const settled = (zoom: number) =>
@@ -828,7 +844,7 @@ describe('retractable panels', () => {
       await editor.mouse.move(760, 460, { steps: 8 });
       await editor.mouse.up();
       await editor.waitForTimeout(400);
-      const before = await viewportTransform(editor);
+      const before = await settledViewport(editor);
 
       await editor.click('[data-testid="toggle-left"]');
       await settled('.sidebar', RAIL_WIDTH);
@@ -907,7 +923,7 @@ describe('fixture mode stays a read-only viewer', () => {
       expect(await viewer.locator('[data-testid="menu-undo"]').isDisabled()).toBe(true);
       expect(await viewer.locator('[data-testid="menu-fit"]').isDisabled()).toBe(false);
 
-      const fitted = await viewportTransform(viewer);
+      const fitted = await settledViewport(viewer);
       await viewer.click('[data-testid="menu-fit"]');
       await expect.poll(() => menu.count()).toBe(0);
 

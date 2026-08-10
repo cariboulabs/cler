@@ -125,7 +125,7 @@
   }
   .port-label {
     padding-left: 4px;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--muted);
     font-family: var(--mono);
   }

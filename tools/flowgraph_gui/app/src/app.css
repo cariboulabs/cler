@@ -30,6 +30,7 @@
   --muted: #8b98a9;
   --faint: #5a6675;
 
+  --danger-fg: #e66767;
   --danger-bg: #37181c;
   --danger-border: #6e2a30;
   --warn-bg: #332b18;
@@ -83,7 +84,8 @@ button:hover:not(:disabled) {
 }
 
 button:disabled {
-  opacity: 0.4;
+  color: var(--muted);
+  border-color: var(--border);
   cursor: not-allowed;
 }
 
@@ -175,5 +177,5 @@ select:hover {
 
 .svelte-flow__attribution {
   background: transparent;
-  color: var(--faint);
+  color: var(--muted);
 }
