@@ -41,9 +41,14 @@ exceptions rather than smuggled in:
 - **Tauri v2 shell** — OS effects only: file dialogs, watcher, atomic saves,
   process spawning, layout cache. Links the crate directly. It never touches
   document bytes except through the session.
-- **React Flow frontend** — renders the latest revision-tagged projection.
-  Transient UI state only (selection, zoom, positions, wire preview,
-  uncommitted field text).
+- **Svelte Flow frontend** (xyflow) — renders the latest revision-tagged
+  projection. Transient UI state only (selection, zoom, positions, wire
+  preview, uncommitted field text). Chosen over React Flow after checking
+  the full M1-M3 canvas requirement list (custom nodes/handles, parallel
+  edges, cycles, external positions, validation callbacks, palette DnD,
+  reconnect) — Svelte Flow 1.x covers all of it on the same xyflow core,
+  and its fine-grained reactivity fits the pushed-projection pattern
+  without React's memoization ceremony.
 
 Undo/versioning live in the crate, not the shell, so CLI and GUI edits share
 one transaction path and the tree can never be stale relative to the writer.
@@ -204,7 +209,7 @@ post-construction setter calls in the param panel (ctor args only —
 ```
 tools/flowgraph_gui/
   cler-graph/        Rust crate + CLI
-  app/               Tauri shell + React Flow frontend
+  app/               Tauri shell + Svelte Flow frontend
 ```
 
 Rust and node toolchains are confined here; never a dependency of the
@@ -241,4 +246,4 @@ framework. `tools/mermaid` is deleted at M1.
 - Write-back fidelity remains the top hazard even after the revision guard;
   the property tests and the splice-only rule are the mitigations, and
   Normalize stays opt-in forever.
-- webkit2gtk quirks on Linux; React Flow is DOM-mainstream, risk low.
+- webkit2gtk quirks on Linux; Svelte Flow is DOM-mainstream, risk low.
