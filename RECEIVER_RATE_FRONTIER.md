@@ -1,10 +1,52 @@
 # Frontier: the last 5% of the Pluto receiver rate
 
-Replaces `RESAMPLER_FRONTIER.md`. The resampler question it was written to ask
-is answered — the four resamplers were the dominant cost and are not any more.
-What is left is a ~5% shortfall with no measured owner, and a separate,
-probably more important defect: **payloads reach echo corrupted, and the
-receiver's own `crc_ok` counter cannot detect it.**
+> **Both questions this file was opened for are answered (2026-08-10).** The
+> shortfall had an owner: the block-to-island partition. `pinned_islands`
+> chose it from cost samples that are noisy by construction, so an identical
+> binary and config ran at 3.000, 2.85 or 2.57 MS/s depending on the draw.
+> Pinning the partition holds 3.000 in every window, and reception is 100%
+> (78/78 frames over 60 s). The corrupted-payload defect was a symptom of
+> running in a slow tier and disappears with it; the residual FEC errors are
+> ch2 adjacent-channel leakage copies of ch3 frames, 23 dB down.
+
+## Why the partition was a lottery
+
+Weights are `ewma_ns_per_call / ewma_items_per_call`, sampled on 1 call in 61
+(`COST_SAMPLE_PERIOD_CALLS`) and only when that call returned `is_ok()`. The
+LoRa decode chains are idle between bursts 842 ms apart, so in a 500 ms
+calibration window they usually record zero samples and are assigned the
+*median* of whatever else was sampled. The DP is deterministic; its input is
+not.
+
+Sweeping every cut of the 10-block topological order on the device:
+
+| islands | rate | what it is |
+|---|---|---|
+| 1/9 .. 4/6 | 2.378 – 2.460 MS/s | |
+| 5/5 | 2.577 MS/s | the even split, when calibration never applies |
+| 6/4 | 2.853 MS/s | what the cost model picks |
+| **7/3** | **3.001 MS/s** | the optimum |
+| 8/2 | 2.954 MS/s | |
+
+**The weight is not a load model.** It sums ns/item and discards item rate, so
+the channelizer at 3.0 MS/s counts the same as a decoder at 0.5 MS/s. Feeding
+it better samples (calibration longer than the traffic period) converges on
+6/4 every time — reliably mediocre. Fixing the sampling alone would lock that
+in; the objective needs the rate term the two EWMAs already contain.
+
+`PinnedIslandsConfig::manual_islands` now takes the split as block names per
+island, and is fatal on unknown, duplicate, missing, empty or
+reverse-topological entries.
+
+## Ceiling
+
+Replaying a 3 MS/s recording unthrottled, the graph sustains **3.078–3.122
+MS/s** at 1.597 cores, about 3% above the 3.000 it must hold. That thin margin
+is why only one cut clears the bar and why `channelizer.in` occupancy rides at
+its cap even when healthy.
+
+Four channels decoding at once (ch3 fanned into all four chains) costs about
++0.05 core and still holds 3.000 — decode cost tracks sample rate, not traffic.
 
 ## Where it stands
 
