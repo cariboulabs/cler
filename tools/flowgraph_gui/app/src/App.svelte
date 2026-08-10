@@ -22,6 +22,7 @@
     loadFixture,
     onExternalChange,
     openDocument,
+    openInEditor,
     pickFile,
     queued,
     redoDocument,
@@ -30,20 +31,27 @@
   } from './lib/backend';
   import { layout } from './lib/layout';
   import {
+    anchorSpans,
+    blockSpans,
     mergeProjection,
     projectSite,
     readOnlyNotes,
+    targetAt,
     typeColors,
     type BlockNode as BlockNodeType,
     type RoutedEdge as RoutedEdgeType
   } from './lib/project';
   import {
+    lineOfOffset,
     siteLabel,
     siteViewIds,
     type Command,
     type DocumentState,
-    type Site
+    type Site,
+    type Span
   } from './lib/schema';
+  import type { CodeMark } from './lib/code';
+  import type CodeDrawer from './lib/CodeDrawer.svelte';
   import { fixtureNames } from './fixtures';
   import type { Outcome } from './lib/inspector';
 
@@ -59,13 +67,23 @@
   const DISK_DRIFT = 'changed on disk';
   const LEFT_PANEL = 'cler.panel.left';
   const RIGHT_PANEL = 'cler.panel.right';
+  const DRAWER_PANEL = 'cler.panel.drawer';
+  const DRAWER_HEIGHT = 'cler.panel.drawer.height';
+  const DEFAULT_DRAWER_HEIGHT = 260;
+  const MIN_DRAWER_HEIGHT = 90;
 
-  function storedOpen(key: string): boolean {
-    return localStorage.getItem(key) !== 'closed';
+  function storedOpen(key: string, fallback: boolean): boolean {
+    const stored = localStorage.getItem(key);
+    return stored === null ? fallback : stored !== 'closed';
   }
 
   function storeOpen(key: string, open: boolean): void {
     localStorage.setItem(key, open ? 'open' : 'closed');
+  }
+
+  function storedHeight(): number {
+    const stored = Number(localStorage.getItem(DRAWER_HEIGHT));
+    return Number.isFinite(stored) && stored >= MIN_DRAWER_HEIGHT ? stored : DEFAULT_DRAWER_HEIGHT;
   }
 
   const startFixture = initialFixture();
@@ -80,8 +98,11 @@
   let edges = $state.raw<RoutedEdgeType[]>([]);
   let status = $state('');
   let viewKey = $state('');
-  let leftOpen = $state(storedOpen(LEFT_PANEL));
-  let rightOpen = $state(storedOpen(RIGHT_PANEL));
+  let leftOpen = $state(storedOpen(LEFT_PANEL, true));
+  let rightOpen = $state(storedOpen(RIGHT_PANEL, true));
+  let drawerOpen = $state(storedOpen(DRAWER_PANEL, false));
+  let drawerHeight = $state(storedHeight());
+  let drawer = $state<typeof CodeDrawer | null>(null);
   let inspector = $state<Inspector | null>(null);
   let generation = 0;
 
@@ -91,9 +112,21 @@
   const notes = $derived(site ? readOnlyNotes(site) : []);
   const legend = $derived<[string, string][]>(site ? [...typeColors(site)] : []);
   const needsReload = $derived(changedOnDisk || doc.externalChange);
+  const hits = $derived<Span[]>(site && selected ? blockSpans(site, selected) : []);
+  const marks = $derived<CodeMark[]>(
+    notes.map((note) => ({ span: note.span, reason: note.reason }))
+  );
+  const anchors = $derived<Span[]>(anchorSpans(doc.model.sites));
 
   $effect(() => storeOpen(LEFT_PANEL, leftOpen));
   $effect(() => storeOpen(RIGHT_PANEL, rightOpen));
+  $effect(() => storeOpen(DRAWER_PANEL, drawerOpen));
+  $effect(() => localStorage.setItem(DRAWER_HEIGHT, String(drawerHeight)));
+
+  $effect(() => {
+    if (!drawerOpen || untrack(() => drawer)) return;
+    void import('./lib/CodeDrawer.svelte').then((module) => (drawer = module.default));
+  });
 
   $effect(() => {
     if (!editable) return;
@@ -235,6 +268,48 @@
     rightOpen = true;
   }
 
+  function declarationOf(blockVar: string): Span | null {
+    return site?.blocks.find((block) => block.var === blockVar)?.span ?? null;
+  }
+
+  function viewSource(blockVar: string) {
+    selectNode(blockVar);
+    drawerOpen = true;
+  }
+
+  async function copyDeclaration(blockVar: string) {
+    const span = declarationOf(blockVar);
+    if (!span) return;
+    try {
+      await navigator.clipboard.writeText(doc.source.slice(span.start, span.end));
+      status = '';
+    } catch {
+      status = 'the clipboard is not available here';
+    }
+  }
+
+  async function openEditor(blockVar: string) {
+    if (!editable) {
+      status = 'opening an editor needs the desktop shell';
+      return;
+    }
+    const span = declarationOf(blockVar);
+    if (!span) return;
+    try {
+      await openInEditor(doc.path, lineOfOffset(doc.source, span.start));
+      status = '';
+    } catch (error) {
+      status = describeApplyError(error);
+    }
+  }
+
+  function pickInCode(offset: number) {
+    const target = targetAt(doc.model.sites, offset);
+    if (!target) return;
+    siteIndex = target.siteIndex;
+    selectNode(target.block);
+  }
+
 </script>
 
 <div class="shell">
@@ -361,17 +436,40 @@
           <Actions
             canUndo={doc.canUndo}
             canRedo={doc.canRedo}
+            canOpenEditor={editable}
             onundo={() => void run(undoDocument)}
             onredo={() => void run(redoDocument)}
             onopen={() => void openFile()}
             ontoggleleft={() => (leftOpen = !leftOpen)}
             ontoggleright={() => (rightOpen = !rightOpen)}
+            ontoggledrawer={() => (drawerOpen = !drawerOpen)}
+            onviewsource={viewSource}
+            oncopydeclaration={(block) => void copyDeclaration(block)}
+            onopeneditor={(block) => void openEditor(block)}
           />
           <Controls showLock={false} />
           <TypeLegend entries={legend} />
           <MiniMap bgColor="var(--bg-1)" maskColor="var(--scrim)" nodeColor="var(--border-hi)" />
         </SvelteFlow>
       {/key}
+
+      {#if drawer}
+        {@const Drawer = drawer}
+        <Drawer
+          open={drawerOpen}
+          source={doc.source}
+          path={doc.path}
+          revision={doc.revision}
+          readOnly={notes.length}
+          {hits}
+          {marks}
+          {anchors}
+          height={drawerHeight}
+          onpick={pickInCode}
+          ontoggle={() => (drawerOpen = !drawerOpen)}
+          onheight={(next) => (drawerHeight = next)}
+        />
+      {/if}
     </div>
   </main>
 

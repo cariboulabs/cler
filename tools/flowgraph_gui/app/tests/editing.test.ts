@@ -67,6 +67,7 @@ function documentState(next: FileModel): DocumentState {
     path: next.file,
     revision: 7,
     model: next,
+    source: '',
     canUndo: true,
     canRedo: false,
     externalChange: false

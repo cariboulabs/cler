@@ -1,5 +1,5 @@
 import type { Edge as FlowEdge, Node as FlowNode } from '@xyflow/svelte';
-import type { Block, Edge, Port, Site } from './schema';
+import type { Block, Edge, Port, Site, Span } from './schema';
 
 export const NODE_WIDTH = 230;
 const HEADER_HEIGHT = 74;
@@ -229,17 +229,45 @@ export function blockPorts(site: Site, blockVar: string): BlockPorts {
   return { inputs, outputs };
 }
 
-export type ReadOnlyNote = { element: string; reason: string };
+export type ReadOnlyNote = { element: string; reason: string; span: Span };
 
 export function readOnlyNotes(site: Site): ReadOnlyNote[] {
   const notes: ReadOnlyNote[] = [];
-  const push = (element: string, reason: string | null) => {
-    if (reason) notes.push({ element, reason });
+  const push = (element: string, reason: string | null, span: Span) => {
+    if (reason) notes.push({ element, reason, span });
   };
-  push(`site ${site.function}()`, site.read_only_reason);
-  for (const block of site.blocks) push(`block ${block.var}`, block.read_only_reason);
-  for (const edge of site.edges) push(`edge ${edge.from} → ${edge.to}`, edge.read_only_reason);
-  for (const runner of site.runners) push(`runner ${runner.block}`, runner.read_only_reason);
-  if (site.config) push('config', site.config.read_only_reason);
+  push(`site ${site.function}()`, site.read_only_reason, site.span);
+  for (const block of site.blocks) push(`block ${block.var}`, block.read_only_reason, block.span);
+  for (const edge of site.edges)
+    push(`edge ${edge.from} → ${edge.to}`, edge.read_only_reason, edge.span);
+  for (const runner of site.runners)
+    push(`runner ${runner.block}`, runner.read_only_reason, runner.span);
+  if (site.config) push('config', site.config.read_only_reason, site.config.run_call_span);
   return notes;
+}
+
+export function blockSpans(site: Site, blockVar: string): Span[] {
+  const block = site.blocks.find((candidate) => candidate.var === blockVar);
+  const runners = site.runners.filter((runner) => runner.block === blockVar);
+  return [...(block ? [block.span] : []), ...runners.map((runner) => runner.span)];
+}
+
+export function anchorSpans(sites: Site[]): Span[] {
+  return sites.flatMap((site) => [
+    ...site.blocks.map((block) => block.span),
+    ...site.runners.map((runner) => runner.span)
+  ]);
+}
+
+export type CodeTarget = { siteIndex: number; block: string };
+
+export function targetAt(sites: Site[], offset: number): CodeTarget | null {
+  const inside = (span: Span) => offset >= span.start && offset < span.end;
+  for (const [siteIndex, site] of sites.entries()) {
+    const block = site.blocks.find((candidate) => inside(candidate.span));
+    if (block) return { siteIndex, block: block.var };
+    const runner = site.runners.find((candidate) => inside(candidate.span));
+    if (runner) return { siteIndex, block: runner.block };
+  }
+  return null;
 }

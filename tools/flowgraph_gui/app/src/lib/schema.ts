@@ -84,10 +84,16 @@ export type DocumentState = {
   path: string;
   revision: number;
   model: FileModel;
+  source: string;
   canUndo: boolean;
   canRedo: boolean;
   externalChange: boolean;
 };
+
+export function lineOfOffset(source: string, offset: number): number {
+  const upto = source.slice(0, Math.max(0, Math.min(offset, source.length)));
+  return upto.split('\n').length;
+}
 
 export type Command =
   | { command: 'set_param'; site: number; block: string; ctor_arg_index: number; new_text: string }

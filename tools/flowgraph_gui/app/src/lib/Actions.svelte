@@ -4,11 +4,16 @@
   type Props = {
     canUndo: boolean;
     canRedo: boolean;
+    canOpenEditor: boolean;
     onundo: () => void;
     onredo: () => void;
     onopen: () => void;
     ontoggleleft: () => void;
     ontoggleright: () => void;
+    ontoggledrawer: () => void;
+    onviewsource: (block: string) => void;
+    oncopydeclaration: (block: string) => void;
+    onopeneditor: (block: string) => void;
   };
 
   type Action = {
@@ -16,17 +21,23 @@
     label: string;
     shortcut: string;
     enabled: boolean;
+    hint?: string;
     run: () => void;
   };
 
   const {
     canUndo,
     canRedo,
+    canOpenEditor,
     onundo,
     onredo,
     onopen,
     ontoggleleft,
-    ontoggleright
+    ontoggleright,
+    ontoggledrawer,
+    onviewsource,
+    oncopydeclaration,
+    onopeneditor
   }: Props = $props();
 
   const flow = useSvelteFlow();
@@ -44,7 +55,8 @@
     '+': 'zoom-in',
     '-': 'zoom-out',
     _: 'zoom-out',
-    '0': 'fit'
+    '0': 'fit',
+    '`': 'drawer'
   };
   const ICONS: Record<string, string[]> = {
     open: ['M2 12.6V4.4a.9.9 0 0 1 .9-.9h3.1l1.3 1.6h5.8a.9.9 0 0 1 .9.9v6.6a.9.9 0 0 1-.9.9H2.9a.9.9 0 0 1-.9-.9Z'],
@@ -62,10 +74,16 @@
       'M10 2h2.5A1.5 1.5 0 0 1 14 3.5V6',
       'M14 10v2.5a1.5 1.5 0 0 1-1.5 1.5H10',
       'M6 14H3.5A1.5 1.5 0 0 1 2 12.5V10'
+    ],
+    drawer: [
+      'M2.4 2.6h11.2a.9.9 0 0 1 .9.9v9a.9.9 0 0 1-.9.9H2.4a.9.9 0 0 1-.9-.9v-9a.9.9 0 0 1 .9-.9Z',
+      'M1.5 9.4h13',
+      'M4.4 5.1 6.2 6.9 4.4 8.7',
+      'M8 8.7h3.4'
     ]
   };
 
-  let menu = $state<{ x: number; y: number } | null>(null);
+  let menu = $state<{ x: number; y: number; block: string | null } | null>(null);
   let saved = $state(false);
   let savedTimer = 0;
 
@@ -93,10 +111,46 @@
       shortcut: 'Ctrl+0',
       enabled: true,
       run: () => void flow.fitView({ padding: 0.15, duration: FIT_MS })
+    },
+    {
+      id: 'drawer',
+      label: 'Toggle code',
+      shortcut: 'Ctrl+`',
+      enabled: true,
+      run: ontoggledrawer
     }
   ]);
 
-  const entries = $derived(actions.filter((action) => MENU_IDS.includes(action.id)));
+  const paneEntries = $derived(actions.filter((action) => MENU_IDS.includes(action.id)));
+
+  function nodeEntries(block: string): Action[] {
+    return [
+      {
+        id: 'view-source',
+        label: 'View source',
+        shortcut: 'Ctrl+`',
+        enabled: true,
+        run: () => onviewsource(block)
+      },
+      {
+        id: 'copy-declaration',
+        label: 'Copy declaration',
+        shortcut: '',
+        enabled: true,
+        run: () => oncopydeclaration(block)
+      },
+      {
+        id: 'open-editor',
+        label: 'Open in editor',
+        shortcut: '',
+        enabled: canOpenEditor,
+        hint: canOpenEditor ? undefined : 'opening an editor needs the desktop shell',
+        run: () => onopeneditor(block)
+      }
+    ];
+  }
+
+  const entries = $derived(menu?.block ? nodeEntries(menu.block) : paneEntries);
 
   function byId(id: string): Action | undefined {
     return actions.find((action) => action.id === id);
@@ -153,11 +207,15 @@
   function onContextMenu(event: MouseEvent) {
     menu = null;
     const target = event.target;
-    if (!(target instanceof Element) || !target.closest('.svelte-flow__pane')) return;
+    if (!(target instanceof Element)) return;
+    const node = target.closest('.svelte-flow__node');
+    const block = node?.getAttribute('data-id') ?? null;
+    if (!block && !target.closest('.svelte-flow__pane')) return;
     event.preventDefault();
     menu = {
       x: Math.min(event.clientX, window.innerWidth - MENU_WIDTH),
-      y: Math.min(event.clientY, window.innerHeight - MENU_HEIGHT)
+      y: Math.min(event.clientY, window.innerHeight - MENU_HEIGHT),
+      block
     };
   }
 </script>
@@ -170,7 +228,7 @@
   <span class="tagline">flowgraph editor</span>
   <span class="grow"></span>
   {#each actions as action (action.id)}
-    {#if action.id === 'zoom-out'}
+    {#if action.id === 'zoom-out' || action.id === 'drawer'}
       <span class="sep"></span>
     {/if}
     <button
@@ -207,7 +265,12 @@
 {#if menu}
   <div class="menu" data-testid="context-menu" style="left: {menu.x}px; top: {menu.y}px">
     {#each entries as entry (entry.id)}
-      <button data-testid="menu-{entry.id}" disabled={!entry.enabled} onclick={() => act(entry)}>
+      <button
+        data-testid="menu-{entry.id}"
+        title={entry.hint}
+        disabled={!entry.enabled}
+        onclick={() => act(entry)}
+      >
         <span>{entry.label}</span><span class="key">{entry.shortcut}</span>
       </button>
     {/each}

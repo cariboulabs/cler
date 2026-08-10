@@ -178,6 +178,42 @@ fn close_drops_the_session() {
 }
 
 #[test]
+fn every_state_carries_the_session_source() {
+    let path = temp_copy("hello_world.cpp");
+    let original = text(&path);
+    let docs = Documents::default();
+
+    let opened = document::open(&docs, as_str(&path)).expect("open");
+    assert_eq!(opened.source, original);
+
+    let applied = document::apply(&docs, as_str(&path), 0, set_param("source1", 1, "4.25f"))
+        .expect("set_param applies");
+    assert_ne!(applied.source, original);
+    assert!(applied.source.contains("4.25f"));
+    assert_eq!(applied.source, text(&path));
+
+    let undone = document::undo(&docs, as_str(&path)).expect("undo");
+    assert_eq!(undone.source, original);
+
+    let outside = format!("{original}\n// from elsewhere\n");
+    std::fs::write(&path, &outside).expect("external write");
+    let reloaded = document::reload(&docs, as_str(&path)).expect("reload");
+    assert_eq!(reloaded.source, outside);
+}
+
+#[test]
+fn the_serialised_state_names_the_source_beside_the_model() {
+    let path = temp_copy("hello_world.cpp");
+    let docs = Documents::default();
+    let opened = document::open(&docs, as_str(&path)).expect("open");
+    let value: Value = serde_json::to_value(&opened).expect("serialisable state");
+
+    assert_eq!(value["source"].as_str(), Some(text(&path).as_str()));
+    assert!(value["model"]["sites"].is_array());
+    assert!(value["canUndo"].is_boolean());
+}
+
+#[test]
 fn parse_file_reports_the_crate_model_with_a_digest() {
     let path = temp_copy("hello_world.cpp");
     let docs = Documents::default();

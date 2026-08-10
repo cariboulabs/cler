@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { fixtures } from '../fixtures';
+import { fixtures, fixtureSources } from '../fixtures';
 import type { Command, DocumentState } from './schema';
 
 export type Invoker = (command: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -80,15 +80,21 @@ export function onExternalChange(handler: (path: string) => void): Promise<Unlis
 
 export function loadFixture(name: string): DocumentState {
   const model = fixtures[name];
-  if (!model) throw new Error(`unknown fixture: ${name}`);
+  const source = fixtureSources[name];
+  if (!model || source === undefined) throw new Error(`unknown fixture: ${name}`);
   return {
     path: model.file,
     revision: 0,
     model,
+    source,
     canUndo: false,
     canRedo: false,
     externalChange: false
   };
+}
+
+export function openInEditor(path: string, line: number): Promise<void> {
+  return invoker('open_in_editor', { path, line }) as Promise<void>;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
