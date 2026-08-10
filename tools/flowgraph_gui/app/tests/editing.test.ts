@@ -326,12 +326,13 @@ describe('ipc payloads', () => {
       new_text: '4.0f'
     };
 
-    const state = await applyCommands('/tmp/hello_world.cpp', [command]);
+    const state = await applyCommands('/tmp/hello_world.cpp', [command], 3);
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.command).toBe('apply_commands');
-    expect(Object.keys(calls[0]?.args ?? {}).sort()).toEqual(['commands', 'path']);
+    expect(Object.keys(calls[0]?.args ?? {}).sort()).toEqual(['baseRevision', 'commands', 'path']);
     expect(calls[0]?.args.commands).toEqual([command]);
+    expect(calls[0]?.args.baseRevision).toBe(3);
     expect(JSON.stringify(calls[0]?.args)).not.toContain('base_revision');
     expect(JSON.stringify(calls[0]?.args)).not.toContain('version');
     expect(state.revision).toBe(7);
@@ -365,9 +366,11 @@ describe('re-render from the returned document state', () => {
     target.display_name = 'Renamed Source';
 
     record(() => documentState(after));
-    const state = await applyCommands(before.file, [
-      { command: 'set_param', site: 0, block: 'source1', ctor_arg_index: 1, new_text: '99.0f' }
-    ]);
+    const state = await applyCommands(
+      before.file,
+      [{ command: 'set_param', site: 0, block: 'source1', ctor_arg_index: 1, new_text: '99.0f' }],
+      0
+    );
 
     const nextSite = state.model.sites[0];
     if (!nextSite) throw new Error('returned state has no sites');

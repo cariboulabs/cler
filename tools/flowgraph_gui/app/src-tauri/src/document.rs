@@ -1,7 +1,9 @@
-use std::collections::hash_map::Entry;
+use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
+use std::hash::{BuildHasher, Hasher};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use cler_graph::{Command, DocumentSession, FileModel, Transaction, SCHEMA_VERSION};
 use serde::Serialize;
@@ -12,10 +14,9 @@ pub type Documents = Mutex<HashMap<PathBuf, Document>>;
 
 pub struct Document {
     session: DocumentSession,
+    spelling: String,
     written: String,
     external_change: bool,
-    undo_depth: usize,
-    redo_depth: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -43,6 +44,11 @@ enum Step {
     Redo,
 }
 
+enum WriteFailure {
+    Drift,
+    Io(std::io::Error),
+}
+
 pub fn canonical(path: &str) -> Result<PathBuf, String> {
     Path::new(path)
         .canonicalize()
@@ -50,44 +56,52 @@ pub fn canonical(path: &str) -> Result<PathBuf, String> {
 }
 
 pub fn open(docs: &Documents, path: &str) -> Result<DocumentState, String> {
+    let mut map = lock(docs);
+    if let Ok((key, doc)) = document(&mut map, path) {
+        revalidate(doc, &key);
+        return Ok(snapshot(&key, doc));
+    }
     let target = canonical(path)?;
-    let mut map = lock(docs)?;
-    let doc = match map.entry(target.clone()) {
-        Entry::Occupied(existing) => existing.into_mut(),
-        Entry::Vacant(slot) => slot.insert(fresh(&target)?),
-    };
-    Ok(snapshot(&target, doc))
+    let doc = fresh(&target, path)?;
+    let state = snapshot(&target, &doc);
+    map.insert(target, doc);
+    Ok(state)
 }
 
-pub fn close(docs: &Documents, path: &str) -> Result<(), String> {
-    let target = canonical(path)?;
-    lock(docs)?.remove(&target);
-    Ok(())
+pub fn close(docs: &Documents, path: &str) -> Option<PathBuf> {
+    let mut map = lock(docs);
+    let key = resolve(&map, path)?;
+    map.remove(&key);
+    let dir = key.parent()?.to_path_buf();
+    map.keys()
+        .all(|other| other.parent() != Some(dir.as_path()))
+        .then_some(dir)
 }
 
-pub fn apply(docs: &Documents, path: &str, commands: Vec<Value>) -> Result<DocumentState, String> {
-    let target = canonical(path)?;
+pub fn apply(
+    docs: &Documents,
+    path: &str,
+    base_revision: u64,
+    commands: Vec<Value>,
+) -> Result<DocumentState, String> {
     let commands: Vec<Command> =
         serde_json::from_value(Value::Array(commands)).map_err(|cause| cause.to_string())?;
-    let mut map = lock(docs)?;
-    let doc = document(&mut map, &target)?;
+    let mut map = lock(docs);
+    let (target, doc) = document(&mut map, path)?;
     refuse_external(doc, &target)?;
 
-    let base_revision = doc.session.revision();
-    let transaction = Transaction {
-        version: SCHEMA_VERSION.to_string(),
-        base_revision,
-        commands,
-    };
-    let outcome = doc
+    let pending = doc
         .session
-        .apply(transaction)
+        .preview(Transaction {
+            version: SCHEMA_VERSION.to_string(),
+            base_revision,
+            commands,
+        })
         .map_err(|cause| cause.to_string())?;
-    if outcome.revision != base_revision {
-        doc.undo_depth += 1;
-        doc.redo_depth = 0;
-        write(doc, &target)?;
+    if pending.changes() {
+        persist(doc, &target, pending.source())?;
     }
+    doc.session.commit(pending);
     Ok(snapshot(&target, doc))
 }
 
@@ -100,88 +114,89 @@ pub fn redo(docs: &Documents, path: &str) -> Result<DocumentState, String> {
 }
 
 pub fn reload(docs: &Documents, path: &str) -> Result<DocumentState, String> {
-    let target = canonical(path)?;
+    let mut map = lock(docs);
+    let (target, doc) = document(&mut map, path)?;
     let text = read(&target)?;
-    let mut map = lock(docs)?;
-    let doc = document(&mut map, &target)?;
-    doc.session
-        .reload(text.clone())
-        .map_err(|cause| cause.to_string())?;
+    if text != doc.session.source() {
+        doc.session
+            .reload(text.clone())
+            .map_err(|cause| cause.to_string())?;
+    }
     doc.written = text;
     doc.external_change = false;
-    doc.undo_depth = 0;
-    doc.redo_depth = 0;
     Ok(snapshot(&target, doc))
 }
 
-pub fn parse_file(path: &str) -> Result<String, String> {
+pub fn parse_file(docs: &Documents, path: &str) -> Result<String, String> {
+    let map = lock(docs);
+    if let Some(doc) = resolve(&map, path).and_then(|key| map.get(&key)) {
+        return serde_json::to_string(&model_of(&doc.session)).map_err(|cause| cause.to_string());
+    }
+    drop(map);
     let target = canonical(path)?;
     let session = DocumentSession::open(&target).map_err(|cause| cause.to_string())?;
     serde_json::to_string(&model_of(&session)).map_err(|cause| cause.to_string())
 }
 
 pub fn note_disk_event(docs: &Documents, path: &Path) -> bool {
-    let Ok(mut map) = docs.lock() else {
-        return false;
-    };
+    let mut map = lock(docs);
     let Some(doc) = map.get_mut(path) else {
         return false;
     };
-    let Ok(bytes) = std::fs::read(path) else {
-        return false;
-    };
-    if bytes == doc.written.as_bytes() {
-        return false;
-    }
-    let first_notice = !doc.external_change;
-    doc.external_change = true;
-    first_notice
+    let quiet = !doc.external_change;
+    revalidate(doc, path);
+    doc.external_change && quiet
 }
 
 fn step(docs: &Documents, path: &str, step: Step) -> Result<DocumentState, String> {
-    let target = canonical(path)?;
-    let mut map = lock(docs)?;
-    let doc = document(&mut map, &target)?;
+    let mut map = lock(docs);
+    let (target, doc) = document(&mut map, path)?;
     refuse_external(doc, &target)?;
-    match step {
-        Step::Undo => {
-            doc.session.undo().map_err(|cause| cause.to_string())?;
-            doc.undo_depth = doc.undo_depth.saturating_sub(1);
-            doc.redo_depth += 1;
-        }
-        Step::Redo => {
-            doc.session.redo().map_err(|cause| cause.to_string())?;
-            doc.redo_depth = doc.redo_depth.saturating_sub(1);
-            doc.undo_depth += 1;
-        }
+    let pending = match step {
+        Step::Undo => doc.session.preview_undo(),
+        Step::Redo => doc.session.preview_redo(),
     }
-    write(doc, &target)?;
+    .map_err(|cause| cause.to_string())?;
+    persist(doc, &target, pending.source())?;
+    doc.session.commit(pending);
     Ok(snapshot(&target, doc))
 }
 
-fn fresh(target: &Path) -> Result<Document, String> {
+fn fresh(target: &Path, spelling: &str) -> Result<Document, String> {
     let session = DocumentSession::open(target).map_err(|cause| cause.to_string())?;
     let written = session.source().to_string();
     Ok(Document {
         session,
+        spelling: spelling.to_string(),
         written,
         external_change: false,
-        undo_depth: 0,
-        redo_depth: 0,
     })
 }
 
-fn lock(docs: &Documents) -> Result<MutexGuard<'_, HashMap<PathBuf, Document>>, String> {
-    docs.lock()
-        .map_err(|_| "the document store lock is poisoned".to_string())
+fn lock(docs: &Documents) -> MutexGuard<'_, HashMap<PathBuf, Document>> {
+    docs.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn resolve(map: &HashMap<PathBuf, Document>, path: &str) -> Option<PathBuf> {
+    if let Ok(target) = canonical(path) {
+        if map.contains_key(&target) {
+            return Some(target);
+        }
+    }
+    let given = Path::new(path);
+    map.iter()
+        .find(|(key, doc)| key.as_path() == given || doc.spelling == path)
+        .map(|(key, _)| key.clone())
 }
 
 fn document<'a>(
     map: &'a mut HashMap<PathBuf, Document>,
-    target: &Path,
-) -> Result<&'a mut Document, String> {
-    map.get_mut(target)
-        .ok_or_else(|| format!("no open document for {}", target.display()))
+    path: &str,
+) -> Result<(PathBuf, &'a mut Document), String> {
+    let missing = || format!("no open document for {path}");
+    let key = resolve(map, path).ok_or_else(missing)?;
+    let doc = map.get_mut(&key).ok_or_else(missing)?;
+    Ok((key, doc))
 }
 
 fn snapshot(target: &Path, doc: &Document) -> DocumentState {
@@ -189,8 +204,8 @@ fn snapshot(target: &Path, doc: &Document) -> DocumentState {
         path: target.display().to_string(),
         revision: doc.session.revision(),
         model: model_of(&doc.session),
-        can_undo: doc.undo_depth > 0,
-        can_redo: doc.redo_depth > 0,
+        can_undo: doc.session.can_undo(),
+        can_redo: doc.session.can_redo(),
         external_change: doc.external_change,
     }
 }
@@ -204,6 +219,11 @@ fn model_of(session: &DocumentSession) -> DocumentModel {
     }
 }
 
+fn revalidate(doc: &mut Document, target: &Path) {
+    doc.external_change =
+        !matches!(std::fs::read(target), Ok(bytes) if bytes == doc.written.as_bytes());
+}
+
 fn refuse_external(doc: &mut Document, target: &Path) -> Result<(), String> {
     let bytes = std::fs::read(target)
         .map_err(|cause| format!("cannot read {}: {cause}", target.display()))?;
@@ -211,18 +231,29 @@ fn refuse_external(doc: &mut Document, target: &Path) -> Result<(), String> {
         return Ok(());
     }
     doc.external_change = true;
-    Err(format!(
-        "{} changed on disk since the last write; reload before editing",
-        target.display()
-    ))
+    Err(drifted(target))
 }
 
-fn write(doc: &mut Document, target: &Path) -> Result<(), String> {
-    write_atomic(target, doc.session.source())
-        .map_err(|cause| format!("cannot write {}: {cause}", target.display()))?;
-    doc.written = doc.session.source().to_string();
-    doc.external_change = false;
-    Ok(())
+fn drifted(target: &Path) -> String {
+    format!(
+        "{} changed on disk since the last write; reload before editing",
+        target.display()
+    )
+}
+
+fn persist(doc: &mut Document, target: &Path, contents: &str) -> Result<(), String> {
+    match write_atomic(target, contents, &doc.written) {
+        Ok(()) => {
+            doc.written = contents.to_string();
+            doc.external_change = false;
+            Ok(())
+        }
+        Err(WriteFailure::Drift) => {
+            doc.external_change = true;
+            Err(drifted(target))
+        }
+        Err(WriteFailure::Io(cause)) => Err(format!("cannot write {}: {cause}", target.display())),
+    }
 }
 
 fn read(target: &Path) -> Result<String, String> {
@@ -230,25 +261,70 @@ fn read(target: &Path) -> Result<String, String> {
         .map_err(|cause| format!("cannot read {}: {cause}", target.display()))
 }
 
-fn write_atomic(target: &Path, contents: &str) -> std::io::Result<()> {
-    std::fs::OpenOptions::new().write(true).open(target)?;
-    let original = std::fs::metadata(target)?;
+fn write_atomic(target: &Path, contents: &str, expected: &str) -> Result<(), WriteFailure> {
+    let original = std::fs::metadata(target).map_err(WriteFailure::Io)?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(target)
+        .map_err(WriteFailure::Io)?;
+    let temp = temp_sibling(target);
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(WriteFailure::Io)?;
+    let staged = stage(file, &original, contents, target, expected);
+    if staged.is_err() {
+        std::fs::remove_file(&temp).ok();
+        return staged;
+    }
+    std::fs::rename(&temp, target).map_err(WriteFailure::Io)?;
+    sync_parent(target);
+    Ok(())
+}
+
+fn stage(
+    mut file: std::fs::File,
+    original: &std::fs::Metadata,
+    contents: &str,
+    target: &Path,
+    expected: &str,
+) -> Result<(), WriteFailure> {
+    file.write_all(contents.as_bytes())
+        .map_err(WriteFailure::Io)?;
+    file.sync_all().map_err(WriteFailure::Io)?;
+    file.set_permissions(original.permissions())
+        .map_err(WriteFailure::Io)?;
+    inherit_owner(original, &file);
+    if std::fs::read(target).map_err(WriteFailure::Io)? != expected.as_bytes() {
+        return Err(WriteFailure::Drift);
+    }
+    Ok(())
+}
+
+fn temp_sibling(target: &Path) -> PathBuf {
     let name = target
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| "document".to_string());
-    let temp = target.with_file_name(format!(".{name}.cler-gui.tmp"));
-    std::fs::write(&temp, contents)?;
-    std::fs::set_permissions(&temp, original.permissions())?;
-    inherit_owner(&original, &temp);
-    std::fs::rename(&temp, target)
+    let token = RandomState::new().build_hasher().finish();
+    target.with_file_name(format!(".{name}.{token:016x}.cler-gui.tmp"))
+}
+
+fn sync_parent(target: &Path) {
+    if let Some(dir) = target.parent() {
+        if let Ok(handle) = std::fs::File::open(dir) {
+            handle.sync_all().ok();
+        }
+    }
 }
 
 #[cfg(unix)]
-fn inherit_owner(original: &std::fs::Metadata, temp: &Path) {
+fn inherit_owner(original: &std::fs::Metadata, temp: &std::fs::File) {
     use std::os::unix::fs::MetadataExt;
-    std::os::unix::fs::chown(temp, Some(original.uid()), Some(original.gid())).ok();
+    use std::os::unix::io::AsFd;
+    std::os::unix::fs::fchown(temp.as_fd(), Some(original.uid()), Some(original.gid())).ok();
 }
 
 #[cfg(not(unix))]
-fn inherit_owner(_original: &std::fs::Metadata, _temp: &Path) {}
+fn inherit_owner(_original: &std::fs::Metadata, _temp: &std::fs::File) {}

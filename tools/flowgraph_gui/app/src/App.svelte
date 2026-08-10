@@ -148,7 +148,7 @@
 
   async function submit(command: Command): Promise<string | null> {
     if (!editable) return 'fixture mode is a read-only viewer';
-    return run((path) => applyCommands(path, [command]));
+    return run((path) => applyCommands(path, [command], doc.revision));
   }
 
   async function openFile() {

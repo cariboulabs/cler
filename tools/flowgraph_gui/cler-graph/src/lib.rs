@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use tree_sitter::{Parser, Tree};
 
-pub use apply::{ApplyError, ApplyOutcome, Command, Splice, Transaction};
+pub use apply::{ApplyError, ApplyOutcome, Command, PendingApply, Splice, Transaction};
 pub use model::{FileModel, Site, SCHEMA_VERSION};
 pub use palette::extract_specs;
 pub use palette_types::BlockSpec;
@@ -103,5 +103,13 @@ impl DocumentSession {
 
     pub fn has_errors(&self) -> bool {
         self.tree.root_node().has_error()
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
     }
 }

@@ -51,8 +51,12 @@ export function redoDocument(path: string): Promise<DocumentState> {
   return documentCall('redo', { path });
 }
 
-export function applyCommands(path: string, commands: Command[]): Promise<DocumentState> {
-  return documentCall('apply_commands', { path, commands });
+export function applyCommands(
+  path: string,
+  commands: Command[],
+  baseRevision: number
+): Promise<DocumentState> {
+  return documentCall('apply_commands', { path, commands, baseRevision });
 }
 
 export function onExternalChange(handler: (path: string) => void): Promise<UnlistenFn> {

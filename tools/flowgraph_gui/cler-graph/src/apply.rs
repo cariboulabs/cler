@@ -119,6 +119,30 @@ pub struct ApplyOutcome {
     pub splices: Vec<Splice>,
 }
 
+enum PendingKind {
+    Edit,
+    Undo,
+    Redo,
+}
+
+pub struct PendingApply {
+    source: String,
+    tree: Tree,
+    splices: Vec<Splice>,
+    changed: bool,
+    kind: PendingKind,
+}
+
+impl PendingApply {
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub fn changes(&self) -> bool {
+        self.changed
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "error", rename_all = "snake_case")]
 pub enum ApplyError {
@@ -1043,6 +1067,11 @@ fn merge(
 
 impl DocumentSession {
     pub fn apply(&mut self, transaction: Transaction) -> Result<ApplyOutcome, ApplyError> {
+        let pending = self.preview(transaction)?;
+        Ok(self.commit(pending))
+    }
+
+    pub fn preview(&self, transaction: Transaction) -> Result<PendingApply, ApplyError> {
         if transaction.version != SCHEMA_VERSION {
             return Err(ApplyError::SchemaMismatch {
                 expected: SCHEMA_VERSION,
@@ -1068,9 +1097,12 @@ impl DocumentSession {
         }
         let (next, splices) = merge(&self.source, splices)?;
         if next == self.source {
-            return Ok(ApplyOutcome {
-                revision: self.revision,
+            return Ok(PendingApply {
+                source: next,
+                tree: self.tree.clone(),
                 splices,
+                changed: false,
+                kind: PendingKind::Edit,
             });
         }
 
@@ -1081,29 +1113,88 @@ impl DocumentSession {
             return Err(ApplyError::ProducesParseError);
         }
 
-        let previous = std::mem::replace(&mut self.source, next);
-        self.undo.push(previous);
-        self.redo.clear();
-        self.tree = tree;
-        self.revision += 1;
-        Ok(ApplyOutcome {
-            revision: self.revision,
+        Ok(PendingApply {
+            source: next,
+            tree,
             splices,
+            changed: true,
+            kind: PendingKind::Edit,
         })
     }
 
+    pub fn preview_undo(&self) -> Result<PendingApply, ApplyError> {
+        self.pending_snapshot(
+            self.undo.last(),
+            PendingKind::Undo,
+            ApplyError::NothingToUndo,
+        )
+    }
+
+    pub fn preview_redo(&self) -> Result<PendingApply, ApplyError> {
+        self.pending_snapshot(
+            self.redo.last(),
+            PendingKind::Redo,
+            ApplyError::NothingToRedo,
+        )
+    }
+
+    pub fn commit(&mut self, pending: PendingApply) -> ApplyOutcome {
+        if !pending.changed {
+            return ApplyOutcome {
+                revision: self.revision,
+                splices: pending.splices,
+            };
+        }
+        let previous = std::mem::replace(&mut self.source, pending.source);
+        self.tree = pending.tree;
+        self.revision += 1;
+        match pending.kind {
+            PendingKind::Edit => {
+                self.undo.push(previous);
+                self.redo.clear();
+            }
+            PendingKind::Undo => {
+                self.undo.pop();
+                self.redo.push(previous);
+            }
+            PendingKind::Redo => {
+                self.redo.pop();
+                self.undo.push(previous);
+            }
+        }
+        ApplyOutcome {
+            revision: self.revision,
+            splices: pending.splices,
+        }
+    }
+
     pub fn undo(&mut self) -> Result<u64, ApplyError> {
-        let restored = self.undo.pop().ok_or(ApplyError::NothingToUndo)?;
-        let replaced = self.swap_source(restored)?;
-        self.redo.push(replaced);
-        Ok(self.revision)
+        let pending = self.preview_undo()?;
+        Ok(self.commit(pending).revision)
     }
 
     pub fn redo(&mut self) -> Result<u64, ApplyError> {
-        let restored = self.redo.pop().ok_or(ApplyError::NothingToRedo)?;
-        let replaced = self.swap_source(restored)?;
-        self.undo.push(replaced);
-        Ok(self.revision)
+        let pending = self.preview_redo()?;
+        Ok(self.commit(pending).revision)
+    }
+
+    fn pending_snapshot(
+        &self,
+        snapshot: Option<&String>,
+        kind: PendingKind,
+        missing: ApplyError,
+    ) -> Result<PendingApply, ApplyError> {
+        let source = snapshot.ok_or(missing)?.clone();
+        let tree = parse_source(&source).map_err(|cause| ApplyError::Reparse {
+            detail: cause.to_string(),
+        })?;
+        Ok(PendingApply {
+            source,
+            tree,
+            splices: Vec::new(),
+            changed: true,
+            kind,
+        })
     }
 
     pub fn reload(&mut self, text: impl Into<String>) -> Result<(u64, bool), ApplyError> {

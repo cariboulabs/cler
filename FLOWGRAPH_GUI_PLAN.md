@@ -74,7 +74,8 @@ Every gesture is a command: `set_param`, `set_display_name`, `add_block`,
   when an external reload is accepted** — otherwise Ctrl-Z after a reload
   silently destroys code written in another editor.
 - **External edits**: watcher event → read file → compare bytes against what
-  the session last wrote. Identical = self-write, ignore (no timing window).
+  the session last wrote. Identical = self-write, ignore (the check happens
+  immediately before the rename).
   Different = reload banner; before *any* write the session re-checks the
   on-disk hash against its base revision and aborts on mismatch.
 - M0 benchmarks the committed-edit round-trip: p95 ack < 50 ms on the

@@ -1,7 +1,7 @@
 pub mod document;
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -25,23 +25,31 @@ fn open_document(
     docs: State<'_, Documents>,
     watcher: State<'_, FileWatcher>,
 ) -> Result<DocumentState, String> {
-    let state = document::open(&docs, &path)?;
-    watch_parent(&watcher, Path::new(&state.path))?;
-    Ok(state)
+    let target = document::canonical(&path)?;
+    watch_parent(&watcher, &target)?;
+    document::open(&docs, &path)
 }
 
 #[tauri::command]
-fn close_document(path: String, docs: State<'_, Documents>) -> Result<(), String> {
-    document::close(&docs, &path)
+fn close_document(
+    path: String,
+    docs: State<'_, Documents>,
+    watcher: State<'_, FileWatcher>,
+) -> Result<(), String> {
+    if let Some(dir) = document::close(&docs, &path) {
+        held(watcher.inner()).unwatch(&dir).ok();
+    }
+    Ok(())
 }
 
 #[tauri::command]
 fn apply_commands(
     path: String,
+    base_revision: u64,
     commands: Vec<Value>,
     docs: State<'_, Documents>,
 ) -> Result<DocumentState, String> {
-    document::apply(&docs, &path, commands)
+    document::apply(&docs, &path, base_revision, commands)
 }
 
 #[tauri::command]
@@ -60,17 +68,19 @@ fn reload_document(path: String, docs: State<'_, Documents>) -> Result<DocumentS
 }
 
 #[tauri::command]
-fn parse_file(path: String) -> Result<String, String> {
-    document::parse_file(&path)
+fn parse_file(path: String, docs: State<'_, Documents>) -> Result<String, String> {
+    document::parse_file(&docs, &path)
+}
+
+fn held(watcher: &FileWatcher) -> MutexGuard<'_, RecommendedWatcher> {
+    watcher.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn watch_parent(watcher: &FileWatcher, target: &Path) -> Result<(), String> {
     let dir = target
         .parent()
         .ok_or_else(|| format!("{} has no parent directory", target.display()))?;
-    watcher
-        .lock()
-        .map_err(|_| "the file watcher lock is poisoned".to_string())?
+    held(watcher)
         .watch(dir, RecursiveMode::NonRecursive)
         .map_err(|cause| format!("cannot watch {}: {cause}", dir.display()))
 }
