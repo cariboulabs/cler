@@ -12,6 +12,8 @@
 
   const STUB = 14;
   const BADGE_OFFSET = 34;
+  const ANCHOR = 18;
+  const ANCHOR_INSET = 16;
 
   function routedPoints(bends: EdgePoint[]): EdgePoint[] {
     const start = { x: props.sourceX, y: props.sourceY };
@@ -60,13 +62,17 @@
 {#if props.data?.reconnectable}
   <EdgeReconnectAnchor
     type="source"
-    position={{ x: props.sourceX, y: props.sourceY }}
+    size={ANCHOR}
+    position={{ x: props.sourceX + ANCHOR_INSET, y: props.sourceY }}
     class="cler-anchor"
+    data-anchor="source:{props.id}"
   />
   <EdgeReconnectAnchor
     type="target"
-    position={{ x: props.targetX, y: props.targetY }}
+    size={ANCHOR}
+    position={{ x: props.targetX - ANCHOR_INSET, y: props.targetY }}
     class="cler-anchor"
+    data-anchor="target:{props.id}"
   />
 {/if}
 {#if props.data?.conflict}
@@ -76,6 +82,14 @@
 {/if}
 
 <style>
+  :global(.svelte-flow__edge-label.cler-anchor) {
+    cursor: grab;
+    border-radius: 50%;
+  }
+  :global(.svelte-flow__edge:hover .cler-anchor),
+  :global(.svelte-flow__edge-label.cler-anchor:hover) {
+    background: color-mix(in srgb, var(--accent) 35%, transparent);
+  }
   :global(.svelte-flow__edge-label.cler-type-badge) {
     padding: 1px 5px;
     border-radius: 4px;

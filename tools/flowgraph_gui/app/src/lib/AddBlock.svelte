@@ -25,8 +25,8 @@
   const { specs, documentPath, taken, onadd }: Props = $props();
 
   const flow = useSvelteFlow();
-  const POPOVER_WIDTH = 300;
-  const POPOVER_HEIGHT = 320;
+  const POPOVER_WIDTH = 316;
+  const POPOVER_HEIGHT = 436;
 
   let at = $state<{ x: number; y: number } | null>(null);
   let spot = $state<EdgePoint>({ x: 0, y: 0 });
@@ -153,8 +153,8 @@
       {#if refusal && refusal.field === null}
         <p class="err" data-add-error="form">{refusal.message}</p>
       {/if}
+      <p class="note">declared unwired — wire it to put it in the graph</p>
       <footer>
-        <span class="note">declared unwired — wire it to put it in the graph</span>
         <button data-testid="add-cancel" onclick={close}>Cancel</button>
         <button class="primary" data-testid="add-confirm" disabled={busy} onclick={confirm}>
           Add
@@ -184,7 +184,6 @@
         {/each}
       </ul>
       <footer>
-        <span class="note"></span>
         <button data-testid="add-cancel" onclick={close}>Cancel</button>
       </footer>
     {/if}
@@ -294,14 +293,15 @@
   }
   footer {
     display: flex;
-    align-items: center;
+    justify-content: flex-end;
     gap: var(--sp-2);
   }
   footer button {
     flex: none;
+    width: auto;
   }
   .note {
-    flex: 1;
+    margin: 0;
     font-size: 10px;
     color: var(--muted);
   }

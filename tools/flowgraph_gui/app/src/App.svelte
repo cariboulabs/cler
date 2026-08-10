@@ -719,9 +719,8 @@
         <div class="dialog" role="dialog" aria-modal="true" data-testid="delete-refusal">
           <h2>{refusal.block} cannot be deleted</h2>
           <p>
-            Its declaration is still referenced in {refusal.spans.length}
-            {refusal.spans.length === 1 ? 'place' : 'places'} outside the flowgraph. Remove those
-            references first — the editor will not rewrite code it does not own.
+            {`Its declaration is still referenced in ${refusal.spans.length} ${refusal.spans.length === 1 ? 'place' : 'places'} outside the flowgraph.`}
+            Remove those references first — the editor will not rewrite code it does not own.
           </p>
           <ul>
             {#each refusal.spans as span (span.start)}

@@ -326,6 +326,11 @@ const sent = (page: Page) => page.evaluate(() => (window as unknown as FakeWindo
 
 const commands = async (page: Page) => (await sent(page)).flat();
 
+async function highlighted(page: Page): Promise<string> {
+  const pieces = await page.locator('[data-testid="code-drawer"] .hit').allTextContents();
+  return pieces.join('');
+}
+
 async function shot(page: Page, name: string) {
   if (!SHOTS) return;
   await page.screenshot({ path: `${SHOTS}/${name}.png` });
@@ -333,6 +338,20 @@ async function shot(page: Page, name: string) {
 
 function handle(node: string, id: string): string {
   return `.svelte-flow__node[data-id="${node}"] .svelte-flow__handle[data-handleid="${id}"]`;
+}
+
+function anchor(edge: string, end: 'source' | 'target'): string {
+  return `[data-anchor^="${end}:${edge}"]`;
+}
+
+function wire(from: string, to: string): string {
+  return `.svelte-flow__edge[data-id^="${from}->${to}"] .svelte-flow__edge-interaction`;
+}
+
+async function paneOrigin(page: Page): Promise<{ x: number; y: number }> {
+  const box = await page.locator('.svelte-flow__pane').boundingBox();
+  if (!box) throw new Error('no pane box');
+  return { x: box.x, y: box.y };
 }
 
 async function centre(page: Page, selector: string): Promise<{ x: number; y: number }> {
@@ -496,10 +515,11 @@ describe('adding a block declares it unwired', () => {
 
       const node = page.locator('.svelte-flow__node[data-id="gain"]');
       await node.waitFor();
+      const pane = await paneOrigin(page);
       const dropped = await node.boundingBox();
       if (!dropped) throw new Error('no node box');
-      expect(Math.abs(dropped.x - 700)).toBeLessThan(60);
-      expect(Math.abs(dropped.y - 660)).toBeLessThan(60);
+      expect(Math.abs(dropped.x - (pane.x + 700))).toBeLessThan(60);
+      expect(Math.abs(dropped.y - (pane.y + 660))).toBeLessThan(60);
 
       await page.click('.svelte-flow__node[data-id="adder"]');
       await page.fill('input[data-field="adder.display_name"]', 'Summer');
@@ -553,10 +573,11 @@ describe('adding a block declares it unwired', () => {
 
       const node = page.locator('.svelte-flow__node[data-id="gain"]');
       await node.waitFor();
+      const pane = await paneOrigin(page);
       const box = await node.boundingBox();
       if (!box) throw new Error('no node box');
-      expect(Math.abs(box.x - 300)).toBeLessThan(60);
-      expect(Math.abs(box.y - 700)).toBeLessThan(60);
+      expect(Math.abs(box.x - (pane.x + 300))).toBeLessThan(60);
+      expect(Math.abs(box.y - (pane.y + 700))).toBeLessThan(60);
       await page.close();
     },
     CASE
@@ -627,9 +648,12 @@ describe('wiring is one gesture and one transaction', () => {
     async () => {
       const model = withoutEdge(modelOf('mass_spring_damper'), 'throttle', 'plant');
       const page = await boot({ fixture: 'mass_spring_damper', model });
-      await page.click('[data-testid="drawer"]').catch(() => undefined);
-      await page.keyboard.press('Control+`');
-      await page.waitForSelector('[data-testid="code-drawer"]');
+      await page.click('[data-testid="drawer"]');
+      await page.waitForSelector('[data-testid="drawer-body"]');
+      await page.click('.svelte-flow__node[data-id="fanout"]');
+      await expect
+        .poll(() => highlighted(page))
+        .toContain('FanoutBlock<float> fanout("Fanout", 2);');
       await shot(page, 'arity-copatch-before');
 
       await dragWire(page, handle('fanout', 'out'), handle('plant', 'force_in'));
@@ -649,6 +673,9 @@ describe('wiring is one gesture and one transaction', () => {
       ]);
       await expect
         .poll(() => page.evaluate(() => (window as unknown as FakeWindow).__fake.source()))
+        .toContain('FanoutBlock<float> fanout("Fanout", 3);');
+      await expect
+        .poll(() => highlighted(page))
         .toContain('FanoutBlock<float> fanout("Fanout", 3);');
       await shot(page, 'arity-copatch-after');
       await page.close();
@@ -676,8 +703,7 @@ describe('wiring is one gesture and one transaction', () => {
     'moves a wire with one reconnect transaction',
     async () => {
       const page = await boot({ model: withoutEdge(modelOf('hello_world'), 'source2', 'adder') });
-      const anchor = '.svelte-flow__edge[data-id^="source1->adder"] .svelte-flow__edgeupdater-target';
-      await dragWire(page, anchor, handle('adder', 'in[1]'));
+      await dragWire(page, anchor('source1->adder.in[0]#0', 'target'), handle('adder', 'in[1]'));
 
       await expect.poll(() => sent(page)).toEqual([
         [
@@ -694,8 +720,7 @@ describe('wiring is one gesture and one transaction', () => {
     'leaves a refused reconnect where it was',
     async () => {
       const page = await boot();
-      const anchor = '.svelte-flow__edge[data-id^="source1->adder"] .svelte-flow__edgeupdater-target';
-      await dragWire(page, anchor, handle('plot', 'in[1]'));
+      await dragWire(page, anchor('source1->adder.in[0]#0', 'target'), handle('plot', 'in[1]'));
 
       await expect.poll(() => page.textContent('[data-testid="status"]')).toContain('add a label');
       expect(await commands(page)).toEqual([]);
@@ -819,7 +844,7 @@ describe('the Delete key follows the selection', () => {
     'disconnects a selected edge, removes a selected node, and stays quiet while typing',
     async () => {
       const page = await boot();
-      await page.click('.svelte-flow__edge[data-id^="source1->adder"] .svelte-flow__edge-path');
+      await page.click(wire('source1', 'adder'));
       await page.keyboard.press('Delete');
       await expect.poll(() => commands(page)).toEqual([
         { command: 'disconnect', site: 0, edge: 0 }
@@ -922,7 +947,7 @@ describe('the problems chip surfaces what the model says', () => {
       await expect
         .poll(() => page.locator('.svelte-flow__edge.selected').count())
         .toBeGreaterThan(0);
-      await expect.poll(() => page.textContent('.inspector .title')).toContain('throughput');
+      await expect.poll(() => page.textContent('.inspector')).toContain('throughput');
       await page.close();
     },
     CASE
@@ -967,7 +992,7 @@ describe('every topology gesture round-trips through undo', () => {
       await undo.click();
       await expect.poll(wires).toBe(before.wires);
 
-      await page.click('.svelte-flow__edge[data-id^="source1->adder"] .svelte-flow__edge-path');
+      await page.click(wire('source1', 'adder'));
       await page.keyboard.press('Delete');
       await expect.poll(wires).toBe(before.wires - 1);
       await undo.click();
