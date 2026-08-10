@@ -37,7 +37,7 @@
 
   const scope = $derived(`${path}::${siteIndex}::`);
   const block = $derived(site?.blocks.find((candidate) => candidate.var === selected));
-  const fields = $derived(block ? blockFields(siteIndex, block, spec) : []);
+  const fields = $derived(block ? blockFields(siteIndex, block, spec, site) : []);
   const config = $derived(site?.config ?? null);
   const configRows = $derived(config ? configFields(siteIndex, config) : []);
   const ports = $derived(site && block ? blockPorts(site, block.var) : null);
@@ -107,6 +107,12 @@
       return;
     }
     if (inFlight[key] === action.text) return;
+    const refusal = field.refuse?.(action.text) ?? null;
+    if (refusal) {
+      drafts = omit(drafts, key);
+      errors = { ...errors, [key]: refusal };
+      return;
+    }
     void commit(field, key, action.text);
   }
 

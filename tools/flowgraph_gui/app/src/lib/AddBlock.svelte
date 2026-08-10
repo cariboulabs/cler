@@ -2,6 +2,7 @@
   import { useSvelteFlow } from '@xyflow/svelte';
   import {
     addForm,
+    addGaps,
     categoryOf,
     ctorSignature,
     portsSummary,
@@ -35,10 +36,24 @@
   let query = $state('');
   let refusal = $state<FieldRefusal | null>(null);
   let busy = $state(false);
+  let attempted = $state(false);
+  let opener: HTMLElement | null = null;
 
   const choices = $derived(chosen ? [] : searchSpecs(specs, query, documentPath));
+  const gaps = $derived(form ? addGaps(form) : []);
+
+  function canvasPane(): HTMLElement | null {
+    return document.querySelector<HTMLElement>('[data-canvas]');
+  }
+
+  function restoreFocus() {
+    const target = opener?.isConnected ? opener : canvasPane();
+    opener = null;
+    target?.focus();
+  }
 
   export function openAt(clientX: number, clientY: number, spec?: BlockSpec): void {
+    opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     spot = flow.screenToFlowPosition({ x: clientX, y: clientY });
     at = {
       x: Math.min(clientX, window.innerWidth - POPOVER_WIDTH),
@@ -47,6 +62,7 @@
     query = '';
     refusal = null;
     busy = false;
+    attempted = false;
     chosen = null;
     form = null;
     if (spec) choose(spec);
@@ -57,12 +73,15 @@
     chosen = null;
     form = null;
     refusal = null;
+    attempted = false;
+    restoreFocus();
   }
 
   function choose(spec: BlockSpec) {
     chosen = spec;
     form = addForm(spec, suggestVarName(spec.name, taken));
     refusal = null;
+    attempted = false;
   }
 
   function setVarName(text: string) {
@@ -81,6 +100,10 @@
 
   async function confirm() {
     if (!chosen || !form || busy) return;
+    if (gaps.length > 0) {
+      attempted = true;
+      return;
+    }
     busy = true;
     const outcome = await onadd(chosen, form, spot);
     busy = false;
@@ -101,13 +124,26 @@
   }
 
   function errorFor(id: string): string | null {
-    return refusal?.field === id ? refusal.message : null;
+    if (refusal?.field === id) return refusal.message;
+    if (!attempted) return null;
+    return gaps.find((gap) => gap.field === id)?.message ?? null;
   }
 </script>
 
-{#snippet row(id: string, label: string, hint: string, value: string, onset: (text: string) => void)}
+{#snippet row(
+  id: string,
+  label: string,
+  hint: string,
+  value: string,
+  required: boolean,
+  onset: (text: string) => void
+)}
   <label class="field">
-    <span class="label">{label}<span class="hint">{hint}</span></span>
+    <span class="label"
+      >{label}{#if required}<span class="req" data-add-required={id}>*</span>{/if}<span class="hint"
+        >{hint}</span
+      ></span
+    >
     <input
       type="text"
       data-add-field={id}
@@ -138,14 +174,14 @@
       </header>
       <code class="sig">{ctorSignature(chosen)}</code>
       <div class="fields">
-        {@render row('var_name', 'variable', 'C++ name', form.varName, setVarName)}
+        {@render row('var_name', 'variable', 'C++ name', form.varName, true, setVarName)}
         {#each form.templateArgs as field, index (field.id)}
-          {@render row(field.id, field.label, field.hint, field.value, (text) =>
+          {@render row(field.id, field.label, field.hint, field.value, field.required, (text) =>
             setField('template', index, text)
           )}
         {/each}
         {#each form.ctorArgs as field, index (field.id)}
-          {@render row(field.id, field.label, field.hint, field.value, (text) =>
+          {@render row(field.id, field.label, field.hint, field.value, field.required, (text) =>
             setField('ctor', index, text)
           )}
         {/each}
@@ -156,7 +192,13 @@
       <p class="note">declared unwired — wire it to put it in the graph</p>
       <footer>
         <button data-testid="add-cancel" onclick={close}>Cancel</button>
-        <button class="primary" data-testid="add-confirm" disabled={busy} onclick={confirm}>
+        <button
+          class="primary"
+          data-testid="add-confirm"
+          disabled={busy || gaps.length > 0}
+          title={gaps.length > 0 ? 'every argument without a default is required' : undefined}
+          onclick={confirm}
+        >
           Add
         </button>
       </footer>
@@ -252,6 +294,10 @@
     font-family: var(--mono);
     font-size: 10px;
     color: var(--muted);
+  }
+  .req {
+    padding-left: 2px;
+    color: var(--danger-fg);
   }
   input {
     width: 100%;

@@ -12,6 +12,7 @@ export type BlockNodeData = {
   block: Block;
   inputs: PortSlot[];
   hasOutput: boolean;
+  hasRunner: boolean;
 };
 
 export type BlockNode = FlowNode<BlockNodeData, 'block'>;
@@ -104,6 +105,10 @@ function hasOutgoing(site: Site, blockVar: string): boolean {
   return site.edges.some((edge) => edge.from === blockVar);
 }
 
+export function hasRunner(site: Site, blockVar: string): boolean {
+  return site.runners.some((runner) => runner.block === blockVar);
+}
+
 function offersOutput(site: Site, block: Block, spec: BlockSpec | undefined): boolean {
   if (hasOutgoing(site, block.var)) return true;
   if (!spec || !block.editable) return false;
@@ -180,7 +185,12 @@ function toNode(site: Site, block: Block, specs: BlockSpec[], connectable: boole
     position: { x: 0, y: 0 },
     width: NODE_WIDTH,
     height: nodeHeight(inputs.length),
-    data: { block, inputs, hasOutput: offersOutput(site, block, spec) },
+    data: {
+      block,
+      inputs,
+      hasOutput: offersOutput(site, block, spec),
+      hasRunner: hasRunner(site, block.var)
+    },
     draggable: true,
     connectable: connectable && block.editable,
     deletable: false
@@ -351,13 +361,23 @@ export function anchorSpans(sites: Site[]): Span[] {
 
 export type Problem = {
   id: string;
-  kind: 'conflict' | 'unresolved';
+  kind: 'conflict' | 'unresolved' | 'no runner';
+  severity: 'error' | 'warning';
   title: string;
   detail: string;
   span: Span;
   edge: string | null;
   block: string | null;
 };
+
+export const NO_RUNNER_BADGE = 'no runner';
+
+export const NO_RUNNER_HINT =
+  'declared, receives wires, but never runs — reconnect or remove its consumers';
+
+export function neverRuns(site: Site, block: Block): boolean {
+  return block.in_graph && !hasRunner(site, block.var);
+}
 
 export function problemsOf(site: Site | undefined): Problem[] {
   if (!site) return [];
@@ -370,6 +390,7 @@ export function problemsOf(site: Site | undefined): Problem[] {
     problems.push({
       id: `conflict:${id}`,
       kind: 'conflict',
+      severity: 'error',
       title: `${edge.from} → ${edge.to}`,
       detail: `${edge.source_type ?? '?'} out into ${edge.sample_type ?? '?'} in`,
       span: edge.span,
@@ -381,11 +402,25 @@ export function problemsOf(site: Site | undefined): Problem[] {
     problems.push({
       id: `unresolved:${at}`,
       kind: 'unresolved',
+      severity: 'error',
       title: item.text,
       detail: item.reason.replace(/_/g, ' '),
       span: item.span,
       edge: null,
       block: null
+    });
+  }
+  for (const block of site.blocks) {
+    if (!neverRuns(site, block)) continue;
+    problems.push({
+      id: `no-runner:${block.var}`,
+      kind: 'no runner',
+      severity: 'warning',
+      title: block.var,
+      detail: `${block.var} has no runner and will never execute`,
+      span: block.span,
+      edge: null,
+      block: block.var
     });
   }
   return problems;

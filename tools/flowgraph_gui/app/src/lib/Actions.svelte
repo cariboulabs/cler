@@ -10,12 +10,15 @@
     reason: string | null;
   };
 
+  export type Alert = { text: string; at: number };
+
   type Props = {
     canUndo: boolean;
     canRedo: boolean;
     canOpenEditor: boolean;
     canEdit: boolean;
     editNote: string;
+    alert: Alert | null;
     selectedNode: string | null;
     selectedEdge: string | null;
     problems: Problem[];
@@ -53,6 +56,7 @@
     canOpenEditor,
     canEdit,
     editNote,
+    alert,
     selectedNode,
     selectedEdge,
     problems,
@@ -78,6 +82,7 @@
   const ZOOM_MS = 150;
   const FIT_MS = 200;
   const SAVED_MS = 1500;
+  const ALERT_MS = 4000;
   const MENU_WIDTH = 200;
   const MENU_HEIGHT = 160;
   const MENU_IDS = ['undo', 'redo', 'fit'];
@@ -117,9 +122,15 @@
   };
 
   let menu = $state<Menu | null>(null);
-  let saved = $state(false);
-  let savedTimer = 0;
+  let toast = $state<{ text: string; danger: boolean } | null>(null);
+  let toastTimer = 0;
   let problemsOpen = $state(false);
+
+  const failing = $derived(problems.some((problem) => problem.severity === 'error'));
+
+  $effect(() => {
+    if (alert) flash(alert.text, true, ALERT_MS);
+  });
 
   const actions = $derived<Action[]>([
     { id: 'open', label: 'Open file', shortcut: 'Ctrl+O', enabled: true, run: onopen },
@@ -190,7 +201,7 @@
         label: 'Open in editor',
         shortcut: '',
         enabled: canOpenEditor,
-        hint: canOpenEditor ? undefined : 'opening an editor needs the desktop shell',
+        hint: canOpenEditor ? undefined : editNote,
         run: () => onopeneditor(block)
       },
       {
@@ -251,10 +262,14 @@
     if (action?.enabled) action.run();
   }
 
+  function flash(text: string, danger: boolean, life: number) {
+    toast = { text, danger };
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (toast = null), life);
+  }
+
   function flashSaved() {
-    saved = true;
-    clearTimeout(savedTimer);
-    savedTimer = setTimeout(() => (saved = false), SAVED_MS);
+    flash('saved automatically', false, SAVED_MS);
   }
 
   function isTyping(target: EventTarget | null): boolean {
@@ -343,7 +358,7 @@
   <span class="grow"></span>
   <button
     class="problems"
-    class:danger={problems.length > 0}
+    class:danger={failing}
     data-testid="problems"
     data-count={problems.length}
     aria-expanded={problemsOpen}
@@ -387,15 +402,30 @@
   {/each}
 </div>
 
-{#if saved}
-  <div class="toast" data-testid="saved-toast">saved automatically</div>
+{#if toast}
+  <div
+    class="toast"
+    class:danger={toast.danger}
+    role={toast.danger ? 'alert' : undefined}
+    data-testid={toast.danger ? 'alert-toast' : 'saved-toast'}
+  >
+    <span>{toast.text}</span>
+    {#if toast.danger}
+      <button
+        class="dismiss"
+        data-testid="alert-dismiss"
+        aria-label="Dismiss"
+        onclick={() => (toast = null)}>×</button
+      >
+    {/if}
+  </div>
 {/if}
 
 {#if problemsOpen}
   <div class="drop" data-testid="problems-list">
     {#each problems as problem (problem.id)}
       <button data-problem={problem.id} onclick={() => pickProblem(problem)}>
-        <span class="kind {problem.kind}">{problem.kind}</span>
+        <span class="kind {problem.severity}">{problem.kind}</span>
         <span class="what">{problem.title}</span>
         <span class="key">{problem.detail}</span>
       </button>
@@ -583,7 +613,7 @@
     background: var(--danger);
     color: var(--accent-fg);
   }
-  .kind.unresolved {
+  .kind.warning {
     background: var(--warn-border);
     color: var(--bg-0);
   }
@@ -609,6 +639,10 @@
     left: 50%;
     z-index: 20;
     transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    max-width: min(560px, 70vw);
     padding: 5px var(--sp-3);
     background: var(--glass);
     backdrop-filter: blur(12px);
@@ -618,6 +652,21 @@
     color: var(--muted);
     font-size: 11.5px;
     animation: rise 150ms ease-out;
+  }
+  .toast.danger {
+    border-color: var(--danger-border);
+    background: var(--danger-bg);
+    color: var(--danger-fg);
+  }
+  .dismiss {
+    flex: none;
+    width: 18px;
+    padding: 0;
+    background: transparent;
+    border-color: transparent;
+    color: inherit;
+    font-size: 13px;
+    line-height: 1;
   }
   @keyframes rise {
     from {

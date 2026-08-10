@@ -63,18 +63,44 @@ function integer(text: string | null | undefined): number | null {
   return found?.[1] === undefined ? null : Number(found[1]);
 }
 
+const OPENERS = '([{<';
+const CLOSERS = ')]}>';
+const QUOTES = '"\'';
+
+function afterLiteral(text: string, at: number): number {
+  const quote = text.charAt(at);
+  let index = at + 1;
+  while (index < text.length) {
+    const character = text.charAt(index);
+    if (character === '\\') {
+      index += 2;
+      continue;
+    }
+    if (character === quote) return index + 1;
+    index += 1;
+  }
+  return index;
+}
+
 export function braceListLength(text: string): number | null {
   const open = text.indexOf('{');
   const close = text.lastIndexOf('}');
   if (open === -1 || close < open) return null;
-  const inner = text.slice(open + 1, close).trim();
-  if (inner.length === 0) return 0;
+  const inner = text.slice(open + 1, close);
+  if (inner.trim().length === 0) return 0;
   let depth = 0;
   let items = 1;
-  for (const character of inner) {
-    if ('([{<"'.includes(character)) depth += character === '"' ? 0 : 1;
-    else if (')]}>'.includes(character)) depth -= 1;
+  let at = 0;
+  while (at < inner.length) {
+    const character = inner.charAt(at);
+    if (QUOTES.includes(character)) {
+      at = afterLiteral(inner, at);
+      continue;
+    }
+    if (OPENERS.includes(character)) depth += 1;
+    else if (CLOSERS.includes(character)) depth -= 1;
     else if (character === ',' && depth === 0) items += 1;
+    at += 1;
   }
   return items;
 }
@@ -231,6 +257,7 @@ export type AddField = {
   label: string;
   value: string;
   hint: string;
+  required: boolean;
 };
 
 export type AddForm = {
@@ -250,13 +277,15 @@ export function addForm(spec: BlockSpec, varName: string): AddForm {
       id: `template.${index}`,
       label: param.name,
       value: param.default ?? '',
-      hint: typeof param.kind === 'string' ? 'type' : param.kind.non_type.param_type
+      hint: typeof param.kind === 'string' ? 'type' : param.kind.non_type.param_type,
+      required: param.default === null && !param.pack
     })),
     ctorArgs: spec.ctor_params.map((param, index) => ({
       id: `ctor.${index}`,
       label: param.name,
       value: index === 0 && param.param_type.includes('char*') ? displayNameFor(varName) : (param.default ?? ''),
-      hint: param.param_type
+      hint: param.param_type,
+      required: param.default === null
     }))
   };
 }
@@ -270,15 +299,41 @@ export function renameInForm(form: AddForm, varName: string): AddForm {
   return { ...form, varName, ctorArgs: renamed };
 }
 
+export type AddGap = { field: string; message: string };
+
+const REQUIRED_GAP = 'required';
+const POSITIONAL_GAP = 'fill this in — a later argument is set';
+
+function fieldGaps(fields: AddField[]): AddGap[] {
+  const filled = fields.map((field) => field.value.trim().length > 0);
+  return fields.flatMap((field, index) => {
+    if (filled[index]) return [];
+    if (field.required) return [{ field: field.id, message: REQUIRED_GAP }];
+    const later = filled.slice(index + 1).some((set) => set);
+    return later ? [{ field: field.id, message: POSITIONAL_GAP }] : [];
+  });
+}
+
+export function addGaps(form: AddForm): AddGap[] {
+  const named =
+    form.varName.trim().length === 0 ? [{ field: 'var_name', message: REQUIRED_GAP }] : [];
+  return [...named, ...fieldGaps(form.templateArgs), ...fieldGaps(form.ctorArgs)];
+}
+
+function positional(fields: AddField[]): string[] {
+  const values = fields.map((field) => field.value.trim());
+  let last = values.length;
+  while (last > 0 && values[last - 1] === '') last -= 1;
+  return values.slice(0, last);
+}
+
 export function addBlockCommand(site: number, spec: BlockSpec, form: AddForm): Command {
-  const kept = (fields: AddField[]) =>
-    fields.map((field) => field.value.trim()).filter((text) => text.length > 0);
   return {
     command: 'add_block',
     site,
     type: spec.name,
-    template_args: kept(form.templateArgs),
-    ctor_args: kept(form.ctorArgs),
+    template_args: positional(form.templateArgs),
+    ctor_args: positional(form.ctorArgs),
     var_name: form.varName.trim()
   };
 }

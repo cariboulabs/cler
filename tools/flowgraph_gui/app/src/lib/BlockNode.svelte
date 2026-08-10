@@ -1,22 +1,30 @@
 <script lang="ts">
   import { Handle, Position, type NodeProps } from '@xyflow/svelte';
-  import { typeSignature, type BlockNode, type BlockNodeData } from './project';
+  import {
+    NO_RUNNER_BADGE,
+    NO_RUNNER_HINT,
+    typeSignature,
+    type BlockNode,
+    type BlockNodeData
+  } from './project';
 
   const props: NodeProps<BlockNode> = $props();
   const data = $derived(props.data);
   const block: BlockNodeData['block'] = $derived(data.block);
+  const badge = $derived(block.in_graph ? NO_RUNNER_BADGE : 'unwired');
+  const badgeHint = $derived(block.in_graph ? NO_RUNNER_HINT : 'declared but not in the runner list');
 </script>
 
 <div
   class="block"
-  class:unwired={!block.in_graph}
+  class:unwired={!data.hasRunner}
   class:readonly={!block.editable}
   title={block.read_only_reason ?? undefined}
 >
   <header>
     <span class="name">{block.display_name ?? block.var}</span>
-    {#if !block.in_graph}
-      <span class="badge unwired-badge" title="declared but not in the runner list">unwired</span>
+    {#if !data.hasRunner}
+      <span class="badge unwired-badge" title={badgeHint}>{badge}</span>
     {/if}
     {#if !block.editable}
       <span class="badge" title={block.read_only_reason ?? 'read-only'}>read-only</span>

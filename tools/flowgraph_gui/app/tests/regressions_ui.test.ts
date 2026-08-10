@@ -1083,7 +1083,7 @@ const errorCases: ErrorCase[] = [
       failMode: 'json',
       failValue: { error: 'revision_mismatch', base_revision: 1, current_revision: 4 }
     },
-    expect: 'the file changed since this edit started — reload it and try again'
+    expect: 'the graph changed under this gesture — try again'
   },
   {
     name: 'unsupported_shape',

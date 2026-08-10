@@ -9,7 +9,7 @@
   } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import { untrack } from 'svelte';
-  import Actions, { type EdgeInfo } from './lib/Actions.svelte';
+  import Actions, { type Alert, type EdgeInfo } from './lib/Actions.svelte';
   import AddBlock from './lib/AddBlock.svelte';
   import BlockNode from './lib/BlockNode.svelte';
   import Inspector from './lib/Inspector.svelte';
@@ -142,7 +142,9 @@
   let selectedEdge = $state<string | null>(null);
   let focus = $state<Span | null>(null);
   let refusal = $state<{ block: string; spans: Span[] } | null>(null);
+  let alert = $state.raw<Alert | null>(null);
   let generation = 0;
+  let alerted = 0;
   let pinned = new Map<string, EdgePoint>();
 
   const editable = $derived(desktop && opened !== null);
@@ -260,6 +262,12 @@
     install(next, true);
   }
 
+  function announce(message: string) {
+    status = message;
+    alerted += 1;
+    alert = { text: message, at: alerted };
+  }
+
   async function attempt(
     action: (path: string) => Promise<DocumentState>,
     take: (next: DocumentState) => void
@@ -274,7 +282,7 @@
     } catch (error) {
       const message = describeApplyError(error);
       if (message.includes(DISK_DRIFT) && era === generation) changedOnDisk = true;
-      status = message;
+      announce(message);
       return { ok: false, message, record: errorRecord(error) };
     }
   }
@@ -282,6 +290,15 @@
   function run(action: (path: string) => Promise<DocumentState>): Promise<Outcome> {
     const path = doc.path;
     return queued(path, () => attempt(action, adopt));
+  }
+
+  async function resync(message: string) {
+    try {
+      install(await openDocument(doc.path), false);
+    } catch {
+      return;
+    }
+    status = message;
   }
 
   async function reload() {
@@ -295,7 +312,12 @@
 
   async function submitAll(commands: Command[]): Promise<Outcome> {
     if (commands.length === 0) return { ok: true };
-    return run((path) => applyCommands(path, commands, doc.revision));
+    const planned = doc.revision;
+    const outcome = await run((path) => applyCommands(path, commands, planned));
+    if (!outcome.ok && outcome.record?.error === 'revision_mismatch') {
+      await resync(outcome.message);
+    }
+    return outcome;
   }
 
   function submit(command: Command): Promise<Outcome> {
@@ -303,7 +325,7 @@
   }
 
   function refuse(message: string): Outcome {
-    status = message;
+    announce(message);
     return { ok: false, message, record: null };
   }
 
@@ -326,7 +348,7 @@
 
   async function openFile() {
     if (!desktop) {
-      status = 'file dialog needs the desktop shell — pick an example below';
+      announce('file dialog needs the desktop shell — pick an example below');
       return;
     }
     status = '';
@@ -339,12 +361,14 @@
       if (previous && previous !== path) void closeDocument(previous).catch(() => undefined);
       reset(next);
     } catch (error) {
-      status = describeApplyError(error);
+      announce(describeApplyError(error));
     }
   }
 
   function openFixture() {
+    const previous = opened;
     opened = null;
+    if (previous) void closeDocument(previous).catch(() => undefined);
     reset(loadFixture(fixtureName));
   }
 
@@ -479,7 +503,7 @@
     if (!spec) return;
     event.preventDefault();
     if (!editable) {
-      status = viewerNote;
+      announce(viewerNote);
       return;
     }
     adder?.openAt(event.clientX, event.clientY, spec);
@@ -511,13 +535,17 @@
       await navigator.clipboard.writeText(doc.source.slice(span.start, span.end));
       status = '';
     } catch {
-      status = 'the clipboard is not available here';
+      announce('the clipboard is not available here');
     }
   }
 
   async function openEditor(blockVar: string) {
     if (!desktop) {
-      status = 'opening an editor needs the desktop shell';
+      announce('opening an editor needs the desktop shell');
+      return;
+    }
+    if (!editable) {
+      announce(viewerNote);
       return;
     }
     const span = declarationOf(blockVar);
@@ -526,7 +554,7 @@
       await openInEditor(doc.path, lineOfOffset(doc.source, span.start));
       status = '';
     } catch (error) {
-      status = describeApplyError(error);
+      announce(describeApplyError(error));
     }
   }
 
@@ -651,7 +679,7 @@
       </div>
     {/if}
 
-    <div class="canvas">
+    <div class="canvas" data-canvas tabindex="-1">
       {#key viewKey}
         <SvelteFlow
           bind:nodes
@@ -684,9 +712,10 @@
           <Actions
             canUndo={doc.canUndo}
             canRedo={doc.canRedo}
-            canOpenEditor={desktop}
+            canOpenEditor={editable}
             canEdit={editable}
             editNote={viewerNote}
+            {alert}
             selectedNode={selected}
             {selectedEdge}
             {problems}

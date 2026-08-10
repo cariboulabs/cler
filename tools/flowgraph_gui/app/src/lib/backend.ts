@@ -210,7 +210,7 @@ export function describeApplyError(rejection: unknown): string {
       return `${block} is still used in ${plural(count, 'place')} outside the flowgraph — remove those references first`;
     }
     case 'revision_mismatch':
-      return 'the file changed since this edit started — reload it and try again';
+      return 'the graph changed under this gesture — try again';
     case 'index_out_of_range':
       return `${phrase(record.element)} index ${String(record.index)} is out of range (${String(record.len)})`;
     case 'no_display_name_argument':

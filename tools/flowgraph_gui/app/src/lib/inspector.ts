@@ -1,5 +1,5 @@
-import type { BlockSpec } from './palette';
-import type { Block, Command, SiteConfig } from './schema';
+import { authorityOf, countOf, type BlockSpec, type PortCount } from './palette';
+import type { Block, Command, Site, SiteConfig } from './schema';
 
 export type Field = {
   id: string;
@@ -9,6 +9,7 @@ export type Field = {
   hint: string | null;
   editable: boolean;
   toCommand: (text: string) => Command;
+  refuse?: (text: string) => string | null;
 };
 
 export type FieldAction = { kind: 'commit'; text: string } | { kind: 'revert' } | { kind: 'none' };
@@ -55,7 +56,77 @@ function templateNames(block: Block, spec: BlockSpec | undefined) {
   }));
 }
 
-export function blockFields(site: number, block: Block, spec?: BlockSpec): Field[] {
+type Slot = { kind: 'template' | 'ctor'; index: number };
+
+function wiredInputs(site: Site, blockVar: string): number {
+  let needed = 0;
+  for (const edge of site.edges) {
+    if (edge.to !== blockVar || edge.port.index === null) continue;
+    needed = Math.max(needed, edge.port.index + 1);
+  }
+  return needed;
+}
+
+function wiredOutputs(site: Site, blockVar: string): number {
+  return site.edges.filter((edge) => edge.from === blockVar).length;
+}
+
+function governs(count: PortCount, slot: Slot): boolean {
+  const authority = authorityOf(count);
+  if (authority.kind === 'template_arg') {
+    return slot.kind === 'template' && authority.index === slot.index;
+  }
+  if (authority.kind === 'ctor_arg' || authority.kind === 'ctor_arg_len') {
+    return slot.kind === 'ctor' && authority.index === slot.index;
+  }
+  return false;
+}
+
+function rewritten(block: Block, slot: Slot, text: string): Block {
+  if (slot.kind === 'template') {
+    return {
+      ...block,
+      template_args: block.template_args.map((arg, at) =>
+        at === slot.index ? { ...arg, text, resolved: null } : arg
+      )
+    };
+  }
+  return {
+    ...block,
+    ctor_args: block.ctor_args.map((arg, at) => (at === slot.index ? { ...arg, text } : arg))
+  };
+}
+
+function shrinkGuard(
+  block: Block,
+  slot: Slot,
+  spec: BlockSpec | undefined,
+  site: Site | undefined
+): ((text: string) => string | null) | undefined {
+  if (!spec || !site) return undefined;
+  const groups: [PortCount, number][] = [
+    [spec.input_count, wiredInputs(site, block.var)],
+    [spec.output_count, wiredOutputs(site, block.var)]
+  ];
+  const governing = groups.filter(([count]) => governs(count, slot));
+  if (governing.length === 0) return undefined;
+  return (text) => {
+    for (const [count, wired] of governing) {
+      const next = countOf(rewritten(block, slot, text), count);
+      if (next !== null && next < wired) {
+        return `${wired} ports are wired — disconnect them before lowering this`;
+      }
+    }
+    return null;
+  };
+}
+
+export function blockFields(
+  siteIndex: number,
+  block: Block,
+  spec?: BlockSpec,
+  site?: Site
+): Field[] {
   const reason = block.read_only_reason;
   const nameEditable = block.editable && block.display_name !== null;
   const templateLabels = templateNames(block, spec);
@@ -70,7 +141,7 @@ export function blockFields(site: number, block: Block, spec?: BlockSpec): Field
     editable: nameEditable,
     toCommand: (text) => ({
       command: 'set_display_name',
-      site,
+      site: siteIndex,
       block: block.var,
       new_text: text
     })
@@ -91,11 +162,12 @@ export function blockFields(site: number, block: Block, spec?: BlockSpec): Field
       editable: block.editable,
       toCommand: (text) => ({
         command: 'set_template_arg',
-        site,
+        site: siteIndex,
         block: block.var,
         template_arg_index: index,
         new_text: text
-      })
+      }),
+      refuse: shrinkGuard(block, { kind: 'template', index }, spec, site)
     };
   });
 
@@ -110,11 +182,12 @@ export function blockFields(site: number, block: Block, spec?: BlockSpec): Field
       editable: block.editable,
       toCommand: (text) => ({
         command: 'set_param',
-        site,
+        site: siteIndex,
         block: block.var,
         ctor_arg_index: index,
         new_text: text
-      })
+      }),
+      refuse: shrinkGuard(block, { kind: 'ctor', index }, spec, site)
     };
   });
 
