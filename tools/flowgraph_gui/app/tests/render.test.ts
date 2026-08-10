@@ -488,6 +488,159 @@ describe('editing against a fake backend', () => {
   );
 });
 
+describe('retractable panels', () => {
+  let editor: Page;
+
+  const RAIL_WIDTH = 44;
+  const SIDEBAR_WIDTH = 280;
+  const INSPECTOR_WIDTH = 320;
+
+  async function width(selector: string): Promise<number> {
+    const box = await editor.locator(selector).boundingBox();
+    if (!box) throw new Error(`${selector} has no box`);
+    return box.width;
+  }
+
+  function settled(selector: string, expected: number) {
+    return expect.poll(() => width(selector), { timeout: 2000 }).toBeCloseTo(expected, 0);
+  }
+
+  function viewportTransform(): Promise<string> {
+    return editor.evaluate(() => {
+      const viewport = document.querySelector('.svelte-flow__viewport');
+      if (!(viewport instanceof HTMLElement)) throw new Error('no flow viewport');
+      return viewport.style.transform;
+    });
+  }
+
+  beforeEach(async () => {
+    editor = await browser.newPage({ viewport: VIEWPORT });
+    await editor.addInitScript(installFakeBackend, { path: FAKE_PATH, model: editableModel() });
+    await editor.goto(origin, { waitUntil: 'load' });
+    await editor.click('button.primary');
+    await editor.waitForSelector('.svelte-flow__node');
+  }, CASE_TIMEOUT);
+
+  afterEach(async () => {
+    await editor.close();
+  });
+
+  it(
+    'collapses each panel to a rail and remembers it across a reload',
+    async () => {
+      await settled('.sidebar', SIDEBAR_WIDTH);
+      await settled('.inspector', INSPECTOR_WIDTH);
+      const canvasOpen = await width('main');
+
+      await editor.click('[data-testid="toggle-left"]');
+      await editor.click('[data-testid="toggle-right"]');
+      await settled('.sidebar', RAIL_WIDTH);
+      await settled('.inspector', RAIL_WIDTH);
+      expect(await width('main')).toBeGreaterThan(canvasOpen);
+
+      expect(await editor.locator('.sidebar .path').isVisible()).toBe(false);
+      expect(await editor.locator('.inspector input').first().isVisible()).toBe(false);
+      expect(await editor.locator('.sidebar img').isVisible()).toBe(true);
+      expect(await editor.locator('.history button').first().isVisible()).toBe(true);
+
+      await editor.reload({ waitUntil: 'load' });
+      await editor.waitForSelector('.svelte-flow__node');
+      await settled('.sidebar', RAIL_WIDTH);
+      await settled('.inspector', RAIL_WIDTH);
+
+      await editor.click('[data-testid="toggle-left"]');
+      await editor.click('[data-testid="toggle-right"]');
+      await editor.reload({ waitUntil: 'load' });
+      await editor.waitForSelector('.svelte-flow__node');
+      await settled('.sidebar', SIDEBAR_WIDTH);
+      await settled('.inspector', INSPECTOR_WIDTH);
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'toggles on [ and ] unless the keystroke lands in a field',
+    async () => {
+      await editor.locator('.svelte-flow__pane').click({ position: { x: 8, y: 8 } });
+      await editor.keyboard.press('[');
+      await settled('.sidebar', RAIL_WIDTH);
+      await editor.keyboard.press(']');
+      await settled('.inspector', RAIL_WIDTH);
+
+      await editor.keyboard.press('[');
+      await editor.keyboard.press(']');
+      await settled('.sidebar', SIDEBAR_WIDTH);
+      await settled('.inspector', INSPECTOR_WIDTH);
+
+      const field = editor.locator('input[data-field="config.scheduler"]');
+      await field.click();
+      await field.pressSequentially('[]');
+      await settled('.sidebar', SIDEBAR_WIDTH);
+      await settled('.inspector', INSPECTOR_WIDTH);
+      expect(await field.inputValue()).toContain('[]');
+      await field.press('Escape');
+      const commands = await editor.evaluate(() => (window as unknown as FakeWindow).__fake.log);
+      expect(commands).toHaveLength(0);
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'expands a collapsed inspector when a block is clicked, and stays open on deselect',
+    async () => {
+      await editor.click('[data-testid="toggle-right"]');
+      await settled('.inspector', RAIL_WIDTH);
+
+      await editor.click('.svelte-flow__node[data-id="adder"]');
+      await settled('.inspector', INSPECTOR_WIDTH);
+      await expect.poll(() => editor.textContent('.inspector .title')).toBe('Adder');
+
+      await editor.locator('.svelte-flow__pane').click({ position: { x: 8, y: 8 } });
+      await expect.poll(() => editor.locator('.inspector .title').count()).toBe(0);
+      await settled('.inspector', INSPECTOR_WIDTH);
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'keeps the collapsed rail hinting that a selection is waiting',
+    async () => {
+      await editor.click('.svelte-flow__node[data-id="adder"]');
+      await editor.click('[data-testid="toggle-right"]');
+      await settled('.inspector', RAIL_WIDTH);
+
+      const rail = editor.locator('[data-testid="toggle-right"]');
+      expect(await rail.locator('svg').count()).toBe(1);
+      expect(await rail.getAttribute('title')).toContain('Adder selected');
+      expect(await rail.getAttribute('aria-expanded')).toBe('false');
+      expect(await editor.getAttribute('[data-testid="toggle-left"]', 'title')).toContain('[');
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'survives a toggle without disturbing zoom or pan',
+    async () => {
+      await editor.click('.svelte-flow__controls-zoomin');
+      await editor.mouse.move(700, 400);
+      await editor.mouse.down();
+      await editor.mouse.move(760, 460, { steps: 8 });
+      await editor.mouse.up();
+      await editor.waitForTimeout(400);
+      const before = await viewportTransform();
+
+      await editor.click('[data-testid="toggle-left"]');
+      await settled('.sidebar', RAIL_WIDTH);
+      await editor.click('[data-testid="toggle-right"]');
+      await settled('.inspector', RAIL_WIDTH);
+      await editor.waitForTimeout(300);
+
+      expect(await viewportTransform()).toBe(before);
+    },
+    CASE_TIMEOUT
+  );
+});
+
 describe('fixture mode stays a read-only viewer', () => {
   let viewer: Page;
 
@@ -517,6 +670,26 @@ describe('fixture mode stays a read-only viewer', () => {
 
       expect(await viewer.locator('.history button').first().isDisabled()).toBe(true);
       expect(await viewer.locator('[data-testid="reload-banner"]').count()).toBe(0);
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'retracts its panels without gaining any edit power',
+    async () => {
+      const boxWidth = async (selector: string) =>
+        (await viewer.locator(selector).boundingBox())?.width ?? -1;
+
+      await viewer.click('[data-testid="toggle-left"]');
+      await viewer.click('[data-testid="toggle-right"]');
+      await expect.poll(() => boxWidth('.sidebar'), { timeout: 2000 }).toBeCloseTo(44, 0);
+      await expect.poll(() => boxWidth('.inspector'), { timeout: 2000 }).toBeCloseTo(44, 0);
+      await expect.poll(() => boxWidth('main'), { timeout: 2000 }).toBeCloseTo(1352, 0);
+
+      await viewer.click('.svelte-flow__node[data-id="iq2mag"]');
+      await expect.poll(() => boxWidth('.inspector'), { timeout: 2000 }).toBeCloseTo(320, 0);
+      expect(await viewer.locator('.inspector input').first().isDisabled()).toBe(true);
+      expect(await viewer.textContent('[data-testid="viewer-note"]')).toContain('read-only viewer');
     },
     CASE_TIMEOUT
   );

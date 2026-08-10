@@ -79,7 +79,8 @@ describe('plots', () => {
     expect(parallel).toHaveLength(2);
     expect(new Set(parallel.map((edge) => edge.id)).size).toBe(2);
     expect(new Set(parallel.map((edge) => edge.targetHandle)).size).toBe(2);
-    expect(parallel.map((edge) => edge.label).sort()).toEqual(['in[0]', 'in[1]']);
+    expect(parallel.map((edge) => edge.targetHandle).sort()).toEqual(['in[0]', 'in[1]']);
+    expect(parallel.every((edge) => edge.label === undefined)).toBe(true);
   });
 
   it('gives cw_timeseries_plot two input handles', async () => {
@@ -97,7 +98,7 @@ describe('mass_spring_damper', () => {
       (edge) => edge.source === 'fanout' && edge.target === 'controller'
     );
     expect(feedback).toBeDefined();
-    expect(feedback?.label).toBe('measured_position_in');
+    expect(feedback?.targetHandle).toBe('measured_position_in');
     expect(projection.nodes).toHaveLength(5);
     expect(projection.edges).toHaveLength(5);
   });

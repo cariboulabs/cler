@@ -46,6 +46,16 @@
 
   const editable = inTauri();
   const DISK_DRIFT = 'changed on disk';
+  const LEFT_PANEL = 'cler.panel.left';
+  const RIGHT_PANEL = 'cler.panel.right';
+
+  function storedOpen(key: string): boolean {
+    return localStorage.getItem(key) !== 'closed';
+  }
+
+  function storeOpen(key: string, open: boolean): void {
+    localStorage.setItem(key, open ? 'open' : 'closed');
+  }
 
   const startFixture = initialFixture();
 
@@ -60,10 +70,15 @@
   let status = $state('');
   let busy = $state(false);
   let viewKey = $state('');
+  let leftOpen = $state(storedOpen(LEFT_PANEL));
+  let rightOpen = $state(storedOpen(RIGHT_PANEL));
 
   const site = $derived<Site | undefined>(doc.model.sites[siteIndex]);
   const notes = $derived(site ? readOnlyNotes(site) : []);
   const needsReload = $derived(changedOnDisk || doc.externalChange);
+
+  $effect(() => storeOpen(LEFT_PANEL, leftOpen));
+  $effect(() => storeOpen(RIGHT_PANEL, rightOpen));
 
   $effect(() => {
     if (!editable) return;
@@ -162,97 +177,130 @@
     opened = null;
     show(loadFixture(fixtureName));
   }
+
+  function selectNode(id: string) {
+    selected = id;
+    rightOpen = true;
+  }
+
+  function isTyping(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+  }
+
+  function onKeydown(event: KeyboardEvent) {
+    if (event.ctrlKey || event.metaKey || event.altKey || isTyping(event.target)) return;
+    if (event.key === '[') leftOpen = !leftOpen;
+    else if (event.key === ']') rightOpen = !rightOpen;
+    else return;
+    event.preventDefault();
+  }
 </script>
 
+<svelte:window onkeydown={onKeydown} />
+
 <div class="shell">
-  <aside class="sidebar">
-    <div class="brand">
-      <img src="/brand/cler_mark.png" alt="" width="26" height="26" />
-      <div>
+  <aside class="sidebar" class:collapsed={!leftOpen}>
+    <div class="head">
+      <img src="/brand/cler_mark.png" alt="cler" width="26" height="26" />
+      <div class="brand">
         <div class="wordmark">cler</div>
         <div class="tagline">flowgraph editor</div>
       </div>
+      <button
+        class="toggle"
+        data-testid="toggle-left"
+        aria-expanded={leftOpen}
+        aria-label={leftOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+        title={leftOpen ? 'Collapse sidebar  [' : 'Expand sidebar  ['}
+        onclick={() => (leftOpen = !leftOpen)}>{leftOpen ? '‹' : '›'}</button
+      >
     </div>
 
-    <div class="toolbar">
+    <div class="history">
+      <button title="Undo" onclick={() => run(undoDocument)} disabled={busy || !doc.canUndo}
+        >{leftOpen ? 'Undo' : '↶'}</button
+      >
+      <button title="Redo" onclick={() => run(redoDocument)} disabled={busy || !doc.canRedo}
+        >{leftOpen ? 'Redo' : '↷'}</button
+      >
+    </div>
+
+    <div class="body">
       <button class="primary" onclick={openFile} disabled={busy}>Open file…</button>
-      <div class="history">
-        <button onclick={() => run(undoDocument)} disabled={busy || !doc.canUndo}>Undo</button>
-        <button onclick={() => run(redoDocument)} disabled={busy || !doc.canRedo}>Redo</button>
-      </div>
-    </div>
 
-    <section>
-      <h2>File</h2>
-      <div class="path" title={doc.path}>{doc.path}</div>
-      <dl>
-        <dt>sites</dt>
-        <dd>{doc.model.sites.length}</dd>
-        <dt>revision</dt>
-        <dd>{doc.revision}</dd>
-        <dt>schema</dt>
-        <dd>{doc.model.version}</dd>
-      </dl>
-    </section>
-
-    {#if doc.model.sites.length > 1}
       <section>
-        <h2>Site</h2>
-        <select bind:value={siteIndex}>
-          {#each doc.model.sites as candidate, i (siteId(candidate))}
-            <option value={i}>{siteLabel(candidate)}</option>
+        <h2>File</h2>
+        <div class="path" title={doc.path}>{doc.path}</div>
+        <dl>
+          <dt>sites</dt>
+          <dd>{doc.model.sites.length}</dd>
+          <dt>revision</dt>
+          <dd>{doc.revision}</dd>
+          <dt>schema</dt>
+          <dd>{doc.model.version}</dd>
+        </dl>
+      </section>
+
+      {#if doc.model.sites.length > 1}
+        <section>
+          <h2>Site</h2>
+          <select bind:value={siteIndex}>
+            {#each doc.model.sites as candidate, i (siteId(candidate))}
+              <option value={i}>{siteLabel(candidate)}</option>
+            {/each}
+          </select>
+        </section>
+      {/if}
+
+      {#if site}
+        <section>
+          <h2>Graph</h2>
+          <dl>
+            <dt>function</dt>
+            <dd>{site.function}()</dd>
+            <dt>flowgraph</dt>
+            <dd>{site.flowgraph_var}</dd>
+            <dt>blocks</dt>
+            <dd>{site.blocks.length}</dd>
+            <dt>edges</dt>
+            <dd>{site.edges.length}</dd>
+            <dt>unwired</dt>
+            <dd>{site.blocks.filter((block) => !block.in_graph).length}</dd>
+          </dl>
+        </section>
+      {/if}
+
+      <section>
+        <h2>Read-only ({notes.length})</h2>
+        {#if notes.length === 0}
+          <p class="muted">everything in this site is editable</p>
+        {:else}
+          <ul class="notes">
+            {#each notes as note (note.element + note.reason)}
+              <li>
+                <span class="el">{note.element}</span><span class="reason">{note.reason}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+
+      <section class="spacer">
+        <h2>Fixture</h2>
+        <select bind:value={fixtureName} onchange={openFixture}>
+          {#each fixtureNames as name (name)}
+            <option value={name}>{name}</option>
           {/each}
         </select>
       </section>
-    {/if}
 
-    {#if site}
-      <section>
-        <h2>Graph</h2>
-        <dl>
-          <dt>function</dt>
-          <dd>{site.function}()</dd>
-          <dt>flowgraph</dt>
-          <dd>{site.flowgraph_var}</dd>
-          <dt>blocks</dt>
-          <dd>{site.blocks.length}</dd>
-          <dt>edges</dt>
-          <dd>{site.edges.length}</dd>
-          <dt>unwired</dt>
-          <dd>{site.blocks.filter((block) => !block.in_graph).length}</dd>
-        </dl>
-      </section>
-    {/if}
-
-    <section>
-      <h2>Read-only ({notes.length})</h2>
-      {#if notes.length === 0}
-        <p class="muted">everything in this site is editable</p>
-      {:else}
-        <ul class="notes">
-          {#each notes as note (note.element + note.reason)}
-            <li>
-              <span class="el">{note.element}</span><span class="reason">{note.reason}</span>
-            </li>
-          {/each}
-        </ul>
+      {#if status}
+        <p class="status" data-testid="status">{status}</p>
       {/if}
-    </section>
 
-    <section class="spacer">
-      <h2>Fixture</h2>
-      <select bind:value={fixtureName} onchange={openFixture}>
-        {#each fixtureNames as name (name)}
-          <option value={name}>{name}</option>
-        {/each}
-      </select>
-    </section>
-
-    {#if status}
-      <p class="status" data-testid="status">{status}</p>
-    {/if}
-
-    <span class="attribution">Caribou Labs</span>
+      <span class="attribution">Caribou Labs</span>
+    </div>
   </aside>
 
   <main>
@@ -281,7 +329,7 @@
           deleteKey={null}
           minZoom={0.1}
           proOptions={{ hideAttribution: false }}
-          onnodeclick={({ node }) => (selected = node.id)}
+          onnodeclick={({ node }) => selectNode(node.id)}
           onpaneclick={() => (selected = null)}
         >
           <Background bgColor="var(--bg-0)" patternColor="var(--border)" gap={18} size={2} />
@@ -292,31 +340,83 @@
     </div>
   </main>
 
-  <Inspector {site} {siteIndex} {selected} enabled={editable && !busy} {submit} />
+  <Inspector
+    {site}
+    {siteIndex}
+    {selected}
+    enabled={editable && !busy}
+    {submit}
+    open={rightOpen}
+    ontoggle={() => (rightOpen = !rightOpen)}
+  />
 </div>
 
 <style>
   .shell {
-    display: grid;
-    grid-template-columns: 280px 1fr 320px;
+    display: flex;
     height: 100%;
   }
   .sidebar {
+    flex: none;
+    width: 280px;
     background: var(--bg-1);
     border-right: 1px solid var(--border);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: width 150ms ease;
+  }
+  .sidebar.collapsed {
+    width: 44px;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
     padding: var(--sp-3);
+  }
+  .collapsed .head {
+    flex-direction: column;
+    padding: var(--sp-2) 9px;
+  }
+  .head img {
+    border-radius: var(--radius-sm);
+    flex: none;
+  }
+  .brand {
+    min-width: 0;
+  }
+  .collapsed .brand {
+    display: none;
+  }
+  .toggle {
+    margin-left: auto;
+    flex: none;
+    width: 26px;
+    padding: 2px 0;
+    font-size: 15px;
+    line-height: 1.1;
+    color: var(--muted);
+  }
+  .collapsed .toggle {
+    margin-left: 0;
+  }
+  .body {
+    flex: 1;
+    min-height: 0;
+    width: 280px;
+    padding: 0 var(--sp-3) var(--sp-3);
     overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: var(--sp-3);
+    transition:
+      opacity 120ms ease,
+      visibility 150ms;
   }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-  }
-  .brand img {
-    border-radius: var(--radius-sm);
+  .collapsed .body {
+    opacity: 0;
+    visibility: hidden;
   }
   .wordmark {
     font-size: 15px;
@@ -331,15 +431,21 @@
     text-transform: uppercase;
     color: var(--faint);
   }
-  .toolbar {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-2);
-  }
   .history {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: var(--sp-2);
+    padding: 0 var(--sp-3) var(--sp-3);
+  }
+  .collapsed .history {
+    grid-template-columns: 1fr;
+    gap: var(--sp-1);
+    padding: 0 9px;
+  }
+  .collapsed .history button {
+    padding: 3px 0;
+    font-size: 14px;
+    line-height: 1.1;
   }
   h2 {
     margin: 0 0 var(--sp-2);
@@ -415,6 +521,7 @@
   }
   main {
     position: relative;
+    flex: 1;
     min-width: 0;
     background: var(--bg-0);
     display: flex;
@@ -438,5 +545,11 @@
   .banner button {
     margin-left: auto;
     flex: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar,
+    .body {
+      transition: none;
+    }
   }
 </style>

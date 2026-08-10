@@ -16,9 +16,11 @@
     selected: string | null;
     enabled: boolean;
     submit: (command: Command) => Promise<string | null>;
+    open: boolean;
+    ontoggle: () => void;
   };
 
-  const { site, siteIndex, selected, enabled, submit }: Props = $props();
+  const { site, siteIndex, selected, enabled, submit, open, ontoggle }: Props = $props();
 
   let drafts = $state<Record<string, string>>({});
   let errors = $state<Record<string, string>>({});
@@ -28,6 +30,13 @@
   const config = $derived(site?.config ?? null);
   const configRows = $derived(config ? configFields(siteIndex, config) : []);
   const ports = $derived(site && block ? blockPorts(site, block.var) : null);
+  const toggleTitle = $derived(
+    open
+      ? 'Collapse inspector  ]'
+      : block
+        ? `${block.display_name ?? block.var} selected — expand inspector  ]`
+        : 'Expand inspector  ]'
+  );
 
   function omit(map: Record<string, string>, id: string): Record<string, string> {
     return Object.fromEntries(Object.entries(map).filter(([key]) => key !== id));
@@ -68,93 +77,182 @@
   </label>
 {/snippet}
 
-<aside class="inspector">
-  {#if block}
-    <section>
-      <h2>Block</h2>
-      <div class="title">{block.display_name ?? block.var}</div>
-      <div class="type">{typeSignature(block)}</div>
-      <dl>
-        <dt>var</dt>
-        <dd>{block.var}</dd>
-        {#if block.alias}
-          <dt>alias</dt>
-          <dd>{block.alias}</dd>
-        {/if}
-        <dt>in graph</dt>
-        <dd>{block.in_graph ? 'yes' : 'declared only'}</dd>
-      </dl>
-      {#if !block.editable}
-        <p class="reason" data-testid="block-reason">
-          read-only: {readable(block.read_only_reason ?? 'unsupported form')}
-        </p>
+<aside class="inspector" class:collapsed={!open}>
+  <div class="head">
+    <button
+      class="toggle"
+      class:live={!open && !!block}
+      data-testid="toggle-right"
+      aria-expanded={open}
+      aria-label={open ? 'Collapse inspector' : 'Expand inspector'}
+      title={toggleTitle}
+      onclick={ontoggle}
+    >
+      {#if open}
+        ›
+      {:else}
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true">
+          <path
+            d="M2 4h6M13 4h1M2 8h1M8 8h6M2 12h4M11 12h3"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          />
+          <circle cx="10" cy="4" r="1.7" />
+          <circle cx="5" cy="8" r="1.7" />
+          <circle cx="8" cy="12" r="1.7" />
+        </svg>
       {/if}
-    </section>
+    </button>
+    <h1>Inspector</h1>
+  </div>
 
-    <section>
-      <h2>Parameters</h2>
-      <div class="fields">
-        {#each fields as field (field.id)}
-          {@render fieldRow(field)}
-        {/each}
-      </div>
-    </section>
-
-    {#if ports}
+  <div class="body">
+    {#if block}
       <section>
-        <h2>Ports</h2>
-        {#if ports.inputs.length === 0 && ports.outputs.length === 0}
-          <p class="muted">no wired ports</p>
-        {:else}
-          <ul class="ports">
-            {#each ports.inputs as port (port)}
-              <li><span class="dir">in</span><span class="port">{port}</span></li>
-            {/each}
-            {#each ports.outputs as port (port)}
-              <li><span class="dir">out</span><span class="port">{port}</span></li>
-            {/each}
-          </ul>
+        <h2>Block</h2>
+        <div class="title">{block.display_name ?? block.var}</div>
+        <div class="type">{typeSignature(block)}</div>
+        <dl>
+          <dt>var</dt>
+          <dd>{block.var}</dd>
+          {#if block.alias}
+            <dt>alias</dt>
+            <dd>{block.alias}</dd>
+          {/if}
+          <dt>in graph</dt>
+          <dd>{block.in_graph ? 'yes' : 'declared only'}</dd>
+        </dl>
+        {#if !block.editable}
+          <p class="reason" data-testid="block-reason">
+            read-only: {readable(block.read_only_reason ?? 'unsupported form')}
+          </p>
         {/if}
       </section>
-    {/if}
-  {:else}
-    <section>
-      <h2>Block</h2>
-      <p class="muted">click a block to edit its parameters</p>
-    </section>
-  {/if}
 
-  {#if config}
-    <section>
-      <h2>Config <span class="source">{config.source}</span></h2>
-      {#if configRows.length === 0}
-        <p class="muted">no direct assignments</p>
-      {:else}
+      <section>
+        <h2>Parameters</h2>
         <div class="fields">
-          {#each configRows as field (field.id)}
+          {#each fields as field (field.id)}
             {@render fieldRow(field)}
           {/each}
         </div>
-      {/if}
-    </section>
-  {/if}
+      </section>
 
-  {#if !enabled}
-    <p class="muted" data-testid="viewer-note">
-      fixture mode — read-only viewer, editing needs the desktop shell
-    </p>
-  {/if}
+      {#if ports}
+        <section>
+          <h2>Ports</h2>
+          {#if ports.inputs.length === 0 && ports.outputs.length === 0}
+            <p class="muted">no wired ports</p>
+          {:else}
+            <ul class="ports">
+              {#each ports.inputs as port (port)}
+                <li><span class="dir">in</span><span class="port">{port}</span></li>
+              {/each}
+              {#each ports.outputs as port (port)}
+                <li><span class="dir">out</span><span class="port">{port}</span></li>
+              {/each}
+            </ul>
+          {/if}
+        </section>
+      {/if}
+    {:else}
+      <section>
+        <h2>Block</h2>
+        <p class="muted">click a block to edit its parameters</p>
+      </section>
+    {/if}
+
+    {#if config}
+      <section>
+        <h2>Config <span class="source">{config.source}</span></h2>
+        {#if configRows.length === 0}
+          <p class="muted">no direct assignments</p>
+        {:else}
+          <div class="fields">
+            {#each configRows as field (field.id)}
+              {@render fieldRow(field)}
+            {/each}
+          </div>
+        {/if}
+      </section>
+    {/if}
+
+    {#if !enabled}
+      <p class="muted" data-testid="viewer-note">
+        fixture mode — read-only viewer, editing needs the desktop shell
+      </p>
+    {/if}
+  </div>
 </aside>
 
 <style>
   .inspector {
+    flex: none;
+    width: 320px;
     background: var(--bg-1);
     border-left: 1px solid var(--border);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: width 150ms ease;
+  }
+  .inspector.collapsed {
+    width: 44px;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
     padding: var(--sp-3);
+  }
+  .collapsed .head {
+    padding: var(--sp-2) 9px;
+  }
+  .toggle {
+    flex: none;
+    width: 26px;
+    padding: 2px 0;
+    font-size: 15px;
+    line-height: 1.1;
+    color: var(--muted);
+  }
+  .toggle svg {
+    display: block;
+    margin: 0 auto;
+  }
+  .toggle.live {
+    border-color: var(--accent);
+    color: var(--accent-hi);
+  }
+  h1 {
+    margin: 0;
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 600;
+  }
+  .collapsed h1 {
+    display: none;
+  }
+  .body {
+    flex: 1;
+    min-height: 0;
+    width: 320px;
+    padding: 0 var(--sp-3) var(--sp-3);
     overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: var(--sp-4);
+    transition:
+      opacity 120ms ease,
+      visibility 150ms;
+  }
+  .collapsed .body {
+    opacity: 0;
+    visibility: hidden;
   }
   h2 {
     margin: 0 0 var(--sp-2);
@@ -283,5 +381,11 @@
     margin: 0;
     color: var(--muted);
     font-size: 11px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .inspector,
+    .body {
+      transition: none;
+    }
   }
 </style>

@@ -70,15 +70,13 @@ function toNode(site: Site, block: Block): BlockNode {
 }
 
 function toEdge(edge: Edge): RoutedEdge {
-  const label = portLabel(edge.port);
   return {
     id: edgeId(edge),
     type: 'routed',
     source: edge.from,
     target: edge.to,
     sourceHandle: 'out',
-    targetHandle: label,
-    label,
+    targetHandle: portLabel(edge.port),
     data: { bends: [] },
     animated: false,
     selectable: true,

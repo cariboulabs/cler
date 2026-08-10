@@ -130,14 +130,6 @@ select:hover {
   --xy-attribution-background-color: transparent;
 }
 
-.svelte-flow__edge-label {
-  padding: 0 2px;
-  background: var(--bg-0);
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 9px;
-}
-
 .svelte-flow__edge.cler-edge .svelte-flow__edge-path {
   stroke: var(--muted);
   stroke-width: 1.8;
