@@ -1,20 +1,21 @@
 #pragma once
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
+#include <algorithm>
 #include <chrono>
 
 template <typename T>
 struct ThrottleBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
+
     cler::Channel<T> in;
 
     ThrottleBlock(const char* name, const size_t sps, size_t const buffer_size = 1024)
         : cler::BlockBase(name),
           in(buffer_size),
-          _sps(sps),
-          _interval(1.0 / static_cast<double>(sps)),
-          _next_tick(std::chrono::high_resolution_clock::now())
+          _sps(static_cast<double>(sps))
     {
-        if (_sps == 0) {
+        if (sps == 0) {
             cler::panic("Sample rate must be greater than zero.");
         }
     }
@@ -27,29 +28,64 @@ struct ThrottleBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSpace;
         }
 
-        // One sample at a time by design: batching would jitter the downstream pacing this
-        // block exists to produce. Slower is fine here since throttling means we want slow.
-        T sample;
-        in.pop(sample);
-        out->push(sample);
+        if (!_pacing_started) {
+            start_pacing();
+        }
 
-        _next_tick += std::chrono::duration_cast<std::chrono::high_resolution_clock::duration>(
-            std::chrono::duration<double>(_interval));
+        const clock::time_point now = wait_until_sample_is_due(_emitted);
 
-        auto now = std::chrono::high_resolution_clock::now();
-        if (now < _next_tick) {
-            auto sleep_duration = _next_tick - now;
-            std::this_thread::sleep_for(sleep_duration);
-        } else {
-            // If we fall behind, catch up (do not sleep)
-            _next_tick = now;
+        const size_t due = samples_due_by(now);
+        const size_t owed = due > _emitted ? due - _emitted : 1;
+        const size_t transferable = std::min(owed, std::min(in.size(), out->space()));
+
+        for (size_t i = 0; i < transferable; ++i) {
+            T sample;
+            in.pop(sample);
+            out->push(sample);
+        }
+        _emitted += transferable;
+
+        if (transferable < owed) {
+            drop_pacing_debt(now);
         }
 
         return cler::Empty{};
     }
 
 private:
-    size_t _sps;
-    double _interval;  // interval between samples in seconds
-    std::chrono::high_resolution_clock::time_point _next_tick;
+    using clock = std::chrono::high_resolution_clock;
+
+    void start_pacing() {
+        _epoch = clock::now();
+        _emitted = 0;
+        _pacing_started = true;
+    }
+
+    clock::time_point wait_until_sample_is_due(size_t sample_index) const {
+        const clock::time_point due_at = _epoch + time_to_emit(sample_index);
+        const clock::time_point now = clock::now();
+        if (now >= due_at) {
+            return now;
+        }
+        std::this_thread::sleep_for(due_at - now);
+        return clock::now();
+    }
+
+    void drop_pacing_debt(clock::time_point now) {
+        _epoch = now - time_to_emit(_emitted);
+    }
+
+    clock::duration time_to_emit(size_t samples) const {
+        return std::chrono::duration_cast<clock::duration>(
+            std::chrono::duration<double>(static_cast<double>(samples) / _sps));
+    }
+
+    size_t samples_due_by(clock::time_point now) const {
+        return static_cast<size_t>(std::chrono::duration<double>(now - _epoch).count() * _sps);
+    }
+
+    double _sps;
+    bool _pacing_started = false;
+    size_t _emitted = 0;
+    clock::time_point _epoch;
 };

@@ -177,6 +177,41 @@ TEST_F(UtilityBlocksTest, ThrottleBlockEmptyInput) {
     EXPECT_EQ(output.size(), 0);
 }
 
+TEST_F(UtilityBlocksTest, ThrottleBlockHighRateThroughput) {
+    const size_t buffer_size = 4096;
+    const size_t sps = 1000000;
+    const size_t total = 100000;
+
+    ThrottleBlock<float> throttle_block("test_throttle_rate", sps, buffer_size);
+    cler::Channel<float> output(buffer_size);
+
+    size_t pushed = 0;
+    size_t popped = 0;
+    size_t out_of_order = 0;
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+    while (popped < total) {
+        while (pushed < total && throttle_block.in.space() > 0) {
+            throttle_block.in.push(static_cast<float>(pushed));
+            ++pushed;
+        }
+        throttle_block.procedure(&output);
+        float sample;
+        while (output.try_pop(sample)) {
+            if (sample != static_cast<float>(popped)) ++out_of_order;
+            ++popped;
+        }
+    }
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - start_time);
+
+    EXPECT_EQ(out_of_order, 0u) << "sample order not preserved";
+
+    const int64_t nominal_ms = static_cast<int64_t>(1000.0 * total / sps);
+    EXPECT_GE(elapsed.count(), nominal_ms * 8 / 10) << "throttle ran free, did not pace";
+    EXPECT_LE(elapsed.count(), nominal_ms * 10) << "throttle did not batch what came due";
+}
+
 // Test ThroughputBlock - verify passthrough and counting
 TEST_F(UtilityBlocksTest, ThroughputBlockPassthrough) {
     const size_t buffer_size = 1024;
