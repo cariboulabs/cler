@@ -86,6 +86,35 @@ async function measureEdges(fixture: string): Promise<RenderedEdge[]> {
   });
 }
 
+function viewportTransform(target: Page): Promise<string> {
+  return target.evaluate(() => {
+    const viewport = document.querySelector('.svelte-flow__viewport');
+    if (!(viewport instanceof HTMLElement)) throw new Error('no flow viewport');
+    return viewport.style.transform;
+  });
+}
+
+function scaleOf(transform: string): number {
+  const found = /scale\(([\d.]+)\)/.exec(transform)?.[1];
+  if (!found) throw new Error(`no scale in "${transform}"`);
+  return Number(found);
+}
+
+function rightClickPrevented(target: Page, selector: string): Promise<boolean> {
+  return target.evaluate((where) => {
+    const element = document.querySelector(where);
+    if (!element) throw new Error(`nothing matches ${where}`);
+    const event = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 500,
+      clientY: 400
+    });
+    element.dispatchEvent(event);
+    return event.defaultPrevented;
+  }, selector);
+}
+
 function installFakeBackend(setup: FakeSetup) {
   function need<T>(value: T | undefined | null, what: string): T {
     if (value === undefined || value === null) throw new Error(`fake backend: no ${what}`);
@@ -446,8 +475,8 @@ describe('editing against a fake backend', () => {
   it(
     'wires undo and redo to the backend history flags',
     async () => {
-      const undo = editor.locator('.history button', { hasText: 'Undo' });
-      const redo = editor.locator('.history button', { hasText: 'Redo' });
+      const undo = editor.locator('[data-testid="undo"]');
+      const redo = editor.locator('[data-testid="redo"]');
       expect(await undo.isDisabled()).toBe(true);
       expect(await redo.isDisabled()).toBe(true);
 
@@ -488,6 +517,186 @@ describe('editing against a fake backend', () => {
   );
 });
 
+describe('top bar, context menu and shortcuts', () => {
+  let editor: Page;
+
+  const PANE_SPOT = { x: 40, y: 400 };
+
+  const calls = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.calls);
+  const menu = () => editor.locator('[data-testid="context-menu"]');
+  const param = () => editor.locator('input[data-field="source1.ctor.1"]');
+
+  async function editParam(text: string) {
+    await editor.click('.svelte-flow__node[data-id="source1"]');
+    await editor.waitForSelector('.inspector input');
+    await param().fill(text);
+    await param().blur();
+    await expect.poll(() => editor.locator('[data-testid="undo"]').isDisabled()).toBe(false);
+  }
+
+  async function openMenu() {
+    await editor.locator('.svelte-flow__pane').click({ button: 'right', position: PANE_SPOT });
+    await menu().waitFor();
+  }
+
+  beforeEach(async () => {
+    editor = await browser.newPage({ viewport: VIEWPORT });
+    await editor.addInitScript(installFakeBackend, { path: FAKE_PATH, model: editableModel() });
+    await editor.goto(origin, { waitUntil: 'load' });
+    await editor.click('button.primary');
+    await editor.waitForSelector('.svelte-flow__node');
+  }, CASE_TIMEOUT);
+
+  afterEach(async () => {
+    await editor.close();
+  });
+
+  it(
+    'puts every action in the top bar with its shortcut, history enabled only when it exists',
+    async () => {
+      const ids = ['open', 'undo', 'redo', 'zoom-out', 'zoom-in', 'fit'];
+      const titles = await Promise.all(
+        ids.map((id) => editor.getAttribute(`[data-testid="${id}"]`, 'title'))
+      );
+      expect(titles).toEqual([
+        'Open file (Ctrl+O)',
+        'Undo (Ctrl+Z)',
+        'Redo (Ctrl+Shift+Z)',
+        'Zoom out (Ctrl+-)',
+        'Zoom in (Ctrl+=)',
+        'Fit view (Ctrl+0)'
+      ]);
+
+      expect(await editor.locator('.sidebar button', { hasText: 'Undo' }).count()).toBe(0);
+      expect(await editor.locator('[data-testid="undo"]').isDisabled()).toBe(true);
+      expect(await editor.locator('[data-testid="redo"]').isDisabled()).toBe(true);
+      for (const id of ['open', 'zoom-out', 'zoom-in', 'fit']) {
+        expect(await editor.locator(`[data-testid="${id}"]`).isDisabled()).toBe(false);
+      }
+
+      await editParam('12.0f');
+      await editor.click('[data-testid="undo"]');
+      await expect.poll(() => param().inputValue()).toBe('1.0f');
+      await expect.poll(() => editor.locator('[data-testid="redo"]').isDisabled()).toBe(false);
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'opens a context menu on the pane and undoes from it',
+    async () => {
+      await openMenu();
+      expect(await editor.locator('[data-testid="menu-undo"]').isDisabled()).toBe(true);
+      expect(await editor.locator('[data-testid="menu-redo"]').isDisabled()).toBe(true);
+      expect(await editor.locator('[data-testid="menu-fit"]').isDisabled()).toBe(false);
+      expect(await editor.textContent('[data-testid="menu-undo"]')).toContain('Ctrl+Z');
+      await editor.keyboard.press('Escape');
+      await expect.poll(() => menu().count()).toBe(0);
+
+      await editParam('33.0f');
+      await openMenu();
+      expect(await editor.locator('[data-testid="menu-undo"]').isDisabled()).toBe(false);
+      await editor.click('[data-testid="menu-undo"]');
+
+      await expect.poll(() => menu().count()).toBe(0);
+      await expect.poll(() => param().inputValue()).toBe('1.0f');
+      expect(await calls()).toEqual(['open_document', 'apply_commands', 'undo']);
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'spends one backend call per history shortcut, and none while a field has focus',
+    async () => {
+      await editParam('42.0f');
+
+      await editor.keyboard.press('Control+z');
+      await expect.poll(() => param().inputValue()).toBe('1.0f');
+      await editor.keyboard.press('Control+Shift+z');
+      await expect.poll(() => param().inputValue()).toBe('42.0f');
+      await editor.keyboard.press('Control+z');
+      await expect.poll(() => param().inputValue()).toBe('1.0f');
+      await editor.keyboard.press('Control+y');
+      await expect.poll(() => param().inputValue()).toBe('42.0f');
+
+      const history = await calls();
+      expect(history).toEqual([
+        'open_document',
+        'apply_commands',
+        'undo',
+        'redo',
+        'undo',
+        'redo'
+      ]);
+
+      await param().click();
+      await editor.keyboard.press('Control+z');
+      await editor.keyboard.press('Control+y');
+      await editor.keyboard.press('Control+Shift+z');
+      await editor.waitForTimeout(300);
+      expect(await calls()).toEqual(history);
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'answers Ctrl+S with an autosave notice and no backend call',
+    async () => {
+      const before = await calls();
+      await editor.keyboard.press('Control+s');
+
+      const toast = editor.locator('[data-testid="saved-toast"]');
+      await toast.waitFor();
+      expect(await toast.textContent()).toContain('saved automatically');
+      expect(await calls()).toEqual(before);
+
+      await expect.poll(() => toast.count(), { timeout: 5000 }).toBe(0);
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'zooms and refits from the keyboard',
+    async () => {
+      const fitted = await viewportTransform(editor);
+      const base = scaleOf(fitted);
+
+      const settled = (zoom: number) =>
+        expect
+          .poll(async () => scaleOf(await viewportTransform(editor)), { timeout: 2000 })
+          .toBeCloseTo(base * zoom, 3);
+
+      await editor.keyboard.press('Control+Equal');
+      await settled(1.2);
+
+      await editor.keyboard.press('Control+Minus');
+      await settled(1);
+
+      await editor.keyboard.press('Control+Equal');
+      await settled(1.2);
+      await editor.keyboard.press('Control+Equal');
+      await settled(1.44);
+      expect(await viewportTransform(editor)).not.toBe(fitted);
+
+      await editor.keyboard.press('Control+0');
+      await expect.poll(() => viewportTransform(editor), { timeout: 2000 }).toBe(fitted);
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'suppresses the browser menu on the pane but leaves it alone in a field',
+    async () => {
+      expect(await rightClickPrevented(editor, '.svelte-flow__pane')).toBe(true);
+      await expect.poll(() => menu().count()).toBe(1);
+
+      expect(await rightClickPrevented(editor, 'input[data-field="config.scheduler"]')).toBe(false);
+      await expect.poll(() => menu().count()).toBe(0);
+    },
+    CASE_TIMEOUT
+  );
+});
+
 describe('retractable panels', () => {
   let editor: Page;
 
@@ -503,14 +712,6 @@ describe('retractable panels', () => {
 
   function settled(selector: string, expected: number) {
     return expect.poll(() => width(selector), { timeout: 2000 }).toBeCloseTo(expected, 0);
-  }
-
-  function viewportTransform(): Promise<string> {
-    return editor.evaluate(() => {
-      const viewport = document.querySelector('.svelte-flow__viewport');
-      if (!(viewport instanceof HTMLElement)) throw new Error('no flow viewport');
-      return viewport.style.transform;
-    });
   }
 
   beforeEach(async () => {
@@ -540,8 +741,8 @@ describe('retractable panels', () => {
 
       expect(await editor.locator('.sidebar .path').isVisible()).toBe(false);
       expect(await editor.locator('.inspector input').first().isVisible()).toBe(false);
-      expect(await editor.locator('.sidebar img').isVisible()).toBe(true);
-      expect(await editor.locator('.history button').first().isVisible()).toBe(true);
+      expect(await editor.locator('[data-testid="top-bar"] img').isVisible()).toBe(true);
+      expect(await editor.locator('[data-testid="undo"]').isVisible()).toBe(true);
 
       await editor.reload({ waitUntil: 'load' });
       await editor.waitForSelector('.svelte-flow__node');
@@ -561,7 +762,7 @@ describe('retractable panels', () => {
   it(
     'toggles on [ and ] unless the keystroke lands in a field',
     async () => {
-      await editor.locator('.svelte-flow__pane').click({ position: { x: 8, y: 8 } });
+      await editor.locator('.svelte-flow__pane').click({ position: { x: 8, y: 300 } });
       await editor.keyboard.press('[');
       await settled('.sidebar', RAIL_WIDTH);
       await editor.keyboard.press(']');
@@ -595,7 +796,7 @@ describe('retractable panels', () => {
       await settled('.inspector', INSPECTOR_WIDTH);
       await expect.poll(() => editor.textContent('.inspector .title')).toBe('Adder');
 
-      await editor.locator('.svelte-flow__pane').click({ position: { x: 8, y: 8 } });
+      await editor.locator('.svelte-flow__pane').click({ position: { x: 8, y: 300 } });
       await expect.poll(() => editor.locator('.inspector .title').count()).toBe(0);
       await settled('.inspector', INSPECTOR_WIDTH);
     },
@@ -627,7 +828,7 @@ describe('retractable panels', () => {
       await editor.mouse.move(760, 460, { steps: 8 });
       await editor.mouse.up();
       await editor.waitForTimeout(400);
-      const before = await viewportTransform();
+      const before = await viewportTransform(editor);
 
       await editor.click('[data-testid="toggle-left"]');
       await settled('.sidebar', RAIL_WIDTH);
@@ -635,7 +836,7 @@ describe('retractable panels', () => {
       await settled('.inspector', RAIL_WIDTH);
       await editor.waitForTimeout(300);
 
-      expect(await viewportTransform()).toBe(before);
+      expect(await viewportTransform(editor)).toBe(before);
     },
     CASE_TIMEOUT
   );
@@ -668,7 +869,7 @@ describe('fixture mode stays a read-only viewer', () => {
       }
       expect(await viewer.textContent('[data-testid="viewer-note"]')).toContain('read-only viewer');
 
-      expect(await viewer.locator('.history button').first().isDisabled()).toBe(true);
+      expect(await viewer.locator('[data-testid="undo"]').isDisabled()).toBe(true);
       expect(await viewer.locator('[data-testid="reload-banner"]').count()).toBe(0);
     },
     CASE_TIMEOUT
@@ -690,6 +891,34 @@ describe('fixture mode stays a read-only viewer', () => {
       await expect.poll(() => boxWidth('.inspector'), { timeout: 2000 }).toBeCloseTo(320, 0);
       expect(await viewer.locator('.inspector input').first().isDisabled()).toBe(true);
       expect(await viewer.textContent('[data-testid="viewer-note"]')).toContain('read-only viewer');
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'keeps the view actions live while history and the file dialog stay out of reach',
+    async () => {
+      expect(await viewer.locator('[data-testid="redo"]').isDisabled()).toBe(true);
+      expect(await viewer.locator('[data-testid="fit"]').isDisabled()).toBe(false);
+
+      await viewer.locator('.svelte-flow__pane').click({ button: 'right', position: { x: 40, y: 400 } });
+      const menu = viewer.locator('[data-testid="context-menu"]');
+      await menu.waitFor();
+      expect(await viewer.locator('[data-testid="menu-undo"]').isDisabled()).toBe(true);
+      expect(await viewer.locator('[data-testid="menu-fit"]').isDisabled()).toBe(false);
+
+      const fitted = await viewportTransform(viewer);
+      await viewer.click('[data-testid="menu-fit"]');
+      await expect.poll(() => menu.count()).toBe(0);
+
+      await viewer.keyboard.press('Control+Equal');
+      await expect
+        .poll(async () => scaleOf(await viewportTransform(viewer)), { timeout: 2000 })
+        .toBeGreaterThan(scaleOf(fitted));
+
+      await viewer.keyboard.press('Control+o');
+      await viewer.waitForSelector('[data-testid="status"]');
+      expect(await viewer.textContent('[data-testid="status"]')).toContain('desktop shell');
     },
     CASE_TIMEOUT
   );

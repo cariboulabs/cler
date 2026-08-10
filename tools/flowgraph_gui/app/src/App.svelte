@@ -9,6 +9,7 @@
   } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import { untrack } from 'svelte';
+  import Actions from './lib/Actions.svelte';
   import BlockNode from './lib/BlockNode.svelte';
   import Inspector from './lib/Inspector.svelte';
   import RoutedEdge from './lib/RoutedEdge.svelte';
@@ -183,30 +184,12 @@
     rightOpen = true;
   }
 
-  function isTyping(target: EventTarget | null): boolean {
-    if (!(target instanceof HTMLElement)) return false;
-    return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
-  }
-
-  function onKeydown(event: KeyboardEvent) {
-    if (event.ctrlKey || event.metaKey || event.altKey || isTyping(event.target)) return;
-    if (event.key === '[') leftOpen = !leftOpen;
-    else if (event.key === ']') rightOpen = !rightOpen;
-    else return;
-    event.preventDefault();
-  }
 </script>
-
-<svelte:window onkeydown={onKeydown} />
 
 <div class="shell">
   <aside class="sidebar" class:collapsed={!leftOpen}>
     <div class="head">
-      <img src="/brand/cler_mark.png" alt="cler" width="26" height="26" />
-      <div class="brand">
-        <div class="wordmark">cler</div>
-        <div class="tagline">flowgraph editor</div>
-      </div>
+      <h1>Document</h1>
       <button
         class="toggle"
         data-testid="toggle-left"
@@ -214,15 +197,6 @@
         aria-label={leftOpen ? 'Collapse sidebar' : 'Expand sidebar'}
         title={leftOpen ? 'Collapse sidebar  [' : 'Expand sidebar  ['}
         onclick={() => (leftOpen = !leftOpen)}>{leftOpen ? '‹' : '›'}</button
-      >
-    </div>
-
-    <div class="history">
-      <button title="Undo" onclick={() => run(undoDocument)} disabled={busy || !doc.canUndo}
-        >{leftOpen ? 'Undo' : '↶'}</button
-      >
-      <button title="Redo" onclick={() => run(redoDocument)} disabled={busy || !doc.canRedo}
-        >{leftOpen ? 'Redo' : '↷'}</button
       >
     </div>
 
@@ -333,6 +307,16 @@
           onpaneclick={() => (selected = null)}
         >
           <Background bgColor="var(--bg-0)" patternColor="var(--border)" gap={18} size={2} />
+          <Actions
+            canUndo={doc.canUndo}
+            canRedo={doc.canRedo}
+            {busy}
+            onundo={() => void run(undoDocument)}
+            onredo={() => void run(redoDocument)}
+            onopen={() => void openFile()}
+            ontoggleleft={() => (leftOpen = !leftOpen)}
+            ontoggleright={() => (rightOpen = !rightOpen)}
+          />
           <Controls showLock={false} />
           <MiniMap bgColor="var(--bg-1)" maskColor="var(--scrim)" nodeColor="var(--border-hi)" />
         </SvelteFlow>
@@ -376,17 +360,17 @@
     padding: var(--sp-3);
   }
   .collapsed .head {
-    flex-direction: column;
     padding: var(--sp-2) 9px;
   }
-  .head img {
-    border-radius: var(--radius-sm);
-    flex: none;
+  h1 {
+    margin: 0;
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    font-weight: 600;
   }
-  .brand {
-    min-width: 0;
-  }
-  .collapsed .brand {
+  .collapsed h1 {
     display: none;
   }
   .toggle {
@@ -417,35 +401,6 @@
   .collapsed .body {
     opacity: 0;
     visibility: hidden;
-  }
-  .wordmark {
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    color: var(--fg);
-    line-height: 1.1;
-  }
-  .tagline {
-    font-size: 10px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--faint);
-  }
-  .history {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--sp-2);
-    padding: 0 var(--sp-3) var(--sp-3);
-  }
-  .collapsed .history {
-    grid-template-columns: 1fr;
-    gap: var(--sp-1);
-    padding: 0 9px;
-  }
-  .collapsed .history button {
-    padding: 3px 0;
-    font-size: 14px;
-    line-height: 1.1;
   }
   h2 {
     margin: 0 0 var(--sp-2);
