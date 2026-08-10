@@ -38,6 +38,40 @@ in; the objective needs the rate term the two EWMAs already contain.
 island, and is fatal on unknown, duplicate, missing, empty or
 reverse-topological entries.
 
+## Better weights are not enough: the objective is wrong too
+
+Tried and reverted (2026-08-10). Weighting each block by measured utilisation
+instead of ns/item — `ns_per_item x items_per_second`, from the cumulative
+channel counters, so no hot-path cost — makes the weights physically real and
+the partition deterministic. It also picks a *worse* split.
+
+Measured on the Pluto receiver, cores per block:
+
+| block | cores |
+|---|---|
+| channelizer | 0.341 |
+| post_res_ch0..3 | 0.095 each |
+| lora_rx_ch0..3 | 0.094 – 0.148 |
+| port3_null | 0.009 |
+
+Minimising the max island then chooses 3/7, which balances almost perfectly
+(0.47 vs 0.53 cores) and runs at **2.45 MS/s**. The fastest split, 7/3, is the
+most *unbalanced* one measured (0.84 vs 0.16 cores) and runs at **3.00**. Rate
+rises with imbalance up to 7/3 and falls again at 8/2.
+
+So load balance does not predict throughput on a 2-core target with a
+`may_block` source. The likely reason is the source thread: three threads on
+two cores, and a nearly idle second island worker leaves a core free to service
+the driver promptly, where two evenly loaded workers starve it. Note this
+contradicts the note elsewhere that the `may_block` source "does not need a
+core reserved for it".
+
+The utilisation weights were kept for `report_partition`, which now prints
+cores per block, and the DP was left on ns/item. Fixing the sampling alone
+would only make a wrong objective consistent. Until there is an objective that
+predicts throughput, name the split with `manual_islands` and find it by
+sweeping.
+
 ## Ceiling
 
 Replaying a 3 MS/s recording unthrottled, the graph sustains **3.078–3.122

@@ -317,9 +317,13 @@ namespace cler {
             }
 
             void collect_block_weights(const Partition& partition, std::array<double, _N>& weights) {
-                sched::detail::collect_block_weights<_N>(_graph->_cost_samples, partition.block_ids,
-                                                 partition.block_count, weights);
+                sched::detail::collect_cost_weights<_N>(_graph->_cost_samples, partition.block_ids,
+                                                        partition.block_count, weights);
+                sched::detail::fill_unsampled_with_median<_N>(partition.block_ids,
+                                                              partition.block_count, weights);
             }
+
+            void mark_item_counters() { _graph->mark_item_counters(); }
 
             size_t collect_regular_blocks(std::array<uint8_t, _N>& ids) {
                 return collect_regular_ids(ids);
@@ -798,6 +802,8 @@ namespace cler {
         size_t _unresolved_edge_count = 0;
         std::array<InputCounter, MaxEdges> _input_counters{};
         size_t _input_counter_count = 0;
+        std::array<std::size_t, _N> _items_mark{};
+        std::chrono::steady_clock::time_point _items_mark_time{};
         OnErrTerminateCallback _on_err_terminate_cb = nullptr;
         void* _on_err_terminate_context = nullptr;
         std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
@@ -818,8 +824,10 @@ namespace cler {
             if (pinned.manual_islands != nullptr) {
                 build_manual_partition(regular_ids, regular_count, worker_count, out);
             } else {
+                std::array<double, _N> weights{};
+                sched::detail::collect_cost_weights<_N>(_cost_samples, regular_ids, regular_count, weights);
                 sched::detail::build_partition<_N, DEFAULT_MAX_WORKERS>(
-                    _edges.data(), _edge_count, _cost_samples,
+                    _edges.data(), _edge_count, weights,
                     regular_ids, regular_count, worker_count,
                     use_costs, _unresolved_edge_count == 0, out);
             }
@@ -923,13 +931,55 @@ namespace cler {
 
         void report_partition(const Partition& partition) {
             std::array<double, _N> weights{};
-            sched::detail::collect_block_weights<_N>(_cost_samples, partition.block_ids,
-                                                     partition.block_count, weights);
+            collect_utilisation_weights(weights);
+            sched::detail::fill_unsampled_with_median<_N>(partition.block_ids,
+                                                          partition.block_count, weights);
             for (size_t island = 0; island < partition.island_count; ++island) {
                 for (uint16_t k = partition.island_begin[island]; k < partition.island_begin[island + 1]; ++k) {
                     const uint8_t id = partition.block_ids[k];
                     TaskPolicy::report_partition_block(island, k, block_name(id), weights[id]);
                 }
+            }
+        }
+
+        template<size_t I>
+        std::size_t cumulative_items_for_index() const {
+            std::size_t reads = 0;
+            bool has_inputs = false;
+            for (size_t i = 0; i < _input_counter_count; ++i) {
+                const auto& ic = _input_counters[i];
+                if (ic.consumer != static_cast<uint8_t>(I)) continue;
+                has_inputs = true;
+                const std::size_t count = ic.read_count(ic.channel);
+                if (count > reads) reads = count;
+            }
+            if (has_inputs) return reads;
+            return sum_output_cumulative_write_count(std::get<I>(_runners).outputs);
+        }
+
+        template<std::size_t... Is>
+        void fill_cumulative_items(std::array<std::size_t, _N>& items, std::index_sequence<Is...>) const {
+            ((items[Is] = cumulative_items_for_index<Is>()), ...);
+        }
+
+        void mark_item_counters() {
+            fill_cumulative_items(_items_mark, std::make_index_sequence<_N>{});
+            _items_mark_time = std::chrono::steady_clock::now();
+        }
+
+        void collect_utilisation_weights(std::array<double, _N>& weights) {
+            std::array<std::size_t, _N> items{};
+            fill_cumulative_items(items, std::make_index_sequence<_N>{});
+
+            const double elapsed_s =
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - _items_mark_time).count();
+
+            for (size_t i = 0; i < _N; ++i) {
+                const double ns = sched::detail::ns_per_item(_cost_samples[i]);
+                const std::size_t delta = items[i] >= _items_mark[i] ? items[i] - _items_mark[i] : 0;
+                const double items_per_second =
+                    elapsed_s > 0.0 ? static_cast<double>(delta) / elapsed_s : 0.0;
+                weights[i] = ns * items_per_second;
             }
         }
 

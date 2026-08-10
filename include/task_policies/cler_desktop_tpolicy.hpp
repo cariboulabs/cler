@@ -90,9 +90,9 @@ struct DesktopTaskPolicy : TaskPolicyBase<DesktopTaskPolicy> {
     }
 
     static inline void report_partition_block(size_t island, size_t position, const char* name,
-                                              double weight_ns_per_item) {
-        std::fprintf(stderr, "cler: partition island %zu pos %zu %s (%.1f ns/item)\n",
-                     island, position, name, weight_ns_per_item);
+                                              double cpu_ns_per_second) {
+        std::fprintf(stderr, "cler: partition island %zu pos %zu %-16s %.3f cores\n",
+                     island, position, name, cpu_ns_per_second / 1e9);
     }
 
     static constexpr size_t park_timeout_us = 1000;

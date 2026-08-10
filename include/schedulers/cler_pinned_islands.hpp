@@ -75,6 +75,7 @@ namespace cler {
 
                 if (regular_count == 0) return;
 
+                host.mark_item_counters();
                 host.rebuild_partition(state.pinned_worker_count, false, state.partition);
                 state.queues.initialize_islands(state.partition.block_ids.data(),
                                                 state.partition.island_begin.data(),
@@ -221,6 +222,7 @@ namespace cler {
                     [&state, worker_id]() { state.park_states.wake_others(worker_id, state.pinned_worker_count); },
                     [host, &state, &config]() mutable {
                         host.rebuild_partition(state.pinned_worker_count, true, state.partition);
+                        host.mark_item_counters();
                         state.queues.initialize_islands(state.partition.block_ids.data(),
                                                 state.partition.island_begin.data(),
                                                 state.partition.island_count);

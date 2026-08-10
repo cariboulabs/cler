@@ -40,20 +40,29 @@ namespace cler {
         };
 
 
-        template<size_t MaxBlocks>
-        void collect_block_weights(const std::array<SchedulerCostSample, MaxBlocks>& samples,
-                                   const std::array<uint8_t, MaxBlocks>& order, size_t count,
-                                   std::array<double, MaxBlocks>& weights) {
-            std::array<double, MaxBlocks> sorted{};
-            size_t sampled = 0;
+        inline double ns_per_item(const SchedulerCostSample& sample) {
+            const double ns = bits_to_double(sample.ewma_ns_per_call_bits.load(std::memory_order_relaxed));
+            const double items = bits_to_double(sample.ewma_items_per_call_bits.load(std::memory_order_relaxed));
+            return ns > 0.0 ? ns / (std::max)(items, 1.0) : 0.0;
+        }
 
+        template<size_t MaxBlocks>
+        void collect_cost_weights(const std::array<SchedulerCostSample, MaxBlocks>& samples,
+                                  const std::array<uint8_t, MaxBlocks>& order, size_t count,
+                                  std::array<double, MaxBlocks>& weights) {
             for (size_t i = 0; i < count; ++i) {
                 const uint8_t id = order[i];
-                const auto& sample = samples[id];
-                const double ns = bits_to_double(sample.ewma_ns_per_call_bits.load(std::memory_order_relaxed));
-                const double items = bits_to_double(sample.ewma_items_per_call_bits.load(std::memory_order_relaxed));
-                weights[id] = ns > 0.0 ? ns / (std::max)(items, 1.0) : 0.0;
-                if (weights[id] > 0.0) sorted[sampled++] = weights[id];
+                weights[id] = ns_per_item(samples[id]);
+            }
+        }
+
+        template<size_t MaxBlocks>
+        void fill_unsampled_with_median(const std::array<uint8_t, MaxBlocks>& order, size_t count,
+                                        std::array<double, MaxBlocks>& weights) {
+            std::array<double, MaxBlocks> sorted{};
+            size_t sampled = 0;
+            for (size_t i = 0; i < count; ++i) {
+                if (weights[order[i]] > 0.0) sorted[sampled++] = weights[order[i]];
             }
 
             double median = 1.0;
@@ -82,7 +91,7 @@ namespace cler {
 
         template<size_t MaxBlocks, size_t MaxWorkers>
         bool build_partition(const Edge* edges, size_t edge_count,
-                             const std::array<SchedulerCostSample, MaxBlocks>& samples,
+                             const std::array<double, MaxBlocks>& block_weights,
                              const std::array<uint8_t, MaxBlocks>& regular_ids, size_t regular_count,
                              size_t worker_count, bool use_costs, bool topology_is_complete,
                              Partition<MaxBlocks, MaxWorkers>& out) {
@@ -108,11 +117,12 @@ namespace cler {
                 return true;
             }
 
-            std::array<double, MaxBlocks> weights{};
-            collect_block_weights<MaxBlocks>(samples, order, regular_count, weights);
+            std::array<double, MaxBlocks> weights = block_weights;
+            fill_unsampled_with_median<MaxBlocks>(order, regular_count, weights);
 
             std::array<double, MaxBlocks + 1> prefix{};
             for (size_t i = 0; i < regular_count; ++i) prefix[i + 1] = prefix[i] + weights[order[i]];
+
 
             std::array<uint16_t, MaxBlocks> crossings{};
             count_cut_crossings<MaxBlocks>(edges, edge_count, order, regular_count, crossings);
