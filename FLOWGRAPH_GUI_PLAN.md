@@ -248,6 +248,85 @@ value is scale, not degradation; nine corpus files lack a trailing newline.
 - **M4 — build & run.** Deferred until M2/M3 round-tripping is proven safe
   on real files; compiler diagnostics mapped to blocks where possible.
 
+## Beyond M4 — the product roadmap
+
+Direction: a **workbench**, not a diagram tool. The reference for interaction
+design is Flux (flux.ai) — dark by default, an assistant living in a side
+panel that proposes actions rather than prose, and a parts library with real
+metadata. We take their interaction *patterns*, not their assets or code, and
+the visual language stays ours (the rflock token set, Caribou red accent).
+
+The single most important thing Flux gets right, and the reason it maps onto
+this architecture so cleanly: **every action is explainable, reviewable and
+reversible.** We already have that machinery — commands, validation, refusal
+with reasons, undo, per-element editability. Everything below routes through
+it. Nothing gets a privileged path to the file.
+
+### M5 — typed edges
+
+Colour each wire by the sample type flowing through it: `float`,
+`std::complex<float>`, `Blob`, `uint16_t`, a user struct. The palette already
+extracts port element types; what is missing is substituting a block's
+template arguments into them, so `GainBlock<float>`'s `Channel<T>` resolves
+to `float`. Positional substitution only — no semantic analysis, and an
+unresolvable type takes a neutral colour rather than a guess, same rule as
+everywhere else.
+
+Two things fall out for free: the type-mismatch lint the validation ladder
+already wants becomes real (both endpoints resolved and unequal → error on
+the edge), and the canvas starts carrying DSP meaning at a glance — complex
+baseband versus real audio is the distinction people actually care about.
+
+Colours must come from a validated categorical palette (contrast against both
+`--bg-0` and `--bg-1`, CVD-checked), not ad-hoc hues, and type must never be
+encoded by colour alone — the port label stays.
+
+### M6 — code affordances
+
+Right-click a block: **view the source** of its declaration and its runner,
+and **jump to it** in the user's editor at the exact line. Every element in
+the model already carries byte spans, so this is nearly free and it is the
+feature that keeps the GUI honest — the code is one click away, always, and
+the user never has to wonder what the canvas did to their file.
+
+Same menu: copy the block's C++ declaration, show the resolved template
+arguments, reveal the header the type came from.
+
+### M7 — block library
+
+Promote the palette extractor into a browsable library: search, categories
+(sources / sinks / math / plots / channelizers / resamplers / hardware),
+`may_block` and port-count metadata visible, user-configured include roots
+alongside `desktop_blocks/`, and a preview of the constructor signature
+before you place anything. Blocks defined in the open file appear in it
+automatically — they already do in the extractor.
+
+### M8 — assistant panel
+
+A chat panel that explains and proposes. Two hard rules:
+
+1. **It emits commands, not text.** The assistant's output is the same
+   command objects the canvas emits, applied through the same
+   `DocumentSession` with the same validation, refusal reasons, atomicity and
+   undo. It cannot write bytes directly, so it inherits every guarantee M0
+   was hardened for. A proposed change renders as a diff to accept or reject.
+2. **Explaining is the default, acting is opt-in.** "What does this
+   channelizer do", "why is this edge read-only", "why is my graph not
+   meeting the rate" are answerable from the model plus AGENTS.md and cost
+   nothing but tokens. Structural edits need an explicit accept.
+
+Needs a Claude API key, is off without one, and costs real money per
+question — so it is last, and it is never on the path of anything else
+working.
+
+### Sequencing
+
+M5 and M6 are cheap, land inside the existing architecture, and make the tool
+visibly better — do them first, in that order. M7 is a UI investment over an
+extractor that already works. M8 is the largest and the only one with an
+external dependency and a running cost. None of them changes the one rule:
+the `.cpp` is still the document.
+
 ## Standing risks
 
 - The editable-grammar boundary is the product: if too many real files land
