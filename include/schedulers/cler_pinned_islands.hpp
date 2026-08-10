@@ -196,6 +196,8 @@ namespace cler {
             }
 
             static bool leader_should_repartition(Host host, State& state, const FlowGraphConfig& config) {
+                if (config.pinned_islands.manual_islands != nullptr) return false;
+
                 const bool calibrated = state.barrier.count() != 0;
                 if (calibrated && config.pinned_islands.repartition_check_ms == 0) return false;
 

@@ -894,6 +894,7 @@ namespace cler {
             for (size_t e = 0; e < _edge_count; ++e) {
                 const uint8_t producer = _edges[e].producer;
                 const uint8_t consumer = _edges[e].consumer;
+                if (producer == consumer) continue;
                 if (!used[producer] || !used[consumer]) continue;
                 if (position[producer] >= position[consumer]) {
                     TaskPolicy::fatal("manual_islands is not in topological order, a block is listed "
