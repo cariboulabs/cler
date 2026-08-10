@@ -123,7 +123,7 @@
 
   let menu = $state<Menu | null>(null);
   let toast = $state<{ text: string; danger: boolean } | null>(null);
-  let toastTimer = 0;
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let problemsOpen = $state(false);
 
   const failing = $derived(problems.some((problem) => problem.severity === 'error'));
@@ -362,7 +362,7 @@
     data-testid="problems"
     data-count={problems.length}
     aria-expanded={problemsOpen}
-    title="{problems.length} type conflicts and unresolved elements in this site"
+    title="{problems.length} conflicts, unresolved elements and runnerless blocks in this site"
     onclick={(event) => {
       event.stopPropagation();
       menu = null;

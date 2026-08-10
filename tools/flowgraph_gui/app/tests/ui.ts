@@ -25,8 +25,11 @@ type Setup = {
 type Fake = {
   log: Command[][];
   calls: string[];
+  bases: number[];
   source: () => string;
   refuse: (value: unknown) => void;
+  hold: () => void;
+  release: () => void;
 };
 
 export type FakeWindow = { __fake: Fake };
@@ -51,9 +54,11 @@ function installFake(setup: Setup) {
   const redone: string[] = [];
   const log: unknown[][] = [];
   const calls: string[] = [];
+  const bases: number[] = [];
   const callbacks = new Map<number, (message: unknown) => void>();
   let refusal: unknown = setup.refusal;
   let nextCallback = 1;
+  let gate: { waited: Promise<void>; open: () => void } | null = null;
 
   type Loose = Record<string, unknown>;
 
@@ -241,6 +246,8 @@ function installFake(setup: Setup) {
     if (command === 'palette') return JSON.parse(JSON.stringify(setup.specs));
     if (command === 'apply_commands') {
       const commands = args.commands as Loose[];
+      bases.push(args.baseRevision as number);
+      if (gate) await gate.waited;
       if (refusal !== null && refusal !== undefined) {
         const thrown = refusal;
         refusal = null;
@@ -273,9 +280,19 @@ function installFake(setup: Setup) {
   scope.__fake = {
     log,
     calls,
+    bases,
     source: () => state.source,
     refuse: (value: unknown) => {
       refusal = value;
+    },
+    hold: () => {
+      let open = () => undefined as void;
+      const waited = new Promise<void>((resolve) => (open = resolve));
+      gate = { waited, open };
+    },
+    release: () => {
+      gate?.open();
+      gate = null;
     }
   };
 }
@@ -325,6 +342,18 @@ export async function boot(options: BootOptions = {}): Promise<Page> {
 export const sent = (page: Page) => page.evaluate(() => (window as unknown as FakeWindow).__fake.log);
 
 export const commands = async (page: Page) => (await sent(page)).flat();
+
+export const calls = (page: Page) =>
+  page.evaluate(() => (window as unknown as FakeWindow).__fake.calls);
+
+export const bases = (page: Page) =>
+  page.evaluate(() => (window as unknown as FakeWindow).__fake.bases);
+
+export const hold = (page: Page) =>
+  page.evaluate(() => (window as unknown as FakeWindow).__fake.hold());
+
+export const release = (page: Page) =>
+  page.evaluate(() => (window as unknown as FakeWindow).__fake.release());
 
 export async function highlighted(page: Page): Promise<string> {
   const pieces = await page.locator('[data-testid="code-drawer"] .hit').allTextContents();

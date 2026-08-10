@@ -250,3 +250,33 @@ test('f) deleting a block referenced outside the graph is refused', async ({
 
   expect(work.bytes(file)).toBe(original);
 });
+
+test('g) a new block reaches disk with its template and every constructor argument', async ({
+  page,
+  work,
+  openFile,
+  shot
+}) => {
+  const file = work.copy('hello_world.cpp');
+
+  await page.goto('/');
+  await openFile(file);
+
+  await page.getByTestId('palette-search').fill('SourceCW');
+  await page.locator('[data-block="SourceCWBlock"] .row').dblclick();
+  await expect(page.getByTestId('add-block')).toBeVisible();
+  await expect(page.getByTestId('add-confirm')).toBeDisabled();
+  await shot('required-args');
+
+  await page.locator('[data-add-field="template.0"]').fill('float');
+  await page.locator('[data-add-field="ctor.1"]').fill('1.0f');
+  await page.locator('[data-add-field="ctor.2"]').fill('2.0f');
+  await page.locator('[data-add-field="ctor.3"]').fill('1000');
+  await expect(page.getByTestId('add-confirm')).toBeEnabled();
+  await page.getByTestId('add-confirm').click();
+
+  await expect
+    .poll(() => work.bytes(file), { timeout: 20_000 })
+    .toContain('SourceCWBlock<float> source_c_w("source_c_w", 1.0f, 2.0f, 1000);');
+  await expect(page.locator('.svelte-flow__node[data-id="source_c_w"]')).toBeVisible();
+});

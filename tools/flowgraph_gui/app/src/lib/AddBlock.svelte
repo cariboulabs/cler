@@ -46,6 +46,11 @@
     return document.querySelector<HTMLElement>('[data-canvas]');
   }
 
+  function focused(): HTMLElement | null {
+    const active = document.activeElement;
+    return active instanceof HTMLElement && active !== document.body ? active : null;
+  }
+
   function restoreFocus() {
     const target = opener?.isConnected ? opener : canvasPane();
     opener = null;
@@ -53,7 +58,7 @@
   }
 
   export function openAt(clientX: number, clientY: number, spec?: BlockSpec): void {
-    opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    opener = focused();
     spot = flow.screenToFlowPosition({ x: clientX, y: clientY });
     at = {
       x: Math.min(clientX, window.innerWidth - POPOVER_WIDTH),

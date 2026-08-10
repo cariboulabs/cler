@@ -474,6 +474,7 @@
       selectEdge(problem.edge);
       return;
     }
+    if (problem.block) selectNode(problem.block);
     jumpTo(problem.span);
   }
 
