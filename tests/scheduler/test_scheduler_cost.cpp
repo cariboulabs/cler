@@ -276,7 +276,32 @@ TEST(SchedulerCostTest, ResolvedButUnreadInputFallsBackToOutputWrites) {
            "silently weight it in ns/call while every other block is ns/item";
 }
 
-TEST(SchedulerCostTest, ManualIslandsOverrideTheCostPartition) {
+TEST(SchedulerCostTest, PinnedIslandsByPointerOverrideTheCostPartition) {
+    FixedRateSource source("Source");
+    DrainingSink sink("Sink", 1 << 16);
+
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, &sink.in),
+        cler::BlockRunner(&sink)
+    );
+
+    const cler::BlockBase* first[]  = {&source};
+    const cler::BlockBase* second[] = {&sink};
+    const cler::IslandList islands[] = {cler::island(first), cler::island(second)};
+
+    auto config = cler::flowgraph_config::pinned_islands(islands);
+    EXPECT_EQ(config.num_workers, 2u);
+    ASSERT_TRUE(static_cast<bool>(fg.check_islands(config)));
+
+    fg.run_for(std::chrono::milliseconds(200), config);
+
+    const auto& partition = fg.partition();
+    EXPECT_EQ(partition.island_count, 2);
+    EXPECT_EQ(partition.island_size(0), 1);
+    EXPECT_EQ(partition.island_size(1), 1);
+}
+
+TEST(SchedulerCostTest, PinnedIslandsByNameStillWork) {
     FixedRateSource source("Source");
     DrainingSink sink("Sink", 1 << 16);
 
@@ -287,19 +312,49 @@ TEST(SchedulerCostTest, ManualIslandsOverrideTheCostPartition) {
 
     const char* islands[] = {"Source", "Sink"};
     auto config = cler::flowgraph_config::pinned_islands(2);
-    config.pinned_islands.manual_islands = islands;
-    config.pinned_islands.manual_island_count = 2;
+    config.pinned_islands.island_names = islands;
+    config.pinned_islands.island_count = 2;
+
+    ASSERT_TRUE(static_cast<bool>(fg.check_islands(config)));
     fg.run_for(std::chrono::milliseconds(200), config);
-
-    const auto& partition = fg.partition();
-    EXPECT_EQ(partition.island_count, 2);
-    EXPECT_EQ(partition.island_size(0), 1);
-    EXPECT_EQ(partition.island_size(1), 1);
-    EXPECT_NE(partition.island_of(partition.block_ids[0]), partition.island_of(partition.block_ids[1]));
+    EXPECT_EQ(fg.partition().island_count, 2);
 }
 
-TEST(SchedulerCostTest, ManualIslandsThatDoNotCoverTheGraphAreFatal) {
-    const char* islands[] = {"Source"};
+TEST(SchedulerCostTest, IslandChecksReportWithoutRunning) {
+    FixedRateSource source("Source");
+    FixedRateSource stranger("Stranger");
+    DrainingSink sink("Sink", 1 << 16);
+
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, &sink.in),
+        cler::BlockRunner(&sink)
+    );
+
+    const cler::BlockBase* only_source[] = {&source};
+    const cler::IslandList missing[] = {cler::island(only_source)};
+    auto config = cler::flowgraph_config::pinned_islands(missing);
+    auto check = fg.check_islands(config);
+    EXPECT_FALSE(static_cast<bool>(check));
+    EXPECT_EQ(check.code, cler::IslandCheck::Code::Missing);
+    EXPECT_STREQ(check.block->name(), "Sink");
+
+    const cler::BlockBase* with_stranger[] = {&source, &stranger};
+    const cler::BlockBase* just_sink[] = {&sink};
+    const cler::IslandList not_in_graph[] = {cler::island(with_stranger), cler::island(just_sink)};
+    auto stranger_config = cler::flowgraph_config::pinned_islands(not_in_graph);
+    auto stranger_check = fg.check_islands(stranger_config);
+    EXPECT_FALSE(static_cast<bool>(stranger_check));
+    EXPECT_EQ(stranger_check.code, cler::IslandCheck::Code::NotInGraph);
+
+    const cler::BlockBase* both[] = {&source, &sink};
+    const cler::IslandList one_island[] = {cler::island(both)};
+    auto duplicate_config = cler::flowgraph_config::pinned_islands(one_island);
+    duplicate_config.pinned_islands.island_names = reinterpret_cast<const char* const*>(1);
+    EXPECT_EQ(fg.check_islands(duplicate_config).code, cler::IslandCheck::Code::BothFormsGiven);
+}
+
+TEST(SchedulerCostTest, ReversedOrderWithinOneIslandIsFatal) {
+    const char* islands[] = {"Sink,Source"};
 
     EXPECT_DEATH({
         FixedRateSource source("Source");
@@ -308,43 +363,28 @@ TEST(SchedulerCostTest, ManualIslandsThatDoNotCoverTheGraphAreFatal) {
             cler::BlockRunner(&source, &sink.in),
             cler::BlockRunner(&sink)
         );
-        auto config = cler::flowgraph_config::pinned_islands(2);
-        config.pinned_islands.manual_islands = islands;
-        config.pinned_islands.manual_island_count = 1;
+        auto config = cler::flowgraph_config::pinned_islands(1);
+        config.pinned_islands.island_names = islands;
+        config.pinned_islands.island_count = 1;
         fg.run_for(std::chrono::milliseconds(200), config);
-    }, "does not list block");
+    }, "listed before the block it consumes from");
 }
 
-TEST(SchedulerCostTest, ManualIslandsInReverseTopologicalOrderAreFatal) {
-    const char* islands[] = {"Sink", "Source"};
+TEST(SchedulerCostTest, ReversedOrderAcrossIslandsIsAllowed) {
+    FixedRateSource source("Source");
+    DrainingSink sink("Sink", 1 << 16);
 
-    EXPECT_DEATH({
-        FixedRateSource source("Source");
-        DrainingSink sink("Sink", 1 << 16);
-        auto fg = cler::make_desktop_flowgraph(
-            cler::BlockRunner(&source, &sink.in),
-            cler::BlockRunner(&sink)
-        );
-        auto config = cler::flowgraph_config::pinned_islands(2);
-        config.pinned_islands.manual_islands = islands;
-        config.pinned_islands.manual_island_count = 2;
-        fg.run_for(std::chrono::milliseconds(200), config);
-    }, "not in topological order");
-}
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, &sink.in),
+        cler::BlockRunner(&sink)
+    );
 
-TEST(SchedulerCostTest, ManualIslandsNamingAnUnknownBlockAreFatal) {
-    const char* islands[] = {"Source,Nope", "Sink"};
+    const cler::BlockBase* consumer_first[] = {&sink};
+    const cler::BlockBase* producer_second[] = {&source};
+    const cler::IslandList islands[] = {cler::island(consumer_first), cler::island(producer_second)};
 
-    EXPECT_DEATH({
-        FixedRateSource source("Source");
-        DrainingSink sink("Sink", 1 << 16);
-        auto fg = cler::make_desktop_flowgraph(
-            cler::BlockRunner(&source, &sink.in),
-            cler::BlockRunner(&sink)
-        );
-        auto config = cler::flowgraph_config::pinned_islands(2);
-        config.pinned_islands.manual_islands = islands;
-        config.pinned_islands.manual_island_count = 2;
-        fg.run_for(std::chrono::milliseconds(200), config);
-    }, "not a schedulable block");
+    auto config = cler::flowgraph_config::pinned_islands(islands);
+    EXPECT_TRUE(static_cast<bool>(fg.check_islands(config)));
+    fg.run_for(std::chrono::milliseconds(200), config);
+    EXPECT_GT(sink.received(), 0u);
 }

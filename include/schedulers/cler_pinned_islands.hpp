@@ -67,9 +67,12 @@ namespace cler {
                 state.next_repartition_check = state.calibration_deadline;
 
                 const size_t max_worker_count = (std::min)(DEFAULT_MAX_WORKERS, regular_count);
+                const size_t requested_workers = config.pinned_islands.island_count != 0
+                    ? config.pinned_islands.island_count
+                    : config.num_workers;
                 state.pinned_worker_count = regular_count == 0
                     ? 0
-                    : (std::max)(size_t{1}, (std::min)(config.num_workers, max_worker_count));
+                    : (std::max)(size_t{1}, (std::min)(requested_workers, max_worker_count));
 
                 host.launch_may_block_tasks_sampled(config, WakePinnedWorkers{&state});
 
@@ -196,7 +199,7 @@ namespace cler {
             }
 
             static bool leader_should_repartition(Host host, State& state, const FlowGraphConfig& config) {
-                if (config.pinned_islands.manual_islands != nullptr) return false;
+                if (config.pinned_islands.island_count != 0) return false;
 
                 const bool calibrated = state.barrier.count() != 0;
                 if (calibrated && config.pinned_islands.repartition_check_ms == 0) return false;

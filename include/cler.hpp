@@ -136,6 +136,35 @@ namespace cler {
         EmbeddableString<64> _name;
     };
 
+    struct IslandCheck {
+        enum class Code : uint8_t {
+            Ok, BothFormsGiven, NoIslands, TooManyIslands, EmptyIsland,
+            NotInGraph, NotSchedulable, Duplicate, Missing, NotTopological
+        };
+
+        Code             code   = Code::Ok;
+        size_t           island = 0;
+        const BlockBase* block  = nullptr;
+
+        explicit operator bool() const { return code == Code::Ok; }
+
+        const char* message() const {
+            switch (code) {
+                case Code::Ok:             return "ok";
+                case Code::BothFormsGiven: return "set pinned_islands.islands or .island_names, not both";
+                case Code::NoIslands:      return "pinned_islands.island_count is zero";
+                case Code::TooManyIslands: return "more islands than workers";
+                case Code::EmptyIsland:    return "an island is empty, which would idle a worker";
+                case Code::NotInGraph:     return "a listed block is not in this flowgraph";
+                case Code::NotSchedulable: return "a listed block declares may_block, it gets its own thread";
+                case Code::Duplicate:      return "a block is listed on more than one island";
+                case Code::Missing:        return "a schedulable block is on no island";
+                case Code::NotTopological: return "within one island a block is listed before the block it consumes from";
+            }
+            return "unknown island error";
+        }
+    };
+
     template<typename T>
     struct channel_to_base { using type = T; };
     template<typename T, size_t N>
@@ -468,6 +497,18 @@ namespace cler {
         }
 
         const Partition& partition() const { return _pinned_state.partition; }
+
+        IslandCheck check_islands(const FlowGraphConfig& config) const {
+            std::array<uint8_t, _N> ids{};
+            size_t count = 0;
+            for (size_t i = 0; i < _N; ++i) {
+                if (_is_regular_block[i]) ids[count++] = static_cast<uint8_t>(i);
+            }
+            Partition scratch;
+            return build_manual_partition(config, ids, count,
+                                          (std::max)(config.num_workers, config.pinned_islands.island_count),
+                                          scratch);
+        }
         size_t repartition_count() const { return _pinned_state.barrier.count(); }
         size_t affinity_failure_count() const { return _affinity_failures.load(std::memory_order_relaxed); }
 
@@ -490,6 +531,11 @@ namespace cler {
         template<std::size_t I>
         void collect_block_base_for_index() {
             _block_bases[I] = static_cast<const BlockBase*>(std::get<I>(_runners).block);
+        }
+
+        template<std::size_t... Is>
+        void collect_regular_flags_impl(std::index_sequence<Is...>) {
+            ((_is_regular_block[Is] = !std::get<Is>(_runners).may_block), ...);
         }
 
         template<std::size_t... Is>
@@ -545,6 +591,7 @@ namespace cler {
 
         void derive_edges() {
             collect_block_bases_impl(std::make_index_sequence<_N>{});
+            collect_regular_flags_impl(std::make_index_sequence<_N>{});
             std::array<BlockSpan, _N> spans{};
             collect_spans_impl(std::make_index_sequence<_N>{}, spans);
             collect_edges_impl(std::make_index_sequence<_N>{}, spans);
@@ -796,6 +843,7 @@ namespace cler {
         std::array<BlockExecutionStats, _N> _stats;
         std::array<sched::detail::SchedulerCostSample, _N> _cost_samples;
         std::array<const BlockBase*, _N> _block_bases{};
+        std::array<bool, _N> _is_regular_block{};
         std::array<Edge, MaxEdges> _edges{};
         size_t _edge_count = 0;
         std::array<UnresolvedEdge, MaxEdges> _unresolved_edges{};
@@ -821,8 +869,13 @@ namespace cler {
         void rebuild_partition_from(const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
                                     size_t worker_count, bool use_costs, Partition& out) {
             const auto& pinned = _config.pinned_islands;
-            if (pinned.manual_islands != nullptr) {
-                build_manual_partition(regular_ids, regular_count, worker_count, out);
+            if (pinned.islands != nullptr || pinned.island_names != nullptr) {
+                const IslandCheck check =
+                    build_manual_partition(_config, regular_ids, regular_count, worker_count, out);
+                if (!check) {
+                    TaskPolicy::fatal(check.message(),
+                                      check.block != nullptr ? check.block->name() : "");
+                }
             } else {
                 std::array<double, _N> weights{};
                 sched::detail::collect_cost_weights<_N>(_cost_samples, regular_ids, regular_count, weights);
@@ -836,98 +889,153 @@ namespace cler {
             }
         }
 
-        static bool token_equals(const char* begin, const char* end, const char* name) {
-            while (begin != end && *begin == ' ') ++begin;
-            while (end != begin && *(end - 1) == ' ') --end;
-            const size_t length = static_cast<size_t>(end - begin);
-            return std::strlen(name) == length && std::strncmp(begin, name, length) == 0;
-        }
-
-        size_t find_schedulable_block(const char* begin, const char* end,
-                                      const std::array<uint8_t, _N>& regular_ids,
-                                      size_t regular_count) const {
-            for (size_t i = 0; i < regular_count; ++i) {
-                if (token_equals(begin, end, block_name(regular_ids[i]))) return regular_ids[i];
+        size_t index_of_block(const BlockBase* block) const {
+            for (size_t i = 0; i < _N; ++i) {
+                if (_block_bases[i] == block) return i;
             }
             return _N;
         }
 
-        size_t append_island(const char* spec, const std::array<uint8_t, _N>& regular_ids,
-                             size_t regular_count, std::array<bool, _N>& used,
-                             Partition& out, size_t cursor) {
-            if (spec == nullptr) {
-                TaskPolicy::fatal("manual_islands has a null island", "");
+        static bool token_equals(const char* begin, const char* end, const char* name) {
+            while (begin != end && (*begin == ' ' || *begin == '\t' || *begin == '\n')) ++begin;
+            while (end != begin && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\n')) --end;
+            const size_t length = static_cast<size_t>(end - begin);
+            return std::strlen(name) == length && std::strncmp(begin, name, length) == 0;
+        }
+
+        size_t index_of_name(const char* begin, const char* end) const {
+            for (size_t i = 0; i < _N; ++i) {
+                if (token_equals(begin, end, _block_bases[i]->name())) return i;
             }
+            return _N;
+        }
+
+        static bool is_regular(size_t index, const std::array<uint8_t, _N>& regular_ids,
+                               size_t regular_count) {
+            for (size_t i = 0; i < regular_count; ++i) {
+                if (regular_ids[i] == index) return true;
+            }
+            return false;
+        }
+
+        IslandCheck add_island_block(size_t index, size_t island,
+                                     const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
+                                     std::array<bool, _N>& used, Partition& out, size_t& cursor) const {
+            if (!is_regular(index, regular_ids, regular_count)) {
+                return IslandCheck{IslandCheck::Code::NotSchedulable, island, _block_bases[index]};
+            }
+            if (used[index]) {
+                return IslandCheck{IslandCheck::Code::Duplicate, island, _block_bases[index]};
+            }
+            used[index] = true;
+            out.block_ids[cursor++] = static_cast<uint8_t>(index);
+            return IslandCheck{};
+        }
+
+        IslandCheck append_island_blocks(const IslandList& list, size_t island,
+                                         const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
+                                         std::array<bool, _N>& used, Partition& out, size_t& cursor) const {
+            for (size_t k = 0; k < list.count; ++k) {
+                const BlockBase* block = list.blocks[k];
+                const size_t index = index_of_block(block);
+                if (index == _N) {
+                    return IslandCheck{IslandCheck::Code::NotInGraph, island, block};
+                }
+                const IslandCheck check =
+                    add_island_block(index, island, regular_ids, regular_count, used, out, cursor);
+                if (!check) return check;
+            }
+            return IslandCheck{};
+        }
+
+        IslandCheck append_island_names(const char* spec, size_t island,
+                                        const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
+                                        std::array<bool, _N>& used, Partition& out, size_t& cursor) const {
+            if (spec == nullptr) return IslandCheck{IslandCheck::Code::EmptyIsland, island};
+
             const char* current = spec;
             while (*current != '\0') {
                 const char* comma = std::strchr(current, ',');
                 const char* end = comma != nullptr ? comma : current + std::strlen(current);
-
-                const size_t block = find_schedulable_block(current, end, regular_ids, regular_count);
-                if (block == _N) {
-                    TaskPolicy::fatal("manual_islands names a block that is not a schedulable block "
-                                      "of this graph", spec);
+                const size_t index = index_of_name(current, end);
+                if (index == _N) {
+                    return IslandCheck{IslandCheck::Code::NotInGraph, island, nullptr};
                 }
-                if (used[block]) {
-                    TaskPolicy::fatal("manual_islands lists a block twice", block_name(block));
-                }
-                used[block] = true;
-                out.block_ids[cursor++] = static_cast<uint8_t>(block);
+                const IslandCheck check =
+                    add_island_block(index, island, regular_ids, regular_count, used, out, cursor);
+                if (!check) return check;
                 current = comma != nullptr ? comma + 1 : end;
             }
-            return cursor;
+            return IslandCheck{};
         }
 
-        void require_every_block_listed(const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
-                                        const std::array<bool, _N>& used) {
-            for (size_t i = 0; i < regular_count; ++i) {
-                if (!used[regular_ids[i]]) {
-                    TaskPolicy::fatal("manual_islands does not list block", block_name(regular_ids[i]));
+        IslandCheck check_within_island_order(const Partition& out) const {
+            std::array<uint16_t, _N> position{};
+            std::array<uint8_t, _N> island_of{};
+            std::array<bool, _N> listed{};
+
+            for (size_t island = 0; island < out.island_count; ++island) {
+                for (uint16_t k = out.island_begin[island]; k < out.island_begin[island + 1]; ++k) {
+                    const uint8_t id = out.block_ids[k];
+                    position[id] = k;
+                    island_of[id] = static_cast<uint8_t>(island);
+                    listed[id] = true;
                 }
             }
-        }
-
-        void require_topological_order(const Partition& out, const std::array<bool, _N>& used) {
-            std::array<uint16_t, _N> position{};
-            for (uint16_t k = 0; k < out.block_count; ++k) position[out.block_ids[k]] = k;
 
             for (size_t e = 0; e < _edge_count; ++e) {
                 const uint8_t producer = _edges[e].producer;
                 const uint8_t consumer = _edges[e].consumer;
                 if (producer == consumer) continue;
-                if (!used[producer] || !used[consumer]) continue;
+                if (!listed[producer] || !listed[consumer]) continue;
+                if (island_of[producer] != island_of[consumer]) continue;
                 if (position[producer] >= position[consumer]) {
-                    TaskPolicy::fatal("manual_islands is not in topological order, a block is listed "
-                                      "before the block it consumes from", block_name(consumer));
+                    return IslandCheck{IslandCheck::Code::NotTopological, island_of[consumer],
+                                       _block_bases[consumer]};
                 }
             }
+            return IslandCheck{};
         }
 
-        void build_manual_partition(const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
-                                    size_t worker_count, Partition& out) {
-            const size_t island_count = _config.pinned_islands.manual_island_count;
-            if (island_count == 0 || island_count > worker_count) {
-                TaskPolicy::fatal("manual_islands needs between one island and one per worker", "");
+        IslandCheck build_manual_partition(const FlowGraphConfig& config,
+                                           const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
+                                           size_t worker_count, Partition& out) const {
+            const auto& pinned = config.pinned_islands;
+            if (pinned.islands != nullptr && pinned.island_names != nullptr) {
+                return IslandCheck{IslandCheck::Code::BothFormsGiven};
+            }
+            if (pinned.island_count == 0) return IslandCheck{IslandCheck::Code::NoIslands};
+            if (pinned.island_count > worker_count) {
+                return IslandCheck{IslandCheck::Code::TooManyIslands};
             }
 
             std::array<bool, _N> used{};
             size_t cursor = 0;
 
-            for (size_t island = 0; island < island_count; ++island) {
-                const char* spec = _config.pinned_islands.manual_islands[island];
+            for (size_t island = 0; island < pinned.island_count; ++island) {
                 out.island_begin[island] = static_cast<uint16_t>(cursor);
-                cursor = append_island(spec, regular_ids, regular_count, used, out, cursor);
+                const IslandCheck check =
+                    pinned.islands != nullptr
+                        ? append_island_blocks(pinned.islands[island], island, regular_ids,
+                                               regular_count, used, out, cursor)
+                        : append_island_names(pinned.island_names[island], island, regular_ids,
+                                              regular_count, used, out, cursor);
+                if (!check) return check;
                 if (cursor == out.island_begin[island]) {
-                    TaskPolicy::fatal("manual_islands has an empty island, which would idle a worker", spec);
+                    return IslandCheck{IslandCheck::Code::EmptyIsland, island};
                 }
             }
 
-            out.island_begin[island_count] = static_cast<uint16_t>(cursor);
+            out.island_begin[pinned.island_count] = static_cast<uint16_t>(cursor);
             out.block_count = static_cast<uint16_t>(cursor);
-            out.island_count = static_cast<uint16_t>(island_count);
+            out.island_count = static_cast<uint16_t>(pinned.island_count);
 
-            require_every_block_listed(regular_ids, regular_count, used);
-            require_topological_order(out, used);
+            for (size_t i = 0; i < regular_count; ++i) {
+                if (!used[regular_ids[i]]) {
+                    return IslandCheck{IslandCheck::Code::Missing, 0, _block_bases[regular_ids[i]]};
+                }
+            }
+            return check_within_island_order(out);
         }
 
         void report_partition(const Partition& partition) {

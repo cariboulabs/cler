@@ -6,6 +6,18 @@
 
 namespace cler {
 
+    struct BlockBase;
+
+    struct IslandList {
+        const BlockBase* const* blocks = nullptr;
+        size_t count = 0;
+    };
+
+    template <size_t N>
+    constexpr IslandList island(const BlockBase* const (&blocks)[N]) {
+        return IslandList{blocks, N};
+    }
+
     enum class SchedulerType {
         ThreadPerBlock,
         FixedThreadPool,
@@ -20,8 +32,9 @@ namespace cler {
         size_t repartition_check_ms = 5000;
         size_t cpu_id_offset = 0;
         size_t park_after_zero_passes = 4;
-        const char* const* manual_islands = nullptr;
-        size_t manual_island_count = 0;
+        const IslandList* islands = nullptr;
+        const char* const* island_names = nullptr;
+        size_t island_count = 0;
         bool report_partition = false;
     };
 

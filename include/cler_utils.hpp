@@ -77,6 +77,16 @@ namespace flowgraph_config {
     }
     
 
+    template <size_t N>
+    inline FlowGraphConfig pinned_islands(const IslandList (&islands)[N]) {
+        FlowGraphConfig config;
+        config.scheduler = SchedulerType::PinnedIslands;
+        config.num_workers = N;
+        config.pinned_islands.islands = islands;
+        config.pinned_islands.island_count = N;
+        return config;
+    }
+
     inline FlowGraphConfig pinned_islands(size_t num_workers = 2) {
         FlowGraphConfig config;
         config.scheduler = SchedulerType::PinnedIslands;
