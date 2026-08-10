@@ -91,7 +91,10 @@
     return requested && fixtureNames.includes(requested) ? requested : 'hello_world';
   }
 
-  const editable = inTauri();
+  const desktop = inTauri();
+  const NOTE_BROWSER = 'example mode — read-only viewer, editing needs the desktop shell';
+  const NOTE_DESKTOP = 'example mode — read-only viewer — use Open file… to edit the real file';
+  const viewerNote = desktop ? NOTE_DESKTOP : NOTE_BROWSER;
   const DISK_DRIFT = 'changed on disk';
   const LEFT_PANEL = 'cler.panel.left';
   const RIGHT_PANEL = 'cler.panel.right';
@@ -142,6 +145,7 @@
   let generation = 0;
   let pinned = new Map<string, EdgePoint>();
 
+  const editable = $derived(desktop && opened !== null);
   const site = $derived<Site | undefined>(doc.model.sites[siteIndex]);
   const viewIds = $derived(siteViewIds(doc.model.sites));
   const viewId = $derived(viewIds[siteIndex] ?? '');
@@ -260,6 +264,7 @@
     action: (path: string) => Promise<DocumentState>,
     take: (next: DocumentState) => void
   ): Promise<Outcome> {
+    if (!editable) return refuse(viewerNote);
     const era = generation;
     try {
       const next = await action(doc.path);
@@ -288,13 +293,7 @@
     inspector?.discardDrafts();
   }
 
-  const VIEWER_ONLY = 'example mode is a read-only viewer';
-
   async function submitAll(commands: Command[]): Promise<Outcome> {
-    if (!editable) {
-      status = VIEWER_ONLY;
-      return { ok: false, message: VIEWER_ONLY, record: null };
-    }
     if (commands.length === 0) return { ok: true };
     return run((path) => applyCommands(path, commands, doc.revision));
   }
@@ -314,7 +313,10 @@
   }
 
   async function refreshPalette(path: string) {
-    if (!editable) return;
+    if (!editable) {
+      specs = [];
+      return;
+    }
     try {
       specs = await loadPalette(path);
     } catch {
@@ -323,7 +325,7 @@
   }
 
   async function openFile() {
-    if (!editable) {
+    if (!desktop) {
       status = 'file dialog needs the desktop shell — pick an example below';
       return;
     }
@@ -477,7 +479,7 @@
     if (!spec) return;
     event.preventDefault();
     if (!editable) {
-      status = VIEWER_ONLY;
+      status = viewerNote;
       return;
     }
     adder?.openAt(event.clientX, event.clientY, spec);
@@ -514,7 +516,7 @@
   }
 
   async function openEditor(blockVar: string) {
-    if (!editable) {
+    if (!desktop) {
       status = 'opening an editor needs the desktop shell';
       return;
     }
@@ -582,6 +584,7 @@
         specs={shownSpecs}
         documentPath={doc.path}
         enabled={editable}
+        notice={viewerNote}
         open={blocksOpen}
         ontoggle={() => (blocksOpen = !blocksOpen)}
         onpick={(spec) => adder?.openAt(window.innerWidth / 2, window.innerHeight / 2, spec)}
@@ -621,8 +624,8 @@
       </section>
 
       <section class="spacer">
-        <h2>Example</h2>
-        <select bind:value={fixtureName} onchange={openFixture}>
+        <h2 data-testid="examples-head">{desktop ? 'Examples (viewer)' : 'Example'}</h2>
+        <select data-testid="example-select" bind:value={fixtureName} onchange={openFixture}>
           {#each fixtureNames as name (name)}
             <option value={name}>{name}</option>
           {/each}
@@ -681,8 +684,9 @@
           <Actions
             canUndo={doc.canUndo}
             canRedo={doc.canRedo}
-            canOpenEditor={editable}
+            canOpenEditor={desktop}
             canEdit={editable}
+            editNote={viewerNote}
             selectedNode={selected}
             {selectedEdge}
             {problems}
@@ -766,6 +770,7 @@
     {selected}
     spec={selectedSpec}
     enabled={editable}
+    notice={viewerNote}
     {submit}
     open={rightOpen}
     ontoggle={() => (rightOpen = !rightOpen)}

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { fixtures } from '../src/fixtures';
 import {
@@ -105,6 +107,51 @@ function editor(target: Field) {
     }
   };
 }
+
+const APP = readFileSync(fileURLToPath(new URL('../src/App.svelte', import.meta.url)), 'utf8');
+
+const MUTATORS = ['applyCommands', 'undoDocument', 'redoDocument', 'reloadDocument'];
+
+function bodyOf(source: string, header: string): string {
+  const start = source.indexOf(header);
+  if (start < 0) throw new Error(`App.svelte no longer declares ${header}`);
+  const rest = source.slice(start + header.length);
+  const end = rest.indexOf('\n  }');
+  if (end < 0) throw new Error(`cannot find the end of ${header}`);
+  return rest.slice(0, end);
+}
+
+function mutatorLines(source: string): string[] {
+  const body = source.slice(source.indexOf("} from './lib/backend';"));
+  return body.split('\n').filter((line) => MUTATORS.some((name) => line.includes(name)));
+}
+
+describe('editability belongs to the document, not the environment', () => {
+  it('derives it from a document opened through open_document', () => {
+    expect(APP).toContain('const editable = $derived(desktop && opened !== null);');
+    expect(APP).not.toMatch(/const editable = inTauri\(\)/);
+    expect(bodyOf(APP, 'function openFixture()')).toContain('opened = null;');
+  });
+
+  it('routes every mutating backend call through the guarded attempt', () => {
+    const lines = mutatorLines(APP);
+    expect(lines.length).toBeGreaterThanOrEqual(MUTATORS.length);
+    for (const line of lines) {
+      expect(line, `unguarded backend call: ${line.trim()}`).toMatch(/\b(run|attempt)\(/);
+    }
+  });
+
+  it('refuses inside attempt, the one choke point undo, redo, reload and apply share', () => {
+    expect(bodyOf(APP, 'async function attempt(')).toMatch(
+      /\): Promise<Outcome> \{\n\s+if \(!editable\) return refuse\(viewerNote\);/
+    );
+  });
+
+  it('keeps the file dialog and the editor launcher on the raw environment flag', () => {
+    expect(bodyOf(APP, 'async function openFile()')).toContain('if (!desktop)');
+    expect(bodyOf(APP, 'async function openEditor(blockVar: string)')).toContain('if (!desktop)');
+  });
+});
 
 describe('transient field state machine', () => {
   it('dispatches exactly one command for four keystrokes plus a blur', () => {

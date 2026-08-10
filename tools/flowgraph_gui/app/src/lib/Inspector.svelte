@@ -20,12 +20,13 @@
     selected: string | null;
     spec: BlockSpec | undefined;
     enabled: boolean;
+    notice: string;
     submit: (command: Command) => Promise<Outcome>;
     open: boolean;
     ontoggle: () => void;
   };
 
-  const { path, site, siteIndex, selected, spec, enabled, submit, open, ontoggle }: Props =
+  const { path, site, siteIndex, selected, spec, enabled, notice, submit, open, ontoggle }: Props =
     $props();
 
   const IME_KEY_CODE = 229;
@@ -254,9 +255,7 @@
     {/if}
 
     {#if !enabled}
-      <p class="muted" data-testid="viewer-note">
-        example mode — read-only viewer, editing needs the desktop shell
-      </p>
+      <p class="muted" data-testid="viewer-note">{notice}</p>
     {/if}
   </div>
 </aside>

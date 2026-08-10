@@ -15,6 +15,7 @@
     canRedo: boolean;
     canOpenEditor: boolean;
     canEdit: boolean;
+    editNote: string;
     selectedNode: string | null;
     selectedEdge: string | null;
     problems: Problem[];
@@ -51,6 +52,7 @@
     canRedo,
     canOpenEditor,
     canEdit,
+    editNote,
     selectedNode,
     selectedEdge,
     problems,
@@ -160,14 +162,12 @@
         label: 'Add block here…',
         shortcut: '',
         enabled: canEdit,
-        hint: canEdit ? undefined : EXAMPLE_NOTE,
+        hint: canEdit ? undefined : editNote,
         run: () => onaddhere(at.x, at.y)
       },
       ...actions.filter((action) => MENU_IDS.includes(action.id))
     ];
   }
-
-  const EXAMPLE_NOTE = 'example mode — editing needs the desktop shell';
 
   function nodeEntries(block: string): Action[] {
     return [
@@ -198,7 +198,7 @@
         label: 'Remove from graph',
         shortcut: 'Del',
         enabled: canEdit,
-        hint: canEdit ? 'splices the runner out, the declaration stays' : EXAMPLE_NOTE,
+        hint: canEdit ? 'splices the runner out, the declaration stays' : editNote,
         run: () => onremove(block)
       },
       {
@@ -206,7 +206,7 @@
         label: 'Delete block…',
         shortcut: '',
         enabled: canEdit,
-        hint: canEdit ? 'removes the declaration too' : EXAMPLE_NOTE,
+        hint: canEdit ? 'removes the declaration too' : editNote,
         run: () => ondeleteblock(block)
       }
     ];
@@ -221,7 +221,7 @@
         label: 'Disconnect',
         shortcut: 'Del',
         enabled: editable,
-        hint: editable ? undefined : (found?.reason ?? EXAMPLE_NOTE),
+        hint: editable ? undefined : (found?.reason ?? editNote),
         run: () => ondisconnect(edge)
       }
     ];

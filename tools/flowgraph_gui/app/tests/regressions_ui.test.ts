@@ -1535,6 +1535,84 @@ describe('G. fixture mode never reaches for a backend', () => {
     },
     CASE
   );
+
+  const DESKTOP_NOTE = 'example mode — read-only viewer — use Open file… to edit the real file';
+
+  async function bootExample(): Promise<Page> {
+    const page = await browser.newPage({ viewport: VIEWPORT });
+    await page.addInitScript(installFake, {
+      path: FAKE_PATH,
+      model: helloModel(),
+      shiftOffsets: false
+    });
+    await page.goto(origin, { waitUntil: 'load' });
+    await page.waitForSelector('.svelte-flow__node');
+    await page.selectOption('[data-testid="example-select"]', 'adsb_receiver');
+    await page.waitForSelector('.path[title="desktop_examples/adsb_receiver.cpp"]');
+    await page.waitForSelector('.svelte-flow__node[data-id="iq2mag"]');
+    return page;
+  }
+
+  it(
+    'G2 keeps an example read-only inside the desktop shell and says how to edit the real file',
+    async () => {
+      const page = await bootExample();
+      const problems: string[] = [];
+      page.on('pageerror', (error) => problems.push(`pageerror: ${error.message}`));
+
+      await select(page, 'iq2mag');
+      const field = page.locator('.inspector input').first();
+      expect(await field.isDisabled()).toBe(true);
+      expect(await page.textContent('[data-testid="viewer-note"]')).toBe(DESKTOP_NOTE);
+      expect(await page.textContent('[data-testid="palette-notice"]')).toBe(DESKTOP_NOTE);
+      expect(await page.textContent('[data-testid="examples-head"]')).toBe('Examples (viewer)');
+
+      await page.evaluate(() => {
+        const input = document.querySelector('.inspector input') as HTMLInputElement | null;
+        if (!input) throw new Error('no field');
+        input.disabled = false;
+        input.value = 'tampered';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new FocusEvent('blur'));
+      });
+      await page.locator('[data-testid="undo"]').click({ force: true });
+      await page.locator('[data-testid="redo"]').click({ force: true });
+      await page.waitForTimeout(400);
+
+      expect(await names(page)).toEqual([]);
+      expect(await sent(page)).toEqual([]);
+      expect(await page.textContent('[data-testid="status"]')).toBe(DESKTOP_NOTE);
+      expect(problems).toEqual([]);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'G3 hands editing back the moment a real file is opened',
+    async () => {
+      const page = await bootExample();
+      await page.click('button.primary');
+      await page.waitForSelector(`.path[title="${FAKE_PATH}"]`);
+      await page.waitForSelector('.svelte-flow__node[data-id="source1"]');
+
+      expect(await page.locator('[data-testid="viewer-note"]').count()).toBe(0);
+      expect(await page.locator('[data-testid="palette-notice"]').count()).toBe(0);
+
+      await select(page, 'source1');
+      const field = page.locator('input[data-field="source1.ctor.1"]');
+      expect(await field.isDisabled()).toBe(false);
+      await field.fill('9.5f');
+      await field.blur();
+
+      await expect.poll(() => sent(page)).toEqual([
+        { command: 'set_param', site: 0, block: 'source1', ctor_arg_index: 1, new_text: '9.5f' }
+      ]);
+      expect(await names(page)).toContain('open_document');
+      await page.close();
+    },
+    CASE
+  );
 });
 
 /* ============================================================== 8. legibility */

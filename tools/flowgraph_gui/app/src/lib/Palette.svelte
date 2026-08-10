@@ -12,12 +12,13 @@
     specs: BlockSpec[];
     documentPath: string;
     enabled: boolean;
+    notice: string;
     open: boolean;
     ontoggle: () => void;
     onpick: (spec: BlockSpec) => void;
   };
 
-  const { specs, documentPath, enabled, open, ontoggle, onpick }: Props = $props();
+  const { specs, documentPath, enabled, notice, open, ontoggle, onpick }: Props = $props();
 
   let query = $state('');
   let expanded = $state<string | null>(null);
@@ -47,9 +48,7 @@
       bind:value={query}
     />
     {#if !enabled}
-      <p class="muted" data-testid="palette-notice">
-        example mode — dragging a block onto the canvas needs the desktop shell
-      </p>
+      <p class="muted" data-testid="palette-notice">{notice}</p>
     {/if}
     <ul>
       {#each entries as spec (spec.origin + spec.name)}
