@@ -97,6 +97,31 @@ export function projectSite(site: Site): Projection {
   };
 }
 
+export function mergeProjection(previous: Projection, next: Projection): Projection {
+  const kept = new Map(previous.nodes.map((node) => [node.id, node]));
+  const bends = new Map(previous.edges.map((edge) => [edge.id, edge.data?.bends ?? []]));
+  return {
+    nodes: next.nodes.map((node) => {
+      const before = kept.get(node.id);
+      if (!before) return node;
+      return { ...node, position: before.position, selected: before.selected };
+    }),
+    edges: next.edges.map((edge) => ({ ...edge, data: { bends: bends.get(edge.id) ?? [] } }))
+  };
+}
+
+export type BlockPorts = { inputs: string[]; outputs: string[] };
+
+export function blockPorts(site: Site, blockVar: string): BlockPorts {
+  const inputs = inputSlots(site, blockVar).map((slot) => slot.label);
+  const outputs = [
+    ...new Set(
+      site.edges.filter((edge) => edge.from === blockVar).map((edge) => `${edge.to}.${portLabel(edge.port)}`)
+    )
+  ];
+  return { inputs, outputs };
+}
+
 export type ReadOnlyNote = { element: string; reason: string };
 
 export function readOnlyNotes(site: Site): ReadOnlyNote[] {

@@ -43,29 +43,29 @@
     width: 100%;
     height: 100%;
     box-sizing: border-box;
-    background: var(--surface);
-    border: 1px solid var(--line);
+    background: var(--bg-1);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 8px 10px;
-    color: var(--text);
+    color: var(--fg);
     font-size: 12px;
     line-height: 1.4;
   }
   .block.unwired {
     border-style: dashed;
-    border-color: var(--muted);
+    border-color: var(--faint);
     background: repeating-linear-gradient(
       135deg,
-      var(--surface),
-      var(--surface) 8px,
-      var(--canvas) 8px,
-      var(--canvas) 16px
+      var(--bg-1),
+      var(--bg-1) 8px,
+      var(--bg-2) 8px,
+      var(--bg-2) 16px
     );
     color: var(--muted);
   }
   .block.readonly {
-    border-color: var(--accent);
-    background: var(--accent-wash);
+    border-color: var(--danger-border);
+    background: var(--danger-bg);
   }
   header {
     display: flex;
@@ -86,14 +86,14 @@
     letter-spacing: 0.04em;
     padding: 1px 5px;
     border-radius: 4px;
-    background: var(--accent);
-    color: var(--cler-white);
+    background: var(--danger);
+    color: var(--accent-fg);
     font-weight: 700;
     cursor: help;
   }
   .unwired-badge {
     background: var(--muted);
-    color: var(--cler-white);
+    color: var(--bg-0);
   }
   .badge + .badge {
     margin-left: 0;
@@ -108,7 +108,7 @@
     white-space: nowrap;
   }
   .type {
-    color: var(--text);
+    color: var(--fg);
   }
   .var {
     color: var(--muted);

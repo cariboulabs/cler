@@ -8,17 +8,32 @@
     type NodeTypes
   } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
+  import { untrack } from 'svelte';
   import BlockNode from './lib/BlockNode.svelte';
+  import Inspector from './lib/Inspector.svelte';
   import RoutedEdge from './lib/RoutedEdge.svelte';
-  import { inTauri, loadFixture, parseFile, pickFile } from './lib/backend';
+  import {
+    applyCommands,
+    closeDocument,
+    describeApplyError,
+    inTauri,
+    loadFixture,
+    onExternalChange,
+    openDocument,
+    pickFile,
+    redoDocument,
+    reloadDocument,
+    undoDocument
+  } from './lib/backend';
   import { layout } from './lib/layout';
   import {
+    mergeProjection,
     projectSite,
     readOnlyNotes,
     type BlockNode as BlockNodeType,
     type RoutedEdge as RoutedEdgeType
   } from './lib/project';
-  import { siteId, siteLabel, type ParseResult, type Site } from './lib/schema';
+  import { siteId, siteLabel, type Command, type DocumentState, type Site } from './lib/schema';
   import { fixtureNames } from './fixtures';
 
   const nodeTypes: NodeTypes = { block: BlockNode as unknown as NodeTypes[string] };
@@ -29,30 +44,55 @@
     return requested && fixtureNames.includes(requested) ? requested : 'hello_world';
   }
 
-  let fixtureName = $state(initialFixture());
-  let result = $state.raw<ParseResult>(loadFixture(fixtureName));
+  const editable = inTauri();
+  const DISK_DRIFT = 'changed on disk';
+
+  const startFixture = initialFixture();
+
+  let fixtureName = $state(startFixture);
+  let doc = $state.raw<DocumentState>(loadFixture(startFixture));
+  let opened = $state<string | null>(null);
   let siteIndex = $state(0);
+  let selected = $state<string | null>(null);
+  let changedOnDisk = $state(false);
   let nodes = $state.raw<BlockNodeType[]>([]);
   let edges = $state.raw<RoutedEdgeType[]>([]);
   let status = $state('');
   let busy = $state(false);
-
   let viewKey = $state('');
 
-  const site = $derived<Site | undefined>(result.sites[siteIndex]);
+  const site = $derived<Site | undefined>(doc.model.sites[siteIndex]);
   const notes = $derived(site ? readOnlyNotes(site) : []);
+  const needsReload = $derived(changedOnDisk || doc.externalChange);
+
+  $effect(() => {
+    if (!editable) return;
+    const pending = onExternalChange((path) => {
+      if (path === doc.path) changedOnDisk = true;
+    });
+    return () => {
+      void pending.then((unlisten) => unlisten());
+    };
+  });
 
   $effect(() => {
     const current = site;
+    const key = current ? `${doc.path}#${siteId(current)}` : '';
     if (!current) {
       nodes = [];
       edges = [];
       viewKey = '';
       return;
     }
-    const key = `${result.file}#${siteId(current)}`;
+    const fresh = projectSite(current);
+    if (untrack(() => viewKey) === key) {
+      const merged = mergeProjection(untrack(() => ({ nodes, edges })), fresh);
+      nodes = merged.nodes;
+      edges = merged.edges;
+      return;
+    }
     let stale = false;
-    layout(projectSite(current)).then((laid) => {
+    layout(fresh).then((laid) => {
       if (stale) return;
       nodes = laid.nodes;
       edges = laid.edges;
@@ -63,56 +103,103 @@
     };
   });
 
-  function show(next: ParseResult) {
-    result = next;
+  function show(next: DocumentState) {
+    doc = next;
     siteIndex = 0;
-    status = next.sites.length === 0 ? 'no flowgraph site found in this file' : '';
+    selected = null;
+    changedOnDisk = false;
+    status = next.model.sites.length === 0 ? 'no flowgraph site found in this file' : '';
+  }
+
+  async function run(action: (path: string) => Promise<DocumentState>): Promise<string | null> {
+    busy = true;
+    try {
+      doc = await action(doc.path);
+      status = '';
+      return null;
+    } catch (error) {
+      const message = describeApplyError(error);
+      if (message.includes(DISK_DRIFT)) changedOnDisk = true;
+      status = message;
+      return message;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function reload() {
+    if (!(await run(reloadDocument))) changedOnDisk = false;
+  }
+
+  async function submit(command: Command): Promise<string | null> {
+    if (!editable) return 'fixture mode is a read-only viewer';
+    return run((path) => applyCommands(path, [command]));
   }
 
   async function openFile() {
-    if (!inTauri()) {
-      status = 'file dialog needs the Tauri shell — pick a fixture below';
+    if (!editable) {
+      status = 'file dialog needs the desktop shell — pick a fixture below';
       return;
     }
     busy = true;
     status = '';
     try {
       const path = await pickFile();
-      if (path) show(await parseFile(path));
+      if (!path) return;
+      const previous = opened;
+      const next = await openDocument(path);
+      opened = path;
+      if (previous && previous !== path) void closeDocument(previous).catch(() => undefined);
+      show(next);
     } catch (error) {
-      status = String(error);
+      status = describeApplyError(error);
     } finally {
       busy = false;
     }
   }
 
   function openFixture() {
+    opened = null;
     show(loadFixture(fixtureName));
   }
 </script>
 
 <div class="shell">
-  <aside>
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="/brand/cler_mark.png" alt="" width="26" height="26" />
+      <div>
+        <div class="wordmark">cler</div>
+        <div class="tagline">flowgraph editor</div>
+      </div>
+    </div>
+
     <div class="toolbar">
-      <button onclick={openFile} disabled={busy}>Open file…</button>
+      <button class="primary" onclick={openFile} disabled={busy}>Open file…</button>
+      <div class="history">
+        <button onclick={() => run(undoDocument)} disabled={busy || !doc.canUndo}>Undo</button>
+        <button onclick={() => run(redoDocument)} disabled={busy || !doc.canRedo}>Redo</button>
+      </div>
     </div>
 
     <section>
       <h2>File</h2>
-      <div class="path" title={result.file}>{result.file}</div>
+      <div class="path" title={doc.path}>{doc.path}</div>
       <dl>
         <dt>sites</dt>
-        <dd>{result.sites.length}</dd>
+        <dd>{doc.model.sites.length}</dd>
+        <dt>revision</dt>
+        <dd>{doc.revision}</dd>
         <dt>schema</dt>
-        <dd>{result.version}</dd>
+        <dd>{doc.model.version}</dd>
       </dl>
     </section>
 
-    {#if result.sites.length > 1}
+    {#if doc.model.sites.length > 1}
       <section>
         <h2>Site</h2>
         <select bind:value={siteIndex}>
-          {#each result.sites as candidate, i (siteId(candidate))}
+          {#each doc.model.sites as candidate, i (siteId(candidate))}
             <option value={i}>{siteLabel(candidate)}</option>
           {/each}
         </select>
@@ -142,9 +229,11 @@
       {#if notes.length === 0}
         <p class="muted">everything in this site is editable</p>
       {:else}
-        <ul>
+        <ul class="notes">
           {#each notes as note (note.element + note.reason)}
-            <li><span class="el">{note.element}</span><span class="reason">{note.reason}</span></li>
+            <li>
+              <span class="el">{note.element}</span><span class="reason">{note.reason}</span>
+            </li>
           {/each}
         </ul>
       {/if}
@@ -160,88 +249,117 @@
     </section>
 
     {#if status}
-      <p class="status">{status}</p>
+      <p class="status" data-testid="status">{status}</p>
     {/if}
+
+    <span class="attribution">Caribou Labs</span>
   </aside>
 
   <main>
-    {#key viewKey}
-      <SvelteFlow
-        bind:nodes
-        bind:edges
-        {nodeTypes}
-        {edgeTypes}
-        colorMode="light"
-        fitView
-        fitViewOptions={{ padding: 0.15 }}
-        nodesConnectable={false}
-        elementsSelectable={true}
-        deleteKey={null}
-        minZoom={0.1}
-        proOptions={{ hideAttribution: false }}
-      >
-        <Background bgColor="var(--canvas)" patternColor="var(--line)" gap={18} size={2} />
-        <Controls showLock={false} />
-        <MiniMap bgColor="var(--canvas)" maskColor="var(--scrim)" nodeColor="var(--muted)" />
-      </SvelteFlow>
-    {/key}
+    {#if needsReload}
+      <div class="banner" data-testid="reload-banner">
+        <span
+          >This file changed on disk. Reloading replaces the open document and
+          <strong>discards the undo history</strong>.</span
+        >
+        <button onclick={reload} disabled={busy}>Reload</button>
+      </div>
+    {/if}
+
+    <div class="canvas">
+      {#key viewKey}
+        <SvelteFlow
+          bind:nodes
+          bind:edges
+          {nodeTypes}
+          {edgeTypes}
+          colorMode="dark"
+          fitView
+          fitViewOptions={{ padding: 0.15 }}
+          nodesConnectable={false}
+          elementsSelectable={true}
+          deleteKey={null}
+          minZoom={0.1}
+          proOptions={{ hideAttribution: false }}
+          onnodeclick={({ node }) => (selected = node.id)}
+          onpaneclick={() => (selected = null)}
+        >
+          <Background bgColor="var(--bg-0)" patternColor="var(--border)" gap={18} size={2} />
+          <Controls showLock={false} />
+          <MiniMap bgColor="var(--bg-1)" maskColor="var(--scrim)" nodeColor="var(--border-hi)" />
+        </SvelteFlow>
+      {/key}
+    </div>
   </main>
+
+  <Inspector {site} {siteIndex} {selected} enabled={editable && !busy} {submit} />
 </div>
 
 <style>
   .shell {
     display: grid;
-    grid-template-columns: 280px 1fr;
+    grid-template-columns: 280px 1fr 320px;
     height: 100%;
   }
-  aside {
-    background: var(--surface);
-    border-right: 1px solid var(--line);
-    padding: 12px;
+  .sidebar {
+    background: var(--bg-1);
+    border-right: 1px solid var(--border);
+    padding: var(--sp-3);
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: var(--sp-3);
   }
-  .toolbar button {
-    width: 100%;
-    padding: 7px 10px;
-    background: var(--accent);
-    color: var(--cler-white);
-    border: 1px solid var(--accent);
-    border-radius: var(--radius);
-    cursor: pointer;
-    font: inherit;
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+  .brand img {
+    border-radius: var(--radius-sm);
+  }
+  .wordmark {
+    font-size: 15px;
     font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--fg);
+    line-height: 1.1;
   }
-  .toolbar button:hover:not(:disabled) {
-    background: var(--accent-dark);
-    border-color: var(--accent-dark);
+  .tagline {
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--faint);
   }
-  .toolbar button:disabled {
-    background: var(--muted);
-    border-color: var(--muted);
-    cursor: default;
+  .toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+  .history {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-2);
   }
   h2 {
-    margin: 0 0 6px;
+    margin: 0 0 var(--sp-2);
     font-size: 10px;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--muted);
+    color: var(--faint);
     font-weight: 600;
   }
   .path {
     font-family: var(--mono);
     font-size: 10.5px;
-    color: var(--accent);
+    color: var(--muted);
     word-break: break-all;
   }
   dl {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 1px 10px;
-    margin: 6px 0 0;
+    gap: 1px var(--sp-3);
+    margin: var(--sp-2) 0 0;
   }
   dt {
     color: var(--muted);
@@ -251,19 +369,7 @@
     font-family: var(--mono);
     font-size: 11px;
   }
-  select {
-    width: 100%;
-    background: var(--canvas);
-    color: var(--text);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: 5px;
-    font: inherit;
-  }
-  select:hover {
-    border-color: var(--accent);
-  }
-  ul {
+  .notes {
     margin: 0;
     padding: 0;
     list-style: none;
@@ -271,10 +377,10 @@
     flex-direction: column;
     gap: 5px;
   }
-  li {
+  .notes li {
     display: flex;
     flex-direction: column;
-    border-left: 2px solid var(--accent);
+    border-left: 2px solid var(--danger-border);
     padding-left: 7px;
   }
   .el {
@@ -283,7 +389,7 @@
   .reason {
     font-family: var(--mono);
     font-size: 10px;
-    color: var(--accent-dark);
+    color: var(--muted);
   }
   .muted {
     margin: 0;
@@ -295,12 +401,42 @@
   }
   .status {
     margin: 0;
+    padding: var(--sp-1) var(--sp-2);
+    border: 1px solid var(--danger-border);
+    background: var(--danger-bg);
+    border-radius: var(--radius-sm);
     font-size: 11px;
-    color: var(--accent-dark);
+    color: var(--danger);
+  }
+  .attribution {
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--faint);
   }
   main {
     position: relative;
     min-width: 0;
-    background: var(--canvas);
+    background: var(--bg-0);
+    display: flex;
+    flex-direction: column;
+  }
+  .canvas {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+  }
+  .banner {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--warn-border);
+    background: var(--warn-bg);
+    color: var(--fg);
+    font-size: 12px;
+  }
+  .banner button {
+    margin-left: auto;
+    flex: none;
   }
 </style>

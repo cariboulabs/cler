@@ -67,11 +67,36 @@ export type Site = Capability & {
   unresolved: unknown[];
 };
 
-export type ParseResult = {
+export type FileModel = {
   version: string;
   file: string;
   sites: Site[];
+  sha256?: string;
+  errors?: Span[];
 };
+
+export type ParseResult = FileModel;
+
+export type DocumentState = {
+  path: string;
+  revision: number;
+  model: FileModel;
+  canUndo: boolean;
+  canRedo: boolean;
+  externalChange: boolean;
+};
+
+export type Command =
+  | { command: 'set_param'; site: number; block: string; ctor_arg_index: number; new_text: string }
+  | {
+      command: 'set_template_arg';
+      site: number;
+      block: string;
+      template_arg_index: number;
+      new_text: string;
+    }
+  | { command: 'set_display_name'; site: number; block: string; new_text: string }
+  | { command: 'set_config'; site: number; path: string; new_value: string };
 
 export function siteId(site: Site): string {
   return `${site.function}@${site.call_offset}`;
