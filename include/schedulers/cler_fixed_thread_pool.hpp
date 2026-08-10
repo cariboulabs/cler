@@ -58,7 +58,7 @@ namespace cler {
         private:
             static void worker_loop(Host host, State& state, size_t worker_id, const FlowGraphConfig& config) {
                 TaskPolicy::configure_thread_for_low_latency_sleep();
-                if (config.pin_workers) {
+                if (config.fixed_thread_pool.pin_workers) {
                     TaskPolicy::pin_to_core(worker_id);
                 }
 

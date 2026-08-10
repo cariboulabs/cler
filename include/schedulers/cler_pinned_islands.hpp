@@ -63,7 +63,7 @@ namespace cler {
                 const size_t regular_count = host.collect_regular_blocks(regular_ids);
 
                 state.calibration_deadline = std::chrono::steady_clock::now() +
-                                             std::chrono::milliseconds(config.calibration_ms);
+                                             std::chrono::milliseconds(config.pinned_islands.calibration_ms);
                 state.next_repartition_check = state.calibration_deadline;
 
                 const size_t max_worker_count = (std::min)(DEFAULT_MAX_WORKERS, regular_count);
@@ -96,7 +96,7 @@ namespace cler {
         private:
             static void worker_loop(Host host, State& state, size_t worker_id, const FlowGraphConfig& config) {
                 TaskPolicy::configure_thread_for_low_latency_sleep();
-                if (!TaskPolicy::pin_to_core(config.cpu_id_offset + worker_id)) {
+                if (!TaskPolicy::pin_to_core(config.pinned_islands.cpu_id_offset + worker_id)) {
                     host.note_affinity_failure();
                 }
 
@@ -168,7 +168,7 @@ namespace cler {
 
                     ++zero_progress_passes;
 
-                    if (zero_progress_passes <= config.park_after_zero_passes) {
+                    if (zero_progress_passes <= config.pinned_islands.park_after_zero_passes) {
                         TaskPolicy::backoff(backoff_state);
                     } else if (!park_armed) {
                         park_armed = true;
@@ -196,12 +196,12 @@ namespace cler {
 
             static bool leader_should_repartition(Host host, State& state, const FlowGraphConfig& config) {
                 const bool calibrated = state.barrier.count() != 0;
-                if (calibrated && config.repartition_check_ms == 0) return false;
+                if (calibrated && config.pinned_islands.repartition_check_ms == 0) return false;
 
                 const auto now = std::chrono::steady_clock::now();
                 if (!calibrated) return now >= state.calibration_deadline;
                 if (now < state.next_repartition_check) return false;
-                state.next_repartition_check = now + std::chrono::milliseconds(config.repartition_check_ms);
+                state.next_repartition_check = now + std::chrono::milliseconds(config.pinned_islands.repartition_check_ms);
 
                 std::array<double, Host::block_count> weights{};
                 host.collect_block_weights(state.partition, weights);
@@ -225,7 +225,7 @@ namespace cler {
                                                 state.partition.island_begin.data(),
                                                 state.partition.island_count);
                         state.next_repartition_check = std::chrono::steady_clock::now() +
-                                                       std::chrono::milliseconds(config.repartition_check_ms);
+                                                       std::chrono::milliseconds(config.pinned_islands.repartition_check_ms);
                     });
             }
         };

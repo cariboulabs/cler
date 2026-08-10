@@ -92,7 +92,7 @@ size_t count_and_drain(cler::Channel<std::complex<float>>* ch, void* context) {
 template <typename T, typename = void>
 struct has_repartition_check_ms : std::false_type {};
 template <typename T>
-struct has_repartition_check_ms<T, std::void_t<decltype(std::declval<T&>().repartition_check_ms)>> : std::true_type {};
+struct has_repartition_check_ms<T, std::void_t<decltype(std::declval<T&>().pinned_islands.repartition_check_ms)>> : std::true_type {};
 
 struct TestResult {
     std::string name;
@@ -209,7 +209,7 @@ int main() {
 
     auto burst_config = cler::flowgraph_config::pinned_islands(2);
     if constexpr (has_repartition_check_ms<cler::FlowGraphConfig>::value) {
-        burst_config.repartition_check_ms = 250;
+        burst_config.pinned_islands.repartition_check_ms = 250;
         std::cout << "repartition_check_ms field found in FlowGraphConfig; using 250ms for burst test" << std::endl;
     } else {
         std::cout << "repartition_check_ms field not found in FlowGraphConfig; running burst test without it" << std::endl;

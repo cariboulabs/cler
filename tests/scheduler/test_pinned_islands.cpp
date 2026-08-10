@@ -131,8 +131,8 @@ CostShiftOutcome run_cost_shift(size_t repartition_check_ms) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(2);
-    config.calibration_ms = 150;
-    config.repartition_check_ms = repartition_check_ms;
+    config.pinned_islands.calibration_ms = 150;
+    config.pinned_islands.repartition_check_ms = repartition_check_ms;
 
     fg.run(config);
     std::this_thread::sleep_for(std::chrono::milliseconds(400));
@@ -172,7 +172,7 @@ TEST(PinnedIslandsTest, CalibrationIsolatesHeavyBlock) {
     ASSERT_EQ(fg.unresolved_edge_count(), 0u);
 
     auto config = cler::flowgraph_config::pinned_islands(3);
-    config.calibration_ms = 150;
+    config.pinned_islands.calibration_ms = 150;
 
     static constexpr uint8_t HEAVY = 1;
 
@@ -214,7 +214,7 @@ TEST(PinnedIslandsTest, FallbackPartitionSplitsByCountNotCost) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(3);
-    config.calibration_ms = 60000;
+    config.pinned_islands.calibration_ms = 60000;
 
     fg.run_for(std::chrono::milliseconds(150), config);
 
@@ -247,7 +247,7 @@ TEST(PinnedIslandsTest, BurstyFlowParksWithoutDeadlock) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(3);
-    config.calibration_ms = 200;
+    config.pinned_islands.calibration_ms = 200;
 
     const auto started = std::chrono::steady_clock::now();
     fg.run_for(RUN_TIME, config);
@@ -283,7 +283,7 @@ TEST(PinnedIslandsTest, DedicatedMayBlockThreadWakesParkedWorkers) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(3);
-    config.calibration_ms = 100;
+    config.pinned_islands.calibration_ms = 100;
 
     fg.run_for(std::chrono::seconds(2), config);
 
@@ -309,7 +309,7 @@ TEST(PinnedIslandsTest, DegenerateWorkerCountsStayBounded) {
         );
 
         auto config = cler::flowgraph_config::pinned_islands(workers);
-        config.calibration_ms = 50;
+        config.pinned_islands.calibration_ms = 50;
 
         fg.run_for(std::chrono::milliseconds(200), config);
 
@@ -352,8 +352,8 @@ TEST(PinnedIslandsTest, HysteresisKeepsSteadyChainPartitioned) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(2);
-    config.calibration_ms = 200;
-    config.repartition_check_ms = 100;
+    config.pinned_islands.calibration_ms = 200;
+    config.pinned_islands.repartition_check_ms = 100;
 
     fg.run_for(std::chrono::seconds(2), config);
 
@@ -377,7 +377,7 @@ TEST(PinnedIslandsTest, SecondRunStartsFromCleanState) {
     );
 
     auto islands_config = cler::flowgraph_config::pinned_islands(2);
-    islands_config.calibration_ms = 100;
+    islands_config.pinned_islands.calibration_ms = 100;
     islands_config.collect_detailed_stats = true;
 
     fg.run_for(std::chrono::milliseconds(400), islands_config);
@@ -417,7 +417,7 @@ TEST(PinnedIslandsTest, MatchesFixedThreadPoolOnSteadyChain) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(2);
-    config.calibration_ms = 100;
+    config.pinned_islands.calibration_ms = 100;
     config.collect_detailed_stats = true;
 
     fg.run_for(std::chrono::milliseconds(500), config);

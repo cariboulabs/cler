@@ -814,10 +814,32 @@ namespace cler {
 
         void rebuild_partition_from(const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
                                     size_t worker_count, bool use_costs, Partition& out) {
-            sched::detail::build_partition<_N, DEFAULT_MAX_WORKERS>(
+            const auto& pinned = _config.pinned_islands;
+            const bool built = sched::detail::build_partition<_N, DEFAULT_MAX_WORKERS>(
                 _edges.data(), _edge_count, _cost_samples,
                 regular_ids, regular_count, worker_count,
-                use_costs, _unresolved_edge_count == 0, out);
+                use_costs, _unresolved_edge_count == 0, out,
+                pinned.manual_island_sizes, pinned.manual_island_count);
+
+            if (!built) {
+                TaskPolicy::fatal("manual_island_sizes must be all non-zero, at most one entry per "
+                                  "worker, and sum to the number of regular blocks");
+            }
+            if (pinned.report_partition) {
+                report_partition(out);
+            }
+        }
+
+        void report_partition(const Partition& partition) {
+            std::array<double, _N> weights{};
+            sched::detail::collect_block_weights<_N>(_cost_samples, partition.block_ids,
+                                                     partition.block_count, weights);
+            for (size_t island = 0; island < partition.island_count; ++island) {
+                for (uint16_t k = partition.island_begin[island]; k < partition.island_begin[island + 1]; ++k) {
+                    const uint8_t id = partition.block_ids[k];
+                    TaskPolicy::report_partition_block(island, k, block_name(id), weights[id]);
+                }
+            }
         }
 
         void reset_run_state() {

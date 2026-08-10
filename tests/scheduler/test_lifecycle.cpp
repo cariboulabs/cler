@@ -257,7 +257,7 @@ TEST(LifecycleTest, WorkerCountEdgeValuesAreClamped) {
             cler::FlowGraphConfig config;
             config.scheduler = scheduler;
             config.num_workers = workers;
-            config.calibration_ms = 60000;
+            config.pinned_islands.calibration_ms = 60000;
 
             fg.run(config);
             std::this_thread::sleep_for(std::chrono::milliseconds(50));

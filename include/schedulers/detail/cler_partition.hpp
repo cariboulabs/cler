@@ -80,12 +80,24 @@ namespace cler {
             return worst;
         }
 
+        inline bool manual_sizes_are_valid(const size_t* sizes, size_t count, size_t regular_count,
+                                           size_t max_islands) {
+            if (count == 0 || count > max_islands) return false;
+            size_t total = 0;
+            for (size_t i = 0; i < count; ++i) {
+                if (sizes[i] == 0) return false;
+                total += sizes[i];
+            }
+            return total == regular_count;
+        }
+
         template<size_t MaxBlocks, size_t MaxWorkers>
-        void build_partition(const Edge* edges, size_t edge_count,
+        bool build_partition(const Edge* edges, size_t edge_count,
                              const std::array<SchedulerCostSample, MaxBlocks>& samples,
                              const std::array<uint8_t, MaxBlocks>& regular_ids, size_t regular_count,
                              size_t worker_count, bool use_costs, bool topology_is_complete,
-                             Partition<MaxBlocks, MaxWorkers>& out) {
+                             Partition<MaxBlocks, MaxWorkers>& out,
+                             const size_t* manual_sizes = nullptr, size_t manual_count = 0) {
             std::array<uint8_t, MaxBlocks> order{};
             if (topology_is_complete) {
                 topo_sort_blocks<MaxBlocks>(edges, edge_count, regular_ids.data(), regular_count, order);
@@ -98,6 +110,20 @@ namespace cler {
             out.block_count = static_cast<uint16_t>(regular_count);
             out.island_count = static_cast<uint16_t>(islands);
 
+            if (manual_sizes != nullptr) {
+                if (!manual_sizes_are_valid(manual_sizes, manual_count, regular_count, MaxWorkers)) {
+                    return false;
+                }
+                size_t cursor = 0;
+                for (size_t w = 0; w < manual_count; ++w) {
+                    out.island_begin[w] = static_cast<uint16_t>(cursor);
+                    cursor += manual_sizes[w];
+                }
+                out.island_begin[manual_count] = static_cast<uint16_t>(regular_count);
+                out.island_count = static_cast<uint16_t>(manual_count);
+                return true;
+            }
+
             if (!use_costs || !topology_is_complete) {
                 size_t cursor = 0;
                 for (size_t w = 0; w < islands; ++w) {
@@ -105,7 +131,7 @@ namespace cler {
                     cursor += regular_count / islands + (w < regular_count % islands ? 1 : 0);
                 }
                 out.island_begin[islands] = static_cast<uint16_t>(regular_count);
-                return;
+                return true;
             }
 
             std::array<double, MaxBlocks> weights{};
@@ -157,6 +183,7 @@ namespace cler {
                 out.island_begin[k - 1] = start;
                 end = start;
             }
+            return true;
         }
 
 

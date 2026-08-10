@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdlib>
+
 #include "cler.hpp"
 #include "cler_task_policy_base.hpp"
 #include <thread>
@@ -79,6 +81,17 @@ struct DesktopTaskPolicy : TaskPolicyBase<DesktopTaskPolicy> {
             "edge derivation matches channels stored inside the consuming block's object). "
             "PinnedIslands will fall back to a contiguous partition.\n",
             producer_name, address);
+    }
+
+    [[noreturn]] static inline void fatal(const char* msg) {
+        std::fprintf(stderr, "cler: fatal: %s\n", msg);
+        std::abort();
+    }
+
+    static inline void report_partition_block(size_t island, size_t position, const char* name,
+                                              double weight_ns_per_item) {
+        std::fprintf(stderr, "cler: partition island %zu pos %zu %s (%.1f ns/item)\n",
+                     island, position, name, weight_ns_per_item);
     }
 
     static constexpr size_t park_timeout_us = 1000;

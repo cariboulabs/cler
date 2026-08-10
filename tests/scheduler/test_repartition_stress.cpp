@@ -122,8 +122,8 @@ TEST(RepartitionStressTest, OwnershipTransferPreservesStreamOrder) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(3);
-    config.calibration_ms = 20;
-    config.repartition_check_ms = 5;
+    config.pinned_islands.calibration_ms = 20;
+    config.pinned_islands.repartition_check_ms = 5;
 
     fg.run(config);
     std::this_thread::sleep_for(std::chrono::seconds(8));
@@ -154,8 +154,8 @@ TEST(RepartitionStressTest, RepeatedRunsReuseTheSameBarrier) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(2);
-    config.calibration_ms = 20;
-    config.repartition_check_ms = 5;
+    config.pinned_islands.calibration_ms = 20;
+    config.pinned_islands.repartition_check_ms = 5;
 
     size_t previous_received = 0;
     for (int iteration = 0; iteration < 3; ++iteration) {

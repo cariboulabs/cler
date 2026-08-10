@@ -87,7 +87,7 @@ TEST(SchedulerCostTest, BlockCostsReflectActualCallShape) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(2);
-    config.calibration_ms = 60000;
+    config.pinned_islands.calibration_ms = 60000;
     fg.run_for(std::chrono::milliseconds(200), config);
 
     ASSERT_GT(sink.received(), 0u);
@@ -111,7 +111,7 @@ TEST(SchedulerCostTest, SinkWeightIsMeasuredInItemsNotCalls) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(2);
-    config.calibration_ms = 60000;
+    config.pinned_islands.calibration_ms = 60000;
     fg.run_for(std::chrono::milliseconds(200), config);
 
     ASSERT_GT(sink.received(), 0u);
@@ -140,7 +140,7 @@ TEST(SchedulerCostTest, MultiOutputWeightDoesNotShrinkWithOutputCount) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(2);
-    config.calibration_ms = 60000;
+    config.pinned_islands.calibration_ms = 60000;
     fg.run_for(std::chrono::milliseconds(300), config);
 
     ASSERT_GT(sink_a.received(), 0u);
@@ -212,7 +212,7 @@ TEST(SchedulerCostTest, SkewedMultiInputUsesMaxDeltaNotDeltaOfMaxima) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(2);
-    config.calibration_ms = 60000;
+    config.pinned_islands.calibration_ms = 60000;
     fg.run_for(std::chrono::milliseconds(300), config);
 
     ASSERT_GT(sink.received(), 0u);
@@ -265,7 +265,7 @@ TEST(SchedulerCostTest, ResolvedButUnreadInputFallsBackToOutputWrites) {
     );
 
     auto config = cler::flowgraph_config::pinned_islands(2);
-    config.calibration_ms = 60000;
+    config.pinned_islands.calibration_ms = 60000;
     fg.run_for(std::chrono::milliseconds(300), config);
 
     ASSERT_GT(sink.received(), 0u);
@@ -274,4 +274,43 @@ TEST(SchedulerCostTest, ResolvedButUnreadInputFallsBackToOutputWrites) {
     EXPECT_GT(costs[1].ewma_items_per_call, UnreadInputBlock::CHUNK * 0.5)
         << "block has a resolved input it never reads; reporting zero items would "
            "silently weight it in ns/call while every other block is ns/item";
+}
+
+TEST(SchedulerCostTest, ManualIslandSizesOverrideTheCostPartition) {
+    FixedRateSource source("Source");
+    DrainingSink sink("Sink", 1 << 16);
+
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, &sink.in),
+        cler::BlockRunner(&sink)
+    );
+
+    const size_t sizes[] = {1, 1};
+    auto config = cler::flowgraph_config::pinned_islands(2);
+    config.pinned_islands.manual_island_sizes = sizes;
+    config.pinned_islands.manual_island_count = 2;
+    fg.run_for(std::chrono::milliseconds(200), config);
+
+    const auto& partition = fg.partition();
+    EXPECT_EQ(partition.island_count, 2);
+    EXPECT_EQ(partition.island_size(0), 1);
+    EXPECT_EQ(partition.island_size(1), 1);
+    EXPECT_NE(partition.island_of(partition.block_ids[0]), partition.island_of(partition.block_ids[1]));
+}
+
+TEST(SchedulerCostTest, ManualIslandSizesThatDoNotCoverTheGraphAreFatal) {
+    const size_t sizes[] = {1};
+
+    EXPECT_DEATH({
+        FixedRateSource source("Source");
+        DrainingSink sink("Sink", 1 << 16);
+        auto fg = cler::make_desktop_flowgraph(
+            cler::BlockRunner(&source, &sink.in),
+            cler::BlockRunner(&sink)
+        );
+        auto config = cler::flowgraph_config::pinned_islands(2);
+        config.pinned_islands.manual_island_sizes = sizes;
+        config.pinned_islands.manual_island_count = 1;
+        fg.run_for(std::chrono::milliseconds(200), config);
+    }, "manual_island_sizes");
 }

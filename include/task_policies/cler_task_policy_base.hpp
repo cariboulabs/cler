@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdlib>
+
 #include <type_traits>
 #include <atomic>
 #include <cstdint>
@@ -37,6 +39,10 @@ struct TaskPolicyBase {
     static inline bool pin_to_core(size_t) { return false; }
 
     static inline void warn_unresolved_edge(const char*, const void*) {}
+
+    [[noreturn]] static inline void fatal(const char*) { std::abort(); }
+
+    static inline void report_partition_block(size_t, size_t, const char*, double) {}
 
     static inline void configure_thread_for_low_latency_sleep() {}
 

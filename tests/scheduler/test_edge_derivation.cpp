@@ -90,7 +90,7 @@ TEST(EdgeDerivationTest, HeapChannelIsUnresolvedAndPartitionsContiguously) {
     EXPECT_EQ(fg.unresolved_edges()[0].address, static_cast<const void*>(sink.in));
 
     auto config = cler::flowgraph_config::pinned_islands(2);
-    config.calibration_ms = 30;
+    config.pinned_islands.calibration_ms = 30;
     fg.run_for(std::chrono::milliseconds(120), config);
 
     EXPECT_EQ(fg.partition().block_count, 2u);
