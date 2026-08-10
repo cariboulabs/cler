@@ -556,10 +556,20 @@ other, never to establish an absolute rate.
 | FixedThreadPool(2) | 1.544 | yes | no (1.760) |
 
 `cores - 1` saves ~1% CPU when the chain has slack and costs 17% of capacity
-when it does not. The `may_block` source spends nearly all its time blocked in
-the driver (measured at 0.196 cores for a 3 MS/s libiio source), so it does not
-need a core reserved for it. `embedded_optimized()` is `pinned_islands(2)` and
-is the right default on a 2-core target.
+when it does not. `embedded_optimized()` is `pinned_islands(2)` and is the right
+default on a 2-core target.
+
+The `may_block` source spends nearly all its time blocked in the driver
+(measured at 0.196 cores for a 3 MS/s libiio source), which once read as "it
+does not need a core reserved for it". A later measurement on a heavier graph
+says otherwise: across all nine cuts of a 10-block chain, throughput rose with
+*imbalance* and peaked where the second worker was nearly idle, 0.84 cores
+against 0.16, while the best-balanced split lost 18%. A worker with slack is
+what services the driver promptly. See `RECEIVER_RATE.md`.
+
+Which partition you get is not something to leave to the cost model on a
+throughput-critical graph: name it with `pinned_islands.islands` and find it by
+sweeping.
 
 The cost-based repartition is what makes 2 workers win: with the barrier
 suppressed the same config drops to 1.760 MSPS. It only matters when per-block
