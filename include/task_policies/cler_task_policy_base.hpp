@@ -40,7 +40,7 @@ struct TaskPolicyBase {
 
     static inline void warn_unresolved_edge(const char*, const void*) {}
 
-    [[noreturn]] static inline void fatal(const char*) { std::abort(); }
+    [[noreturn]] static inline void fatal(const char*, const char*) { std::abort(); }
 
     static inline void report_partition_block(size_t, size_t, const char*, double) {}
 

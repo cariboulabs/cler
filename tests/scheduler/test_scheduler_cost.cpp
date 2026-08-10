@@ -276,7 +276,7 @@ TEST(SchedulerCostTest, ResolvedButUnreadInputFallsBackToOutputWrites) {
            "silently weight it in ns/call while every other block is ns/item";
 }
 
-TEST(SchedulerCostTest, ManualIslandSizesOverrideTheCostPartition) {
+TEST(SchedulerCostTest, ManualIslandsOverrideTheCostPartition) {
     FixedRateSource source("Source");
     DrainingSink sink("Sink", 1 << 16);
 
@@ -285,9 +285,9 @@ TEST(SchedulerCostTest, ManualIslandSizesOverrideTheCostPartition) {
         cler::BlockRunner(&sink)
     );
 
-    const size_t sizes[] = {1, 1};
+    const char* islands[] = {"Source", "Sink"};
     auto config = cler::flowgraph_config::pinned_islands(2);
-    config.pinned_islands.manual_island_sizes = sizes;
+    config.pinned_islands.manual_islands = islands;
     config.pinned_islands.manual_island_count = 2;
     fg.run_for(std::chrono::milliseconds(200), config);
 
@@ -298,8 +298,8 @@ TEST(SchedulerCostTest, ManualIslandSizesOverrideTheCostPartition) {
     EXPECT_NE(partition.island_of(partition.block_ids[0]), partition.island_of(partition.block_ids[1]));
 }
 
-TEST(SchedulerCostTest, ManualIslandSizesThatDoNotCoverTheGraphAreFatal) {
-    const size_t sizes[] = {1};
+TEST(SchedulerCostTest, ManualIslandsThatDoNotCoverTheGraphAreFatal) {
+    const char* islands[] = {"Source"};
 
     EXPECT_DEATH({
         FixedRateSource source("Source");
@@ -309,8 +309,42 @@ TEST(SchedulerCostTest, ManualIslandSizesThatDoNotCoverTheGraphAreFatal) {
             cler::BlockRunner(&sink)
         );
         auto config = cler::flowgraph_config::pinned_islands(2);
-        config.pinned_islands.manual_island_sizes = sizes;
+        config.pinned_islands.manual_islands = islands;
         config.pinned_islands.manual_island_count = 1;
         fg.run_for(std::chrono::milliseconds(200), config);
-    }, "manual_island_sizes");
+    }, "does not list block");
+}
+
+TEST(SchedulerCostTest, ManualIslandsInReverseTopologicalOrderAreFatal) {
+    const char* islands[] = {"Sink", "Source"};
+
+    EXPECT_DEATH({
+        FixedRateSource source("Source");
+        DrainingSink sink("Sink", 1 << 16);
+        auto fg = cler::make_desktop_flowgraph(
+            cler::BlockRunner(&source, &sink.in),
+            cler::BlockRunner(&sink)
+        );
+        auto config = cler::flowgraph_config::pinned_islands(2);
+        config.pinned_islands.manual_islands = islands;
+        config.pinned_islands.manual_island_count = 2;
+        fg.run_for(std::chrono::milliseconds(200), config);
+    }, "not in topological order");
+}
+
+TEST(SchedulerCostTest, ManualIslandsNamingAnUnknownBlockAreFatal) {
+    const char* islands[] = {"Source,Nope", "Sink"};
+
+    EXPECT_DEATH({
+        FixedRateSource source("Source");
+        DrainingSink sink("Sink", 1 << 16);
+        auto fg = cler::make_desktop_flowgraph(
+            cler::BlockRunner(&source, &sink.in),
+            cler::BlockRunner(&sink)
+        );
+        auto config = cler::flowgraph_config::pinned_islands(2);
+        config.pinned_islands.manual_islands = islands;
+        config.pinned_islands.manual_island_count = 2;
+        fg.run_for(std::chrono::milliseconds(200), config);
+    }, "not a schedulable block");
 }

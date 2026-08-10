@@ -83,8 +83,9 @@ struct DesktopTaskPolicy : TaskPolicyBase<DesktopTaskPolicy> {
             producer_name, address);
     }
 
-    [[noreturn]] static inline void fatal(const char* msg) {
-        std::fprintf(stderr, "cler: fatal: %s\n", msg);
+    [[noreturn]] static inline void fatal(const char* msg, const char* detail) {
+        std::fprintf(stderr, "cler: fatal: %s%s%s\n", msg,
+                     (detail && *detail) ? ": " : "", (detail && *detail) ? detail : "");
         std::abort();
     }
 

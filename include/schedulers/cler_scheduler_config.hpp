@@ -20,7 +20,7 @@ namespace cler {
         size_t repartition_check_ms = 5000;
         size_t cpu_id_offset = 0;
         size_t park_after_zero_passes = 4;
-        const size_t* manual_island_sizes = nullptr;
+        const char* const* manual_islands = nullptr;
         size_t manual_island_count = 0;
         bool report_partition = false;
     };
