@@ -5,18 +5,23 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use cler_graph::{Command, DocumentSession, FileModel, Transaction, SCHEMA_VERSION};
+use cler_graph::{
+    palette_specs, BlockSpec, Command, DocumentSession, FileModel, Transaction, SCHEMA_VERSION,
+};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 pub type Documents = Mutex<HashMap<PathBuf, Document>>;
 
+const PALETTE_DIR: &str = "desktop_blocks";
+
 pub struct Document {
     session: DocumentSession,
     spelling: String,
     written: String,
     external_change: bool,
+    palette: Vec<BlockSpec>,
 }
 
 #[derive(Debug, Serialize)]
@@ -130,12 +135,14 @@ pub fn reload(docs: &Documents, path: &str) -> Result<DocumentState, String> {
 pub fn parse_file(docs: &Documents, path: &str) -> Result<String, String> {
     let map = lock(docs);
     if let Some(doc) = resolve(&map, path).and_then(|key| map.get(&key)) {
-        return serde_json::to_string(&model_of(&doc.session)).map_err(|cause| cause.to_string());
+        return serde_json::to_string(&model_of(&doc.session, &doc.palette))
+            .map_err(|cause| cause.to_string());
     }
     drop(map);
     let target = canonical(path)?;
     let session = DocumentSession::open(&target).map_err(|cause| cause.to_string())?;
-    serde_json::to_string(&model_of(&session)).map_err(|cause| cause.to_string())
+    serde_json::to_string(&model_of(&session, &nearby_palette(&target)))
+        .map_err(|cause| cause.to_string())
 }
 
 pub fn note_disk_event(docs: &Documents, path: &Path) -> bool {
@@ -170,7 +177,19 @@ fn fresh(target: &Path, spelling: &str) -> Result<Document, String> {
         spelling: spelling.to_string(),
         written,
         external_change: false,
+        palette: nearby_palette(target),
     })
+}
+
+fn nearby_palette(target: &Path) -> Vec<BlockSpec> {
+    let Some(root) = target
+        .ancestors()
+        .map(|dir| dir.join(PALETTE_DIR))
+        .find(|dir| dir.is_dir())
+    else {
+        return Vec::new();
+    };
+    palette_specs(&[root]).unwrap_or_default()
 }
 
 fn lock(docs: &Documents) -> MutexGuard<'_, HashMap<PathBuf, Document>> {
@@ -203,15 +222,15 @@ fn snapshot(target: &Path, doc: &Document) -> DocumentState {
     DocumentState {
         path: target.display().to_string(),
         revision: doc.session.revision(),
-        model: model_of(&doc.session),
+        model: model_of(&doc.session, &doc.palette),
         can_undo: doc.session.can_undo(),
         can_redo: doc.session.can_redo(),
         external_change: doc.external_change,
     }
 }
 
-fn model_of(session: &DocumentSession) -> DocumentModel {
-    let model = session.parse();
+fn model_of(session: &DocumentSession, palette: &[BlockSpec]) -> DocumentModel {
+    let model = session.parse_with_palette(palette);
     DocumentModel {
         sha256: format!("{:x}", Sha256::digest(session.source().as_bytes())),
         has_errors: model.has_errors,

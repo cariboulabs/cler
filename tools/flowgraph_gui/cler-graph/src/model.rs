@@ -109,6 +109,9 @@ pub struct Edge {
     pub span: Span,
     pub editable: bool,
     pub read_only_reason: Option<Reason>,
+    pub sample_type: Option<String>,
+    pub source_type: Option<String>,
+    pub type_conflict: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

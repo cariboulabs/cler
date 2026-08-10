@@ -721,7 +721,10 @@
             "end": 2419
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
         },
         {
           "from": "cw_throttle",
@@ -739,7 +742,10 @@
             "end": 2475
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
         },
         {
           "from": "cw_fanout",
@@ -757,7 +763,10 @@
             "end": 2539
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         },
         {
           "from": "cw_fanout",
@@ -775,7 +784,10 @@
             "end": 2562
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         },
         {
           "from": "cw_fanout",
@@ -793,7 +805,10 @@
             "end": 2588
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         },
         {
           "from": "cw_complex2realimag",
@@ -811,7 +826,10 @@
             "end": 2664
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "float",
+          "source_type": "float",
+          "type_conflict": false
         },
         {
           "from": "cw_complex2realimag",
@@ -829,7 +847,10 @@
             "end": 2691
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "float",
+          "source_type": "float",
+          "type_conflict": false
         },
         {
           "from": "chirp_source",
@@ -847,7 +868,10 @@
             "end": 2803
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
         },
         {
           "from": "chirp_throttle",
@@ -865,7 +889,10 @@
             "end": 2865
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
         },
         {
           "from": "chirp_fanout",
@@ -883,7 +910,10 @@
             "end": 2929
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         },
         {
           "from": "chirp_fanout",
@@ -901,7 +931,10 @@
             "end": 2952
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         },
         {
           "from": "chirp_fanout",
@@ -919,7 +952,10 @@
             "end": 2978
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         },
         {
           "from": "chirp_c2realimag",
@@ -937,7 +973,10 @@
             "end": 3054
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "float",
+          "source_type": "float",
+          "type_conflict": false
         },
         {
           "from": "chirp_c2realimag",
@@ -955,7 +994,10 @@
             "end": 3084
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "float",
+          "source_type": "float",
+          "type_conflict": false
         }
       ],
       "config": null,

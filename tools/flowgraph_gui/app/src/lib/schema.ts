@@ -30,6 +30,9 @@ export type Edge = Capability & {
   arg_index: number;
   text: string;
   span: Span;
+  sample_type: string | null;
+  source_type: string | null;
+  type_conflict: boolean;
 };
 
 export type Runner = Capability & {

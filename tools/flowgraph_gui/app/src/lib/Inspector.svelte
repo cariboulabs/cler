@@ -207,11 +207,19 @@
             <p class="muted">no wired ports</p>
           {:else}
             <ul class="ports">
-              {#each ports.inputs as port (port)}
-                <li><span class="dir">in</span><span class="port">{port}</span></li>
+              {#each ports.inputs as port (port.label)}
+                <li>
+                  <span class="dir">in</span><span class="port">{port.label}</span>
+                  {#if port.type}<span class="sample" data-sample-type={port.label}>{port.type}</span
+                    >{/if}
+                </li>
               {/each}
-              {#each ports.outputs as port (port)}
-                <li><span class="dir">out</span><span class="port">{port}</span></li>
+              {#each ports.outputs as port (port.label)}
+                <li>
+                  <span class="dir">out</span><span class="port">{port.label}</span>
+                  {#if port.type}<span class="sample" data-sample-type={port.label}>{port.type}</span
+                    >{/if}
+                </li>
               {/each}
             </ul>
           {/if}
@@ -435,6 +443,16 @@
     font-family: var(--mono);
     font-size: 11px;
     color: var(--muted);
+  }
+  .sample {
+    margin-left: auto;
+    padding-left: var(--sp-2);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .muted {
     margin: 0;

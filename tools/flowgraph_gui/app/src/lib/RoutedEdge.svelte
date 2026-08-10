@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { BaseEdge, getBezierPath, type EdgeProps } from '@xyflow/svelte';
+  import { BaseEdge, EdgeLabel, getBezierPath, type EdgeProps } from '@xyflow/svelte';
   import type { EdgePoint, RoutedEdge } from './project';
 
   const props: EdgeProps<RoutedEdge> = $props();
 
   const STUB = 14;
+  const BADGE_OFFSET = 34;
 
   function routedPoints(bends: EdgePoint[]): EdgePoint[] {
     const start = { x: props.sourceX, y: props.sourceY };
@@ -46,4 +47,25 @@
   });
 </script>
 
+{#if props.data?.title}
+  <title>{props.data.title}</title>
+{/if}
 <BaseEdge id={props.id} {path} markerEnd={props.markerEnd} style={props.style} />
+{#if props.data?.conflict}
+  <EdgeLabel x={props.targetX - BADGE_OFFSET} y={props.targetY - 11} class="cler-type-badge">
+    type
+  </EdgeLabel>
+{/if}
+
+<style>
+  :global(.svelte-flow__edge-label.cler-type-badge) {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--danger);
+    color: var(--accent-fg);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    pointer-events: none !important;
+  }
+</style>

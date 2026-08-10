@@ -1,7 +1,12 @@
-use cler_graph::model::{ConfigSource, PortKind, Reason, RunnerForm, Site};
-use cler_graph::{DocumentSession, FileModel};
+use std::path::PathBuf;
+use std::sync::OnceLock;
+
+use cler_graph::model::{ConfigSource, Edge, PortKind, Reason, RunnerForm, Site};
+use cler_graph::{palette_specs, BlockSpec, DocumentSession, FileModel};
 
 const CORPUS: &str = "../../../desktop_examples";
+const BLOCKS: &str = "../../../desktop_blocks";
+const CONFLICT_FIXTURE: &str = "tests/data/type_conflict.cpp";
 
 fn model(name: &str) -> FileModel {
     let path = format!("{CORPUS}/{name}");
@@ -13,6 +18,43 @@ fn only_site(name: &str) -> Site {
     let mut model = model(name);
     assert_eq!(model.sites.len(), 1, "{name} should have one graph site");
     model.sites.remove(0)
+}
+
+fn desktop_palette() -> &'static [BlockSpec] {
+    static PALETTE: OnceLock<Vec<BlockSpec>> = OnceLock::new();
+    PALETTE.get_or_init(|| {
+        palette_specs(&[PathBuf::from(BLOCKS)]).expect("desktop_blocks palette extracts")
+    })
+}
+
+fn typed_model(path: &str) -> FileModel {
+    let session = DocumentSession::open(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    session.parse_with_palette(desktop_palette())
+}
+
+fn typed_site(name: &str) -> Site {
+    let mut model = typed_model(&format!("{CORPUS}/{name}"));
+    assert_eq!(model.sites.len(), 1, "{name} should have one graph site");
+    model.sites.remove(0)
+}
+
+fn typed_source(source: &str) -> Site {
+    let mut model = DocumentSession::load(source)
+        .expect("inline source parses")
+        .parse_with_palette(desktop_palette());
+    assert_eq!(model.sites.len(), 1, "inline source should have one site");
+    model.sites.remove(0)
+}
+
+fn sample_types(site: &Site) -> Vec<Option<&str>> {
+    site.edges
+        .iter()
+        .map(|e| e.sample_type.as_deref())
+        .collect()
+}
+
+fn labelled(edge: &Edge) -> String {
+    format!("{} -> {}.{}", edge.from, edge.to, edge.port.name)
 }
 
 #[test]
@@ -394,6 +436,190 @@ fn corpus_meets_m0_targets() {
         fully_editable >= 15,
         "only {fully_editable} files fully editable"
     );
+}
+
+#[test]
+fn hello_world_edges_are_all_float() {
+    let site = typed_site("hello_world.cpp");
+    assert_eq!(sample_types(&site), vec![Some("float"); 4]);
+    assert!(site
+        .edges
+        .iter()
+        .all(|e| e.source_type.as_deref() == Some("float")));
+    assert!(site.edges.iter().all(|e| !e.type_conflict));
+}
+
+#[test]
+fn polyphase_channelizer_carries_complex_baseband() {
+    let site = typed_site("polyphase_channelizer.cpp");
+    assert_eq!(site.edges.len(), 17);
+    for edge in &site.edges {
+        assert_eq!(
+            edge.sample_type.as_deref(),
+            Some("std::complex<float>"),
+            "{} lost its element type",
+            labelled(edge)
+        );
+        assert!(!edge.type_conflict);
+    }
+
+    let variadic = site.edges_between("channelizer", "plot_polyphase_cspectrum");
+    assert_eq!(variadic.len(), 5);
+    assert!(
+        variadic.iter().all(|e| e.source_type.is_none()),
+        "a variadic output pack is not a resolved element type"
+    );
+
+    let fixed = site.edges_between("adder", "throughput");
+    assert_eq!(fixed[0].source_type.as_deref(), Some("std::complex<float>"));
+}
+
+#[test]
+fn mass_spring_damper_edges_are_all_float() {
+    let site = typed_site("mass_spring_damper.cpp");
+    assert_eq!(sample_types(&site), vec![Some("float"); 5]);
+    assert!(site.edges.iter().all(|e| !e.type_conflict));
+
+    let feedback = site.edges_between("fanout", "controller");
+    assert_eq!(feedback[0].sample_type.as_deref(), Some("float"));
+}
+
+#[test]
+fn a_mismatched_edge_is_flagged_as_a_type_conflict() {
+    let mut model = typed_model(CONFLICT_FIXTURE);
+    let site = model.sites.remove(0);
+    let conflicting: Vec<&cler_graph::model::Edge> =
+        site.edges.iter().filter(|e| e.type_conflict).collect();
+    assert_eq!(conflicting.len(), 1);
+    assert_eq!(labelled(conflicting[0]), "throttle -> throughput.in");
+    assert_eq!(
+        conflicting[0].sample_type.as_deref(),
+        Some("std::complex<float>")
+    );
+    assert_eq!(conflicting[0].source_type.as_deref(), Some("float"));
+
+    assert_eq!(
+        sample_types(&site),
+        vec![
+            Some("float"),
+            Some("std::complex<float>"),
+            Some("std::complex<float>")
+        ]
+    );
+    assert!(site.editable, "a type conflict is a lint, not a refusal");
+}
+
+#[test]
+fn template_arguments_substitute_positionally() {
+    let site = typed_source(
+        r#"
+#include "cler.hpp"
+
+template <typename T, size_t N>
+struct MixBlock : public cler::BlockBase {
+    cler::Channel<T> in;
+    MixBlock(const char* name) : cler::BlockBase(name), in(N) {}
+    cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
+        return cler::Empty{};
+    }
+};
+
+template <typename T>
+struct DependentBlock : public cler::BlockBase {
+    cler::Channel<T::value_type> in;
+    DependentBlock(const char* name) : cler::BlockBase(name), in(8) {}
+    cler::Result<cler::Empty, cler::Error> procedure() { return cler::Empty{}; }
+};
+
+int main() {
+    MixBlock<float, 4> real("Real");
+    MixBlock<std::complex<float>, 4> complex_mix("Complex");
+    DependentBlock<std::complex<float>> dependent("Dependent");
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&real, &complex_mix.in),
+        cler::BlockRunner(&complex_mix, &dependent.in),
+        cler::BlockRunner(&dependent)
+    );
+    fg.run();
+}
+"#,
+    );
+
+    let crossing = site.edges_between("real", "complex_mix");
+    assert_eq!(crossing[0].source_type.as_deref(), Some("float"));
+    assert_eq!(
+        crossing[0].sample_type.as_deref(),
+        Some("std::complex<float>")
+    );
+    assert!(crossing[0].type_conflict);
+
+    let onwards = site.edges_between("complex_mix", "dependent");
+    assert_eq!(
+        onwards[0].source_type.as_deref(),
+        Some("std::complex<float>")
+    );
+    assert_eq!(
+        onwards[0].sample_type, None,
+        "a dependent name is never guessed at"
+    );
+    assert!(
+        !onwards[0].type_conflict,
+        "one resolved end can never conflict"
+    );
+}
+
+#[test]
+fn a_type_outside_the_palette_stays_unresolved() {
+    let site = typed_site("spike.cpp");
+    let unknown = site.edges_between("fanout", "power");
+    assert_eq!(unknown[0].sample_type, None);
+    assert_eq!(unknown[0].source_type, None);
+
+    let known = site.edges_between("power", "trigger");
+    assert_eq!(
+        known[0].sample_type.as_deref(),
+        Some("float"),
+        "the Trig alias resolves through to TriggerBlock<float>"
+    );
+}
+
+#[test]
+fn parsing_without_a_palette_resolves_only_the_open_file() {
+    let hello = only_site("hello_world.cpp");
+    assert!(hello.edges.iter().all(|e| e.sample_type.is_none()));
+
+    let local = only_site("mass_spring_damper.cpp");
+    let into_plant = local.edges_between("throttle", "plant");
+    assert_eq!(into_plant[0].sample_type.as_deref(), Some("float"));
+    let into_throttle = local.edges_between("controller", "throttle");
+    assert_eq!(into_throttle[0].sample_type, None);
+    assert_eq!(into_throttle[0].source_type.as_deref(), Some("float"));
+}
+
+#[test]
+fn the_corpus_reports_no_type_conflicts() {
+    for entry in std::fs::read_dir(CORPUS)
+        .expect("corpus directory")
+        .flatten()
+    {
+        let path = entry.path();
+        if path.extension().map(|e| e != "cpp").unwrap_or(true) {
+            continue;
+        }
+        let model = typed_model(&path.display().to_string());
+        for site in &model.sites {
+            for edge in &site.edges {
+                assert!(
+                    !edge.type_conflict,
+                    "{} invented a conflict on {}: {:?} vs {:?}",
+                    path.display(),
+                    labelled(edge),
+                    edge.source_type,
+                    edge.sample_type
+                );
+            }
+        }
+    }
 }
 
 #[test]

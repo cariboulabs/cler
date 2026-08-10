@@ -17,7 +17,7 @@ export type BlockNode = FlowNode<BlockNodeData, 'block'>;
 
 export type EdgePoint = { x: number; y: number };
 
-export type RoutedEdgeData = { bends: EdgePoint[] };
+export type RoutedEdgeData = { bends: EdgePoint[]; title?: string; conflict?: boolean };
 
 export type RoutedEdge = FlowEdge<RoutedEdgeData, 'routed'>;
 
@@ -64,6 +64,49 @@ function hasOutgoing(site: Site, blockVar: string): boolean {
   return site.edges.some((edge) => edge.from === blockVar);
 }
 
+export const TYPE_TOKENS = ['--type-1', '--type-2', '--type-3', '--type-4', '--type-5', '--type-6'];
+export const NEUTRAL_TOKEN = '--muted';
+
+export function edgeSampleType(edge: Edge): string | null {
+  return edge.sample_type ?? edge.source_type ?? null;
+}
+
+function wiredEdges(site: Site): Edge[] {
+  const declared = new Set(site.blocks.map((block) => block.var));
+  return site.edges.filter((edge) => declared.has(edge.from) && declared.has(edge.to));
+}
+
+export function typeColors(site: Site): Map<string, string> {
+  const colors = new Map<string, string>();
+  for (const edge of wiredEdges(site)) {
+    const type = edgeSampleType(edge);
+    if (type === null || colors.has(type)) continue;
+    colors.set(type, TYPE_TOKENS[colors.size] ?? NEUTRAL_TOKEN);
+  }
+  return colors;
+}
+
+export function edgeTitle(edge: Edge): string | undefined {
+  if (edge.type_conflict && edge.source_type && edge.sample_type) {
+    return `type conflict: ${edge.source_type} out → ${edge.sample_type} in`;
+  }
+  const type = edgeSampleType(edge);
+  return type === null ? undefined : `sample type: ${type}`;
+}
+
+function edgeClass(edge: Edge): string {
+  const names = ['cler-edge'];
+  if (!edge.editable) names.push('cler-edge-readonly');
+  if (edge.type_conflict) names.push('cler-edge-conflict');
+  return names.join(' ');
+}
+
+function edgeStyle(edge: Edge, colors: Map<string, string>): string | undefined {
+  const type = edgeSampleType(edge);
+  if (type === null) return undefined;
+  return `--edge-color: var(${colors.get(type) ?? NEUTRAL_TOKEN})`;
+}
+
 function toNode(site: Site, block: Block): BlockNode {
   const inputs = inputSlots(site, block.var);
   return {
@@ -79,7 +122,7 @@ function toNode(site: Site, block: Block): BlockNode {
   };
 }
 
-function toEdge(edge: Edge, id: string): RoutedEdge {
+function toEdge(edge: Edge, id: string, colors: Map<string, string>): RoutedEdge {
   return {
     id,
     type: 'routed',
@@ -87,21 +130,22 @@ function toEdge(edge: Edge, id: string): RoutedEdge {
     target: edge.to,
     sourceHandle: 'out',
     targetHandle: portLabel(edge.port),
-    data: { bends: [] },
+    data: { bends: [], title: edgeTitle(edge), conflict: edge.type_conflict },
     animated: false,
     selectable: true,
     deletable: false,
-    class: edge.editable ? 'cler-edge' : 'cler-edge cler-edge-readonly'
+    style: edgeStyle(edge, colors),
+    class: edgeClass(edge)
   };
 }
 
 export function projectSite(site: Site): Projection {
-  const declared = new Set(site.blocks.map((block) => block.var));
-  const wired = site.edges.filter((edge) => declared.has(edge.from) && declared.has(edge.to));
+  const wired = wiredEdges(site);
   const ids = edgeIds(wired);
+  const colors = typeColors(site);
   return {
     nodes: site.blocks.map((block) => toNode(site, block)),
-    edges: wired.map((edge, index) => toEdge(edge, ids[index] ?? edgeKey(edge)))
+    edges: wired.map((edge, index) => toEdge(edge, ids[index] ?? edgeKey(edge), colors))
   };
 }
 
@@ -154,19 +198,34 @@ export function mergeProjection(previous: Projection, next: Projection): Project
       placed.set(node.id, spot);
       return { ...node, position: spot };
     }),
-    edges: next.edges.map((edge) => ({ ...edge, data: { bends: bends.get(edge.id) ?? [] } }))
+    edges: next.edges.map((edge) => ({
+      ...edge,
+      data: { ...edge.data, bends: bends.get(edge.id) ?? [] }
+    }))
   };
 }
 
-export type BlockPorts = { inputs: string[]; outputs: string[] };
+export type PortLine = { label: string; type: string | null };
+
+export type BlockPorts = { inputs: PortLine[]; outputs: PortLine[] };
+
+function firstSeen(pairs: [string, string | null][]): PortLine[] {
+  const found = new Map<string, string | null>();
+  for (const [label, type] of pairs) if (!found.has(label)) found.set(label, type);
+  return [...found].map(([label, type]) => ({ label, type }));
+}
 
 export function blockPorts(site: Site, blockVar: string): BlockPorts {
-  const inputs = inputSlots(site, blockVar).map((slot) => slot.label);
-  const outputs = [
-    ...new Set(
-      site.edges.filter((edge) => edge.from === blockVar).map((edge) => `${edge.to}.${portLabel(edge.port)}`)
-    )
-  ];
+  const inputs = firstSeen(
+    site.edges
+      .filter((edge) => edge.to === blockVar)
+      .map((edge) => [portLabel(edge.port), edgeSampleType(edge)])
+  ).sort((a, b) => a.label.localeCompare(b.label, 'en', { numeric: true }));
+  const outputs = firstSeen(
+    site.edges
+      .filter((edge) => edge.from === blockVar)
+      .map((edge) => [`${edge.to}.${portLabel(edge.port)}`, edgeSampleType(edge)])
+  );
   return { inputs, outputs };
 }
 

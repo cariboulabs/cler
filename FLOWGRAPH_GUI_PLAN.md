@@ -265,6 +265,14 @@ it. Nothing gets a privileged path to the file.
 
 ### M5 — typed edges
 
+**M5 status: complete.** 168 crate tests, 149 frontend tests. `parse` gained
+an optional palette (`--palette <dir>`, repeatable; the desktop shell finds
+`desktop_blocks/` by walking up from the opened file) and every edge now
+carries `sample_type`, `source_type` and `type_conflict`. Substitution is
+positional and textual only — a dependent name, an unbound parameter or a
+variadic output pack resolves to `None`, and across the whole corpus not one
+false conflict is raised.
+
 Colour each wire by the sample type flowing through it: `float`,
 `std::complex<float>`, `Blob`, `uint16_t`, a user struct. The palette already
 extracts port element types; what is missing is substituting a block's

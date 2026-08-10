@@ -3,6 +3,7 @@ pub mod model;
 mod palette;
 pub mod palette_types;
 mod parse;
+mod sample_types;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -11,7 +12,7 @@ use tree_sitter::{Parser, Tree};
 
 pub use apply::{ApplyError, ApplyOutcome, Command, PendingApply, Splice, Transaction};
 pub use model::{FileModel, Site, SCHEMA_VERSION};
-pub use palette::extract_specs;
+pub use palette::{extract_specs, palette_specs, source_files};
 pub use palette_types::BlockSpec;
 
 #[derive(Debug)]
@@ -79,7 +80,14 @@ impl DocumentSession {
     }
 
     pub fn parse(&self) -> FileModel {
-        let (sites, errors) = parse::extract(self.tree.root_node(), &self.source);
+        self.parse_with_palette(&[])
+    }
+
+    pub fn parse_with_palette(&self, palette: &[BlockSpec]) -> FileModel {
+        let origin = self.file.clone().unwrap_or_default();
+        let local = extract_specs(&self.source, &origin);
+        let specs: Vec<&BlockSpec> = local.iter().chain(palette.iter()).collect();
+        let (sites, errors) = parse::extract(self.tree.root_node(), &self.source, &specs);
         FileModel {
             version: SCHEMA_VERSION,
             file: self.file.clone(),

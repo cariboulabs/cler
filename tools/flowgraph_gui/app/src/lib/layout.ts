@@ -52,7 +52,7 @@ export async function layout(projection: Projection): Promise<Projection> {
     })),
     edges: projection.edges.map((edge) => ({
       ...edge,
-      data: { bends: bends.get(edge.id) ?? [] }
+      data: { ...edge.data, bends: bends.get(edge.id) ?? [] }
     }))
   };
 }

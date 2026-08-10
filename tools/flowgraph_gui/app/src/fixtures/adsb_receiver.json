@@ -292,7 +292,10 @@
             "end": 8521
           },
           "editable": false,
-          "read_only_reason": "unsupported_block_expression"
+          "read_only_reason": "unsupported_block_expression",
+          "sample_type": "std::complex<int16_t>",
+          "source_type": "std::complex<int16_t>",
+          "type_conflict": false
         },
         {
           "from": "iq2mag",
@@ -310,7 +313,10 @@
             "end": 8570
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "uint16_t",
+          "source_type": "uint16_t",
+          "type_conflict": false
         },
         {
           "from": "decoder",
@@ -328,7 +334,10 @@
             "end": 8623
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "mode_s_msg",
+          "source_type": "mode_s_msg",
+          "type_conflict": false
         }
       ],
       "config": null,

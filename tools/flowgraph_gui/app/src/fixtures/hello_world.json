@@ -333,7 +333,10 @@
             "end": 970
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "float",
+          "source_type": "float",
+          "type_conflict": false
         },
         {
           "from": "source2",
@@ -351,7 +354,10 @@
             "end": 1021
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "float",
+          "source_type": "float",
+          "type_conflict": false
         },
         {
           "from": "adder",
@@ -369,7 +375,10 @@
             "end": 1070
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "float",
+          "source_type": "float",
+          "type_conflict": false
         },
         {
           "from": "throttle",
@@ -387,7 +396,10 @@
             "end": 1121
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "float",
+          "source_type": "float",
+          "type_conflict": false
         }
       ],
       "config": null,

@@ -1,7 +1,10 @@
+use std::path::{Path, PathBuf};
+
 use crate::palette_types::*;
 use tree_sitter::{Node, Parser, Tree};
 
 const MAY_BLOCK: &str = "may_block";
+const PALETTE_EXTENSIONS: &[&str] = &["hpp", "cpp"];
 const CHANNEL: &str = "Channel<";
 const CHANNEL_BASE: &str = "ChannelBase<";
 const PROCEDURE: &str = "procedure(";
@@ -16,6 +19,47 @@ pub fn extract_specs(source: &str, origin: &str) -> Vec<BlockSpec> {
     collect_blocks(root, source, &code, origin, &mut specs);
     attach_synonyms(root, source, &mut specs);
     specs
+}
+
+pub fn source_files(root: &Path, extensions: &[&str]) -> Result<Vec<PathBuf>, crate::Error> {
+    if root.is_file() {
+        return Ok(vec![root.to_path_buf()]);
+    }
+    let mut files = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let entries = std::fs::read_dir(&current).map_err(|cause| crate::Error::Read {
+            path: current.clone(),
+            cause,
+        })?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path
+                .extension()
+                .is_some_and(|found| extensions.iter().any(|wanted| found == *wanted))
+            {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+pub fn palette_specs(roots: &[PathBuf]) -> Result<Vec<BlockSpec>, crate::Error> {
+    let mut specs = Vec::new();
+    for root in roots {
+        for file in source_files(root, PALETTE_EXTENSIONS)? {
+            let source = std::fs::read_to_string(&file).map_err(|cause| crate::Error::Read {
+                path: file.clone(),
+                cause,
+            })?;
+            specs.extend(extract_specs(&source, &file.display().to_string()));
+        }
+    }
+    Ok(specs)
 }
 
 fn parse_cpp(source: &str) -> Option<Tree> {
@@ -355,7 +399,7 @@ fn assigned_name(hay: &str, at: usize) -> Option<String> {
     (!ident.is_empty()).then(|| ident.chars().rev().collect())
 }
 
-fn is_whole_word(hay: &str, start: usize, end: usize) -> bool {
+pub(crate) fn is_whole_word(hay: &str, start: usize, end: usize) -> bool {
     let before = hay[..start].chars().next_back();
     let after = hay[end..].chars().next();
     let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');

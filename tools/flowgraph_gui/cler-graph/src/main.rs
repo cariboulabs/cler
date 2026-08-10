@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use cler_graph::model::Site;
 use cler_graph::palette_types::{Direction, PortCount};
 use cler_graph::{
-    extract_specs, BlockSpec, DocumentSession, Error, FileModel, Splice, Transaction,
+    palette_specs, source_files, BlockSpec, DocumentSession, Error, FileModel, Splice, Transaction,
     SCHEMA_VERSION,
 };
 
@@ -25,6 +25,8 @@ enum Command {
         file: PathBuf,
         #[arg(long)]
         pretty: bool,
+        #[arg(long, value_name = "DIR")]
+        palette: Vec<PathBuf>,
     },
     Corpus {
         dir: PathBuf,
@@ -55,7 +57,11 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Parse { file, pretty } => parse_command(&file, pretty),
+        Command::Parse {
+            file,
+            pretty,
+            palette,
+        } => parse_command(&file, pretty, &palette),
         Command::Corpus { dir } => corpus_command(&dir),
         Command::Apply {
             file,
@@ -332,9 +338,9 @@ struct ParseOutput<'a> {
     model: &'a FileModel,
 }
 
-fn parse_command(file: &Path, pretty: bool) -> Result<(), Failure> {
+fn parse_command(file: &Path, pretty: bool, palette: &[PathBuf]) -> Result<(), Failure> {
     let session = DocumentSession::open(file)?;
-    let model = session.parse();
+    let model = session.parse_with_palette(&palette_specs(palette)?);
     let output = ParseOutput {
         sha256: digest(session.source().as_bytes()),
         model: &model,
@@ -354,33 +360,6 @@ fn parse_command(file: &Path, pretty: bool) -> Result<(), Failure> {
             Ok(())
         }
     }
-}
-
-fn source_files(root: &Path, extensions: &[&str]) -> Result<Vec<PathBuf>, Failure> {
-    if root.is_file() {
-        return Ok(vec![root.to_path_buf()]);
-    }
-    let mut files = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(current) = stack.pop() {
-        let entries = std::fs::read_dir(&current).map_err(|cause| Error::Read {
-            path: current.clone(),
-            cause,
-        })?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path
-                .extension()
-                .is_some_and(|found| extensions.iter().any(|wanted| found == *wanted))
-            {
-                files.push(path);
-            }
-        }
-    }
-    files.sort();
-    Ok(files)
 }
 
 fn ports(spec: &BlockSpec, direction: Direction) -> String {
@@ -438,16 +417,7 @@ fn palette_table(specs: &[BlockSpec]) {
 }
 
 fn palette_command(paths: &[PathBuf], table: bool) -> Result<(), Failure> {
-    let mut specs = Vec::new();
-    for root in paths {
-        for file in source_files(root, &["hpp", "cpp"])? {
-            let source = std::fs::read_to_string(&file).map_err(|cause| Error::Read {
-                path: file.clone(),
-                cause,
-            })?;
-            specs.extend(extract_specs(&source, &file.display().to_string()));
-        }
-    }
+    let specs = palette_specs(paths)?;
     if table {
         palette_table(&specs);
         return Ok(());

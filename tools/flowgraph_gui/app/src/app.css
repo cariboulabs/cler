@@ -36,6 +36,14 @@
   --warn-bg: #332b18;
   --warn-border: #6b551f;
 
+  /* Categorical sample-type ramp, CVD-validated against --bg-1 (rflock --chart-1..6). */
+  --type-1: #3987e5;
+  --type-2: #199e70;
+  --type-3: #c98500;
+  --type-4: #008300;
+  --type-5: #9085e9;
+  --type-6: #e66767;
+
   --glass: color-mix(in srgb, var(--bg-1) 78%, transparent);
   --shadow: 0 8px 30px #0008;
   --scrim: color-mix(in srgb, var(--bg-0) 72%, transparent);
@@ -133,12 +141,18 @@ select:hover {
 }
 
 .svelte-flow__edge.cler-edge .svelte-flow__edge-path {
-  stroke: var(--muted);
+  stroke: var(--edge-color, var(--muted));
   stroke-width: 1.8;
 }
 
 .svelte-flow__edge.cler-edge-readonly .svelte-flow__edge-path {
   stroke: var(--danger);
+  stroke-dasharray: 5 3;
+}
+
+.svelte-flow__edge.cler-edge-conflict .svelte-flow__edge-path {
+  stroke: var(--danger);
+  stroke-width: 2.4;
   stroke-dasharray: 5 3;
 }
 

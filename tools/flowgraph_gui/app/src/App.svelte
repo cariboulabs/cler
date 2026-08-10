@@ -13,6 +13,7 @@
   import BlockNode from './lib/BlockNode.svelte';
   import Inspector from './lib/Inspector.svelte';
   import RoutedEdge from './lib/RoutedEdge.svelte';
+  import TypeLegend from './lib/TypeLegend.svelte';
   import {
     applyCommands,
     closeDocument,
@@ -32,6 +33,7 @@
     mergeProjection,
     projectSite,
     readOnlyNotes,
+    typeColors,
     type BlockNode as BlockNodeType,
     type RoutedEdge as RoutedEdgeType
   } from './lib/project';
@@ -87,6 +89,7 @@
   const viewIds = $derived(siteViewIds(doc.model.sites));
   const viewId = $derived(viewIds[siteIndex] ?? '');
   const notes = $derived(site ? readOnlyNotes(site) : []);
+  const legend = $derived<[string, string][]>(site ? [...typeColors(site)] : []);
   const needsReload = $derived(changedOnDisk || doc.externalChange);
 
   $effect(() => storeOpen(LEFT_PANEL, leftOpen));
@@ -365,6 +368,7 @@
             ontoggleright={() => (rightOpen = !rightOpen)}
           />
           <Controls showLock={false} />
+          <TypeLegend entries={legend} />
           <MiniMap bgColor="var(--bg-1)" maskColor="var(--scrim)" nodeColor="var(--border-hi)" />
         </SvelteFlow>
       {/key}

@@ -3,6 +3,8 @@ use std::collections::{HashMap, HashSet};
 use tree_sitter::Node;
 
 use crate::model::*;
+use crate::palette_types::BlockSpec;
+use crate::sample_types;
 
 const FLOWGRAPH_FACTORY: &str = "make_desktop_flowgraph";
 const RUNNER: &str = "BlockRunner";
@@ -12,7 +14,7 @@ const BLOCK_SUFFIX: &str = "Block";
 const FILE_SCOPE_SKIP: &[&str] = &["function_definition", "field_declaration_list"];
 const LOCAL_SCOPE_SKIP: &[&str] = &["field_declaration_list"];
 
-pub fn extract<'t>(root: Node<'t>, src: &'t str) -> (Vec<Site>, Vec<Span>) {
+pub fn extract<'t>(root: Node<'t>, src: &'t str, specs: &[&BlockSpec]) -> (Vec<Site>, Vec<Span>) {
     let errors = error_spans(root);
     let file = Extractor::new(root, src);
     let calls: Vec<Node<'t>> = descendants(root)
@@ -31,6 +33,7 @@ pub fn extract<'t>(root: Node<'t>, src: &'t str) -> (Vec<Site>, Vec<Span>) {
     let mut sites = Vec::new();
     for (call, (function, scope)) in calls.into_iter().zip(scopes) {
         let mut site = file.scoped(scope).site(call, function, scope);
+        sample_types::annotate(&mut site, specs);
         if per_scope.get(&scope.id()).copied().unwrap_or_default() > 1 {
             force_read_only(&mut site, Reason::MultiSiteFunction);
         }
@@ -802,6 +805,9 @@ impl<'t> Extractor<'t> {
                             span: span(*arg),
                             editable: edge_reason.is_none() && block_var.is_some(),
                             read_only_reason: edge_reason,
+                            sample_type: None,
+                            source_type: None,
+                            type_conflict: false,
                         });
                     }
                     PortExpr::Unresolved => {

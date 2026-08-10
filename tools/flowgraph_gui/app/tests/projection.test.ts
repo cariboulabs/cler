@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { fixtures } from '../src/fixtures';
 import { layout } from '../src/lib/layout';
-import { edgeIds, projectSite, readOnlyNotes, type Projection } from '../src/lib/project';
-import type { ParseResult, Site } from '../src/lib/schema';
+import {
+  blockPorts,
+  edgeIds,
+  edgeTitle,
+  projectSite,
+  readOnlyNotes,
+  typeColors,
+  TYPE_TOKENS,
+  type Projection
+} from '../src/lib/project';
+import type { Block, Edge, ParseResult, Site } from '../src/lib/schema';
 
 function fixture(name: string): ParseResult {
   const found = fixtures[name];
@@ -161,6 +170,195 @@ describe('adsb_receiver', () => {
 
     const unwired = projection.nodes.filter((node) => !node.data.block.in_graph);
     expect(unwired.map((node) => node.id)).toEqual(['null_sink']);
+  });
+});
+
+function syntheticBlock(name: string): Block {
+  return {
+    var: name,
+    type_text: 'AnyBlock',
+    type_name: 'AnyBlock',
+    alias: null,
+    template_args: [],
+    ctor_args: [],
+    display_name: null,
+    in_graph: true,
+    span: { start: 0, end: 0 },
+    editable: true,
+    read_only_reason: null
+  };
+}
+
+type EdgeSpec = {
+  from: string;
+  to: string;
+  port: string;
+  sample?: string | null;
+  source?: string | null;
+  conflict?: boolean;
+  editable?: boolean;
+};
+
+function syntheticEdge(spec: EdgeSpec): Edge {
+  return {
+    from: spec.from,
+    to: spec.to,
+    port: { name: spec.port, index: null, kind: 'field' },
+    runner_index: 0,
+    arg_index: 1,
+    text: '',
+    span: { start: 0, end: 0 },
+    editable: spec.editable ?? true,
+    read_only_reason: null,
+    sample_type: spec.sample ?? null,
+    source_type: spec.source ?? spec.sample ?? null,
+    type_conflict: spec.conflict ?? false
+  };
+}
+
+function syntheticSite(specs: EdgeSpec[]): Site {
+  const edges = specs.map(syntheticEdge);
+  const names = [...new Set(edges.flatMap((edge) => [edge.from, edge.to]))];
+  return {
+    function: 'main',
+    call_offset: 0,
+    span: { start: 0, end: 0 },
+    flowgraph_var: 'flowgraph',
+    blocks: names.map(syntheticBlock),
+    edges,
+    runners: [],
+    config: null,
+    unresolved: [],
+    editable: true,
+    read_only_reason: null
+  };
+}
+
+function chain(types: (string | null)[]): Site {
+  return syntheticSite(
+    types.map((sample, index) => ({
+      from: `src${index}`,
+      to: 'sink',
+      port: `in${index}`,
+      sample
+    }))
+  );
+}
+
+function styleOf(projection: Projection, id: string): string | undefined {
+  const edge = projection.edges.find((candidate) => candidate.id === id);
+  return edge?.style === undefined ? undefined : String(edge.style);
+}
+
+describe('typed edges', () => {
+  it('assigns tokens in first-appearance order, not alphabetical order', () => {
+    const site = chain(['uint16_t', 'float', 'uint16_t', 'std::complex<float>']);
+    expect([...typeColors(site)]).toEqual([
+      ['uint16_t', '--type-1'],
+      ['float', '--type-2'],
+      ['std::complex<float>', '--type-3']
+    ]);
+  });
+
+  it('gives the same site the same colours every time it is projected', () => {
+    const site = chain(['float', 'std::complex<float>', 'float']);
+    const first = projectSite(site).edges.map((edge) => String(edge.style));
+    const reloaded = projectSite(JSON.parse(JSON.stringify(site)) as Site).edges.map((edge) =>
+      String(edge.style)
+    );
+    expect(reloaded).toEqual(first);
+    expect(first).toEqual([
+      '--edge-color: var(--type-1)',
+      '--edge-color: var(--type-2)',
+      '--edge-color: var(--type-1)'
+    ]);
+  });
+
+  it('falls back to the neutral stroke past the sixth distinct type', () => {
+    const types = ['t0', 't1', 't2', 't3', 't4', 't5', 't6', 't7'];
+    const colors = typeColors(chain(types));
+    expect(types.slice(0, 6).map((type) => colors.get(type))).toEqual(TYPE_TOKENS);
+    expect(colors.get('t6')).toBe('--muted');
+    expect(colors.get('t7')).toBe('--muted');
+  });
+
+  it('leaves an unresolved edge without a colour at all', () => {
+    const projection = projectSite(chain(['float', null]));
+    expect(styleOf(projection, 'src0->sink.in0[]#0')).toBe('--edge-color: var(--type-1)');
+    expect(styleOf(projection, 'src1->sink.in1[]#0')).toBeUndefined();
+  });
+
+  it('uses the source element type when only the source end resolves', () => {
+    const site = syntheticSite([
+      { from: 'a', to: 'b', port: 'in', sample: null, source: 'float' }
+    ]);
+    expect([...typeColors(site)]).toEqual([['float', '--type-1']]);
+  });
+
+  it('marks a conflicting edge so the danger styling outranks its type colour', () => {
+    const site = syntheticSite([
+      { from: 'a', to: 'b', port: 'in', sample: 'float' },
+      {
+        from: 'b',
+        to: 'c',
+        port: 'in',
+        sample: 'std::complex<float>',
+        source: 'float',
+        conflict: true
+      }
+    ]);
+    const projection = projectSite(site);
+    const conflicting = projection.edges[1];
+    expect(String(conflicting?.class)).toContain('cler-edge-conflict');
+    expect(conflicting?.data?.conflict).toBe(true);
+    expect(String(projection.edges[0]?.class)).not.toContain('cler-edge-conflict');
+  });
+
+  it('keeps read-only and conflicting edges on separate classes', () => {
+    const site = syntheticSite([
+      { from: 'a', to: 'b', port: 'in', sample: 'float', editable: false },
+      { from: 'b', to: 'c', port: 'in', sample: 'float', source: 'int', conflict: true }
+    ]);
+    const classes = projectSite(site).edges.map((edge) => String(edge.class));
+    expect(classes[0]).toBe('cler-edge cler-edge-readonly');
+    expect(classes[1]).toBe('cler-edge cler-edge-conflict');
+  });
+
+  it('writes the type into the edge tooltip', () => {
+    const [plain, conflicting, unknown] = syntheticSite([
+      { from: 'a', to: 'b', port: 'in', sample: 'std::complex<float>' },
+      { from: 'b', to: 'c', port: 'in', sample: 'uint16_t', source: 'float', conflict: true },
+      { from: 'c', to: 'd', port: 'in', sample: null }
+    ]).edges;
+    expect(plain && edgeTitle(plain)).toBe('sample type: std::complex<float>');
+    expect(conflicting && edgeTitle(conflicting)).toBe('type conflict: float out → uint16_t in');
+    expect(unknown && edgeTitle(unknown)).toBeUndefined();
+  });
+
+  it('hands the inspector a type per wired port', () => {
+    const site = firstSite('hello_world');
+    expect(blockPorts(site, 'adder')).toEqual({
+      inputs: [
+        { label: 'in[0]', type: 'float' },
+        { label: 'in[1]', type: 'float' }
+      ],
+      outputs: [{ label: 'throttle.in', type: 'float' }]
+    });
+  });
+
+  it('reads real types off the regenerated fixtures', () => {
+    expect([...typeColors(firstSite('hello_world'))]).toEqual([['float', '--type-1']]);
+    expect([...typeColors(firstSite('plots'))]).toEqual([
+      ['std::complex<float>', '--type-1'],
+      ['float', '--type-2']
+    ]);
+
+    const conflict = firstSite('type_conflict');
+    expect([...typeColors(conflict)]).toEqual([
+      ['float', '--type-1'],
+      ['std::complex<float>', '--type-2']
+    ]);
+    expect(conflict.edges.filter((edge) => edge.type_conflict)).toHaveLength(1);
   });
 });
 

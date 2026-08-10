@@ -291,7 +291,10 @@
             "end": 5904
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         },
         {
           "from": "fanout",
@@ -309,7 +312,10 @@
             "end": 5957
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         },
         {
           "from": "fanout",
@@ -327,7 +333,10 @@
             "end": 5977
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         }
       ],
       "config": null,
@@ -637,7 +646,10 @@
             "end": 7420
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
         },
         {
           "from": "fanout",
@@ -655,7 +667,10 @@
             "end": 7473
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         },
         {
           "from": "fanout",
@@ -673,7 +688,10 @@
             "end": 7491
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         }
       ],
       "config": null,
@@ -969,7 +987,10 @@
             "end": 8656
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
         },
         {
           "from": "fanout",
@@ -987,7 +1008,10 @@
             "end": 8709
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         },
         {
           "from": "fanout",
@@ -1005,7 +1029,10 @@
             "end": 8727
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
         }
       ],
       "config": null,
@@ -1234,7 +1261,10 @@
             "end": 9934
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": null,
+          "source_type": null,
+          "type_conflict": false
         },
         {
           "from": "power_detector",
@@ -1252,7 +1282,10 @@
             "end": 9997
           },
           "editable": true,
-          "read_only_reason": null
+          "read_only_reason": null,
+          "sample_type": "float",
+          "source_type": null,
+          "type_conflict": false
         }
       ],
       "config": null,

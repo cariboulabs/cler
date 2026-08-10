@@ -952,3 +952,144 @@ describe('fixture mode stays a read-only viewer', () => {
     CASE_TIMEOUT
   );
 });
+
+describe('typed edges on the canvas', () => {
+  let typed: Page;
+
+  function rgbOf(hex: string): string {
+    const value = hex.replace('#', '');
+    const channel = (at: number) => parseInt(value.slice(at, at + 2), 16);
+    return `rgb(${channel(0)}, ${channel(2)}, ${channel(4)})`;
+  }
+
+  async function token(name: string): Promise<string> {
+    const hex = await typed.evaluate(
+      (which) => getComputedStyle(document.documentElement).getPropertyValue(which).trim(),
+      name
+    );
+    return rgbOf(hex);
+  }
+
+  async function show(fixture: string): Promise<void> {
+    await typed.goto(`${origin}/?fixture=${fixture}`, { waitUntil: 'load' });
+    await typed.waitForSelector('path.svelte-flow__edge-path');
+    await typed.waitForTimeout(400);
+  }
+
+  function strokes(): Promise<Record<string, string>> {
+    return typed.evaluate(() =>
+      Object.fromEntries(
+        Array.from(document.querySelectorAll('.svelte-flow__edge')).map((group) => {
+          const path = group.querySelector('path.svelte-flow__edge-path');
+          const id = group.getAttribute('data-id') ?? '';
+          return [id, path ? getComputedStyle(path).stroke : ''];
+        })
+      )
+    );
+  }
+
+  function titles(): Promise<Record<string, string>> {
+    return typed.evaluate(() =>
+      Object.fromEntries(
+        Array.from(document.querySelectorAll('.svelte-flow__edge')).map((group) => [
+          group.getAttribute('data-id') ?? '',
+          group.querySelector('title')?.textContent?.trim() ?? ''
+        ])
+      )
+    );
+  }
+
+  beforeEach(async () => {
+    typed = await browser.newPage({ viewport: VIEWPORT });
+  }, CASE_TIMEOUT);
+
+  afterEach(async () => {
+    await typed.close();
+  });
+
+  it(
+    'paints one token per type and leaves unresolved edges neutral',
+    async () => {
+      await show('spike');
+      const painted = await strokes();
+      expect(painted['usrp->fanout.in[]#0']).toBe(await token('--type-1'));
+      expect(painted['fanout->power.in[]#0']).toBe(await token('--muted'));
+      expect(painted['power->trigger.in[]#0']).toBe(await token('--type-2'));
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'hides the legend when a site resolves a single type',
+    async () => {
+      await show('hello_world');
+      expect(await typed.locator('[data-testid="type-legend"]').count()).toBe(0);
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'lists every resolved type in the legend and collapses on demand',
+    async () => {
+      await show('type_conflict');
+      const legend = typed.locator('[data-testid="type-legend"]');
+      await legend.waitFor();
+      expect(await legend.locator('li .name').allTextContents()).toEqual([
+        'float',
+        'std::complex<float>'
+      ]);
+      const swatch = await legend.locator('li .swatch').first().evaluate(
+        (node) => getComputedStyle(node).backgroundColor
+      );
+      expect(swatch).toBe(await token('--type-1'));
+
+      await typed.click('[data-testid="type-legend-toggle"]');
+      await expect.poll(() => legend.locator('li').count()).toBe(0);
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'lets a type conflict outrank the type colour and badges the target end',
+    async () => {
+      await show('type_conflict');
+      const painted = await strokes();
+      const danger = await token('--danger');
+      expect(painted['throttle->throughput.in[]#0']).toBe(danger);
+      expect(painted['ramp->throttle.in[]#0']).toBe(await token('--type-1'));
+      expect(painted['throughput->sink.in[]#0']).toBe(await token('--type-2'));
+
+      const badges = typed.locator('.cler-type-badge');
+      expect(await badges.count()).toBe(1);
+      expect((await badges.first().textContent())?.trim()).toBe('type');
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'names the type in the edge tooltip and both types on a conflict',
+    async () => {
+      await show('type_conflict');
+      const tooltips = await titles();
+      expect(tooltips['ramp->throttle.in[]#0']).toBe('sample type: float');
+      expect(tooltips['throttle->throughput.in[]#0']).toBe(
+        'type conflict: float out → std::complex<float> in'
+      );
+    },
+    CASE_TIMEOUT
+  );
+
+  it(
+    'shows the resolved type beside every port in the inspector',
+    async () => {
+      await show('type_conflict');
+      await typed.click('.svelte-flow__node[data-id="throttle"]');
+      await typed.waitForSelector('.inspector .ports');
+      expect(await typed.locator('.inspector .ports li').allTextContents()).toEqual([
+        'inin float',
+        'outthroughput.in std::complex<float>'
+      ]);
+    },
+    CASE_TIMEOUT
+  );
+});
