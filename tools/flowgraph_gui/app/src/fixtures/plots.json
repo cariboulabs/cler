@@ -1,0 +1,967 @@
+{
+  "sha256": "8b019f5826244ae17cd67e56ea9ad60b711c8652e02640882681ee25ff6fff2d",
+  "version": "0.2.0",
+  "file": "desktop_examples/plots.cpp",
+  "has_errors": false,
+  "errors": [],
+  "sites": [
+    {
+      "function": "main",
+      "call_offset": 2336,
+      "span": {
+        "start": 2336,
+        "end": 3234
+      },
+      "flowgraph_var": "flowgraph",
+      "blocks": [
+        {
+          "var": "cw_source",
+          "type_text": "SourceCWBlock<std::complex<float>>",
+          "type_name": "SourceCWBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 676,
+                "end": 695
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"CWSource\"",
+              "span": {
+                "start": 707,
+                "end": 717
+              }
+            },
+            {
+              "text": "1.0f",
+              "span": {
+                "start": 719,
+                "end": 723
+              }
+            },
+            {
+              "text": "2.0f",
+              "span": {
+                "start": 725,
+                "end": 729
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 731,
+                "end": 734
+              }
+            }
+          ],
+          "display_name": "CWSource",
+          "in_graph": true,
+          "span": {
+            "start": 662,
+            "end": 736
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "cw_throttle",
+          "type_text": "ThrottleBlock<std::complex<float>>",
+          "type_name": "ThrottleBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 755,
+                "end": 774
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"CWThrottle\"",
+              "span": {
+                "start": 788,
+                "end": 800
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 802,
+                "end": 805
+              }
+            }
+          ],
+          "display_name": "CWThrottle",
+          "in_graph": true,
+          "span": {
+            "start": 741,
+            "end": 807
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "cw_fanout",
+          "type_text": "FanoutBlock<std::complex<float>>",
+          "type_name": "FanoutBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 824,
+                "end": 843
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"CWFanout\"",
+              "span": {
+                "start": 855,
+                "end": 865
+              }
+            },
+            {
+              "text": "3",
+              "span": {
+                "start": 867,
+                "end": 868
+              }
+            }
+          ],
+          "display_name": "CWFanout",
+          "in_graph": true,
+          "span": {
+            "start": 812,
+            "end": 870
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "cw_complex2realimag",
+          "type_text": "ComplexToMagPhaseBlock",
+          "type_name": "ComplexToMagPhaseBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"CWComplex2RealImag\"",
+              "span": {
+                "start": 918,
+                "end": 938
+              }
+            },
+            {
+              "text": "ComplexToMagPhaseBlock::Mode::RealImag",
+              "span": {
+                "start": 940,
+                "end": 978
+              }
+            }
+          ],
+          "display_name": "CWComplex2RealImag",
+          "in_graph": true,
+          "span": {
+            "start": 875,
+            "end": 980
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "cw_timeseries_plot",
+          "type_text": "PlotTimeSeriesBlock",
+          "type_name": "PlotTimeSeriesBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"CW-TimeSeriesPlot\"",
+              "span": {
+                "start": 1033,
+                "end": 1052
+              }
+            },
+            {
+              "text": "{\"Real\", \"Imaginary\"}",
+              "span": {
+                "start": 1062,
+                "end": 1083
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 1093,
+                "end": 1096
+              }
+            },
+            {
+              "text": "10.0f",
+              "span": {
+                "start": 1106,
+                "end": 1111
+              }
+            }
+          ],
+          "display_name": "CW-TimeSeriesPlot",
+          "in_graph": true,
+          "span": {
+            "start": 985,
+            "end": 1140
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "chirp_source",
+          "type_text": "SourceChirpBlock<std::complex<float>>",
+          "type_name": "SourceChirpBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 1163,
+                "end": 1182
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"ChirpSource\"",
+              "span": {
+                "start": 1197,
+                "end": 1210
+              }
+            },
+            {
+              "text": "1.0f",
+              "span": {
+                "start": 1212,
+                "end": 1216
+              }
+            },
+            {
+              "text": "20.0f",
+              "span": {
+                "start": 1218,
+                "end": 1223
+              }
+            },
+            {
+              "text": "80.0f",
+              "span": {
+                "start": 1225,
+                "end": 1230
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 1232,
+                "end": 1235
+              }
+            },
+            {
+              "text": "10.0f",
+              "span": {
+                "start": 1237,
+                "end": 1242
+              }
+            }
+          ],
+          "display_name": "ChirpSource",
+          "in_graph": true,
+          "span": {
+            "start": 1146,
+            "end": 1244
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "chirp_throttle",
+          "type_text": "ThrottleBlock<std::complex<float>>",
+          "type_name": "ThrottleBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 1263,
+                "end": 1282
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"ChirpThrottle\"",
+              "span": {
+                "start": 1299,
+                "end": 1314
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 1316,
+                "end": 1319
+              }
+            }
+          ],
+          "display_name": "ChirpThrottle",
+          "in_graph": true,
+          "span": {
+            "start": 1249,
+            "end": 1321
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "chirp_fanout",
+          "type_text": "FanoutBlock<std::complex<float>>",
+          "type_name": "FanoutBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 1338,
+                "end": 1357
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"ChirpFanout\"",
+              "span": {
+                "start": 1372,
+                "end": 1385
+              }
+            },
+            {
+              "text": "3",
+              "span": {
+                "start": 1387,
+                "end": 1388
+              }
+            }
+          ],
+          "display_name": "ChirpFanout",
+          "in_graph": true,
+          "span": {
+            "start": 1326,
+            "end": 1390
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "chirp_c2realimag",
+          "type_text": "ComplexToMagPhaseBlock",
+          "type_name": "ComplexToMagPhaseBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"ChirpComplex2RealImag\"",
+              "span": {
+                "start": 1435,
+                "end": 1458
+              }
+            },
+            {
+              "text": "ComplexToMagPhaseBlock::Mode::RealImag",
+              "span": {
+                "start": 1460,
+                "end": 1498
+              }
+            }
+          ],
+          "display_name": "ChirpComplex2RealImag",
+          "in_graph": true,
+          "span": {
+            "start": 1395,
+            "end": 1500
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "chirp_timeseries_plot",
+          "type_text": "PlotTimeSeriesBlock",
+          "type_name": "PlotTimeSeriesBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"Chirp-TimeSeriesPlot\"",
+              "span": {
+                "start": 1556,
+                "end": 1578
+              }
+            },
+            {
+              "text": "{\"Real\", \"Imaginary\"}",
+              "span": {
+                "start": 1588,
+                "end": 1609
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 1619,
+                "end": 1622
+              }
+            },
+            {
+              "text": "10.0f",
+              "span": {
+                "start": 1632,
+                "end": 1637
+              }
+            }
+          ],
+          "display_name": "Chirp-TimeSeriesPlot",
+          "in_graph": true,
+          "span": {
+            "start": 1505,
+            "end": 1666
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "cspectrum_plot",
+          "type_text": "PlotCSpectrumBlock",
+          "type_name": "PlotCSpectrumBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"Chirp-CSpectrumPlot\"",
+              "span": {
+                "start": 1719,
+                "end": 1740
+              }
+            },
+            {
+              "text": "{\"CW\", \"Chirp\"}",
+              "span": {
+                "start": 1750,
+                "end": 1765
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 1775,
+                "end": 1778
+              }
+            },
+            {
+              "text": "256",
+              "span": {
+                "start": 1788,
+                "end": 1791
+              }
+            }
+          ],
+          "display_name": "Chirp-CSpectrumPlot",
+          "in_graph": true,
+          "span": {
+            "start": 1676,
+            "end": 1821
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "cspectrogram_plot",
+          "type_text": "PlotCSpectrogramBlock",
+          "type_name": "PlotCSpectrogramBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"CW-SpectrogramPlot\"",
+              "span": {
+                "start": 1876,
+                "end": 1896
+              }
+            },
+            {
+              "text": "{\"CW\", \"Chirp\"}",
+              "span": {
+                "start": 1906,
+                "end": 1921
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 1931,
+                "end": 1934
+              }
+            },
+            {
+              "text": "128",
+              "span": {
+                "start": 1944,
+                "end": 1947
+              }
+            },
+            {
+              "text": "100",
+              "span": {
+                "start": 1980,
+                "end": 1983
+              }
+            }
+          ],
+          "display_name": "CW-SpectrogramPlot",
+          "in_graph": true,
+          "span": {
+            "start": 1827,
+            "end": 1998
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "runners": [
+        {
+          "index": 0,
+          "block": "cw_source",
+          "block_expr": "&cw_source",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 2374,
+            "end": 2420
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 1,
+          "block": "cw_throttle",
+          "block_expr": "&cw_throttle",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 2430,
+            "end": 2476
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 2,
+          "block": "cw_fanout",
+          "block_expr": "&cw_fanout",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 2486,
+            "end": 2589
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 3,
+          "block": "cw_complex2realimag",
+          "block_expr": "&cw_complex2realimag",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 2599,
+            "end": 2692
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 4,
+          "block": "cw_timeseries_plot",
+          "block_expr": "&cw_timeseries_plot",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 2702,
+            "end": 2740
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 5,
+          "block": "chirp_source",
+          "block_expr": "&chirp_source",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 2752,
+            "end": 2804
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 6,
+          "block": "chirp_throttle",
+          "block_expr": "&chirp_throttle",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 2814,
+            "end": 2866
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 7,
+          "block": "chirp_fanout",
+          "block_expr": "&chirp_fanout",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 2876,
+            "end": 2979
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 8,
+          "block": "chirp_c2realimag",
+          "block_expr": "&chirp_c2realimag",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 2989,
+            "end": 3085
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 9,
+          "block": "chirp_timeseries_plot",
+          "block_expr": "&chirp_timeseries_plot",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 3095,
+            "end": 3136
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 10,
+          "block": "cspectrum_plot",
+          "block_expr": "&cspectrum_plot",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 3147,
+            "end": 3181
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 11,
+          "block": "cspectrogram_plot",
+          "block_expr": "&cspectrogram_plot",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 3191,
+            "end": 3228
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "edges": [
+        {
+          "from": "cw_source",
+          "to": "cw_throttle",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 0,
+          "arg_index": 1,
+          "text": "&cw_throttle.in",
+          "span": {
+            "start": 2404,
+            "end": 2419
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "cw_throttle",
+          "to": "cw_fanout",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 1,
+          "arg_index": 1,
+          "text": "&cw_fanout.in",
+          "span": {
+            "start": 2462,
+            "end": 2475
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "cw_fanout",
+          "to": "cw_complex2realimag",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 2,
+          "arg_index": 1,
+          "text": "&cw_complex2realimag.in",
+          "span": {
+            "start": 2516,
+            "end": 2539
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "cw_fanout",
+          "to": "cspectrum_plot",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 2,
+          "arg_index": 2,
+          "text": "&cspectrum_plot.in[0]",
+          "span": {
+            "start": 2541,
+            "end": 2562
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "cw_fanout",
+          "to": "cspectrogram_plot",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 2,
+          "arg_index": 3,
+          "text": "&cspectrogram_plot.in[0]",
+          "span": {
+            "start": 2564,
+            "end": 2588
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "cw_complex2realimag",
+          "to": "cw_timeseries_plot",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 3,
+          "arg_index": 1,
+          "text": "&cw_timeseries_plot.in[0]",
+          "span": {
+            "start": 2639,
+            "end": 2664
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "cw_complex2realimag",
+          "to": "cw_timeseries_plot",
+          "port": {
+            "name": "in",
+            "index": 1,
+            "kind": "indexed_field"
+          },
+          "runner_index": 3,
+          "arg_index": 2,
+          "text": "&cw_timeseries_plot.in[1]",
+          "span": {
+            "start": 2666,
+            "end": 2691
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "chirp_source",
+          "to": "chirp_throttle",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 5,
+          "arg_index": 1,
+          "text": "&chirp_throttle.in",
+          "span": {
+            "start": 2785,
+            "end": 2803
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "chirp_throttle",
+          "to": "chirp_fanout",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 6,
+          "arg_index": 1,
+          "text": "&chirp_fanout.in",
+          "span": {
+            "start": 2849,
+            "end": 2865
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "chirp_fanout",
+          "to": "chirp_c2realimag",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 7,
+          "arg_index": 1,
+          "text": "&chirp_c2realimag.in",
+          "span": {
+            "start": 2909,
+            "end": 2929
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "chirp_fanout",
+          "to": "cspectrum_plot",
+          "port": {
+            "name": "in",
+            "index": 1,
+            "kind": "indexed_field"
+          },
+          "runner_index": 7,
+          "arg_index": 2,
+          "text": "&cspectrum_plot.in[1]",
+          "span": {
+            "start": 2931,
+            "end": 2952
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "chirp_fanout",
+          "to": "cspectrogram_plot",
+          "port": {
+            "name": "in",
+            "index": 1,
+            "kind": "indexed_field"
+          },
+          "runner_index": 7,
+          "arg_index": 3,
+          "text": "&cspectrogram_plot.in[1]",
+          "span": {
+            "start": 2954,
+            "end": 2978
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "chirp_c2realimag",
+          "to": "chirp_timeseries_plot",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 8,
+          "arg_index": 1,
+          "text": "&chirp_timeseries_plot.in[0]",
+          "span": {
+            "start": 3026,
+            "end": 3054
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "chirp_c2realimag",
+          "to": "chirp_timeseries_plot",
+          "port": {
+            "name": "in",
+            "index": 1,
+            "kind": "indexed_field"
+          },
+          "runner_index": 8,
+          "arg_index": 2,
+          "text": "&chirp_timeseries_plot.in[1]",
+          "span": {
+            "start": 3056,
+            "end": 3084
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "config": null,
+      "unresolved": [],
+      "editable": true,
+      "read_only_reason": null
+    }
+  ]
+}

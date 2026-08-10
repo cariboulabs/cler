@@ -1,0 +1,107 @@
+:root {
+  --cler-black: #1a1a1a;
+  --cler-gray: #f5f5f5;
+  --cler-light-gray: #dedede;
+  --cler-muted: #626262;
+  --cler-red: #c51f32;
+  --cler-red-dark: #9f1828;
+  --cler-white: #fff;
+  --radius: 8px;
+
+  --canvas: var(--cler-gray);
+  --surface: var(--cler-white);
+  --line: var(--cler-light-gray);
+  --text: var(--cler-black);
+  --muted: var(--cler-muted);
+  --accent: var(--cler-red);
+  --accent-dark: var(--cler-red-dark);
+  --accent-wash: color-mix(in srgb, var(--cler-red) 6%, var(--cler-white));
+  --hover: color-mix(in srgb, var(--cler-black) 5%, var(--cler-white));
+  --scrim: color-mix(in srgb, var(--cler-black) 10%, transparent);
+  --mono: Monaco, Menlo, 'Ubuntu Mono', ui-monospace, monospace;
+
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--text);
+  font:
+    13px/1.45 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.svelte-flow__edge-label {
+  padding: 0 2px;
+  background: var(--canvas);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.svelte-flow__edge.cler-edge .svelte-flow__edge-path {
+  stroke: var(--text);
+  stroke-width: 1.8;
+}
+
+.svelte-flow__edge.cler-edge-readonly .svelte-flow__edge-path {
+  stroke: var(--accent-dark);
+  stroke-dasharray: 5 3;
+}
+
+.svelte-flow__edge.selected .svelte-flow__edge-path {
+  stroke: var(--accent);
+  stroke-width: 2.6;
+  stroke-dasharray: none;
+}
+
+.svelte-flow__handle {
+  width: 7px;
+  height: 7px;
+  background: var(--text);
+  border: 1px solid var(--surface);
+}
+
+.svelte-flow__node.selected .block {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.svelte-flow__controls-button {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  fill: var(--text);
+}
+
+.svelte-flow__controls-button:hover {
+  background: var(--hover);
+}
+
+.svelte-flow__minimap {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.svelte-flow__attribution {
+  background: transparent;
+  color: var(--muted);
+}

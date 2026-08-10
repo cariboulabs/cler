@@ -1,0 +1,356 @@
+{
+  "sha256": "46b74203888baaa35439e4f46048820c629959bcdea0a6368c51a05eda43f4bf",
+  "version": "0.2.0",
+  "file": "desktop_examples/mass_spring_damper.cpp",
+  "has_errors": false,
+  "errors": [],
+  "sites": [
+    {
+      "function": "main",
+      "call_offset": 10154,
+      "span": {
+        "start": 10154,
+        "end": 10441
+      },
+      "flowgraph_var": "flowgraph",
+      "blocks": [
+        {
+          "var": "controller",
+          "type_text": "ControllerBlock",
+          "type_name": "ControllerBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"Controller\"",
+              "span": {
+                "start": 9643,
+                "end": 9655
+              }
+            }
+          ],
+          "display_name": "Controller",
+          "in_graph": true,
+          "span": {
+            "start": 9616,
+            "end": 9657
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "throttle",
+          "type_text": "ThrottleBlock<float>",
+          "type_name": "ThrottleBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "float",
+              "resolved": null,
+              "span": {
+                "start": 9676,
+                "end": 9681
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"Throttle\"",
+              "span": {
+                "start": 9692,
+                "end": 9702
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 9704,
+                "end": 9707
+              }
+            }
+          ],
+          "display_name": "Throttle",
+          "in_graph": true,
+          "span": {
+            "start": 9662,
+            "end": 9709
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "plant",
+          "type_text": "PlantBlock",
+          "type_name": "PlantBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"Plant\"",
+              "span": {
+                "start": 9731,
+                "end": 9738
+              }
+            }
+          ],
+          "display_name": "Plant",
+          "in_graph": true,
+          "span": {
+            "start": 9714,
+            "end": 9740
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "fanout",
+          "type_text": "FanoutBlock<float>",
+          "type_name": "FanoutBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "float",
+              "resolved": null,
+              "span": {
+                "start": 9759,
+                "end": 9764
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"Fanout\"",
+              "span": {
+                "start": 9773,
+                "end": 9781
+              }
+            },
+            {
+              "text": "2",
+              "span": {
+                "start": 9783,
+                "end": 9784
+              }
+            }
+          ],
+          "display_name": "Fanout",
+          "in_graph": true,
+          "span": {
+            "start": 9747,
+            "end": 9786
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "plot",
+          "type_text": "PlotTimeSeriesBlock",
+          "type_name": "PlotTimeSeriesBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"Sensor Plot\"",
+              "span": {
+                "start": 9826,
+                "end": 9839
+              }
+            },
+            {
+              "text": "{\"Measured Position\"}",
+              "span": {
+                "start": 9849,
+                "end": 9870
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 9897,
+                "end": 9900
+              }
+            },
+            {
+              "text": "100.0f",
+              "span": {
+                "start": 9910,
+                "end": 9916
+              }
+            }
+          ],
+          "display_name": "Sensor Plot",
+          "in_graph": true,
+          "span": {
+            "start": 9792,
+            "end": 9946
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "runners": [
+        {
+          "index": 0,
+          "block": "controller",
+          "block_expr": "&controller",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 10188,
+            "end": 10232
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 1,
+          "block": "throttle",
+          "block_expr": "&throttle",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 10238,
+            "end": 10283
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 2,
+          "block": "plant",
+          "block_expr": "&plant",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 10289,
+            "end": 10326
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 3,
+          "block": "fanout",
+          "block_expr": "&fanout",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 10332,
+            "end": 10405
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 4,
+          "block": "plot",
+          "block_expr": "&plot",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 10411,
+            "end": 10435
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "edges": [
+        {
+          "from": "controller",
+          "to": "throttle",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 0,
+          "arg_index": 1,
+          "text": "&throttle.in",
+          "span": {
+            "start": 10219,
+            "end": 10231
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "throttle",
+          "to": "plant",
+          "port": {
+            "name": "force_in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 1,
+          "arg_index": 1,
+          "text": "&plant.force_in",
+          "span": {
+            "start": 10267,
+            "end": 10282
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "plant",
+          "to": "fanout",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 2,
+          "arg_index": 1,
+          "text": "&fanout.in",
+          "span": {
+            "start": 10315,
+            "end": 10325
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "fanout",
+          "to": "plot",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 3,
+          "arg_index": 1,
+          "text": "&plot.in[0]",
+          "span": {
+            "start": 10359,
+            "end": 10370
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "from": "fanout",
+          "to": "controller",
+          "port": {
+            "name": "measured_position_in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 3,
+          "arg_index": 2,
+          "text": "&controller.measured_position_in",
+          "span": {
+            "start": 10372,
+            "end": 10404
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "config": null,
+      "unresolved": [],
+      "editable": true,
+      "read_only_reason": null
+    }
+  ]
+}
