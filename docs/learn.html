@@ -3,1153 +3,443 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Learn CLER with real examples: control systems, cyclic graphs, performance optimization. From basic blocks to advanced embedded DSP applications.">
-    <meta name="keywords" content="CLER tutorial, DSP examples, embedded programming, C++ flowgraph, control systems, real-time processing">
-    <title>Learn CLER - Documentation</title>
+    <meta name="description" content="CLER guide: blocks, channels, flowgraphs, schedulers, embedded targets, and performance.">
+    <title>CLER guide</title>
     <link rel="stylesheet" href="styles/main.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css">
-    <style>
-        /* Fix for scroll position when clicking navigation links */
-        section[id] {
-            scroll-margin-top: 80px; /* Adjust based on your nav height */
-        }
-    </style>
 </head>
 <body>
-    <nav class="nav">
-        <div class="nav-brand">
-            <img src="cler-logo.jpeg" alt="CLER" class="logo">
-        </div>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <nav class="nav" aria-label="Primary">
+        <a href="index.html" class="nav-brand" aria-label="CLER home">
+            <img src="cler-logo.jpeg" alt="CLER" class="logo" width="113" height="40">
+        </a>
         <div class="nav-tabs">
             <a href="index.html" class="nav-tab">Home</a>
-            <a href="learn.html" class="nav-tab active">Learn</a>
+            <a href="learn.html" class="nav-tab" aria-current="page">Learn</a>
             <a href="blog.html" class="nav-tab">Blog</a>
         </div>
-        <div class="nav-links">
-            <a href="https://github.com/cariboulabs/cler" class="github-link" target="_blank">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                </svg>
-            </a>
-        </div>
+        <a href="https://github.com/cariboulabs/cler" class="github-link" target="_blank" rel="noreferrer">GitHub</a>
     </nav>
 
-    <main class="learn-page">
-        <div class="container">
+    <main id="main-content">
+        <div class="container learn-layout">
             <div class="sidebar">
-                <button class="nav-toggle mobile-only" aria-label="Toggle navigation" aria-expanded="false" aria-controls="learnNav">☰</button>
-                <nav class="learn-nav" id="learnNav">
-                    <h3>Contents</h3>
+                <button class="nav-toggle mobile-only" type="button" aria-expanded="false" aria-controls="learnNav">Contents</button>
+                <nav class="learn-nav" id="learnNav" aria-label="Guide contents">
+                    <p class="nav-heading">Contents</p>
                     <ul>
-                        <li><a href="#understanding">Understanding CLER</a></li>
-                        <li><a href="#core-concepts">Core Concepts</a></li>
-                        <li><a href="#execution-models">Execution Models</a></li>
-                        <li><a href="#platform-support">Platform Support</a></li>
-                        <li><a href="#control-system">Control System Example</a></li>
-                        <li><a href="#performance-example">Performance Considerations</a></li>
-                        <li><a href="#scheduler-types">Scheduler Types & Optimization</a></li>
-                        <li><a href="#buffer-patterns">Buffer Access Patterns</a></li>
-                        <li><a href="#developer-tools">Developer Tools</a></li>
-                        <li><a href="#real-world">Real-World Applications</a></li>
-                        <li><a href="#architecture">Architecture Deep Dive</a></li>
+                        <li><a href="#build">Build and link</a></li>
+                        <li><a href="#blocks">Write a block</a></li>
+                        <li><a href="#progress">Progress and errors</a></li>
+                        <li><a href="#execution">Run a graph</a></li>
+                        <li><a href="#channels">Channels</a></li>
+                        <li><a href="#schedulers">Schedulers</a></li>
+                        <li><a href="#performance">Performance</a></li>
+                        <li><a href="#platforms">Platforms</a></li>
+                        <li><a href="#desktop-blocks">Desktop blocks</a></li>
+                        <li><a href="#tools">Tools and tests</a></li>
                     </ul>
                 </nav>
             </div>
 
             <div class="content">
-                <h1>Learn CLER</h1>
-                <p class="intro">CLER is designed around simplicity: Blocks are just structs with methods, Channels are type-safe queues, and the framework compiles away to almost nothing.</p>
+                <h1>CLER guide</h1>
+                <p class="intro">The rules and APIs needed to build a correct graph. Examples here match the current code.</p>
+                <p class="status-note"><strong>Project status:</strong> CLER is in early development. Block names and APIs can change. Pin a commit instead of <code>main</code> for stable builds.</p>
 
-                <section id="understanding">
-                    <h2>Understanding CLER</h2>
-                    <p><strong>Real Examples, Real Code</strong></p>
-                    <p>Learning DSP frameworks is best done by seeing working code in action. The examples below come directly from our desktop_examples directory — they're not toy code, but real applications demonstrating CLER's core capabilities.</p>
-                    
-                    <p><strong>Platform Support</strong></p>
-                    <p>CLER supports both desktop and embedded platforms. Desktop examples use standard threads, while embedded frameworks include bare-metal, Zephyr, FreeRTOS, and ThreadX implementations.</p>
+                <section id="build">
+                    <h2>Build and link</h2>
+                    <p>CLER needs CMake 3.16 or newer and C++17. Linux and macOS are supported. On Windows, use WSL2.</p>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-bash line-numbers">mkdir build
+cd build
+cmake ..
+make -j4</code></pre>
+                    </div>
+                    <p>Release with <code>-O3</code> is the default. Use <code>-DCMAKE_BUILD_TYPE=Debug</code> for debug symbols. The default build enables GUI and liquid-backed blocks.</p>
+
+                    <h3>Core-only CMake dependency</h3>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cmake line-numbers">set(CLER_BUILD_BLOCKS OFF CACHE BOOL "" FORCE)
+set(CLER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
+include(FetchContent)
+FetchContent_Declare(
+    cler
+    GIT_REPOSITORY https://github.com/cariboulabs/cler.git
+    GIT_TAG 0488e85d76a57965f326949a8f6f021de33c9ba0
+)
+FetchContent_MakeAvailable(cler)
+
+target_link_libraries(my_app PRIVATE cler::cler)</code></pre>
+                    </div>
+                    <p>Link <code>cler::cler</code> for the header-only core. To use <code>cler::desktop_blocks</code>, leave <code>CLER_BUILD_BLOCKS</code> on and enable only the parts you need.</p>
+
+                    <h3>Desktop-block dependencies</h3>
+                    <p>The build always needs threads and pkg-config. GUI blocks also need OpenGL and X11 on Linux; GLFW is used from the system or fetched. ImGui and ImPlot are fetched. Enabling liquid-backed blocks fetches liquid-dsp. Hardware and audio libraries are optional and enable their matching blocks when found.</p>
+
+                    <h3>Build switches</h3>
+                    <table>
+                        <thead><tr><th scope="col">Option</th><th scope="col">Default</th><th scope="col">Use</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>CLER_BUILD_BLOCKS</code></td><td>ON</td><td>Desktop block library</td></tr>
+                            <tr><td><code>CLER_BUILD_BLOCKS_GUI</code></td><td>ON</td><td>GUI and plot blocks</td></tr>
+                            <tr><td><code>CLER_BUILD_BLOCKS_LIQUID</code></td><td>ON</td><td>Blocks backed by liquid-dsp</td></tr>
+                            <tr><td><code>CLER_BUILD_EXAMPLES</code></td><td>ON</td><td>Desktop and embedded examples</td></tr>
+                            <tr><td><code>CLER_BUILD_PERFORMANCE</code></td><td>OFF</td><td>Benchmarks</td></tr>
+                            <tr><td><code>CLER_BUILD_TESTS</code></td><td>OFF</td><td>Unit tests</td></tr>
+                        </tbody>
+                    </table>
                 </section>
 
-                <section id="core-concepts">
-                    <h2>Core Concepts</h2>
-                    
-                    <h3>Blocks Are Just Structs</h3>
-                    <p>Every CLER block is a C++ struct with a <code>procedure()</code> method. Simple inheritance from BlockBase with minimal virtual functions only for interface:</p>
-                    
+                <section id="blocks">
+                    <h2>Write a block</h2>
+                    <p>A block inherits <code>cler::BlockBase</code>, owns its input channels, and takes output channels in <code>procedure()</code>. A fixed channel count belongs in the type, not in a constructor argument.</p>
                     <div class="code-block">
                         <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">struct GainBlock : public cler::BlockBase {
-    float gain;
-    
-    GainBlock(const char* name, float gain_value) 
-        : BlockBase(name), gain(gain_value) {}
-    
-    cler::Result&lt;cler::Empty, cler::Error&gt; procedure(
-        cler::ChannelBase&lt;float&gt;* in,
-        cler::ChannelBase&lt;float&gt;* out) {
-        
-        size_t transferable = std::min(in->size(), out->space());
-        for (size_t i = 0; i < transferable; ++i) {
-            float value;
-            in->pop(value);
-            out->push(value * gain);
+                        <pre><code class="language-cpp line-numbers">struct GainBlock : cler::BlockBase {
+    cler::Channel&lt;float&gt; in;
+
+    GainBlock(const char* name, float gain)
+        : BlockBase(name),
+          in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)),
+          gain_(gain) {}
+
+    cler::Result&lt;cler::Empty, cler::Error&gt;
+    procedure(cler::ChannelBase&lt;float&gt;* out) {
+        auto [read_ptr, read_size] = in.read_dbf();
+        if (read_size == 0) return cler::Error::NotEnoughSamples;
+
+        auto [write_ptr, write_size] = out-&gt;write_dbf();
+        if (write_size == 0) return cler::Error::NotEnoughSpace;
+
+        const size_t count = std::min(read_size, write_size);
+        for (size_t i = 0; i &lt; count; ++i) {
+            write_ptr[i] = read_ptr[i] * gain_;
         }
+
+        in.commit_read(count);
+        out-&gt;commit_write(count);
         return cler::Empty{};
     }
+
+private:
+    float gain_;
 };</code></pre>
                     </div>
-                    <p class="design-note"><strong>Design Rationale:</strong> Minimal virtual functions (only for interface), very little runtime type erasure, minimal hidden costs. What you write is mostly what gets compiled.</p>
+                    <p>For a fixed number of inputs or outputs, use a template parameter and check packs with <code>static_assert(sizeof...(OChannels) == N)</code>. This keeps every call site and buffer shape in sync.</p>
 
-                    <h3>Multiple Input/Output Blocks</h3>
-                    <p>Blocks can have any number of inputs and outputs. Here's an adder that takes 2 inputs:</p>
+                    <h3>Blocks that wait</h3>
+                    <p>If <code>procedure()</code> can block on a device, file, socket, or timer, declare it:</p>
                     <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">struct AdderBlock : public cler::BlockBase {
-    cler::Channel&lt;float&gt; in0;   // First input channel (owned by block)
-    cler::Channel&lt;double&gt; in1;  // Second input (different type!)
-    
-    AdderBlock(const char* name) : BlockBase(name), in0(512), in1(512) {}
-    
-    cler::Result&lt;cler::Empty, cler::Error&gt; procedure(
-        cler::ChannelBase&lt;float&gt;* out) {
-        
-        size_t transferable = std::min({in0.size(), in1.size(), out->space()});
-        for (size_t i = 0; i < transferable; ++i) {
-            float value0;
-            double value1;
-            in0.pop(value0);
-            in1.pop(value1);
-            out->push(value0 + static_cast&lt;float&gt;(value1));
-        }
-        return cler::Empty{};
-    }
-};</code></pre>
+                        <pre><code class="language-cpp">static constexpr bool may_block = true;</code></pre>
                     </div>
-                    <p class="key-point"><strong>Key Design:</strong> Input channels are owned by the block, output channels are passed as parameters. This prevents one-to-many connection issues.</p>
-
-                    <h3>Type-Agnostic Channels</h3>
-                    <p>Channels work with any type — not just numbers:</p>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// Custom packet type
-struct Packet {
-    uint32_t id;
-    std::vector&lt;uint8_t&gt; data;
-};
-
-// Channel that carries packets
-cler::Channel&lt;Packet&gt; packet_channel(64);
-
-// Block that processes packets
-struct PacketProcessor : public cler::BlockBase {
-    cler::Channel&lt;Packet&gt; in;  // Input channel owned by block
-    
-    PacketProcessor(const char* name) : BlockBase(name), in(64) {}
-    
-    template&lt;typename... OChannels&gt;
-    cler::Result&lt;cler::Empty, cler::Error&gt; procedure(OChannels*... outs) {
-        Packet packet;
-        while (in.pop(packet)) {
-            // Process packet...
-            packet.id += 1000;  // Example processing
-            // Push to all outputs using fold expression
-            ((outs->push(packet)), ...);
-        }
-        return cler::Empty{};
-    }
-};</code></pre>
-                    </div>
-                    <p class="key-point"><strong>Flexibility:</strong> You're not limited to primitive types. Pass complex data structures, protocol packets, or custom objects between blocks.</p>
+                    <p>The flowgraph gives that block its own thread. It is not placed in a worker pool or pinned island. <code>cler::BlockRunnerMayBlock(...)</code> can mark an older block at the runner instead.</p>
                 </section>
 
-                <section id="execution-models">
-                    <h2>Two Execution Models</h2>
-                    <p>Different applications need different trade-offs. Flowgraph mode is convenient and handles threading for you. Streamlined mode gives you maximum control for embedded systems or when you need every microsecond.</p>
-                    
-                    <h3>Flowgraph Mode</h3>
-                    <p>Each block runs in its own thread, framework manages everything:</p>
+                <section id="progress">
+                    <h2>Progress and errors</h2>
+                    <p class="key-point"><strong>Success means progress.</strong> A successful call must consume or produce at least one item.</p>
+                    <p>If nothing moved, return a retryable error:</p>
+                    <ul>
+                        <li><code>NotEnoughSamples</code> when input is empty.</li>
+                        <li><code>NotEnoughSpace</code> when an output is full.</li>
+                        <li><code>NotEnoughSpaceOrSamples</code> when either answer is enough.</li>
+                    </ul>
+                    <p>Schedulers use success to reset idle backoff and wake parked workers. A no-op success can pin a core at full use.</p>
+
+                    <p class="key-point"><strong>A retryable error means no input was consumed.</strong> Check every input and output before committing any of them.</p>
                     <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// Desktop version
-auto flowgraph = cler::make_desktop_flowgraph(
-    cler::BlockRunner(&amp;source, &amp;adder.in[0], &amp;adder.in[1]),  // multiple outputs
-    cler::BlockRunner(&amp;adder, &amp;gain.in),                     // single output
-    cler::BlockRunner(&amp;gain, &amp;sink.in),
-    cler::BlockRunner(&amp;sink)                                  // no outputs (sink)
-);
+                        <pre><code class="language-cpp line-numbers">// Check all channels first.
+for (size_t i = 0; i &lt; channel_count; ++i) {
+    if (in[i].size() &lt; needed) {
+        return cler::Error::NotEnoughSamples;
+    }
+}
 
-// Configure scheduler and performance options
-cler::FlowGraphConfig config;
-config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Or FixedThreadPool (recommended)
-// config.adaptive_sleep = true;  // Optional: for sparse/intermittent data only
-flowgraph.run(config);
-
-// Embedded version (FreeRTOS example)
-#include "task_policies/cler_freertos_tpolicy.hpp"
-auto flowgraph = cler::FlowGraph&lt;cler::FreeRTOSTaskPolicy,
-    decltype(cler::BlockRunner(&amp;source, &amp;adder.in[0], &amp;adder.in[1])),
-    decltype(cler::BlockRunner(&amp;adder, &amp;gain.in)),
-    decltype(cler::BlockRunner(&amp;gain, &amp;sink.in)),
-    decltype(cler::BlockRunner(&amp;sink))
-&gt;(
-    cler::BlockRunner(&amp;source, &amp;adder.in[0], &amp;adder.in[1]),
-    cler::BlockRunner(&amp;adder, &amp;gain.in),
-    cler::BlockRunner(&amp;gain, &amp;sink.in),
-    cler::BlockRunner(&amp;sink)
-);
-
-flowgraph.run(config);  // Same config works on all platforms</code></pre>
+// Only then do the work and commit every read.
+for (size_t i = 0; i &lt; channel_count; ++i) {
+    send(in[i]);
+    in[i].commit_read(needed);
+}
+return cler::Empty{};</code></pre>
                     </div>
-                    <p class="key-point"><strong>BlockRunner Syntax:</strong> First argument is the block, remaining arguments are its outputs (passed to procedure() as parameters). Same syntax works across all platforms.</p>
+                    <p>If some data already moved, return success and report the shortfall on the next call.</p>
 
-                    <h3>Streamlined Mode</h3>
-                    <p>You control the loop, manual scheduling (from streamlined.cpp):</p>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">while (true) {
-    source.procedure(&amp;adder.in[0], &amp;adder.in[1]);  // multiple outputs
-    adder.procedure(&amp;gain.in);                      // single output
-    gain.procedure(&amp;sink.in);
-    sink.procedure();                                // no outputs
-}</code></pre>
-                    </div>
-                    <p class="design-note"><strong>Use Cases:</strong> When blocks are simple, you avoid thread overhead. Perfect for embedded systems or when you need deterministic timing.</p>
+                    <h3>Fatal errors</h3>
+                    <p>Errors at or after <code>TERMINATE_FLOWGRAPH</code> stop the graph. Use <code>TERM_ProcedureError</code> for a runtime failure that cannot be retried. On desktop, use <code>cler::panic()</code> for bad setup or a broken invariant.</p>
+                    <p>CLER code does not throw. Catch exceptions only at the edge of a library whose API throws, such as UHD or SoapySDR.</p>
                 </section>
 
-                <section id="platform-support">
-                    <h2>Platform Support & Task Policies</h2>
-                    <p>CLER supports multiple platforms through its task policy abstraction. Different platforms require different threading models, but the same block code works everywhere.</p>
-                    
-                    <h3>Desktop Development</h3>
+                <section id="execution">
+                    <h2>Run a graph</h2>
+                    <h3>Flowgraph mode</h3>
                     <div class="code-block">
                         <button class="copy-button" onclick="copyCode(this)">Copy</button>
                         <pre><code class="language-cpp line-numbers">#include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 
-int main() {
-    // Create blocks...
-    SourceCWBlock&lt;float&gt; source("Source", 1.0f, 10.0f, 1000);
-    GainBlock&lt;float&gt; gain("Gain", 2.0f);
-    
-    // Desktop flowgraph uses std::thread
-    auto flowgraph = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&amp;source, &amp;gain.in),
-        cler::BlockRunner(&amp;gain, &amp;sink.in),
-        cler::BlockRunner(&amp;sink)
-    );
-    
-    // Configure scheduler for optimal performance
-    cler::FlowGraphConfig config;
-    config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Default scheduler scheduler
-    // config.adaptive_sleep = true;  // Optional: reduce CPU when idle
-    flowgraph.run(config);
-    return 0;
-}</code></pre>
-                    </div>
-                    
-                    <h3>Embedded Systems</h3>
-                    
-                    <h4>FreeRTOS</h4>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">#include "cler.hpp"
-#include "task_policies/cler_freertos_tpolicy.hpp"
+auto graph = cler::make_desktop_flowgraph(
+    cler::BlockRunner(&amp;source, &amp;gain.in),
+    cler::BlockRunner(&amp;gain, &amp;sink.in),
+    cler::BlockRunner(&amp;sink)
+);
 
-int main() {
-    // Same blocks work on any platform
-    SourceCWBlock&lt;float&gt; source("Source", 1.0f, 10.0f, 1000);
-    GainBlock&lt;float&gt; gain("Gain", 2.0f);
-    
-    // FreeRTOS flowgraph uses xTaskCreate
-    auto flowgraph = cler::FlowGraph&lt;cler::FreeRTOSTaskPolicy,
-        decltype(cler::BlockRunner(&amp;source, &amp;gain.in)),
-        decltype(cler::BlockRunner(&amp;gain, &amp;sink.in)),
-        decltype(cler::BlockRunner(&amp;sink))
-    &gt;(
-        cler::BlockRunner(&amp;source, &amp;gain.in),
-        cler::BlockRunner(&amp;gain, &amp;sink.in),
-        cler::BlockRunner(&amp;sink)
-    );
-    
-    flowgraph.run();
-    vTaskStartScheduler();  // FreeRTOS scheduler
-    return 0;
-}</code></pre>
+graph.run();
+// Application work...
+graph.stop();</code></pre>
                     </div>
-                    
-                    <h4>Bare Metal (No Threading)</h4>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">#include "cler.hpp"
-// No task policy needed for bare metal
+                    <p>The first <code>BlockRunner</code> argument is the block. The rest are its outputs, in the same order as the parameters of <code>procedure()</code>. A sink has no output arguments.</p>
+                    <p><code>graph.run_for(duration, config)</code> runs and stops the graph for tests and short jobs. <code>stop()</code> joins all worker threads.</p>
+                    <p>Cyclic graphs are allowed. Seed at least one channel before <code>run()</code>, or every block in the cycle can wait forever. See <code>desktop_examples/mass_spring_damper.cpp</code>.</p>
 
-int main() {
-    // Stack-allocated channels for deterministic memory
-    struct SimpleBlock : public cler::BlockBase {
-        cler::Channel&lt;float, 64&gt; in;  // Fixed size, no heap allocation
-        
-        SimpleBlock(const char* name) : BlockBase(name) {}
-        
-        template&lt;typename... OChannels&gt;
-        cler::Result&lt;cler::Empty, cler::Error&gt; procedure(OChannels*... outs) {
-            // Minimal processing for embedded constraints
-            float sample;
-            while (in.pop(sample)) {
-                ((outs->push(sample * 2.0f)), ...);
-            }
-            return cler::Empty{};
-        }
-    };
-    
-    SimpleBlock block1("Block1"), block2("Block2");
-    
-    // Streamlined mode only for bare metal
-    while (true) {
-        block1.procedure(&amp;block2.in);
-        block2.procedure();  // No outputs
-        // Hardware-specific timing control
-    }
-}</code></pre>
-                    </div>
-                    
-                    <div class="key-point">
-                        <strong>Platform Abstraction:</strong> The same block code works on desktop (std::thread), FreeRTOS (xTaskCreate), ThreadX (tx_thread_create), Zephyr (k_thread_create), or bare metal (no threading). Only the task policy changes.
-                    </div>
-                </section>
-
-                <section id="control-system">
-                    <h2>Cyclic Graphs - Control System Example</h2>
-                    <p>This demonstrates CLER's support for cyclic graphs — the controller's output feeds the plant, and the plant's output feeds back to the controller, creating a closed feedback loop. This isn't just signal processing — it's a complete interactive simulation with real-time GUI controls.</p>
-                    
-                    <h3>The Plant Block</h3>
+                    <h3>Streamlined mode</h3>
                     <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">struct PlantBlock : public cler::BlockBase {
-    cler::Channel&lt;float&gt; force_in;
-    
-    PlantBlock(const char* name) : BlockBase(name), force_in(1024) {
-        force_in.push(0.0f); // CRITICAL: Initial force for cyclic graph
-    }
-    
-    cler::Result&lt;cler::Empty, cler::Error&gt; procedure(
-        cler::ChannelBase&lt;float&gt;* measured_position_out) {
-        
-        float force;
-        force_in.pop(force);
-        
-        // Mass-spring-damper physics simulation
-        float acceleration = (force - K * _x - C * _v) / M;
-        _v += acceleration * DT;
-        _x += _v * DT + 0.5f * acceleration * DT * DT;
-        
-        measured_position_out->push(_x);
-        return cler::Empty{};
-    }
-    
-private:
-    float _x = 0.0, _v = 0.0;  // Position and velocity state
-};</code></pre>
-                    </div>
-                    <p class="key-point"><strong>Critical Detail:</strong> The plant block maintains internal state and connects to the controller in a feedback loop. The <code>force_in.push(0.0f)</code> is crucial — cyclic graphs need initial conditions or they'll deadlock on startup.</p>
-                    
-                    <h3>Interactive PID Controller with Thread-Safe GUI</h3>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">struct ControllerBlock : public cler::BlockBase {
-    cler::Channel&lt;float&gt; measured_position_in;
-    
-    // Thread-safe parameters modified by GUI
-    std::atomic&lt;float&gt; _kp{2.0f}, _ki{1.0f}, _kd{1.0f};
-    std::atomic&lt;float&gt; _target{10.0f};
-    std::atomic&lt;bool&gt;  _feed_forward{false};
-    
-    cler::Result&lt;cler::Empty, cler::Error&gt; procedure(
-        cler::ChannelBase&lt;float&gt;* force_out) {
-        
-        float measured_position;
-        measured_position_in.pop(measured_position);
-        
-        // Read parameters atomically (modified by GUI thread)
-        float target = _target.load(std::memory_order_relaxed);
-        float kp = _kp.load(std::memory_order_relaxed);
-        
-        float error = target - measured_position;
-        float derivative = (error - _error_prev) / DT;
-        _integral += error * DT;
-        
-        float force = kp * error + _ki.load() * _integral + _kd.load() * derivative;
-        
-        // Optional feed-forward control
-        if (_feed_forward.load()) {
-            force += K * target;  // Compensation for spring constant
-        }
-        
-        force_out->push(force);
-        _error_prev = error;
-        return cler::Empty{};
-    }
-    
-private:
-    float _error_prev = 0.0, _integral = 0.0;
-};</code></pre>
-                    </div>
-                    <p class="key-point"><strong>Thread Safety:</strong> The GUI thread modifies PID parameters while the control loop runs at 100Hz. Atomic variables ensure thread-safe updates without locks, maintaining real-time performance. The controller remains responsive even while parameters change.</p>
-                    
-                    <h3>The Cyclic Flowgraph</h3>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">auto flowgraph = cler::make_desktop_flowgraph(
-    cler::BlockRunner(&controller, &throttle.in),
-    cler::BlockRunner(&throttle, &plant.force_in),          // Controller → Plant
-    cler::BlockRunner(&plant, &fanout.in),
-    cler::BlockRunner(&fanout, &plot.in[0], &controller.measured_position_in)  // Plant → Controller (feedback)
-);</code></pre>
-                    </div>
-                    <p><strong>BlockRunner Syntax:</strong> First argument is the block to run, remaining arguments are the outputs (channels passed to the block's procedure() method).</p>
-                    <p class="design-note"><strong>Feedback Loop:</strong> Notice how the data flows Controller → Plant → Fanout → back to Controller, creating a complete feedback loop. The initial force value in the plant prevents deadlock at startup.</p>
-                </section>
-
-                <section id="performance-example">
-                    <h2>Performance Considerations</h2>
-                    <p>Choosing between flowgraph and streamlined modes depends on the computational weight of your blocks versus the overhead of orchestration.</p>
-                    
-                    <h3>When Streamlined Mode Wins</h3>
-                    <p>If your blocks do minimal work per sample, the thread synchronization overhead in flowgraph mode can dominate. Consider this anti-pattern:</p>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// Anti-pattern: Simple gain block in flowgraph mode
-struct GainBlock : public cler::BlockBase {
-    cler::Channel&lt;float&gt; in;  // Input channel owned by block
-    float gain;
-    
-    GainBlock(const char* name, float gain_value) 
-        : BlockBase(name), in(512), gain(gain_value) {}
-    
-    template&lt;typename... OChannels&gt;
-    cler::Result&lt;cler::Empty, cler::Error&gt; procedure(OChannels*... outs) {
-        // Just multiplying by a constant - very little work!
-        float value;
-        while (in.pop(value)) {
-            // Push to all outputs using fold expression
-            ((outs->push(value * gain)), ...);
-        }
-        return cler::Empty{};
-    }
-};</code></pre>
-                    </div>
-                    <p class="design-note"><strong>The Problem:</strong> Each sample requires thread synchronization (pushing/popping from channels). The overhead of synchronization far exceeds the actual computation (one multiplication).</p>
-                    
-                    <h3>Better Approaches</h3>
-                    <p><strong>Option 1: Combine lightweight operations into heavier blocks</strong></p>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// Better: Combine multiple operations
-struct ProcessingBlock : public cler::BlockBase {
-    cler::Channel&lt;float&gt; in;  // Input channel owned by block
-    float gain;
-    float offset;
-    
-    ProcessingBlock(const char* name, float gain_value, float offset_value)
-        : BlockBase(name), in(512), gain(gain_value), offset(offset_value) {}
-    
-    template&lt;typename... OChannels&gt;
-    cler::Result&lt;cler::Empty, cler::Error&gt; procedure(OChannels*... outs) {
-        float buffer[256];
-        size_t count = in.readN(buffer, 256);
-        
-        // Process in batches - amortizes synchronization cost
-        for (size_t i = 0; i < count; ++i) {
-            buffer[i] = buffer[i] * gain + offset;
-            // Could add filtering, decimation, etc. here
-        }
-        
-        // Write to all outputs using fold expression
-        ((outs->writeN(buffer, count)), ...);
-        return cler::Empty{};
-    }
-};</code></pre>
-                    </div>
-                    
-                    <p><strong>Option 2: Use streamlined mode for simple chains</strong></p>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// Streamlined mode - no thread overhead
-while (running) {
+                        <pre><code class="language-cpp line-numbers">while (running) {
     source.procedure(&amp;gain.in);
-    gain.procedure(&amp;offset.in);
-    offset.procedure(&amp;sink.in);
+    gain.procedure(&amp;sink.in);
     sink.procedure();
 }</code></pre>
                     </div>
-                    
-                    <h3>Stack-Allocated Channels</h3>
-                    <p>For embedded systems or when you know the exact buffer size needed:</p>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">struct FilterBlock : public cler::BlockBase {
-    // Stack-allocated channel - no heap allocation!
-    cler::Channel&lt;float, 1024&gt; in;  // Template parameter sets size
-    
-    FilterBlock(const char* name) : BlockBase(name) {}
-    
-    template&lt;typename... OChannels&gt;
-    cler::Result&lt;cler::Empty, cler::Error&gt; procedure(OChannels*... outs) {
-        // Process data...
-        // Push to all outputs using fold expression when ready
-        return cler::Empty{};
-    }
-};</code></pre>
-                    </div>
-                    <p class="key-point"><strong>Benefits:</strong> No dynamic allocation, better cache locality, deterministic memory usage — critical for real-time embedded systems.</p>
+                    <p>You own the loop, timing, and error handling. There is no task policy or scheduler. This is the bare-metal path and is often best for a short chain.</p>
                 </section>
 
-                <section id="scheduler-types">
-                    <h2>Scheduler Types & Performance Optimization</h2>
-                    <p>CLER provides two highly optimized schedulers designed for different workload characteristics. Choosing the right scheduler can significantly improve throughput and reduce CPU usage.</p>
-                    
-                    <h3>ThreadPerBlock (Default)</h3>
+                <section id="channels">
+                    <h2>Channels</h2>
                     <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">cler::Channel&lt;float, 1024&gt; fixed;  // storage is part of the object
+cler::Channel&lt;float&gt; dynamic(1024); // storage is allocated at runtime</code></pre>
+                    </div>
+                    <p>A channel is SPSC: one producer and one consumer. Do not read from the producer side or write from the consumer side.</p>
+
+                    <h3>Access methods</h3>
+                    <table>
+                        <thead><tr><th scope="col">Method</th><th scope="col">Use</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>read_dbf</code> / <code>write_dbf</code></td><td>Default hot path. Direct contiguous access with no copy.</td></tr>
+                            <tr><td><code>readN</code> / <code>writeN</code></td><td>Good when an API already needs a separate buffer.</td></tr>
+                            <tr><td><code>peek_read</code> / <code>peek_write</code></td><td>Two ring segments plus manual commit. Easy to get wrong.</td></tr>
+                            <tr><td><code>push</code> / <code>pop</code></td><td>Single control items, not a DSP hot path.</td></tr>
+                        </tbody>
+                    </table>
+                    <p>DBF needs a heap channel whose storage is at least <code>cler::DOUBLY_MAPPED_MIN_SIZE</code> bytes, currently 4 KiB. It is not available for fixed channels. Bad DBF use asserts in builds with assertions and returns <code>{nullptr, 0}</code> otherwise; it does not fall back.</p>
+                    <p><code>readN</code> and <code>writeN</code> commit as they copy. The peek and DBF methods need <code>commit_read()</code> or <code>commit_write()</code>. With peek, handle both returned segments.</p>
+
+                    <h3>Counters and capacity</h3>
+                    <p><code>consumer_thread_cumulative_read_count()</code> is atomic and can be polled from a monitor thread. <code>producer_thread_cumulative_write_count()</code> is safe only on the producer thread.</p>
+                    <p>On a new channel, <code>space()</code> is its real capacity. Use it instead of the requested size because heap channels may round the size up.</p>
+                </section>
+
+                <section id="schedulers">
+                    <h2>Schedulers</h2>
+                    <table>
+                        <thead><tr><th scope="col">Scheduler</th><th scope="col">Use</th><th scope="col">Workers</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>ThreadPerBlock</code></td><td>Small graphs and debugging</td><td>One per regular block</td></tr>
+                            <tr><td><code>FixedThreadPool</code></td><td>Uniform work with fewer threads</td><td>Requested count, clamped</td></tr>
+                            <tr><td><code>PinnedIslands</code></td><td>Core limits, uneven work, sparse data</td><td>One per island</td></tr>
+                        </tbody>
+                    </table>
+                    <p>Blocks marked <code>may_block</code> always get separate threads and do not count as regular workers.</p>
+                    <p><code>config.max_calls_per_tick</code>, default 4, limits how many times a worker calls one block before moving on. <code>CLER_DEFAULT_MAX_WORKERS</code> sets the build-time worker cap.</p>
+
+                    <h3>Thread per block</h3>
+                    <div class="code-block">
+                        <pre><code class="language-cpp line-numbers">cler::FlowGraphConfig config; // ThreadPerBlock is the default
+graph.run(config);</code></pre>
+                    </div>
+
+                    <h3>Fixed thread pool</h3>
+                    <div class="code-block">
                         <pre><code class="language-cpp line-numbers">cler::FlowGraphConfig config;
-config.scheduler = cler::SchedulerType::ThreadPerBlock;  // Default scheduler
-// config.adaptive_sleep = true;  // Only for sparse/intermittent data
-flowgraph.run(config);</code></pre>
+config.scheduler = cler::SchedulerType::FixedThreadPool;
+config.num_workers = 4;
+config.fixed_thread_pool.pin_workers = false;
+graph.run(config);</code></pre>
                     </div>
-                    <p><strong>Best for:</strong> Default choice, debugging, simple flowgraphs, guaranteed per-block isolation</p>
-                    <p><strong>Characteristics:</strong> One dedicated thread per block (default, simple, debuggable)</p>
-                    <p class="design-note"><strong>Trade-offs:</strong> Simple and predictable, but thread overhead grows with block count. Excellent starting point for most applications.</p>
-                    
-                    <h3>FixedThreadPool (Cache-Optimized)</h3>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">cler::FlowGraphConfig config;
-config.scheduler = cler::SchedulerType::FixedThreadPool;  // Recommended
-config.num_workers = 4;  // Number of worker threads (minimum 2, adjust for your CPU)
-// config.adaptive_sleep = true;  // Optional: only for sparse data
-// config.collect_detailed_stats = false;  // Ultra-high performance mode
-flowgraph.run(config);</code></pre>
-                    </div>
-                    <p><strong>Best for:</strong> Constrained systems, embedded applications, memory-limited environments</p>
-                    <p><strong>Characteristics:</strong> Cache-optimized worker threads with platform-aware memory layout</p>
-                    <p class="key-point"><strong>Benefits:</strong> Better for constrained systems, automatic cache line detection for x86/ARM/RISC-V, lower thread overhead than ThreadPerBlock.</p>
-                    
-                    <h3>Adaptive Sleep Configuration</h3>
-                    <p><strong>⚠️ Warning:</strong> Adaptive sleep reduces CPU usage but can significantly impact throughput. Only use for sparse/intermittent data sources like sensors or network packets with gaps.</p>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// Adaptive sleep works with both scheduler types - USE CAREFULLY
-// Can significantly reduce throughput, only use for sparse/intermittent data
-config.adaptive_sleep = true;  // CAUTION: reduces CPU usage but may impact throughput
-config.adaptive_sleep_multiplier = 1.5;       // How aggressively to increase sleep
-config.adaptive_sleep_max_us = 5000.0;        // Maximum sleep time (microseconds)
-config.adaptive_sleep_fail_threshold = 10;    // Start sleeping after N failures
+                    <p>The requested count is raised to 2, then capped by <code>CLER_DEFAULT_MAX_WORKERS</code> and the regular block count. A graph with one regular block still uses one worker.</p>
 
-// For very sparse data (sensors, network packets)
-config.adaptive_sleep_multiplier = 2.0;       // Aggressive backoff
-config.adaptive_sleep_max_us = 10000.0;       // Up to 10ms sleep
-config.adaptive_sleep_fail_threshold = 5;     // Sleep after 5 failures</code></pre>
+                    <h3>Pinned islands</h3>
+                    <div class="code-block">
+                        <pre><code class="language-cpp line-numbers">#include "cler_utils.hpp"
+
+auto config = cler::flowgraph_config::pinned_islands(2);
+config.pinned_islands.calibration_ms = 500;
+config.pinned_islands.repartition_check_ms = 5000; // 0 disables drift checks
+config.pinned_islands.cpu_id_offset = 0;
+config.pinned_islands.park_after_zero_passes = 4;
+config.pinned_islands.report_partition = true;
+graph.run(config);</code></pre>
                     </div>
-                    <p class="design-note"><strong>Use Cases:</strong> Sensor data, network packets, user input processing. Can achieve >90% CPU reduction during idle periods while maintaining low latency when data arrives.</p>
+                    <p>This scheduler starts from topological islands, measures block cost, then changes the split after calibration. Later checks only apply a split that improves the cost score. Idle workers back off and then park.</p>
+                    <p><code>report_partition</code> prints each island and an estimate of CPU cores used by each block.</p>
+                    <p>Pinning is always attempted on cores <code>cpu_id_offset + worker_id</code>. Affinity works on Linux, desktop or embedded. macOS and the current FreeRTOS, ThreadX, and Zephyr policies run islands without affinity and report the failed attempts.</p>
+
+                    <h3>Set islands yourself</h3>
+                    <p>For a rate-critical graph, measure each split and keep the one that meets the rate. A balanced split is not always the fastest.</p>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-cpp line-numbers">#include "cler_desktop_utils.hpp"
+#include "cler_utils.hpp"
+
+const cler::BlockBase* left[] = {&amp;mix, &amp;filter, &amp;demod};
+const cler::BlockBase* right[] = {&amp;decode, &amp;sink};
+const cler::IslandList islands[] = {
+    cler::island(left),
+    cler::island(right)
+};
+
+auto config = cler::flowgraph_config::pinned_islands(islands);
+auto check = graph.check_islands(config);
+if (!check) cler::panic(check.message());
+graph.run(config);</code></pre>
+                    </div>
+                    <p>List every regular block exactly once. Do not list <code>may_block</code> blocks. Within an island, producers must come before consumers. Manual islands skip calibration and repartition.</p>
+
+                    <h3>Stats</h3>
+                    <p><code>partition()</code>, <code>stats()</code>, <code>block_costs()</code>, <code>repartition_count()</code>, <code>total_park_events()</code>, and <code>affinity_failure_count()</code> are exact after <code>stop()</code>. During a run they are best-effort.</p>
+                    <p><code>block_costs()</code> is filled only by PinnedIslands. Set <code>collect_detailed_stats = true</code> only while profiling; it adds work to the hot path. All scheduler stats reset on each <code>run()</code>.</p>
                 </section>
 
-                <section id="buffer-patterns">
-                    <h2>Buffer Access Patterns</h2>
-                    <p>CLER provides three main ways to access buffer data. Here's what we recommend:</p>
-                    
-                    <div class="performance-results">
-                        <h3>Simple Recommendation</h3>
-                        <div class="perf-table">
-                            <div class="perf-row header">
-                                <div class="perf-technique">Technique</div>
-                                <div class="perf-throughput">Performance</div>
-                                <div class="perf-vs">When to Use</div>
-                            </div>
-                            <div class="perf-row optimal">
-                                <div class="perf-technique">read_dbf/write_dbf</div>
-                                <div class="perf-throughput">Best Performance</div>
-                                <div class="perf-vs">Try this first - fastest and cleanest for most cases</div>
-                            </div>
-                            <div class="perf-row good">
-                                <div class="perf-technique">readN/writeN</div>
-                                <div class="perf-throughput">Good Performance</div>
-                                <div class="perf-vs">Fallback if DBF not available - still very fast</div>
-                            </div>
-                            <div class="perf-row">
-                                <div class="perf-technique">peek/commit</div>
-                                <div class="perf-throughput">Specialized</div>
-                                <div class="perf-vs">Only if you need fine control over buffer management</div>
-                            </div>
-                            <div class="perf-row avoid">
-                                <div class="perf-technique">push/pop</div>
-                                <div class="perf-throughput">AVOID</div>
-                                <div class="perf-vs">Extremely slow - use only for control/config data</div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="pattern-comparison">
-                        <div class="pattern">
-                            <h3>1. read_dbf/write_dbf (TRY THIS FIRST)</h3>
-                            <div class="code-block">
-                                <pre><code class="language-cpp line-numbers">// Fastest and cleanest - zero-copy direct buffer access
-auto [read_ptr, read_size] = in->read_dbf();
-auto [write_ptr, write_size] = out->write_dbf();
-size_t to_process = std::min(read_size, write_size);
-
-for (size_t i = 0; i < to_process; ++i) {
-    write_ptr[i] = read_ptr[i] * gain;  // Direct processing
-}
-
-in->commit_read(to_process);
-out->commit_write(to_process);</code></pre>
-                            </div>
-                            <p class="pattern-note fast">✅ <strong>RECOMMENDED</strong> - Best performance, clean code.</p>
-                        </div>
-                        
-                        <div class="pattern">
-                            <h3>2. readN/writeN (SOLID FALLBACK)</h3>
-                            <div class="code-block">
-                                <pre><code class="language-cpp line-numbers">// Simple and reliable - use when DBF not available
-float buffer[256];
-size_t count = in->readN(buffer, 256);
-
-for (size_t i = 0; i < count; ++i) {
-    buffer[i] *= gain;
-}
-
-out->writeN(buffer, count);</code></pre>
-                            </div>
-                            <p class="pattern-note fast">✅ <strong>GOOD FALLBACK</strong> - Still very fast, works everywhere, simple API</p>
-                        </div>
-                        
-                        <div class="pattern">
-                            <h3>3. peek/commit (COMPLEX - NOT RECOMMENDED)</h3>
-                            <div class="code-block">
-                                <pre><code class="language-cpp line-numbers">const float *ptr1, *ptr2;
-size_t size1, size2;
-size_t available = in.peek_read(ptr1, size1, ptr2, size2);
-
-// Process directly from input buffer
-for (size_t i = 0; i < size1; ++i) buffer[i] = ptr1[i] * gain;
-for (size_t i = 0; i < size2; ++i) buffer[size1+i] = ptr2[i] * gain;
-
-in.commit_read(size1 + size2);
-out->writeN(buffer, size1 + size2);</code></pre>
-                            </div>
-                            <p class="pattern-note fast">⚠️ <strong>Complex implementation</strong> - Only ~5% faster than readN/writeN, not worth the complexity</p>
-                        </div>
-                        
-                        <div class="pattern">
-                            <h3>4. push/pop (AVOID)</h3>
-                            <div class="code-block">
-                                <pre><code class="language-cpp line-numbers">float sample;
-in->pop(sample);
-out->push(sample * gain);</code></pre>
-                            </div>
-                            <p class="pattern-note avoid">⚠️ <strong>Orders of magnitude slower</strong> - Function call overhead per sample. Use only for control data</p>
-                        </div>
-                    </div>
-                    
-                    <div class="performance-notes">
-                        <h3>Quick Summary</h3>
-                        <ul>
-                            <li><strong>Try DBF first</strong> - It's usually the fastest and cleanest option</li>
-                            <li><strong>Use readN/writeN as fallback</strong> - Simple and still very fast</li>
-                            <li><strong>DBF requirements</strong> - Buffer must be heap-allocated and page-aligned (≥4KB)</li>
-                            <li><strong>Peek/commit is rarely needed</strong> - Only for specialized buffer management</li>
-                            <li><strong>Never use push/pop for DSP data</strong> - It's extremely slow</li>
-                            <li><strong>Run benchmarks</strong>: <code>cd build/performance && ./perf_read_write_techniques</code></li>
-                        </ul>
-                    </div>
-                </section>
-
-                <section id="developer-tools">
-                    <h2>Developer Tools</h2>
-
-                    <h3>Flowgraph Visualization</h3>
-                    <p>CLER includes a tool to generate interactive Mermaid diagrams from your C++ flowgraph code, helping you visualize and understand your signal processing pipelines.</p>
-
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-bash line-numbers"># Install the VSCode extension
-cd tools/mermaid/vscode-extension
-./install.sh
-
-# Or use the CLI tool directly
-tools/mermaid/build/cler-mermaid my_flowgraph.cpp -o diagram</code></pre>
-                    </div>
-
-                    <p>The VSCode extension provides one-click preview with auto-refresh as you edit. The generated diagrams show block types, connections, and flow direction with automatic theme matching.</p>
-                </section>
-
-                <section id="real-world">
-                    <h2>Real-World Applications</h2>
-                    <p>CLER shines in embedded systems where clean architecture meets resource constraints. Here are practical applications showing when flowgraphs excel and when manual approaches work better.</p>
-                    
-                    <h3>Microcontroller Applications</h3>
-                    
-                    <h4>IoT Sensor Hub (STM32)</h4>
-                    <p>A environmental monitoring node collecting data from multiple sensors and forwarding to a gateway. <strong>RAM requirement: 64-128KB for comfortable operation.</strong></p>
-                    
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// Manual callback hell approach - hard to maintain
-struct SensorManager {
-    void (*temp_callback)(float);
-    void (*humidity_callback)(float);  
-    void (*pressure_callback)(float);
-    void (*network_callback)(SensorPacket);
-    
-    void process_sensors() {
-        float temp = read_temperature();
-        if (temp_callback) temp_callback(temp);
-        
-        float humidity = read_humidity();
-        if (humidity_callback) humidity_callback(humidity);
-        
-        // ... multiply by 6 sensors, nested callbacks, error handling
-    }
-};
-
-// CLER flowgraph approach - clean and testable
-struct TemperatureSensor : public cler::BlockBase {
-    cler::Channel<float, 32> out;
-    
-    cler::Result<cler::Empty, cler::Error> procedure() {
-        if (out.space() > 0) {
-            float temp = read_temperature_sensor();
-            out.push(temp);
-        }
-        return cler::Empty{};
-    }
-};
-
-struct SensorAggregator : public cler::BlockBase {
-    cler::Channel<float, 16> temp_in, humidity_in, pressure_in;
-    
-    template<typename... OChannels>
-    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... network_out) {
-        if (temp_in.size() && humidity_in.size() && pressure_in.size()) {
-            SensorPacket packet;
-            temp_in.pop(packet.temperature);
-            humidity_in.pop(packet.humidity);
-            pressure_in.pop(packet.pressure);
-            packet.timestamp = get_system_time();
-            
-            ((network_out->push(packet)), ...);
-        }
-        return cler::Empty{};
-    }
-};
-
-// Clean, testable flowgraph  
-auto flowgraph = cler::FlowGraph<cler::FreeRTOSTaskPolicy>(
-    cler::BlockRunner(&temp_sensor, &aggregator.temp_in),
-    cler::BlockRunner(&humidity_sensor, &aggregator.humidity_in),
-    cler::BlockRunner(&pressure_sensor, &aggregator.pressure_in),
-    cler::BlockRunner(&aggregator, &network_transmitter.in),
-    cler::BlockRunner(&network_transmitter)
-);</code></pre>
-                    </div>
-                    <p class="key-point"><strong>Why Flowgraphs Win:</strong> Complex data flows with multiple sensors become manageable. Each sensor can be tested independently, and adding new sensors doesn't require rewiring callbacks.</p>
-                    
-                    <h4>Real-Time Audio Processing</h4>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">struct AudioFilterBlock : public cler::BlockBase {
-    cler::Channel<int16_t, 128> in;  // 44.1kHz audio samples
-    BiquadFilter filter;             // State preserved between calls
-    
-    template<typename... OChannels>
-    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... outs) {
-        int16_t samples[64];
-        size_t count = in.readN(samples, 64);
-        
-        // Process audio block with preserved filter state
-        for (size_t i = 0; i < count; ++i) {
-            samples[i] = filter.process(samples[i]);
-        }
-        
-        ((outs->writeN(samples, count)), ...);
-        return cler::Empty{};
-    }
-};
-
-// Real-time audio chain: ADC → Filter → Compressor → DAC
-auto audio_flowgraph = cler::FlowGraph<cler::FreeRTOSTaskPolicy>(
-    cler::BlockRunner(&adc_source, &filter.in),
-    cler::BlockRunner(&filter, &compressor.in),
-    cler::BlockRunner(&compressor, &dac_sink.in),
-    cler::BlockRunner(&dac_sink)
-);</code></pre>
-                    </div>
-                    <p class="design-note"><strong>Real-Time Constraints:</strong> Audio processing needs deterministic timing. CLER's static allocation and predictable execution makes this possible on microcontrollers.</p>
-                    
-                    <h4>Motor Control System</h4>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">struct EncoderBlock : public cler::BlockBase {
-    cler::Channel<float, 16> position_out;
-    volatile uint32_t* encoder_register;
-    
-    cler::Result<cler::Empty, cler::Error> procedure() {
-        if (position_out.space() > 0) {
-            uint32_t raw_count = *encoder_register; 
-            float position = (raw_count * 2.0f * M_PI) / 4096.0f; // Convert to radians
-            position_out.push(position);
-        }
-        return cler::Empty{};
-    }
-};
-
-struct PIDController : public cler::BlockBase {
-    cler::Channel<float, 8> setpoint_in, feedback_in;
-    std::atomic<float> kp{1.0f}, ki{0.1f}, kd{0.01f};
-    float integral = 0.0f, previous_error = 0.0f;
-    
-    template<typename... OChannels>  
-    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... control_out) {
-        float setpoint, feedback;
-        if (setpoint_in.pop(setpoint) && feedback_in.pop(feedback)) {
-            float error = setpoint - feedback;
-            integral += error * DT;
-            float derivative = (error - previous_error) / DT;
-            
-            float output = kp.load() * error + ki.load() * integral + kd.load() * derivative;
-            previous_error = error;
-            
-            ((control_out->push(output)), ...);
-        }
-        return cler::Empty{};
-    }
-};
-
-// Control loop: Setpoint → PID Controller → Motor Driver
-//                      ↑     Encoder ←  Motor ←</code></pre>
-                    </div>
-                    <p class="key-point"><strong>Control Systems:</strong> Flowgraphs naturally express feedback loops. Thread-safe atomic parameters allow runtime tuning without stopping the control loop.</p>
-                    
-                    <h3>FPGA Hybrid Designs</h3>
-                    <p>CLER excels in FPGA systems where hardware acceleration combines with software flexibility.</p>
-                    
-                    <h4>SDR with FPGA Preprocessing</h4>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// FPGA handles high-rate operations, ARM processes protocols
-struct FPGAInterface : public cler::BlockBase {
-    cler::Channel<std::complex<float>, 1024> iq_out;
-    volatile uint32_t* fpga_fifo;           // Memory-mapped FPGA interface
-    volatile uint32_t* fpga_control;
-    
-    cler::Result<cler::Empty, cler::Error> procedure() {
-        // Check FPGA FIFO status
-        if ((*fpga_control & FIFO_NOT_EMPTY) && (iq_out.space() >= 256)) {
-            std::complex<float> samples[256];
-            
-            // Burst read from FPGA (preprocessed samples)
-            for (int i = 0; i < 256; ++i) {
-                uint32_t iq_data = *fpga_fifo;
-                float i_val = (int16_t)(iq_data >> 16) / 32768.0f;
-                float q_val = (int16_t)(iq_data & 0xFFFF) / 32768.0f;
-                samples[i] = std::complex<float>(i_val, q_val);
-            }
-            
-            iq_out.writeN(samples, 256);
-        }
-        return cler::Empty{};
-    }
-};
-
-struct ProtocolDecoder : public cler::BlockBase {
-    cler::Channel<std::complex<float>, 512> iq_in;
-    DemodulatorState demod_state;           // Complex software processing
-    
-    template<typename... OChannels>
-    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... packet_out) {
-        std::complex<float> samples[128];
-        size_t count = iq_in.readN(samples, 128);
-        
-        if (count > 0) {
-            // Complex demodulation that benefits from ARM cores
-            for (size_t i = 0; i < count; ++i) {
-                if (process_sample(&demod_state, samples[i])) {
-                    // Packet detected and decoded
-                    ((packet_out->push(demod_state.decoded_packet)), ...);
-                }
-            }
-        }
-        return cler::Empty{};
-    }
-};
-
-// Hybrid architecture: FPGA → ARM Processing → Network
-auto sdr_flowgraph = cler::FlowGraph<cler::LinuxTaskPolicy>(
-    cler::BlockRunner(&fpga_interface, &channelizer.in),      // High-rate data from FPGA
-    cler::BlockRunner(&channelizer, &decoder1.in, &decoder2.in), // Split to protocols
-    cler::BlockRunner(&decoder1, &network1.in),               // Process on ARM cores
-    cler::BlockRunner(&decoder2, &network2.in),
-    cler::BlockRunner(&network1),
-    cler::BlockRunner(&network2)
-);</code></pre>
-                    </div>
-                    <p class="design-note"><strong>Hybrid Benefits:</strong> FPGA handles computationally intensive tasks (filtering, channelization) while ARM cores handle complex protocol processing. CLER coordinates the data flow between hardware and software domains.</p>
-                    
-                    <h4>Real-Time Image Processing</h4>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">struct ImageAcquisition : public cler::BlockBase {
-    cler::Channel<ImageFrame, 4> frame_out; // Small buffer for real-time
-    CameraInterface* camera;
-    
-    cler::Result<cler::Empty, cler::Error> procedure() {
-        if (frame_out.space() > 0 && camera->frame_ready()) {
-            ImageFrame frame;
-            camera->capture_frame(&frame);
-            frame_out.push(std::move(frame));
-        }
-        return cler::Empty{};
-    }
-};
-
-struct FPGAEdgeDetection : public cler::BlockBase {
-    cler::Channel<ImageFrame, 2> frame_in;
-    volatile uint32_t* fpga_processor;      // Hardware accelerated
-    
-    template<typename... OChannels>
-    cler::Result<cler::Empty, cler::Error> procedure(OChannels*... processed_out) {
-        ImageFrame frame;
-        if (frame_in.pop(frame)) {
-            // DMA transfer to FPGA, hardware processes edges
-            setup_fpga_dma(frame.data, frame.width, frame.height);
-            start_fpga_processing();
-            
-            // Wait for completion (or use interrupt-driven approach)
-            while (!fpga_processing_complete()) { /* yield or sleep */ }
-            
-            // Processed frame ready
-            ((processed_out->push(std::move(frame))), ...);
-        }
-        return cler::Empty{};
-    }
-};
-
-// Computer vision pipeline: Camera → FPGA Edge Detection → ARM Analysis → Display
-auto vision_flowgraph = cler::FlowGraph<cler::LinuxTaskPolicy>(
-    cler::BlockRunner(&camera, &fpga_edge.frame_in),
-    cler::BlockRunner(&fpga_edge, &arm_analysis.in),  
-    cler::BlockRunner(&arm_analysis, &display.in),
-    cler::BlockRunner(&display)
-);</code></pre>
-                    </div>
-                    <p class="key-point"><strong>Real-Time Vision:</strong> Hardware accelerates compute-intensive operations while software handles higher-level analysis. Natural pipeline structure matches hardware capabilities.</p>
-                    
-                    <h3>When to Use Flowgraphs vs Manual Wiring</h3>
-                    
-                    <h4>✅ Flowgraphs Excel When:</h4>
-                    <div class="key-point">
-                        <strong>Complex Data Flows:</strong> Multiple inputs, outputs, or feedback loops benefit from flowgraph structure.
-                    </div>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// Multi-sensor fusion with feedback - naturally expressed as flowgraph
-auto sensor_fusion = cler::FlowGraph<cler::FreeRTOSTaskPolicy>(
-    cler::BlockRunner(&gps, &kalman_filter.gps_in),
-    cler::BlockRunner(&imu, &kalman_filter.imu_in),
-    cler::BlockRunner(&mag, &kalman_filter.mag_in),
-    cler::BlockRunner(&kalman_filter, &navigation.in, &control_feedback.in),
-    cler::BlockRunner(&navigation, &display.in),
-    cler::BlockRunner(&control_feedback, &actuator.in),
-    cler::BlockRunner(&actuator)
-);</code></pre>
-                    </div>
-                    
-                    <div class="key-point">
-                        <strong>Rapid Prototyping:</strong> Easy to add/remove blocks, change connections, test different configurations.
-                    </div>
-                    
-                    <div class="key-point">
-                        <strong>Testing & Validation:</strong> Each block can be unit tested independently. Mock blocks easily replace hardware interfaces.
-                    </div>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// Easy testing - replace hardware blocks with test blocks
-#ifdef UNIT_TEST
-    MockGPSBlock mock_gps("GPS", test_positions);
-    auto test_flowgraph = cler::FlowGraph<cler::DesktopTaskPolicy>(
-        cler::BlockRunner(&mock_gps, &kalman_filter.gps_in),  // Mock instead of real GPS
-        // ... rest of flowgraph unchanged
-    );
-#endif</code></pre>
-                    </div>
-                    
-                    <div class="key-point">
-                        <strong>Parallel Processing:</strong> Natural parallelism when blocks can run independently on multiple cores.
-                    </div>
-                    
-                    <h4>❌ Manual Wiring Better When:</h4>
-                    <div class="design-note">
-                        <strong>Simple Linear Chains:</strong> A → B → C with minimal processing overhead benefits from direct calls.
-                    </div>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// Simple processing chain - manual is more efficient
-while (running) {
-    sensor.read_raw(&raw_data);           // Direct hardware access
-    filter.process(raw_data, &filtered);  // Inline processing  
-    transmit.send(filtered);              // Direct transmission
-    delay_ms(10);                         // Simple timing
-}</code></pre>
-                    </div>
-                    
-                    <div class="design-note">
-                        <strong>Tight Timing Constraints:</strong> Hard real-time systems may need manual control for predictability.
-                    </div>
-                    
-                    <div class="design-note">
-                        <strong>Minimal Resource Usage:</strong> Systems with <32KB RAM may benefit from eliminating flowgraph overhead.
-                    </div>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">// Ultra-constrained system (8KB RAM)
-void main_loop() {
-    uint16_t adc_value = read_adc();
-    uint16_t filtered = simple_filter(adc_value);  // Stack-based, no allocation
-    if (filtered > threshold) {
-        trigger_output();
-    }
-}  // Total overhead: ~100 bytes</code></pre>
-                    </div>
-                    
-                    <div class="design-note">
-                        <strong>Single-Threaded Embedded:</strong> Baremetal systems without RTOS may prefer direct control loops.
-                    </div>
-                    
-                    <h4>STM32 Practical Guidelines</h4>
-                    <div class="performance-notes">
-                        <h3>Memory Requirements</h3>
-                        <ul>
-                            <li><strong>Minimum for flowgraphs:</strong> 64KB RAM (simple chains, 2-4 blocks)</li>
-                            <li><strong>Comfortable operation:</strong> 128KB+ RAM (complex flowgraphs, 6+ blocks)</li>
-                            <li><strong>Per-block overhead:</strong> ~2-4KB (threads, channels, state)</li>
-                            <li><strong>Manual alternative:</strong> <32KB systems, use streamlined mode</li>
-                            <li><strong>Optimization:</strong> Stack-allocated channels reduce heap pressure</li>
-                        </ul>
-                    </div>
-                    
-                    <div class="key-point">
-                        <strong>Architecture Decision Framework:</strong><br>
-                        • <3 blocks + simple chain → Manual wiring<br>
-                        • 3-6 blocks + moderate complexity → Consider both approaches<br>  
-                        • 6+ blocks OR complex data flow → Flowgraphs excel<br>
-                        • Need testing/modularity → Flowgraphs<br>
-                        • <64KB RAM OR hard real-time → Manual wiring
-                    </div>
-                </section>
-
-                <section id="architecture">
-                    <h2>Architecture Deep Dive</h2>
-                    <p>CLER uses C++17 templates to eliminate all runtime overhead while maintaining type safety and flexibility.</p>
-                    
-                    <h3>Compile-Time Magic</h3>
-                    <div class="code-block">
-                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-cpp line-numbers">template&lt;typename Block, typename... Channels&gt;
-struct BlockRunner {
-    Block* block;
-    std::tuple&lt;Channels*...&gt; outputs;
-    
-    // Template deduction guide - compiler figures out types automatically
-    template&lt;typename... InputChannels&gt;
-    BlockRunner(Block* blk, InputChannels*... outs)
-        : block(blk), outputs(static_cast&lt;Channels*&gt;(outs)...) {}
-};</code></pre>
-                    </div>
-                    <p class="key-point"><strong>Zero Overhead:</strong> Channel types are deduced at compile time. Minimal runtime type checking, very few virtual function calls, minimal dynamic allocations. The flowgraph code compiles close to what you'd write by hand — often with template optimizations.</p>
-                    
-                    <h3>AI-Friendly Core (&lt;1000 LOC)</h3>
-                    <p>CLER's core is intentionally small and focused:</p>
+                <section id="performance">
+                    <h2>Performance rules</h2>
                     <ul>
-                        <li><strong>&lt;1000 lines:</strong> Perfect context window for AI assistance</li>
-                        <li><strong>Clear abstractions:</strong> BlockBase, Channel, FlowGraph, Result types</li>
-                        <li><strong>Minimal dependencies:</strong> Only standard library, easy to understand</li>
-                        <li><strong>Template-heavy:</strong> AI tools excel at understanding and extending template code</li>
+                        <li>Process the whole available span. Do not call an external DSP kernel once per sample or frame.</li>
+                        <li>Do not allocate in <code>procedure()</code>. Allocate buffers and state in the constructor.</li>
+                        <li>Use DBF for hardware I/O and heap-backed desktop channels.</li>
+                        <li>Size the next input channel to at least the upstream driver buffer. A smaller channel can stall a blocking refill.</li>
+                        <li>Before comparing CPU use, confirm both runs meet the requested sample rate.</li>
                     </ul>
-                    <p>This means when you get stuck with complex error messages (CLER's one weakness), any LLM can quickly understand your code and suggest fixes.</p>
-                    
-                    <h3>Lock-Free Channel Implementation</h3>
-                    <p>Based on Dmitry Drogalis's SPSC queue, optimized for DSP workloads:</p>
-                    <ul>
-                        <li><strong>Cache-aligned:</strong> Prevents false sharing between producer/consumer</li>
-                        <li><strong>Memory ordering:</strong> Carefully tuned acquire/release semantics for x86/ARM</li>
-                        <li><strong>Configurable sizing:</strong> Stack allocation for embedded, heap for desktop</li>
-                        <li><strong>Multiple access patterns:</strong> From simple push/pop to zero-copy peek/commit</li>
-                    </ul>
-                    
-                    <h3>Embedded-First Design</h3>
-                    <p>CLER's design choices address real embedded constraints:</p>
-                    <ul>
-                        <li><strong>Adaptive performance:</strong> Uses advanced techniques like doubly-mapped buffers when available, falls back gracefully on constrained systems</li>
-                        <li><strong>Predictable timing:</strong> Manual memory management, no unexpected allocations</li>
-                        <li><strong>Small memory footprint:</strong> Perfect for microcontrollers</li>
-                        <li><strong>Type safety:</strong> Catch connection errors at compile time, not runtime</li>
-                    </ul>
+
+                    <h3>Measure rate without another block</h3>
+                    <div class="code-block">
+                        <pre><code class="language-cpp line-numbers">const auto before = block.in.consumer_thread_cumulative_read_count();
+const auto start = std::chrono::steady_clock::now();
+
+// Wait for the measurement window.
+
+const auto items = block.in.consumer_thread_cumulative_read_count() - before;
+const double seconds = std::chrono::duration&lt;double&gt;(
+    std::chrono::steady_clock::now() - start).count();
+const double items_per_second = items / seconds;</code></pre>
+                    </div>
+                    <p>A pass-through counter adds a thread and a full-rate copy. Polling the channel counter does not.</p>
+
+                    <h3>Resampling and channelizing</h3>
+                    <p>Use <code>RationalResamplerBlock&lt;INTERP, DECIM, TAPS_PER_PHASE&gt;</code> for a fixed complex-sample ratio. Use <code>MultiStageResamplerBlock</code> for an arbitrary runtime ratio with float or complex-float samples.</p>
+                    <p>The polyphase channelizer and rational resampler batch their kernels and keep fixed-shape state in <code>std::array</code>. Keep new high-rate blocks on the same path.</p>
+                </section>
+
+                <section id="platforms">
+                    <h2>Platforms</h2>
+                    <table>
+                        <thead><tr><th scope="col">Target</th><th scope="col">Task policy</th><th scope="col">Factory</th></tr></thead>
+                        <tbody>
+                            <tr><td>Linux / macOS</td><td><code>cler_desktop_tpolicy.hpp</code></td><td><code>make_desktop_flowgraph</code></td></tr>
+                            <tr><td>FreeRTOS</td><td><code>cler_freertos_tpolicy.hpp</code></td><td><code>make_freertos_flowgraph</code></td></tr>
+                            <tr><td>ThreadX</td><td><code>cler_threadx_tpolicy.hpp</code></td><td><code>make_threadx_flowgraph</code></td></tr>
+                            <tr><td>Zephyr</td><td><code>cler_zephyr_tpolicy.hpp</code></td><td><code>make_zephyr_flowgraph</code></td></tr>
+                            <tr><td>Bare metal</td><td>None</td><td>Call procedures in a loop</td></tr>
+                        </tbody>
+                    </table>
+                    <p>For MCU targets, use fixed channels such as <code>Channel&lt;float, 128&gt;</code> and avoid desktop-only helpers. The task policies currently allocate task wrappers and stacks; check them against the memory rules of your RTOS port.</p>
+                    <p>Windows has no native target. Build the Linux path under WSL2.</p>
+                </section>
+
+                <section id="desktop-blocks">
+                    <h2>Desktop blocks</h2>
+                    <p><code>desktop_blocks/</code> is for quick desktop and embedded-Linux work. It favors broad APIs over the smallest memory use.</p>
+                    <table>
+                        <thead><tr><th scope="col">Group</th><th scope="col">Included blocks</th></tr></thead>
+                        <tbody>
+                            <tr><td>Sources</td><td>CW, chirp, file, audio file, UDP, Pluto, HackRF, CaribouLite, UHD, SoapySDR</td></tr>
+                            <tr><td>Sinks</td><td>Null, file, audio, UDP, HackRF, UHD, SoapySDR</td></tr>
+                            <tr><td>DSP</td><td>Add, gain, frequency shift, complex split, noise, FM demod, Kaiser LPF</td></tr>
+                            <tr><td>Rate and channels</td><td>Multi-stage and rational resamplers, polyphase channelizer</td></tr>
+                            <tr><td>Utilities</td><td>Fanout, fused kernels, throttle, throughput, trigger</td></tr>
+                            <tr><td>Views and protocols</td><td>Time plot, spectrum, spectrogram, ADS-B, EZGMSK</td></tr>
+                        </tbody>
+                    </table>
+                    <p>Hardware, GUI, audio, and liquid-backed blocks depend on system libraries. CMake builds the matching examples only when those libraries are present.</p>
+                    <p>Start with the source files in <a href="https://github.com/cariboulabs/cler/tree/main/desktop_examples">desktop_examples</a>. They cover flowgraph and streamlined use, plots, SDR devices, UDP, FM, ADS-B, channelizing, audio, and cyclic control.</p>
+                </section>
+
+                <section id="tools">
+                    <h2>Tools and tests</h2>
+                    <h3>Flowgraph diagram</h3>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-bash line-numbers">cd tools/mermaid
+mkdir build
+cd build
+cmake ..
+make -j4
+./cler-mermaid ../../../desktop_examples/hello_world.cpp -o graph</code></pre>
+                    </div>
+                    <p>A VS Code preview extension is in <code>tools/mermaid/vscode-extension</code>.</p>
+
+                    <h3>Tests and benchmarks</h3>
+                    <div class="code-block">
+                        <pre><code class="language-bash line-numbers">mkdir build
+cd build
+cmake -DCLER_BUILD_TESTS=ON -DCLER_BUILD_PERFORMANCE=ON ..
+make -j4
+ctest --output-on-failure
+
+./performance/perf_read_write_techniques
+./performance/perf_simple_linear_flow
+./performance/perf_fanout_workloads</code></pre>
+                    </div>
+                    <p>Scheduler barrier changes also need <code>tests/scheduler/test_repartition_stress.cpp</code>. The test checks for duplicate or reordered samples while islands move.</p>
                 </section>
             </div>
         </div>
+        <span id="copy-status" class="sr-only" aria-live="polite"></span>
     </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p>CLER 0.1.0 · Early development · APIs may change</p>
+            <p class="footer-links">
+                <a href="https://github.com/cariboulabs/cler/blob/main/License">Apache-2.0 license</a>
+                <a href="https://github.com/cariboulabs/cler/issues">Issues</a>
+            </p>
+        </div>
+    </footer>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cmake.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.js"></script>
     <script>
-        function copyCode(button) {
-            const codeBlock = button.parentElement.querySelector('code');
-            const text = codeBlock.textContent;
-            navigator.clipboard.writeText(text).then(() => {
-                button.textContent = 'Copied!';
-                setTimeout(() => {
-                    button.textContent = 'Copy';
-                }, 2000);
-            });
+        async function copyCode(button) {
+            const status = document.getElementById('copy-status');
+            try {
+                await navigator.clipboard.writeText(button.parentElement.querySelector('code').textContent);
+                button.textContent = 'Copied';
+                status.textContent = 'Code copied to clipboard.';
+            } catch {
+                button.textContent = 'Copy failed';
+                status.textContent = 'Could not copy code to the clipboard.';
+            }
+            setTimeout(() => { button.textContent = 'Copy'; }, 1500);
         }
 
-        // Smooth scrolling for navigation links
-        document.querySelectorAll('.learn-nav a').forEach(link => {
-            link.addEventListener('click', (e) => {
-                e.preventDefault();
-                const targetId = link.getAttribute('href').substring(1);
-                const targetElement = document.getElementById(targetId);
-                if (targetElement) {
-                    targetElement.scrollIntoView({ behavior: 'smooth' });
-                }
-            });
+        const nav = document.getElementById('learnNav');
+        const toggle = document.querySelector('.nav-toggle');
+        toggle.addEventListener('click', () => {
+            const open = nav.classList.toggle('open');
+            toggle.setAttribute('aria-expanded', open);
         });
-
-        // Mobile navigation toggle
-        document.addEventListener('DOMContentLoaded', function() {
-            const toggleBtn = document.querySelector('.nav-toggle');
-            const sidebar = document.querySelector('.sidebar');
-            const learnNav = document.querySelector('.learn-nav');
-            
-            if (toggleBtn && sidebar && learnNav) {
-                toggleBtn.addEventListener('click', function() {
-                    const isOpen = learnNav.classList.toggle('open');
-                    sidebar.classList.toggle('open');
-                    toggleBtn.setAttribute('aria-expanded', isOpen);
-                });
-            }
-            
-            // Auto-close nav on link click (mobile only)
-            document.querySelectorAll('.learn-nav a').forEach(link => {
-                link.addEventListener('click', () => {
-                    if (window.innerWidth <= 768) {
-                        sidebar.classList.remove('open');
-                        learnNav.classList.remove('open');
-                        if (toggleBtn) {
-                            toggleBtn.setAttribute('aria-expanded', 'false');
-                        }
-                    }
-                });
+        nav.querySelectorAll('a').forEach((link) => {
+            link.addEventListener('click', () => {
+                nav.classList.remove('open');
+                toggle.setAttribute('aria-expanded', 'false');
             });
         });
     </script>

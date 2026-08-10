@@ -173,8 +173,11 @@ struct ADSBAggregateBlock : public cler::BlockBase {
         draw_aircraft(draw_list, canvas_pos, canvas_size);
 
         ImGui::SetCursorScreenPos(ImVec2(canvas_pos.x + INFO_TEXT_OFFSET_X, canvas_p1.y - INFO_TEXT_OFFSET_Y));
-        ImGui::Text("Aircraft: %zu | Center: %.2f°N, %.2f°W | Zoom: %.1fx",
-                    _aircraft.size(), _map_center_lat, -_map_center_lon, _map_zoom);
+        const char latitude_hemisphere = _map_center_lat >= 0.0f ? 'N' : 'S';
+        const char longitude_hemisphere = _map_center_lon >= 0.0f ? 'E' : 'W';
+        ImGui::Text("Aircraft: %zu | Center: %.2f°%c, %.2f°%c | Zoom: %.1fx",
+                    _aircraft.size(), std::fabs(_map_center_lat), latitude_hemisphere,
+                    std::fabs(_map_center_lon), longitude_hemisphere, _map_zoom);
 
         handle_map_interaction(canvas_pos, canvas_size);
 
