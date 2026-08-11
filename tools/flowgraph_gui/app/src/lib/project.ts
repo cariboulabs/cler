@@ -1,5 +1,12 @@
 import type { Edge as FlowEdge, Node as FlowNode } from '@xyflow/svelte';
-import { authorityOf, countOf, specOfBlock, type BlockSpec } from './palette';
+import {
+  authorityOf,
+  countOf,
+  missingRequiredFields,
+  specOfBlock,
+  type BlockSpec,
+  type RequiredBlockField
+} from './palette';
 import type { Block, Edge, Port, Site, Span } from './schema';
 
 export const NODE_WIDTH = 230;
@@ -13,6 +20,7 @@ export type BlockNodeData = {
   inputs: PortSlot[];
   hasOutput: boolean;
   hasRunner: boolean;
+  missingRequiredFields: RequiredBlockField[];
 };
 
 export type BlockNode = FlowNode<BlockNodeData, 'block'>;
@@ -194,7 +202,8 @@ function toNode(site: Site, block: Block, specs: BlockSpec[], connectable: boole
       block,
       inputs,
       hasOutput: offersOutput(site, block, spec),
-      hasRunner: hasRunner(site, block.var)
+      hasRunner: hasRunner(site, block.var),
+      missingRequiredFields: spec ? missingRequiredFields(block, spec) : []
     },
     draggable: true,
     connectable: connectable && block.editable,

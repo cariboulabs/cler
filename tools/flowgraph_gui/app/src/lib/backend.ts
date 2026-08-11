@@ -75,6 +75,16 @@ export function applyCommands(
   return documentCall('apply_commands', { path, commands, baseRevision });
 }
 
+export type PreviewResult = { diff: string; summary: { splices: number } };
+
+export function previewCommands(
+  path: string,
+  commands: Command[],
+  baseRevision: number
+): Promise<PreviewResult> {
+  return invoker('preview_commands', { path, commands, baseRevision }) as Promise<PreviewResult>;
+}
+
 export async function loadPalette(path: string): Promise<BlockSpec[]> {
   const specs = await invoker('palette', { path });
   return Array.isArray(specs) ? (specs as BlockSpec[]) : [];
@@ -193,6 +203,19 @@ export function onAssistantDelta(
 
 export function onAssistantDone(handler: (payload: AssistantDone) => void): Promise<UnlistenFn> {
   return listen<AssistantDone>('assistant-done', (event) => handler(event.payload));
+}
+
+export type AssistantProposal = {
+  path: string;
+  rationale: string;
+  commands: Command[];
+  dropped: number;
+};
+
+export function onAssistantProposal(
+  handler: (payload: AssistantProposal) => void
+): Promise<UnlistenFn> {
+  return listen<AssistantProposal>('assistant-proposal', (event) => handler(event.payload));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -181,6 +181,19 @@ fn dispatch(
                 _ => Reply::Loud("apply_commands needs baseRevision and commands".to_string()),
             }
         }
+        "preview_commands" => {
+            let base = args
+                .get("base_revision")
+                .or_else(|| args.get("baseRevision"))
+                .and_then(Value::as_u64);
+            let commands = args.get("commands").and_then(Value::as_array).cloned();
+            match (base, commands) {
+                (Some(base), Some(commands)) => {
+                    outcome(document::preview(docs, &path, base, commands))
+                }
+                _ => Reply::Loud("preview_commands needs baseRevision and commands".to_string()),
+            }
+        }
         "undo" => outcome(document::undo(docs, &path)),
         "redo" => outcome(document::redo(docs, &path)),
         "reload_document" => outcome(document::reload(docs, &path)),

@@ -1,4 +1,10 @@
-import { authorityOf, countOf, type BlockSpec, type PortCount } from './palette';
+import {
+  authorityOf,
+  countOf,
+  isRequiredArgumentPlaceholder,
+  type BlockSpec,
+  type PortCount
+} from './palette';
 import type { Block, Command, Site, SiteConfig } from './schema';
 
 export type Field = {
@@ -20,6 +26,10 @@ export type Outcome =
   | { ok: false; message: string; record: Record<string, unknown> | null };
 
 const NO_DISPLAY_NAME = 'this block has no display-name argument';
+
+function editableArgument(text: string): string {
+  return isRequiredArgumentPlaceholder(text) ? '' : text;
+}
 
 export function blurAction(draft: string | undefined, committed: string): FieldAction {
   if (draft === undefined || draft === committed) return { kind: 'revert' };
@@ -155,7 +165,7 @@ export function blockFields(
       id: `${block.var}.template.${index}`,
       label: naming.label,
       slot: naming.slot,
-      value: arg.text,
+      value: editableArgument(arg.text),
       hint: block.editable
         ? arg.resolved && arg.resolved !== arg.text
           ? `resolves to ${arg.resolved}`
@@ -180,7 +190,7 @@ export function blockFields(
       id: `${block.var}.ctor.${index}`,
       label: naming.label,
       slot: naming.slot,
-      value: arg.text,
+      value: editableArgument(arg.text),
       hint: block.editable ? naming.hint : reason,
       hintIsCode: block.editable,
       editable: block.editable,

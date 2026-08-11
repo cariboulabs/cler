@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use cler_flowgraph_gui::assistant::{self, Chunk, Turn};
+use cler_flowgraph_gui::assistant::{self, Chunk, Proposal, Turn};
 use cler_graph::palette_types::{Direction, Port, PortCount};
-use cler_graph::BlockSpec;
-use serde_json::Value;
+use cler_graph::{BlockSpec, Command};
+use serde_json::{json, Value};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -302,7 +302,8 @@ fn the_request_carries_the_model_the_context_and_the_history() {
     ];
 
     let body: Value =
-        serde_json::from_str(&assistant::request("<graph_model/>", "why?", &history)).unwrap();
+        serde_json::from_str(&assistant::request("<graph_model/>", "why?", &history, false))
+            .unwrap();
 
     assert_eq!(body["model"], assistant::MODEL);
     assert_eq!(body["stream"], true);
@@ -316,7 +317,321 @@ fn the_request_carries_the_model_the_context_and_the_history() {
     assert_eq!(body["system"][1]["text"], "<graph_model/>");
     assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
 
+    assert!(body.get("tools").is_none(), "a read-only file offers no tool");
     let preamble = body["system"][0]["text"].as_str().unwrap();
     assert!(preamble.contains("You explain; you do not act"), "{preamble}");
     assert!(preamble.contains("## 4. "), "the guide is missing");
+}
+
+/* ============================================================ the tool */
+
+const RENAME: &str = r#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_02","type":"message","role":"assistant","model":"claude-opus-5","content":[],"usage":{"input_tokens":5000,"output_tokens":1}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Renaming the source "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"so the legend reads right."}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_01","name":"propose_commands","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"rationale\":\"rename "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"source1 to Chirp\",\"commands\":[{\"command\""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":":\"set_display_name\",\"site\":0,"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"block\":\"source1\",\"new_text\":\"Chirp\"}]}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":98}}
+
+event: message_stop
+data: {"type":"message_stop"}
+"#;
+
+const TWICE: &str = r#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_01","name":"propose_commands","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"rationale\":\"first\",\"commands\":[{\"command\":\"remove_from_graph\",\"site\":0,\"block\":\"plot\"}]}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_02","name":"propose_commands","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"rationale\":\"second\",\"commands\":[{\"command\":\"delete_block\",\"site\":0,\"block\":\"adder\"}]}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_stop
+data: {"type":"message_stop"}
+"#;
+
+const DECLINED_MID_TOOL: &str = r#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_01","name":"propose_commands","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"rationale\":\"half a "}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber"}},"usage":{"output_tokens":12}}
+"#;
+
+const NOT_A_COMMAND: &str = r#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_01","name":"propose_commands","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"rationale\":\"rewire it\",\"commands\":[{\"command\":\"rewire\",\"site\":0}]}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_stop
+data: {"type":"message_stop"}
+"#;
+
+fn spoken(transcript: &str) -> (assistant::Reply, String) {
+    let mut said = String::new();
+    let reply = assistant::gather(transcript.lines().map(str::to_string), |text| {
+        said.push_str(text);
+    });
+    (reply, said)
+}
+
+fn tool_variants() -> Vec<Value> {
+    assistant::tool()["input_schema"]["properties"]["commands"]["items"]["anyOf"]
+        .as_array()
+        .expect("the tool offers a list of command variants")
+        .clone()
+}
+
+fn kind_of(schema: &Value) -> String {
+    match &schema["type"] {
+        Value::Array(kinds) => kinds[0].as_str().unwrap_or_default().to_string(),
+        other => other.as_str().unwrap_or_default().to_string(),
+    }
+}
+
+fn sample(schema: &Value) -> Value {
+    if let Some(fixed) = schema.get("const") {
+        return fixed.clone();
+    }
+    match kind_of(schema).as_str() {
+        "string" => json!("x"),
+        "integer" => json!(1),
+        "boolean" => json!(true),
+        "array" => json!([sample(&schema["items"])]),
+        "object" => Value::Object(
+            schema["properties"]
+                .as_object()
+                .expect("an object schema lists its properties")
+                .iter()
+                .map(|(name, field)| (name.clone(), sample(field)))
+                .collect(),
+        ),
+        other => panic!("no sample value for schema type {other:?}"),
+    }
+}
+
+fn tag(command: &Command) -> &'static str {
+    match command {
+        Command::SetParam { .. } => "set_param",
+        Command::SetTemplateArg { .. } => "set_template_arg",
+        Command::SetDisplayName { .. } => "set_display_name",
+        Command::SetConfig { .. } => "set_config",
+        Command::Connect { .. } => "connect",
+        Command::Disconnect { .. } => "disconnect",
+        Command::AddBlock { .. } => "add_block",
+        Command::RemoveFromGraph { .. } => "remove_from_graph",
+        Command::DeleteBlock { .. } => "delete_block",
+        Command::DefineBlock { .. } => "define_block",
+    }
+}
+
+#[test]
+fn the_tool_schema_matches_the_command_enum_field_for_field() {
+    let variants = tool_variants();
+    let mut covered: Vec<String> = Vec::new();
+
+    for schema in &variants {
+        let named = schema["properties"]["command"]["const"]
+            .as_str()
+            .expect("every variant pins its command tag")
+            .to_string();
+        let offered: Vec<String> = schema["properties"]
+            .as_object()
+            .expect("properties")
+            .keys()
+            .cloned()
+            .collect();
+        let required: Vec<String> = schema["required"]
+            .as_array()
+            .expect("required")
+            .iter()
+            .map(|name| name.as_str().expect("a field name").to_string())
+            .collect();
+        assert_eq!(
+            schema["additionalProperties"],
+            json!(false),
+            "{named} invites fields the enum would reject"
+        );
+
+        let full = sample(schema);
+        let parsed: Command = serde_json::from_value(full.clone())
+            .unwrap_or_else(|cause| panic!("{named} does not deserialize: {cause}\n{full:#}"));
+        assert_eq!(tag(&parsed), named, "{named} parsed into another variant");
+        covered.push(named.clone());
+
+        let emitted: Vec<String> = serde_json::to_value(&parsed)
+            .expect("a command serializes")
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(
+            emitted, offered,
+            "{named}: serde carries {emitted:?}, the schema offers {offered:?}"
+        );
+
+        for field in &offered {
+            let mut without = full.clone();
+            without
+                .as_object_mut()
+                .expect("an object")
+                .remove(field.as_str());
+            let accepted = serde_json::from_value::<Command>(without).is_ok();
+            assert_eq!(
+                accepted,
+                !required.contains(field),
+                "{named}.{field}: the schema calls it required={}, serde needs it={}",
+                required.contains(field),
+                !accepted
+            );
+        }
+
+        let mut extra = full;
+        extra["surprise"] = json!(1);
+        assert!(
+            serde_json::from_value::<Command>(extra).is_err(),
+            "{named} would silently swallow an unknown field"
+        );
+    }
+
+    covered.sort();
+    covered.dedup();
+    assert_eq!(
+        covered.len(),
+        variants.len(),
+        "two schema variants map onto one command"
+    );
+    assert_eq!(covered.len(), 10, "the schema is missing a command");
+}
+
+#[test]
+fn the_tool_reaches_the_model_only_when_the_file_can_be_edited() {
+    let acting: Value =
+        serde_json::from_str(&assistant::request("<graph_model/>", "rename it", &[], true))
+            .unwrap();
+    let reading: Value =
+        serde_json::from_str(&assistant::request("<graph_model/>", "rename it", &[], false))
+            .unwrap();
+
+    assert_eq!(acting["tools"][0]["name"], assistant::TOOL_NAME);
+    assert_eq!(acting["tools"].as_array().unwrap().len(), 1);
+    assert!(reading.get("tools").is_none(), "example mode offers no tool");
+
+    let permitted = acting["system"][0]["text"].as_str().unwrap();
+    assert!(permitted.contains("propose_commands"), "{permitted}");
+    assert!(permitted.contains("second tool call"), "{permitted}");
+    assert!(
+        permitted.contains("cannot also be wired in it"),
+        "the prompt must name the one-transaction rule the planner enforces: {permitted}"
+    );
+    assert!(
+        !permitted.contains("You explain; you do not act"),
+        "the read-only rule leaked into the acting prompt"
+    );
+}
+
+#[test]
+fn a_tool_call_split_across_deltas_becomes_one_proposal_beside_the_text() {
+    let (reply, said) = spoken(RENAME);
+
+    assert_eq!(said, "Renaming the source so the legend reads right.");
+    assert_eq!(reply.failure, None);
+    assert_eq!(reply.dropped, 0);
+    assert_eq!(
+        reply.proposal,
+        Some(Proposal {
+            rationale: "rename source1 to Chirp".to_string(),
+            commands: vec![json!({
+                "command": "set_display_name",
+                "site": 0,
+                "block": "source1",
+                "new_text": "Chirp"
+            })]
+        })
+    );
+    assert_eq!((reply.input, reply.output), (5000, 98));
+}
+
+#[test]
+fn a_second_tool_call_in_one_turn_is_dropped_and_counted() {
+    let (reply, _) = spoken(TWICE);
+
+    let proposal = reply.proposal.expect("the first call survives");
+    assert_eq!(proposal.rationale, "first");
+    assert_eq!(proposal.commands[0]["command"], "remove_from_graph");
+    assert_eq!(reply.dropped, 1, "the second call is dropped, not merged");
+    assert_eq!(reply.failure, None);
+}
+
+#[test]
+fn a_refusal_part_way_through_a_tool_call_yields_no_proposal() {
+    let (reply, _) = spoken(DECLINED_MID_TOOL);
+
+    assert_eq!(reply.proposal, None, "half a tool call is not a proposal");
+    let failure = reply.failure.expect("a refusal is reported");
+    assert!(failure.contains("declined"), "{failure}");
+    assert!(failure.contains("cyber"), "{failure}");
+}
+
+#[test]
+fn a_command_the_editor_does_not_have_is_refused_at_the_boundary() {
+    let (reply, _) = spoken(NOT_A_COMMAND);
+
+    assert_eq!(reply.proposal, None);
+    let failure = reply.failure.expect("an unknown command is reported");
+    assert!(failure.contains("cannot run"), "{failure}");
+}
+
+#[test]
+fn a_plain_answer_carries_no_proposal() {
+    let (reply, said) = spoken(STREAM);
+
+    assert_eq!(said, "chirp (chirp) feeds the throttle.");
+    assert_eq!(reply.proposal, None);
+    assert_eq!(reply.dropped, 0);
+    assert_eq!(reply.failure, None);
 }

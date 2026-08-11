@@ -13,13 +13,22 @@
   const block: BlockNodeData['block'] = $derived(data.block);
   const badge = $derived(block.in_graph ? NO_RUNNER_BADGE : 'unwired');
   const badgeHint = $derived(block.in_graph ? NO_RUNNER_HINT : 'declared but not in the runner list');
+  const invalid = $derived(data.missingRequiredFields.length > 0);
+  const invalidHint = $derived(
+    invalid
+      ? `Missing required fields: ${data.missingRequiredFields.map((field) => field.name).join(', ')}`
+      : null
+  );
+  const hint = $derived([block.read_only_reason, invalidHint].filter(Boolean).join('\n') || undefined);
 </script>
 
 <div
   class="block"
   class:unwired={!data.hasRunner}
   class:readonly={!block.editable}
-  title={block.read_only_reason ?? undefined}
+  class:invalid
+  data-invalid={invalid ? 'true' : undefined}
+  title={hint}
 >
   <header>
     <span class="name">{block.display_name ?? block.var}</span>
@@ -64,6 +73,10 @@
     color: var(--fg);
     font-size: 12px;
     line-height: 1.4;
+  }
+  .block.invalid {
+    background: var(--danger-bg);
+    border-color: var(--danger-border);
   }
   header {
     display: flex;

@@ -66,7 +66,6 @@
     ondeleteblock: (block: string) => void;
     ondisconnect: (edge: string) => void;
     onaddhere: (clientX: number, clientY: number) => void;
-    onnewblock: () => void;
     onproblem: (problem: Problem) => void;
   };
 
@@ -117,7 +116,6 @@
     ondeleteblock,
     ondisconnect,
     onaddhere,
-    onnewblock,
     onproblem
   }: Props = $props();
 
@@ -131,6 +129,17 @@
   const MENU_WIDTH = 200;
   const MENU_HEIGHT = 260;
   const MENU_IDS = ['check', 'build', 'run', 'undo', 'redo', 'fit'];
+  const TOOLBAR_IDS = [
+    'check',
+    'build',
+    'run',
+    'open',
+    'undo',
+    'redo',
+    'zoom-out',
+    'zoom-in',
+    'fit'
+  ];
   const CTRL_KEYS: Record<string, string> = {
     y: 'redo',
     o: 'open',
@@ -165,21 +174,6 @@
       'M10 2h2.5A1.5 1.5 0 0 1 14 3.5V6',
       'M14 10v2.5a1.5 1.5 0 0 1-1.5 1.5H10',
       'M6 14H3.5A1.5 1.5 0 0 1 2 12.5V10'
-    ],
-    drawer: [
-      'M2.4 2.6h11.2a.9.9 0 0 1 .9.9v9a.9.9 0 0 1-.9.9H2.4a.9.9 0 0 1-.9-.9v-9a.9.9 0 0 1 .9-.9Z',
-      'M1.5 9.4h13',
-      'M4.4 5.1 6.2 6.9 4.4 8.7',
-      'M8 8.7h3.4'
-    ],
-    assistant: [
-      'M2.5 3.4h11a.9.9 0 0 1 .9.9v6a.9.9 0 0 1-.9.9H6.8L3.4 13.6v-2.4h-.9a.9.9 0 0 1-.9-.9v-6a.9.9 0 0 1 .9-.9Z'
-    ],
-    chrome: [
-      'M2 3.5h12',
-      'M2 12.5h12',
-      'M5.6 6.4 8 8.8l2.4-2.4',
-      'M10.4 10.6 8 8.8'
     ]
   };
 
@@ -282,6 +276,7 @@
       run: ontogglechrome
     }
   ]);
+  const toolbarActions = $derived(actions.filter((action) => TOOLBAR_IDS.includes(action.id)));
 
   function paneEntries(at: Menu): Action[] {
     return [
@@ -292,14 +287,6 @@
         enabled: canEdit,
         hint: canEdit ? undefined : editNote,
         run: () => onaddhere(at.x, at.y)
-      },
-      {
-        id: 'new-block',
-        label: 'New block type…',
-        shortcut: '',
-        enabled: canEdit,
-        hint: canEdit ? 'defines a new struct in this file' : editNote,
-        run: onnewblock
       },
       ...actions.filter((action) => MENU_IDS.includes(action.id))
     ];
@@ -510,8 +497,8 @@
   >
     {listed.length} problem{listed.length === 1 ? '' : 's'}
   </button>
-  {#each actions as action (action.id)}
-    {#if action.id === 'open' || action.id === 'zoom-out' || action.id === 'drawer'}
+  {#each toolbarActions as action (action.id)}
+    {#if action.id === 'open' || action.id === 'zoom-out'}
       <span class="sep"></span>
     {/if}
     <button

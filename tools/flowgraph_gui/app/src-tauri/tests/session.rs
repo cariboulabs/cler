@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use cler_flowgraph_gui::assistant;
 use cler_flowgraph_gui::document::{self, Documents};
 use serde_json::{json, Value};
 
@@ -28,6 +29,19 @@ fn text(path: &Path) -> String {
 
 fn as_str(path: &Path) -> &str {
     path.to_str().expect("utf-8 path")
+}
+
+#[test]
+fn bundled_example_paths_resolve_from_the_application_directory() {
+    let target = document::canonical("desktop_examples/hello_world.cpp").expect("example path");
+    assert_eq!(
+        target,
+        corpus("hello_world.cpp").canonicalize().expect("corpus")
+    );
+    let conflict =
+        document::canonical("tools/flowgraph_gui/cler-graph/tests/data/type_conflict.cpp")
+            .expect("fixture path");
+    assert!(conflict.ends_with("cler-graph/tests/data/type_conflict.cpp"));
 }
 
 fn set_param(block: &str, index: usize, new_text: &str) -> Vec<Value> {
@@ -224,4 +238,195 @@ fn parse_file_reports_the_crate_model_with_a_digest() {
     assert_eq!(value["has_errors"], false);
     assert_eq!(value["sha256"].as_str().map(str::len), Some(64));
     assert_eq!(value["sites"].as_array().map(Vec::len), Some(1));
+}
+
+#[test]
+fn preview_shows_the_diff_it_would_write_and_writes_nothing() {
+    let path = temp_copy("hello_world.cpp");
+    let original = text(&path);
+    let docs = Documents::default();
+    document::open(&docs, as_str(&path)).expect("open");
+
+    let preview = document::preview(&docs, as_str(&path), 0, set_param("source1", 1, "4.25f"))
+        .expect("preview plans");
+
+    assert_eq!(preview.summary.splices, 1);
+    assert!(preview.diff.starts_with("@@ -"), "{}", preview.diff);
+    assert!(
+        preview
+            .diff
+            .lines()
+            .any(|line| line.starts_with('-') && line.contains("1.0f, 1.0f, SPS")),
+        "{}",
+        preview.diff
+    );
+    assert!(
+        preview
+            .diff
+            .lines()
+            .any(|line| line.starts_with('+') && line.contains("4.25f, 1.0f, SPS")),
+        "{}",
+        preview.diff
+    );
+    assert!(
+        preview
+            .diff
+            .lines()
+            .any(|line| line.starts_with(' ') && line.contains("const size_t SPS")),
+        "the diff carries context lines: {}",
+        preview.diff
+    );
+
+    assert_eq!(text(&path), original, "preview wrote to the file");
+    let reopened = document::open(&docs, as_str(&path)).expect("reopen");
+    assert_eq!(reopened.revision, 0, "preview committed a revision");
+    assert!(!reopened.can_undo);
+}
+
+#[test]
+fn preview_of_two_commands_reports_both_splices_in_one_diff() {
+    let path = temp_copy("hello_world.cpp");
+    let docs = Documents::default();
+    document::open(&docs, as_str(&path)).expect("open");
+
+    let preview = document::preview(
+        &docs,
+        as_str(&path),
+        0,
+        vec![
+            json!({
+                "command": "set_display_name",
+                "site": 0,
+                "block": "source1",
+                "new_text": "Chirp",
+            }),
+            json!({
+                "command": "set_display_name",
+                "site": 0,
+                "block": "throttle",
+                "new_text": "Governor",
+            }),
+        ],
+    )
+    .expect("preview plans");
+
+    assert_eq!(preview.summary.splices, 2);
+    let added: Vec<&str> = preview
+        .diff
+        .lines()
+        .filter(|line| line.starts_with('+'))
+        .collect();
+    assert!(added.iter().any(|line| line.contains("\"Chirp\"")), "{added:?}");
+    assert!(
+        added.iter().any(|line| line.contains("\"Governor\"")),
+        "{added:?}"
+    );
+}
+
+#[test]
+fn preview_refuses_with_the_same_reasons_apply_would_give() {
+    let path = temp_copy("hello_world.cpp");
+    let original = text(&path);
+    let docs = Documents::default();
+    document::open(&docs, as_str(&path)).expect("open");
+
+    let stale = document::preview(&docs, as_str(&path), 7, set_param("source1", 1, "4.25f"))
+        .expect_err("a stale base is refused");
+    assert!(stale.contains("revision_mismatch"), "{stale}");
+
+    let missing = document::preview(&docs, as_str(&path), 0, set_param("ghost", 1, "4.25f"))
+        .expect_err("an unknown block is refused");
+    assert!(missing.contains("unknown_block"), "{missing}");
+
+    let used = document::preview(
+        &docs,
+        as_str(&path),
+        0,
+        vec![json!({ "command": "delete_block", "site": 0, "block": "plot" })],
+    )
+    .expect_err("a block used outside the graph is refused");
+    assert!(used.contains("references_outside_graph"), "{used}");
+    assert!(used.contains("spans"), "the refusal lists where: {used}");
+
+    let unknown = document::preview(
+        &docs,
+        as_str(&path),
+        0,
+        vec![json!({ "command": "rewire", "site": 0 })],
+    )
+    .expect_err("a command the editor does not have is refused");
+    assert!(unknown.contains("rewire"), "{unknown}");
+
+    assert_eq!(text(&path), original, "a refused preview touched the file");
+}
+
+#[test]
+fn preview_renders_an_inserted_declaration_as_a_pure_addition() {
+    let path = temp_copy("hello_world.cpp");
+    let docs = Documents::default();
+    document::open(&docs, as_str(&path)).expect("open");
+
+    let preview = document::preview(
+        &docs,
+        as_str(&path),
+        0,
+        vec![json!({
+            "command": "add_block",
+            "site": 0,
+            "type": "ThrottleBlock",
+            "template_args": ["float"],
+            "ctor_args": ["\"Second\"", "SPS"],
+            "var_name": "throttle2",
+        })],
+    )
+    .expect("preview plans");
+
+    let added: Vec<&str> = preview
+        .diff
+        .lines()
+        .filter(|line| line.starts_with('+'))
+        .collect();
+    let removed: Vec<&str> = preview
+        .diff
+        .lines()
+        .filter(|line| line.starts_with('-'))
+        .collect();
+    assert_eq!(
+        added,
+        vec!["+    ThrottleBlock<float> throttle2(\"Second\", SPS);"]
+    );
+    assert!(
+        removed.is_empty(),
+        "an insertion should not read as a rewrite: {removed:?}"
+    );
+    assert!(
+        preview.diff.contains(" auto flowgraph = cler::make_desktop_flowgraph("),
+        "the line the block was inserted before stays context: {}",
+        preview.diff
+    );
+}
+
+#[test]
+fn a_file_no_command_could_edit_never_reaches_the_model_with_a_tool() {
+    let path = temp_copy("hello_world.cpp");
+    let docs = Documents::default();
+    let sound = document::open(&docs, as_str(&path)).expect("open");
+    assert!(
+        assistant::actionable(&sound),
+        "a parsed, editable file can be proposed against"
+    );
+
+    let broken = path.with_file_name("broken.cpp");
+    std::fs::write(&broken, "int main() { this is not c++ (\n").expect("write");
+    let state = document::open(&docs, as_str(&broken)).expect("open");
+
+    assert!(
+        !assistant::actionable(&state),
+        "a file with parse errors refuses every command, so the tool is withheld"
+    );
+    assert!(
+        !assistant::request("<ctx/>", "fix it", &[], assistant::actionable(&state))
+            .contains(assistant::TOOL_NAME),
+        "a withheld tool must not reach the request body"
+    );
 }

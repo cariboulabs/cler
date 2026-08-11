@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { REQUIRED_ARGUMENT_PLACEHOLDER } from '../src/lib/palette';
 import { lineOfOffset, type Span } from '../src/lib/schema';
 import {
   anchor,
@@ -93,38 +94,38 @@ describe('the palette lists what the crate found', () => {
 
 describe('adding a block declares it unwired', () => {
   it(
-    'drops from the palette, pre-fills the form and sends exactly one add_block',
+    'drops from the palette immediately and stays invalid until required fields are filled',
     async () => {
       const page = await boot();
       await page.fill('[data-testid="palette-search"]', 'gain');
       await dragBlock(page, 'GainBlock', { x: 620, y: 620 });
-      await page.waitForSelector('[data-testid="add-block"]');
-      await shot(page, 'palette-drag-popover');
-
-      expect(await page.inputValue('[data-add-field="var_name"]')).toBe('gain');
-      expect(await page.inputValue('[data-add-field="ctor.0"]')).toBe('"gain"');
-      expect(await page.inputValue('[data-add-field="ctor.2"]')).toBe('0');
-      await page.fill('[data-add-field="template.0"]', 'float');
-      await page.fill('[data-add-field="ctor.1"]', '2.0f');
-      await page.click('[data-testid="add-confirm"]');
 
       await expect.poll(() => commands(page)).toEqual([
         {
           command: 'add_block',
           site: 0,
           type: 'GainBlock',
-          template_args: ['float'],
-          ctor_args: ['"gain"', '2.0f', '0'],
+          template_args: [REQUIRED_ARGUMENT_PLACEHOLDER],
+          ctor_args: ['"gain"', REQUIRED_ARGUMENT_PLACEHOLDER, '0'],
           var_name: 'gain'
         }
       ]);
-      expect((await sent(page)).length).toBe(1);
 
       const node = page.locator('.svelte-flow__node[data-id="gain"]');
       await node.waitFor();
       expect(await node.locator('.block.unwired').count()).toBe(1);
+      expect(await node.locator('.block').getAttribute('data-invalid')).toBe('true');
       expect(await page.textContent('.inspector .title')).toBe('gain');
+      expect(await page.inputValue('input[data-field="gain.template.0"]')).toBe('');
+      expect(await page.inputValue('input[data-field="gain.ctor.1"]')).toBe('');
       expect(await page.locator('[data-testid="add-block"]').count()).toBe(0);
+      await shot(page, 'palette-drag-required');
+
+      await page.fill('input[data-field="gain.template.0"]', 'float');
+      await page.press('input[data-field="gain.template.0"]', 'Enter');
+      await page.fill('input[data-field="gain.ctor.1"]', '2.0f');
+      await page.press('input[data-field="gain.ctor.1"]', 'Enter');
+      await expect.poll(() => node.locator('.block').getAttribute('data-invalid')).toBe(null);
       await page.close();
     },
     CASE
@@ -136,10 +137,6 @@ describe('adding a block declares it unwired', () => {
       const page = await boot();
       await page.fill('[data-testid="palette-search"]', 'gain');
       await dragBlock(page, 'GainBlock', { x: 700, y: 660 });
-      await page.waitForSelector('[data-testid="add-block"]');
-      await page.fill('[data-add-field="template.0"]', 'float');
-      await page.fill('[data-add-field="ctor.1"]', '2.0f');
-      await page.click('[data-testid="add-confirm"]');
 
       const node = page.locator('.svelte-flow__node[data-id="gain"]');
       await node.waitFor();
@@ -172,9 +169,6 @@ describe('adding a block declares it unwired', () => {
       await page.fill('[data-testid="palette-search"]', 'gain');
       await dragBlock(page, 'GainBlock', { x: 620, y: 620 });
       await page.waitForSelector('[data-testid="add-block"]');
-      await page.fill('[data-add-field="template.0"]', 'float');
-      await page.fill('[data-add-field="ctor.1"]', '2.0f');
-      await page.click('[data-testid="add-confirm"]');
 
       await expect.poll(() => page.textContent('[data-add-error="var_name"]')).toBe(
         'gain is already declared in this function'
@@ -276,7 +270,7 @@ describe('wiring is one gesture and one transaction', () => {
     async () => {
       const model = withoutEdge(modelOf('mass_spring_damper'), 'throttle', 'plant');
       const page = await boot({ fixture: 'mass_spring_damper', model });
-      await page.click('[data-testid="drawer"]');
+      await page.keyboard.press('Control+`');
       await page.waitForSelector('[data-testid="drawer-body"]');
       await page.click('.svelte-flow__node[data-id="fanout"]');
       await expect
@@ -543,7 +537,6 @@ describe('each right-click target has its own menu', () => {
       expect(await page.getAttribute('[data-testid="context-menu"]', 'data-menu')).toBe('pane');
       expect(await menuIds(page)).toEqual([
         'menu-add-here',
-        'menu-new-block',
         'menu-check',
         'menu-build',
         'menu-run',
@@ -611,10 +604,6 @@ describe('every topology gesture round-trips through undo', () => {
 
       await page.fill('[data-testid="palette-search"]', 'gain');
       await dragBlock(page, 'GainBlock', { x: 620, y: 640 });
-      await page.waitForSelector('[data-testid="add-block"]');
-      await page.fill('[data-add-field="template.0"]', 'float');
-      await page.fill('[data-add-field="ctor.1"]', '2.0f');
-      await page.click('[data-testid="add-confirm"]');
       await page.locator('.svelte-flow__node[data-id="gain"]').waitFor();
       await undo.click();
       await expect.poll(nodes).toBe(before.nodes);

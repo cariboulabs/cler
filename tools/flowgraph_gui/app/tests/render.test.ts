@@ -355,7 +355,6 @@ describe('editing against a fake backend', () => {
     await editor.addInitScript(installFakeBackend, { path: FAKE_PATH, model: editableModel() });
     await editor.addInitScript(openInspector);
     await editor.goto(origin, { waitUntil: 'load' });
-    await editor.click('button.primary');
     await editor.waitForSelector(`.path[title="${FAKE_PATH}"]`);
     await editor.waitForSelector('.svelte-flow__node');
   }, CASE_TIMEOUT);
@@ -566,7 +565,6 @@ describe('top bar, context menu and shortcuts', () => {
     await editor.addInitScript(installFakeBackend, { path: FAKE_PATH, model: editableModel() });
     await editor.addInitScript(openInspector);
     await editor.goto(origin, { waitUntil: 'load' });
-    await editor.click('button.primary');
     await editor.waitForSelector('.svelte-flow__node');
   }, CASE_TIMEOUT);
 
@@ -575,7 +573,7 @@ describe('top bar, context menu and shortcuts', () => {
   });
 
   it(
-    'puts every action in the top bar with its shortcut, history enabled only when it exists',
+    'keeps document and canvas actions in the top bar, with history enabled only when it exists',
     async () => {
       const ids = ['open', 'undo', 'redo', 'zoom-out', 'zoom-in', 'fit'];
       const titles = await Promise.all(
@@ -589,6 +587,9 @@ describe('top bar, context menu and shortcuts', () => {
         'Zoom in (Ctrl+=)',
         'Fit view (Ctrl+0)'
       ]);
+      for (const id of ['drawer', 'assistant', 'chrome']) {
+        expect(await editor.locator(`[data-testid="${id}"]`).count()).toBe(0);
+      }
 
       expect(await editor.locator('.sidebar button', { hasText: 'Undo' }).count()).toBe(0);
       expect(await editor.locator('[data-testid="undo"]').isDisabled()).toBe(true);
@@ -742,7 +743,6 @@ describe('retractable panels', () => {
     await editor.addInitScript(installFakeBackend, { path: FAKE_PATH, model: editableModel() });
     await editor.addInitScript(openInspector);
     await editor.goto(origin, { waitUntil: 'load' });
-    await editor.click('button.primary');
     await editor.waitForSelector('.svelte-flow__node');
   }, CASE_TIMEOUT);
 

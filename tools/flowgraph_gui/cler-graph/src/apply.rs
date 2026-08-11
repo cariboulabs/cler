@@ -169,6 +169,10 @@ impl PendingApply {
     pub fn changes(&self) -> bool {
         self.changed
     }
+
+    pub fn splices(&self) -> &[Splice] {
+        &self.splices
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

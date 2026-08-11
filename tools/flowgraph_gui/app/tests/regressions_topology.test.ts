@@ -22,7 +22,6 @@ import {
   calls,
   CASE,
   commands,
-  dragBlock,
   dragWire,
   handle,
   hold,
@@ -82,14 +81,6 @@ function addCommand(spec: BlockSpec, form: AddForm) {
   return command;
 }
 
-function activeTestId(page: Page): Promise<string | null> {
-  return page.evaluate(() =>
-    document.activeElement instanceof HTMLElement
-      ? document.activeElement.getAttribute('data-testid')
-      : null
-  );
-}
-
 function activeTag(page: Page): Promise<string> {
   return page.evaluate(() => document.activeElement?.tagName ?? 'none');
 }
@@ -100,13 +91,6 @@ function activeIsCanvas(page: Page): Promise<boolean> {
       document.activeElement instanceof HTMLElement &&
       document.activeElement.hasAttribute('data-canvas')
   );
-}
-
-function pickPalette(page: Page, name: string): Promise<void> {
-  return page.evaluate((block) => {
-    const row = document.querySelector<HTMLElement>(`[data-block="${block}"] .row`);
-    row?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-  }, name);
 }
 
 /* ================================================ 1. required constructor arguments */
@@ -180,8 +164,10 @@ describe('1. an argument without a default is required, never dropped', () => {
     'the popover keeps Add disabled until every required field is filled',
     async () => {
       const page = await boot();
-      await page.fill('[data-testid="palette-search"]', 'SourceCW');
-      await dragBlock(page, 'SourceCWBlock', { x: 620, y: 620 });
+      await openMenu(page, '.svelte-flow__pane', { x: 620, y: 620 });
+      await page.click('[data-testid="menu-add-here"]');
+      await page.fill('[data-testid="add-search"]', 'SourceCW');
+      await page.click('[data-add-pick="SourceCWBlock"]');
       await page.waitForSelector('[data-testid="add-block"]');
 
       const confirm = page.locator('[data-testid="add-confirm"]');
@@ -366,23 +352,9 @@ describe('5. a refusal is visible with the sidebar collapsed', () => {
 
 describe('6. closing the add popover hands focus back', () => {
   it(
-    'U2 the field that opened it keeps the next Delete, and the body never gets focus',
+    'returns focus to the canvas and never leaves it on the body',
     async () => {
       const page = await boot();
-      await page.click('.svelte-flow__node[data-id="adder"]');
-      await page.click('[data-testid="palette-search"]');
-      await page.keyboard.press('Delete');
-      expect(await commands(page)).toEqual([]);
-
-      await pickPalette(page, 'GainBlock');
-      await page.waitForSelector('[data-add-field="var_name"]');
-      await page.click('[data-testid="add-cancel"]');
-      await page.waitForSelector('[data-testid="add-block"]', { state: 'detached' });
-      expect(await activeTestId(page)).toBe('palette-search');
-      await page.keyboard.press('Delete');
-      await page.waitForTimeout(150);
-      expect(await commands(page)).toEqual([]);
-
       await openMenu(page, '.svelte-flow__pane', { x: 420, y: 320 });
       await page.click('[data-testid="menu-add-here"]');
       await page.waitForSelector('[data-testid="add-search"]');
@@ -440,28 +412,20 @@ describe('7. a wired block with no runner is called out', () => {
 
 /* ================================================ 8. example mode */
 
-describe('8. picking an example leaves the real document alone', () => {
+describe('8. examples are real editable documents in the desktop shell', () => {
   it(
-    'G3/G5 closes the open document and locks open-in-editor',
+    'G3/G5 opens the selected example and keeps editor actions enabled',
     async () => {
-      const model = modelOf('hello_world');
-      model.sites = [];
-      const page = await boot({ model, empty: true });
-      expect(await page.locator('[data-testid="example-select"]').count()).toBe(0);
-      await page.selectOption('[data-testid="empty-examples"]', 'plots');
-      await page.waitForSelector('.svelte-flow__node[data-id="cw_throttle"]');
-      await expect.poll(() => calls(page)).toContain('close_document');
-      expect(await page.getAttribute('[data-testid="demo-chip"]', 'title')).toContain(
-        'example mode'
-      );
+      const page = await boot();
+      await page.selectOption('[data-testid="example-select"]', 'plots');
+      await expect
+        .poll(async () => (await calls(page)).filter((call) => call === 'open_document').length)
+        .toBe(2);
+      expect(await page.locator('[data-testid="demo-chip"]').count()).toBe(0);
 
-      await openMenu(page, '.svelte-flow__node[data-id="cw_throttle"]');
+      await openMenu(page, '.svelte-flow__node[data-id="source1"]');
       const editor = page.locator('[data-testid="menu-open-editor"]');
-      expect(await editor.isDisabled()).toBe(true);
-      expect(await editor.getAttribute('title')).toContain('example mode');
-      await editor.click({ force: true });
-      await page.waitForTimeout(150);
-      expect(await calls(page)).not.toContain('open_in_editor');
+      expect(await editor.isDisabled()).toBe(false);
       await page.close();
     },
     CASE

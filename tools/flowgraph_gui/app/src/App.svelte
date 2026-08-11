@@ -17,13 +17,12 @@
   import AddBlock from './lib/AddBlock.svelte';
   import Assistant from './lib/Assistant.svelte';
   import BlockNode from './lib/BlockNode.svelte';
-  import DefineBlock from './lib/DefineBlock.svelte';
   import Inspector from './lib/Inspector.svelte';
   import Palette from './lib/Palette.svelte';
   import { type RailTab } from './lib/RailTabs.svelte';
   import RoutedEdge from './lib/RoutedEdge.svelte';
   import TypeLegend from './lib/TypeLegend.svelte';
-  import { historyOf, type Message, type Usage } from './lib/assistant';
+  import { diffLines, historyOf, type Message, type Proposal, type Usage } from './lib/assistant';
   import {
     applyCommands,
     assistantAsk,
@@ -31,6 +30,9 @@
     assistantStop,
     onAssistantDelta,
     onAssistantDone,
+    onAssistantProposal,
+    previewCommands,
+    type AssistantProposal,
     type AssistantStatus,
     buildTarget,
     checkDocument,
@@ -69,6 +71,7 @@
     addRefusal,
     connectPlan,
     DRAG_TYPE,
+    missingRequiredFields,
     reconnectPlan,
     specFor,
     specOfBlock,
@@ -79,12 +82,6 @@
     type FieldRefusal,
     type Wire
   } from './lib/palette';
-  import {
-    defineCommand,
-    defineRefusal,
-    structSpan,
-    type DefineForm
-  } from './lib/define';
   import {
     anchorSpans,
     blockSpans,
@@ -140,6 +137,7 @@
   const NO_SITE = 'no flowgraph site found in this file';
   const DROP_HINT = 'dropped — release on an input port to connect';
   const NO_SHELL = 'the assistant runs on your machine — open the desktop shell to use it';
+  const MOVED_ON = 'the graph moved on since that proposal — re-check it before applying';
   const RAIL_WIDTH = 44;
   const SIDEBAR_WIDTH = 280;
   const INSPECTOR_WIDTH = 320;
@@ -188,12 +186,10 @@
   let drawerOpen = $state(storedOpen(DRAWER_PANEL, false));
   let drawerHeight = $state(storedHeight());
   let stashed = $state.raw<[boolean, boolean, boolean] | null>(null);
-  let dismissed = $state(requestedFixture !== null);
   let failure = $state<string | null>(null);
   let drawer = $state<typeof CodeDrawer | null>(null);
   let inspector = $state<Inspector | null>(null);
   let adder = $state<AddBlock | null>(null);
-  let definer = $state<DefineBlock | null>(null);
   let specs = $state.raw<BlockSpec[]>([]);
   let selectedEdge = $state<string | null>(null);
   let focus = $state<Span | null>(null);
@@ -212,6 +208,7 @@
   let pendingReply = $state<number | null>(null);
   let turns = 0;
   let generation = 0;
+  let opening = 0;
   let alerted = 0;
   let pinned = new Map<string, EdgePoint>();
 
@@ -232,12 +229,9 @@
   const siteAnchor = $derived<Span | null>(anchors[siteIndex] ?? null);
   const emptyState = $derived.by(() => {
     if (failure !== null) return { title: 'that file did not open', reason: failure };
-    if (doc.model.sites.length === 0) return { title: 'nothing to show yet', reason: NO_SITE };
-    return { title: 'this is a bundled example', reason: viewerNote };
+    return { title: 'nothing to show yet', reason: NO_SITE };
   });
-  const empty = $derived(
-    failure !== null || doc.model.sites.length === 0 || (!editable && !dismissed)
-  );
+  const empty = $derived(failure !== null || doc.model.sites.length === 0);
   const fitPadding = $derived<FitPadding>({
     top: `${BAR_HEIGHT + INSET + FIT_GAP}px`,
     right: `${(rightOpen ? INSPECTOR_WIDTH : RAIL_WIDTH) + INSET + FIT_GAP}px`,
@@ -257,6 +251,19 @@
     const block = site?.blocks.find((candidate) => candidate.var === selected);
     return block ? specOfBlock(specs, block) : undefined;
   });
+  const incompleteBlocks = $derived.by(() =>
+    doc.model.sites.flatMap((candidate) =>
+      candidate.blocks.flatMap((block) => {
+        const spec = specOfBlock(specs, block);
+        return spec && missingRequiredFields(block, spec).length > 0 ? [block.var] : [];
+      })
+    )
+  );
+  const incompleteNote = $derived(
+    incompleteBlocks.length === 0
+      ? null
+      : `${incompleteBlocks.length} block${incompleteBlocks.length === 1 ? '' : 's'} missing required fields`
+  );
   const diagnostics = $derived<Placed[]>(
     placeDiagnostics(parseDiagnostics(diagLines), doc.path, doc.source, doc.model.sites)
   );
@@ -274,8 +281,11 @@
       hint: blocked ?? target?.reason ?? targetError ?? 'build this example with cmake (Ctrl+B)'
     },
     run: {
-      enabled: blocked === null && (running || (busy === null && target?.available === true)),
-      hint: blocked ?? target?.reason ?? targetError ?? 'run the built example (Ctrl+R)'
+      enabled:
+        blocked === null &&
+        (running || (incompleteNote === null && busy === null && target?.available === true)),
+      hint:
+        blocked ?? incompleteNote ?? target?.reason ?? targetError ?? 'run the built example (Ctrl+R)'
     }
   });
 
@@ -284,6 +294,12 @@
   $effect(() => storeOpen(BLOCKS_PANEL, blocksOpen));
   $effect(() => storeOpen(DRAWER_PANEL, drawerOpen));
   $effect(() => localStorage.setItem(DRAWER_HEIGHT, String(drawerHeight)));
+
+  $effect(() => {
+    if (!desktop) return;
+    const name = fixtureName;
+    void openExample(name);
+  });
 
   $effect(() => {
     if (!drawerOpen || untrack(() => drawer)) return;
@@ -362,8 +378,9 @@
       if (payload.path !== doc.path) return;
       closeReply(payload.usage, payload.error);
     });
+    const plans = onAssistantProposal((payload) => void attachProposal(payload));
     return () => {
-      void Promise.all([deltas, ends]).then((pending) => {
+      void Promise.all([deltas, ends, plans]).then((pending) => {
         for (const unlisten of pending) unlisten();
       });
     };
@@ -485,8 +502,22 @@
     }
     if (pendingReply !== null) return;
     const history = historyOf(chat);
-    const asked: Message = { id: ++turns, role: 'user', text: question, usage: null, error: null };
-    const reply: Message = { id: ++turns, role: 'assistant', text: '', usage: null, error: null };
+    const asked: Message = {
+      id: ++turns,
+      role: 'user',
+      text: question,
+      usage: null,
+      error: null,
+      proposal: null
+    };
+    const reply: Message = {
+      id: ++turns,
+      role: 'assistant',
+      text: '',
+      usage: null,
+      error: null,
+      proposal: null
+    };
     chat = [...chat, asked, reply];
     pendingReply = reply.id;
     try {
@@ -494,6 +525,98 @@
     } catch (error) {
       closeReply(null, describeApplyError(error));
     }
+  }
+
+  async function vetted(plan: Proposal, planned: number): Promise<Proposal> {
+    try {
+      const checked = await previewCommands(doc.path, plan.commands, planned);
+      return {
+        ...plan,
+        baseRevision: planned,
+        diff: diffLines(checked.diff),
+        splices: checked.summary.splices,
+        refusal: null,
+        state: 'ready'
+      };
+    } catch (error) {
+      const record = errorRecord(error);
+      if (record?.error === 'references_outside_graph' && typeof record.block === 'string') {
+        refusal = { block: record.block, spans: spansOf(record) };
+      }
+      return {
+        ...plan,
+        baseRevision: planned,
+        diff: [],
+        splices: 0,
+        refusal: describeApplyError(error),
+        state: 'refused'
+      };
+    }
+  }
+
+  async function attachProposal(payload: AssistantProposal) {
+    if (!editable || payload.path !== doc.path) return;
+    const planned = doc.revision;
+    const plan = await vetted(
+      {
+        rationale: payload.rationale,
+        commands: payload.commands,
+        baseRevision: planned,
+        dropped: payload.dropped,
+        diff: [],
+        splices: 0,
+        refusal: null,
+        state: 'ready',
+        appliedAt: null
+      },
+      planned
+    );
+    const last = chat.at(-1);
+    if (last && last.role === 'assistant' && last.proposal === null) {
+      chat = [...chat.slice(0, -1), { ...last, proposal: plan }];
+      return;
+    }
+    chat = [
+      ...chat,
+      { id: ++turns, role: 'assistant', text: '', usage: null, error: null, proposal: plan }
+    ];
+  }
+
+  function planOf(id: number): Proposal | null {
+    return chat.find((message) => message.id === id)?.proposal ?? null;
+  }
+
+  function setProposal(id: number, next: Proposal) {
+    chat = chat.map((message) => (message.id === id ? { ...message, proposal: next } : message));
+  }
+
+  async function acceptProposal(id: number) {
+    const plan = planOf(id);
+    if (!plan || plan.state !== 'ready') return;
+    if (plan.baseRevision !== doc.revision) {
+      announce(MOVED_ON);
+      return;
+    }
+    const outcome = await submitAll(plan.commands);
+    const settled = planOf(id);
+    if (!settled) return;
+    if (!outcome.ok) {
+      setProposal(id, { ...settled, refusal: outcome.message, state: 'refused' });
+      return;
+    }
+    setProposal(id, { ...settled, state: 'accepted', appliedAt: doc.revision });
+  }
+
+  function rejectProposal(id: number) {
+    const plan = planOf(id);
+    if (!plan || plan.state === 'accepted') return;
+    setProposal(id, { ...plan, state: 'rejected' });
+  }
+
+  async function replanProposal(id: number) {
+    const plan = planOf(id);
+    if (!plan || plan.state !== 'ready') return;
+    setProposal(id, await vetted(plan, doc.revision));
   }
 
   function stopAssistant() {
@@ -621,11 +744,12 @@
     try {
       const path = await pickFile();
       if (!path) return;
+      const request = ++opening;
       const previous = opened;
       const next = await openDocument(path);
+      if (request !== opening) return;
       opened = path;
       failure = null;
-      dismissed = true;
       if (previous && previous !== path) void closeDocument(previous).catch(() => undefined);
       reset(next);
     } catch (error) {
@@ -634,11 +758,28 @@
     }
   }
 
+  async function openExample(name: string) {
+    const request = ++opening;
+    try {
+      const next = await openDocument(loadFixture(name).path);
+      if (request !== opening) return;
+      const previous = opened;
+      opened = next.path;
+      failure = null;
+      if (previous && previous !== next.path) void closeDocument(previous).catch(() => undefined);
+      reset(next);
+    } catch (error) {
+      if (request !== opening) return;
+      failure = describeApplyError(error);
+      announce(failure);
+    }
+  }
+
   function openFixture() {
+    if (desktop) return;
     const previous = opened;
     opened = null;
     failure = null;
-    dismissed = true;
     if (previous) void closeDocument(previous).catch(() => undefined);
     reset(loadFixture(fixtureName));
   }
@@ -801,32 +942,7 @@
   }
 
   function placeSpec(spec: BlockSpec) {
-    adder?.openAt(window.innerWidth / 2, window.innerHeight / 2, spec);
-  }
-
-  async function defineBlock(form: DefineForm): Promise<FieldRefusal | null> {
-    const outcome = await submit(defineCommand(siteIndex, form));
-    if (!outcome.ok) {
-      return defineRefusal(outcome.record, form) ?? { field: null, message: outcome.message };
-    }
-    const name = form.name.trim();
-    await refreshPalette(doc.path);
-    const span = structSpan(doc.source, name);
-    if (drawerOpen && span) focus = span;
-    alerted += 1;
-    alert = {
-      text: `${name} is in the palette`,
-      at: alerted,
-      tone: 'note',
-      action: {
-        label: 'Place it',
-        run: () => {
-          const spec = specFor(shownSpecs, name);
-          if (spec) placeSpec(spec);
-        }
-      }
-    };
-    return null;
+    adder?.placeAt(window.innerWidth / 2, window.innerHeight / 2, spec);
   }
 
   function droppedSpec(event: DragEvent): BlockSpec | null {
@@ -842,7 +958,7 @@
       announce(viewerNote);
       return;
     }
-    adder?.openAt(event.clientX, event.clientY, spec);
+    adder?.placeAt(event.clientX, event.clientY, spec);
   }
 
   function onDragOver(event: DragEvent) {
@@ -961,7 +1077,6 @@
         open={blocksOpen}
         ontoggle={() => (blocksOpen = !blocksOpen)}
         onpick={placeSpec}
-        onnew={() => definer?.open()}
       />
 
       {#if site}
@@ -1001,16 +1116,14 @@
         </section>
       {/if}
 
-      {#if !opened}
-        <section>
-          <h2 data-testid="examples-head">{desktop ? 'Examples (viewer)' : 'Example'}</h2>
-          <select data-testid="example-select" bind:value={fixtureName} onchange={openFixture}>
-            {#each fixtureNames as name (name)}
-              <option value={name}>{name}</option>
-            {/each}
-          </select>
-        </section>
-      {/if}
+      <section>
+        <h2 data-testid="examples-head">Examples</h2>
+        <select data-testid="example-select" bind:value={fixtureName} onchange={openFixture}>
+          {#each fixtureNames as name (name)}
+            <option value={name}>{name}</option>
+          {/each}
+        </select>
+      </section>
 
       {#if status}
         <p class="status" data-testid="status">{status}</p>
@@ -1100,7 +1213,6 @@
             ondeleteblock={(block) => void deleteBlock(block)}
             ondisconnect={disconnect}
             onaddhere={addHere}
-            onnewblock={() => definer?.open()}
             onproblem={pickProblem}
           />
           <AddBlock
@@ -1141,13 +1253,6 @@
         </div>
       {/if}
 
-      <DefineBlock
-        bind:this={definer}
-        specs={shownSpecs}
-        documentPath={doc.path}
-        ondefine={defineBlock}
-      />
-
       {#if refusal}
         <div class="dialog" role="dialog" aria-modal="true" data-testid="delete-refusal">
           <h2>{refusal.block} cannot be deleted</h2>
@@ -1169,6 +1274,16 @@
             <button data-testid="refusal-close" onclick={() => (refusal = null)}>Close</button>
           </footer>
         </div>
+      {/if}
+
+      {#if !drawerOpen}
+        <button
+          class="drawer-toggle"
+          data-testid="drawer-toggle"
+          aria-label="Expand code drawer"
+          title="Expand code drawer  Ctrl+`"
+          onclick={() => (drawerOpen = true)}>⌃ Code</button
+        >
       {/if}
 
       {#if drawer}
@@ -1207,11 +1322,15 @@
       selection={chatSelection}
       enabled={editable}
       note={viewerNote}
+      revision={doc.revision}
       ontoggle={() => (rightOpen = !rightOpen)}
       ontab={pickRailTab}
       onask={(question) => void askAssistant(question)}
       onstop={stopAssistant}
       onrecheck={() => void refreshAssistant()}
+      onaccept={(id) => void acceptProposal(id)}
+      onreject={rejectProposal}
+      onreplan={(id) => void replanProposal(id)}
     />
   {:else}
     <Inspector
@@ -1382,6 +1501,19 @@
     position: relative;
     flex: 1;
     min-height: 0;
+  }
+  .drawer-toggle {
+    position: absolute;
+    z-index: 8;
+    left: 50%;
+    bottom: var(--sp-3);
+    transform: translateX(-50%);
+    padding: var(--sp-0) var(--sp-3);
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    border-color: var(--border);
+    color: var(--muted);
+    font-size: 11px;
   }
   .banner {
     display: flex;

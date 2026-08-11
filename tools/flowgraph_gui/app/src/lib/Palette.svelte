@@ -16,10 +16,9 @@
     open: boolean;
     ontoggle: () => void;
     onpick: (spec: BlockSpec) => void;
-    onnew: () => void;
   };
 
-  const { specs, documentPath, enabled, note, open, ontoggle, onpick, onnew }: Props = $props();
+  const { specs, documentPath, enabled, note, open, ontoggle, onpick }: Props = $props();
 
   let query = $state('');
 
@@ -45,13 +44,6 @@
   </h2>
 
   {#if open}
-    <button
-      class="new"
-      data-testid="palette-new"
-      disabled={!enabled}
-      title={enabled ? 'Define a new block type in this file' : note}
-      onclick={onnew}>New block…</button
-    >
     <input
       type="search"
       placeholder="search blocks"
@@ -114,12 +106,6 @@
     margin-left: auto;
     font-family: var(--mono);
     letter-spacing: 0;
-  }
-  .new {
-    width: 100%;
-    margin-bottom: var(--sp-1);
-    padding: var(--sp-1) var(--sp-2);
-    font-size: 11px;
   }
   input {
     width: 100%;
