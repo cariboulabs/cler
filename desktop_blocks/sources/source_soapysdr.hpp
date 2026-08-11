@@ -37,8 +37,9 @@ inline std::string get_soapy_format() {
 
 template<typename T>
 struct SourceSoapySDRBlock : public cler::BlockBase {
-    
-    SourceSoapySDRBlock(const char* name, 
+    static constexpr bool may_block = true;
+
+    SourceSoapySDRBlock(const char* name,
                         const std::string& args,
                         double freq,
                         double rate,
@@ -184,7 +185,7 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
             if (overflow_count % 100 == 0) {
                 std::cerr << "SourceSoapySDRBlock: Overflow count: " << overflow_count << std::endl;
             }
-            return cler::Empty{}; // Continue despite overflow
+            return cler::Error::NotEnoughSamples;
         } else {
             std::cerr << "SourceSoapySDRBlock: readStream error: " << SoapySDR::errToStr(ret) << std::endl;
             return cler::Error::TERM_ProcedureError;

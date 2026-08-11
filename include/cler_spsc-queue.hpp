@@ -220,6 +220,8 @@ private:
   struct alignas(details::cacheLineSize) WriterCacheLine {
     std::atomic<std::size_t> writeIndex_{0};
     std::size_t readIndexCache_{0};
+    std::size_t cumulativeWriteCount_{0};
+    std::size_t dbfLastWriteIndex_{0};
   } writer_;
 
   struct alignas(details::cacheLineSize) ReaderCacheLine {
@@ -227,6 +229,8 @@ private:
     std::size_t writeIndexCache_{0};
     // Cache capacity for performance
     std::size_t capacityCache_{};
+    std::size_t dbfLastReadIndex_{0};
+    std::atomic<std::size_t> cumulativeReadCount_{0};
   } reader_;
 
   // Helper to get buffer pointer with correct offset
@@ -269,13 +273,13 @@ public:
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     const auto nextWriteIndex =
         (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
-    // Loop while waiting for reader to catch up
     while (nextWriteIndex == writer_.readIndexCache_) {
       writer_.readIndexCache_ =
           reader_.readIndex_.load(std::memory_order_acquire);
     }
     write_value(writeIndex, val);
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+    ++writer_.cumulativeWriteCount_;
   }
 
   template <typename P,
@@ -286,21 +290,19 @@ public:
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     const auto nextWriteIndex =
         (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
-    // Loop while waiting for reader to catch up
     while (nextWriteIndex == writer_.readIndexCache_) {
       writer_.readIndexCache_ =
           reader_.readIndex_.load(std::memory_order_acquire);
     }
     write_value(writeIndex, std::forward<P>(val));
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+    ++writer_.cumulativeWriteCount_;
   }
 
-  // Non-blocking push - returns false if no space
   [[nodiscard]] bool try_push(const T &val) noexcept(nothrow_v) {
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     const auto nextWriteIndex =
         (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
-    // Check reader cache and if actually equal then fail to write
     if (nextWriteIndex == writer_.readIndexCache_) {
       writer_.readIndexCache_ =
           reader_.readIndex_.load(std::memory_order_acquire);
@@ -310,6 +312,7 @@ public:
     }
     write_value(writeIndex, val);
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+    ++writer_.cumulativeWriteCount_;
     return true;
   }
 
@@ -322,7 +325,6 @@ public:
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     const auto nextWriteIndex =
         (writeIndex == base_type::capacity_ - 1) ? 0 : writeIndex + 1;
-    // Check reader cache and if actually equal then fail to write
     if (nextWriteIndex == writer_.readIndexCache_) {
       writer_.readIndexCache_ =
           reader_.readIndex_.load(std::memory_order_acquire);
@@ -332,6 +334,7 @@ public:
     }
     write_value(writeIndex, std::forward<P>(val));
     writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+    ++writer_.cumulativeWriteCount_;
     return true;
   }
 
@@ -346,6 +349,9 @@ public:
     const auto nextReadIndex =
         (readIndex == reader_.capacityCache_ - 1) ? 0 : readIndex + 1;
     reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
+    reader_.cumulativeReadCount_.store(
+        reader_.cumulativeReadCount_.load(std::memory_order_relaxed) + 1,
+        std::memory_order_relaxed);
   }
 
   [[nodiscard]] bool try_pop(T &val) noexcept(nothrow_v) {
@@ -362,6 +368,9 @@ public:
     const auto nextReadIndex =
         (readIndex == reader_.capacityCache_ - 1) ? 0 : readIndex + 1;
     reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
+    reader_.cumulativeReadCount_.store(
+        reader_.cumulativeReadCount_.load(std::memory_order_relaxed) + 1,
+        std::memory_order_relaxed);
     return true;
   }
 
@@ -386,6 +395,14 @@ public:
 
   [[nodiscard]] std::size_t space() const noexcept {
     return capacity() - size();
+  }
+
+  [[nodiscard]] std::size_t producer_thread_cumulative_write_count() const noexcept {
+    return writer_.cumulativeWriteCount_;
+  }
+
+  [[nodiscard]] std::size_t consumer_thread_cumulative_read_count() const noexcept {
+    return reader_.cumulativeReadCount_.load(std::memory_order_relaxed);
   }
 
   // Check if this queue uses doubly-mapped memory
@@ -425,6 +442,7 @@ public:
     }
 
     writer_.writeIndex_.store((writeIndex + toWrite) % capacity, std::memory_order_release);
+    writer_.cumulativeWriteCount_ += toWrite;
     return toWrite;
   }
 
@@ -458,6 +476,9 @@ public:
 
     const auto nextReadIndex = (readIndex + toRead) % capacity;
     reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
+    reader_.cumulativeReadCount_.store(
+        reader_.cumulativeReadCount_.load(std::memory_order_relaxed) + toRead,
+        std::memory_order_relaxed);
 
     return toRead;
   }
@@ -555,36 +576,36 @@ public:
     const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
     const auto nextReadIndex = (readIndex + count) % capacity;
     reader_.readIndex_.store(nextReadIndex, std::memory_order_release);
+    reader_.cumulativeReadCount_.store(
+        reader_.cumulativeReadCount_.load(std::memory_order_relaxed) + count,
+        std::memory_order_relaxed);
   }
 
-  // NEW: Zero-copy contiguous read (only available with doubly mapped heap buffers)
   std::pair<const T*, std::size_t> read_dbf() noexcept {
       if constexpr (N == 0) {
-          // Only heap buffers can be doubly mapped
           if (base_type::is_doubly_mapped_) {
               const auto capacity = base_type::capacity_;
               const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
-              auto writeIndexCache = writer_.writeIndex_.load(std::memory_order_acquire);
-              reader_.writeIndexCache_ = writeIndexCache;
-              
-              std::size_t available;
-              if (writeIndexCache >= readIndex) {
-                  available = writeIndexCache - readIndex;
-              } else {
-                  available = capacity - readIndex + writeIndexCache;
+
+              std::size_t available = (reader_.writeIndexCache_ >= readIndex)
+                  ? reader_.writeIndexCache_ - readIndex
+                  : capacity - readIndex + reader_.writeIndexCache_;
+
+              if (available == 0 || readIndex == reader_.dbfLastReadIndex_) {
+                  reader_.writeIndexCache_ = writer_.writeIndex_.load(std::memory_order_acquire);
+                  available = (reader_.writeIndexCache_ >= readIndex)
+                      ? reader_.writeIndexCache_ - readIndex
+                      : capacity - readIndex + reader_.writeIndexCache_;
               }
-              
+              reader_.dbfLastReadIndex_ = readIndex;
+
               if (available == 0) {
                   return {nullptr, 0};
               }
-              
+
               const T* ptr = &base_type::buffer_[readIndex];
-              
-              // With aligned boundaries, we can read all available data contiguously
-              // The double mapping ensures continuity past capacity_
               return {ptr, available};
           }
-          // NOT doubly mapped - assert in debug mode with specific reason
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
           if (buffer_bytes < details::DOUBLY_MAPPED_MIN_SIZE) {
               assert(false && "read_dbf() requires buffer size >= 4KB. Current buffer too small.");
@@ -602,35 +623,34 @@ public:
       const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
       const auto nextWriteIndex = (writeIndex + count) % capacity;
       writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
+      writer_.cumulativeWriteCount_ += count;
   }
 
   std::pair<T*, std::size_t> write_dbf() noexcept {
       if constexpr (N == 0) {
-          // Only heap buffers can be doubly mapped
           if (base_type::is_doubly_mapped_) {
               const auto capacity = base_type::capacity_;
               const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
-              auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
-              writer_.readIndexCache_ = readIndexCache;
-              
-              std::size_t space;
-              if (readIndexCache > writeIndex) {
-                  space = readIndexCache - writeIndex - 1;
-              } else {
-                  space = capacity - writeIndex + readIndexCache - 1;
+
+              std::size_t space = (writer_.readIndexCache_ > writeIndex)
+                  ? writer_.readIndexCache_ - writeIndex - 1
+                  : capacity - writeIndex + writer_.readIndexCache_ - 1;
+
+              if (space == 0 || writeIndex == writer_.dbfLastWriteIndex_) {
+                  writer_.readIndexCache_ = reader_.readIndex_.load(std::memory_order_acquire);
+                  space = (writer_.readIndexCache_ > writeIndex)
+                      ? writer_.readIndexCache_ - writeIndex - 1
+                      : capacity - writeIndex + writer_.readIndexCache_ - 1;
               }
-              
+              writer_.dbfLastWriteIndex_ = writeIndex;
+
               if (space == 0) {
                   return {nullptr, 0};
               }
-              
+
               T* ptr = &base_type::buffer_[writeIndex];
-              
-              // With aligned boundaries, we can write all available space contiguously
-              // The double mapping ensures continuity past capacity_
               return {ptr, space};
           }
-          // NOT doubly mapped - assert in debug mode with specific reason
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
           if (buffer_bytes < details::DOUBLY_MAPPED_MIN_SIZE) {
               assert(false && "write_dbf() requires buffer size >= 4KB. Current buffer too small.");

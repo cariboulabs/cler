@@ -5,6 +5,7 @@
 
 #include "cler.hpp"
 #include "desktop_blocks/resamplers/multistage_resampler.hpp"
+#include "desktop_blocks/resamplers/rational_resampler.hpp"
 
 class ResamplerBlocksTest : public ::testing::Test {
 protected:
@@ -331,4 +332,103 @@ TEST_F(ResamplerBlocksTest, MultiStageResamplerSmallBufferException) {
     
     // Buffer too small for doubly-mapped: must die
     EXPECT_DEATH(MultiStageResamplerBlock<float>("test_resampler_small", ratio, attenuation, small_buffer), "cler panic");
+}
+namespace {
+
+constexpr size_t kRatInterp = 5;
+constexpr size_t kRatDecim  = 6;
+constexpr size_t kRatTaps   = 14;
+constexpr float  kRatAtten  = 80.0f;
+
+using RatBlock  = RationalResamplerBlock<kRatInterp, kRatDecim, kRatTaps>;
+using RatKernel = RationalResampler<kRatInterp, kRatDecim, kRatTaps>;
+
+std::vector<std::complex<float>> drain(cler::Channel<std::complex<float>>& ch) {
+    std::vector<std::complex<float>> out;
+    std::complex<float> s;
+    while (ch.try_pop(s)) out.push_back(s);
+    return out;
+}
+
+std::vector<std::complex<float>> run_block_in_chunks(RatBlock& block,
+                                                     cler::Channel<std::complex<float>>& out,
+                                                     const std::vector<std::complex<float>>& input,
+                                                     size_t chunk) {
+    std::vector<std::complex<float>> collected;
+    size_t pos = 0;
+    while (pos < input.size()) {
+        const size_t n = std::min(chunk, input.size() - pos);
+        const size_t written = block.in.writeN(input.data() + pos, n);
+        pos += written;
+        while (block.in.size() > 0) {
+            if (block.procedure(&out).is_err()) break;
+            auto got = drain(out);
+            collected.insert(collected.end(), got.begin(), got.end());
+        }
+        if (written == 0) {
+            auto got = drain(out);
+            collected.insert(collected.end(), got.begin(), got.end());
+        }
+    }
+    while (block.procedure(&out).is_ok()) {
+        auto got = drain(out);
+        collected.insert(collected.end(), got.begin(), got.end());
+    }
+    auto tail = drain(out);
+    collected.insert(collected.end(), tail.begin(), tail.end());
+    return collected;
+}
+
+}  // namespace
+
+TEST_F(ResamplerBlocksTest, RationalResamplerBlockExactCountAndBatchContinuity) {
+    const size_t num_input = 60000;
+    std::vector<std::complex<float>> input(num_input);
+    for (size_t i = 0; i < num_input; ++i) {
+        const float t = static_cast<float>(i);
+        input[i] = std::complex<float>(std::sin(0.017f * t) + 0.3f * std::sin(0.211f * t),
+                                       std::cos(0.017f * t) - 0.3f * std::cos(0.109f * t));
+    }
+
+    RatKernel reference(kRatAtten);
+    std::vector<std::complex<float>> expected(RatKernel::max_outputs(num_input));
+    const size_t expected_n = reference.process(input.data(), num_input, expected.data());
+    expected.resize(expected_n);
+    EXPECT_EQ(expected_n, num_input * kRatInterp / kRatDecim);
+
+    for (size_t chunk : {509u, 4096u, 16384u}) {
+        RatBlock block("rat_block", kRatAtten, 32768);
+        cler::Channel<std::complex<float>> out(32768);
+        const auto got = run_block_in_chunks(block, out, input, chunk);
+
+        ASSERT_EQ(got.size(), expected.size()) << "chunk=" << chunk;
+        for (size_t i = 0; i < got.size(); ++i) {
+            ASSERT_NEAR(got[i].real(), expected[i].real(), 1e-5f) << "chunk=" << chunk << " i=" << i;
+            ASSERT_NEAR(got[i].imag(), expected[i].imag(), 1e-5f) << "chunk=" << chunk << " i=" << i;
+        }
+    }
+}
+
+TEST_F(ResamplerBlocksTest, RationalResamplerBlockFrequencyResponse) {
+    const float input_rate = 600e3f;
+    const size_t num_input = 24000;
+
+    auto rms_out_for_tone = [&](float tone_hz) {
+        RatBlock block("rat_resp", kRatAtten, 32768);
+        cler::Channel<std::complex<float>> out(32768);
+        const auto input = generate_complex_exponential(num_input, tone_hz, input_rate);
+        const auto got = run_block_in_chunks(block, out, input, 4096);
+        EXPECT_GT(got.size(), num_input / 2);
+        double acc = 0.0;
+        const size_t skip = 64;
+        for (size_t i = skip; i < got.size(); ++i) acc += std::norm(got[i]);
+        return std::sqrt(acc / static_cast<double>(got.size() - skip));
+    };
+
+    const double dc_ref = rms_out_for_tone(0.0f);
+    const double pass   = rms_out_for_tone(100e3f);
+    const double stop   = rms_out_for_tone(300e3f);
+
+    EXPECT_NEAR(20.0 * std::log10(pass / dc_ref), 0.0, 1.0);
+    EXPECT_LT(20.0 * std::log10(stop / dc_ref), -12.0);
 }

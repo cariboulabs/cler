@@ -3,95 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="CLER Blog - Technical insights, use cases, and development updates for the embedded DSP framework.">
-    <meta name="keywords" content="CLER blog, DSP development, embedded systems, technical articles">
-    <title>CLER Blog - Technical Articles and Use Cases</title>
+    <meta name="description" content="CLER project notes and DSP case studies.">
+    <title>CLER blog</title>
     <link rel="stylesheet" href="styles/main.css">
 </head>
 <body>
-    <nav class="nav">
-        <div class="nav-brand">
-            <img src="cler-logo.jpeg" alt="CLER" class="logo">
-        </div>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <nav class="nav" aria-label="Primary">
+        <a href="index.html" class="nav-brand" aria-label="CLER home">
+            <img src="cler-logo.jpeg" alt="CLER" class="logo" width="113" height="40">
+        </a>
         <div class="nav-tabs">
             <a href="index.html" class="nav-tab">Home</a>
             <a href="learn.html" class="nav-tab">Learn</a>
-            <a href="blog.html" class="nav-tab active">Blog</a>
+            <a href="blog.html" class="nav-tab" aria-current="page">Blog</a>
         </div>
-        <div class="nav-links">
-            <a href="https://github.com/cariboulabs/cler" class="github-link" target="_blank">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                </svg>
-            </a>
-        </div>
+        <a href="https://github.com/cariboulabs/cler" class="github-link" target="_blank" rel="noreferrer">GitHub</a>
     </nav>
 
-    <main>
+    <main id="main-content">
         <section class="hero">
-            <h1>CLER Blog</h1>
+            <h1>CLER blog</h1>
+            <p class="subtext">Project notes and case studies</p>
         </section>
 
-        <section class="container blog-content">
-            <div class="blog-posts">
+        <section class="band">
+            <div class="container blog-content">
                 <article class="blog-card">
-                    <h2><a href="blog/01-tower-listener.html">Tower Listener: Narrowband GMSK Multi-channel DSP for Heliostat Communication</a></h2>
-                    <p class="blog-meta">June 2025 | Use Case</p>
-                    <p>A 15-channel DSP receiver processing 3 MHz of spectrum for real-time heliostat field communication at a U.S. DOE facility. Uses GMSK demodulation with TI EasyLink protocol for solar mirror array control.</p>
-                    <a href="blog/01-tower-listener.html" class="read-more">Read more →</a>
+                    <h2><a href="blog/01-tower-listener.html">Tower Listener: narrowband GMSK for heliostat communication</a></h2>
+                    <p class="blog-meta">June 2025 · Use case</p>
+                    <p>A 15-channel receiver built as a CLER flowgraph: live or recorded IQ, one resampler, one polyphase channelizer, and a GMSK demodulator per channel.</p>
+                    <a href="blog/01-tower-listener.html">Read the article →</a>
                 </article>
-            </div>
 
-            <div class="contribute">
-                <hr>
-                <p><em>Have something to share? We'd love to feature community posts. Open an issue with your article idea.</em></p>
+                <p>Have a CLER result worth sharing? <a href="https://github.com/cariboulabs/cler/issues/new">Open an issue</a> with the topic and measurements.</p>
             </div>
         </section>
     </main>
 
-    <style>
-        .blog-posts {
-            margin: 2rem 0;
-        }
-        .blog-card {
-            background: #f9f9f9;
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-            border-radius: 8px;
-            border: 1px solid #eee;
-        }
-        .blog-card h2 {
-            margin-top: 0;
-            margin-bottom: 0.5rem;
-        }
-        .blog-card h2 a {
-            color: #333;
-            text-decoration: none;
-        }
-        .blog-card h2 a:hover {
-            color: #007acc;
-        }
-        .blog-meta {
-            color: #666;
-            font-size: 0.9rem;
-            margin-bottom: 1rem;
-        }
-        .read-more {
-            color: #007acc;
-            text-decoration: none;
-            font-weight: 500;
-        }
-        .read-more:hover {
-            text-decoration: underline;
-        }
-        .contribute {
-            margin-top: 3rem;
-        }
-        .contribute hr {
-            border: none;
-            border-top: 1px solid #eee;
-            margin: 2rem 0;
-        }
-    </style>
+    <footer class="site-footer">
+        <div class="container">
+            <p>CLER 0.1.0 · Early development · APIs may change</p>
+            <p class="footer-links">
+                <a href="https://github.com/cariboulabs/cler/blob/main/License">Apache-2.0 license</a>
+                <a href="https://github.com/cariboulabs/cler/issues">Issues</a>
+            </p>
+        </div>
+    </footer>
 </body>
 </html>

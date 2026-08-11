@@ -37,9 +37,10 @@ inline std::string get_soapy_format() {
 
 template<typename T>
 struct SinkSoapySDRBlock : public cler::BlockBase {
-    
+    static constexpr bool may_block = true;
+
     cler::Channel<T> in;
-    
+
     SinkSoapySDRBlock(const char* name,
                       const std::string& args,
                       double freq,
@@ -188,8 +189,7 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
             int ret = device->writeStream(stream, buffs, to_send, flags, time_ns, timeout_us);
 
             if (ret == SOAPY_SDR_TIMEOUT) {
-                in.commit_read(samples_sent);
-                return cler::Error::NotEnoughSpace;
+                break;
             } else if (ret == SOAPY_SDR_UNDERFLOW) {
                 underflow_count++;
                 if (underflow_count % 100 == 0) {
@@ -200,11 +200,16 @@ struct SinkSoapySDRBlock : public cler::BlockBase {
                 std::cerr << "SinkSoapySDRBlock: writeStream error: " << SoapySDR::errToStr(ret) << std::endl;
                 in.commit_read(samples_sent);
                 return cler::Error::TERM_ProcedureError;
+            } else if (ret == 0) {
+                break;
             } else {
                 samples_sent += ret;
             }
         }
-        
+
+        if (samples_sent == 0) {
+            return cler::Error::NotEnoughSpace;
+        }
         in.commit_read(samples_sent);
         return cler::Empty{};
     }

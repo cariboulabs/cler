@@ -4,38 +4,40 @@
 #include "cler_result.hpp"
 #include "cler_embeddable_string.hpp"
 #include "cler_platform.hpp"
+#include "task_policies/cler_task_policy_base.hpp"
+#include "schedulers/cler_scheduler_config.hpp"
+#include "schedulers/detail/cler_topology.hpp"
+#include "schedulers/detail/cler_park.hpp"
+#include "schedulers/detail/cler_barrier.hpp"
+#include "schedulers/cler_thread_per_block.hpp"
+#include "schedulers/cler_fixed_thread_pool.hpp"
+#include "schedulers/cler_pinned_islands.hpp"
+#include "schedulers/detail/cler_partition.hpp"
 #include <array>
 #include <algorithm> // for std::min, which a-lot of cler blocks use
 #include <complex> //again, a lot of cler blocks use complex numbers
 #include <chrono> // for timing measurements in FlowGraph
 #include <tuple> // for storing block runners
 #include <cassert> // for assertions
-#include <atomic> // for atomic adaptive sleep state
+#include <atomic>
 #include <limits> // for std::numeric_limits
+#include <type_traits>
+#include <cstdint>
+#include <cstring>
 
 namespace cler {
 
-    //here so we can insure blocks use this feature
     constexpr size_t DOUBLY_MAPPED_MIN_SIZE = dro::details::DOUBLY_MAPPED_MIN_SIZE;
-
-    // Configurable at compile-time for different target platforms
-    #ifndef CLER_DEFAULT_MAX_WORKERS
-    #define CLER_DEFAULT_MAX_WORKERS (8)  // Conservative default for embedded systems
-    #endif
-    constexpr size_t DEFAULT_MAX_WORKERS = CLER_DEFAULT_MAX_WORKERS;
 
     enum class Error {
         OK,
 
-        // Non-fatal errors (< TERMINATE_FLOWGRAPH)
         Unknown,
         NotEnoughSamples,
         NotEnoughSpace,
         NotEnoughSpaceOrSamples, // for lazyness
         ProcedureError,
         BadData,
-        
-        // Fatal errors (>= TERMINATE_FLOWGRAPH)
         TERMINATE_FLOWGRAPH,
         TERM_InvalidChannelIndex,
         TERM_ProcedureError,
@@ -43,7 +45,6 @@ namespace cler {
         TERM_EOFReached,
     };
     
-    // Helper function for error classification
     constexpr bool is_fatal(Error error) {
         return error >= Error::TERMINATE_FLOWGRAPH;
     }
@@ -81,6 +82,8 @@ namespace cler {
         virtual void commit_write(size_t count) = 0;
         virtual std::pair<const T*, std::size_t> read_dbf() = 0;
         virtual std::pair<T*, std::size_t> write_dbf() = 0;
+        virtual std::size_t producer_thread_cumulative_write_count() const = 0;
+        virtual std::size_t consumer_thread_cumulative_read_count() const = 0;
     };
 
     template <typename T, size_t N = 0>
@@ -112,6 +115,12 @@ namespace cler {
 
         std::pair<const T*, std::size_t> read_dbf() override { return _queue.read_dbf(); }
         std::pair<T*, std::size_t> write_dbf() override { return _queue.write_dbf(); }
+        std::size_t producer_thread_cumulative_write_count() const override {
+            return _queue.producer_thread_cumulative_write_count();
+        }
+        std::size_t consumer_thread_cumulative_read_count() const override {
+            return _queue.consumer_thread_cumulative_read_count();
+        }
     };
 
     struct BlockBase {
@@ -122,8 +131,38 @@ namespace cler {
         BlockBase& operator=(const BlockBase&) = delete;
         BlockBase(BlockBase&&) = delete;
         BlockBase& operator=(BlockBase&&) = delete;
+
     private:
         EmbeddableString<64> _name;
+    };
+
+    struct IslandCheck {
+        enum class Code : uint8_t {
+            Ok, BothFormsGiven, NoIslands, TooManyIslands, EmptyIsland,
+            NotInGraph, NotSchedulable, Duplicate, Missing, NotTopological
+        };
+
+        Code             code   = Code::Ok;
+        size_t           island = 0;
+        const BlockBase* block  = nullptr;
+
+        explicit operator bool() const { return code == Code::Ok; }
+
+        const char* message() const {
+            switch (code) {
+                case Code::Ok:             return "ok";
+                case Code::BothFormsGiven: return "set pinned_islands.islands or .island_names, not both";
+                case Code::NoIslands:      return "pinned_islands.island_count is zero";
+                case Code::TooManyIslands: return "more islands than workers";
+                case Code::EmptyIsland:    return "an island is empty, which would idle a worker";
+                case Code::NotInGraph:     return "a listed block is not in this flowgraph";
+                case Code::NotSchedulable: return "a listed block declares may_block, it gets its own thread";
+                case Code::Duplicate:      return "a block is listed on more than one island";
+                case Code::Missing:        return "a schedulable block is on no island";
+                case Code::NotTopological: return "within one island a block is listed before the block it consumes from";
+            }
+            return "unknown island error";
+        }
     };
 
     template<typename T>
@@ -133,20 +172,40 @@ namespace cler {
     template<typename T>
     using channel_to_base_t = typename channel_to_base<T>::type;
 
+    template<typename Block, typename = void>
+    struct block_declares_may_block : std::false_type {};
+    template<typename Block>
+    struct block_declares_may_block<Block, std::enable_if_t<Block::may_block>> : std::true_type {};
+    template<typename Block>
+    constexpr bool block_declares_may_block_v = block_declares_may_block<Block>::value;
+
     template<typename Block, typename... Channels>
     struct BlockRunner {
         Block* block;
         std::tuple<Channels*...> outputs;
+        bool may_block = block_declares_may_block_v<Block>;
 
         template<typename... InputChannels>
         BlockRunner(Block* blk, InputChannels*... outs)
             : block(blk), outputs(static_cast<Channels*>(outs)...) {}
     };
 
-    // C++17 deduction guide: automatically deduces channel base types from concrete channel types
-    // This allows: BlockRunner(&block, &channel) instead of BlockRunner<Block, ChannelBase<T>>(&block, &channel)
     template<typename Block, typename... Channels>
     BlockRunner(Block*, Channels*...) -> BlockRunner<Block, channel_to_base_t<Channels>...>;
+
+    template<typename Block, typename... Channels>
+    auto BlockRunnerMayBlock(Block* blk, Channels*... outs) {
+        BlockRunner<Block, channel_to_base_t<Channels>...> runner(blk, outs...);
+        runner.may_block = true;
+        return runner;
+    }
+
+    template<typename Runner>
+    struct runner_output_count;
+    template<typename Block, typename... Channels>
+    struct runner_output_count<BlockRunner<Block, Channels...>> {
+        static constexpr size_t value = sizeof...(Channels);
+    };
 
     struct alignas(platform::cache_line_size) BlockExecutionStats {
         EmbeddableString<64> name;
@@ -154,10 +213,7 @@ namespace cler {
         size_t failed_procedures = 0;
         double total_dead_time_s = 0.0;
         double total_runtime_s = 0.0;
-        double final_adaptive_sleep_us = 0.0;
-        std::atomic<double> current_adaptive_sleep_us{0.0};
-        std::atomic<size_t> consecutive_fails{0};
-        
+
         double get_avg_execution_time_us() const {
             return successful_procedures > 0 ? (total_runtime_s * 1e6) / successful_procedures : 0.0;
         }
@@ -171,42 +227,11 @@ namespace cler {
         }
     };
 
-    // Scheduling types for performance optimization  
-    enum class SchedulerType {
-        ThreadPerBlock,        // Default: Simple, Debuggable
-        FixedThreadPool        // Better for constrained systems
+    struct BlockCost {
+        double ewma_ns_per_call = 0.0;
+        double ewma_items_per_call = 0.0;
     };
-    
-    // Configuration for performance optimization
-    struct FlowGraphConfig {
-        SchedulerType scheduler = SchedulerType::ThreadPerBlock;
-        size_t num_workers = 4;  // Used by FixedThreadPool; ThreadPerBlock creates one thread per block
 
-        // Optimizes CPU usage, usually at the cost of reducing throughput
-        // Most useful for:
-        // - Intermittent sensor data  
-        // - Network packet processing with gaps
-        // - File processing with I/O delays
-        bool adaptive_sleep = false;
-        double adaptive_sleep_multiplier = 1.5;  // How aggressively to increase sleep time
-        double adaptive_sleep_max_us = 5000.0;          // Maximum sleep time in microseconds
-        size_t adaptive_sleep_fail_threshold = 10;  // Start sleeping after N consecutive fails
-
-        // Performance optimization: disable detailed stats collection for ultra-high throughput
-        // When false: saves ~200 bytes per block, eliminates procedure counting and timing
-        // When true: full diagnostics available (successful_procedures, timing, etc.)
-        bool collect_detailed_stats = false;
-        
-        // Micro-batching: run block procedure multiple times per scheduling tick
-        // Reduces context switches and queue crossing overhead
-        // Typical values: 1-16, with 4-8 being sweet spot for most workloads
-        size_t max_calls_per_tick = 4;  // Conservative default to prevent runaway hot stages
-        
-        // Optional: pin worker threads to specific CPU cores
-        // Can improve cache locality and reduce migration overhead
-        bool pin_workers = false;
-
-    };
 
     template<typename TaskPolicy, typename... BlockRunners>
     class FlowGraph {
@@ -214,11 +239,32 @@ namespace cler {
         static constexpr std::size_t _N = sizeof...(BlockRunners);
         static constexpr std::size_t MaxBlocks = sizeof...(BlockRunners);  // Clean compile-time constant
         static_assert(_N > 0, "FlowGraph must have at least one block");
-        static_assert(_N <= 256, "FlowGraph cannot have more than 256 blocks (due to uint8_t indexing)");
+        static constexpr std::size_t MaxSupportedBlocks =
+            (std::min)(static_cast<std::size_t>((std::numeric_limits<uint8_t>::max)()),
+                       platform::cache_line_size * 4 - 2 * sizeof(uint32_t));
+        static_assert(_N <= MaxSupportedBlocks,
+                      "FlowGraph has more blocks than the scheduler's worker queue can index; "
+                      "the bound is min(255, cache_line_size * 4 - 8) and is platform-dependent");
+        static constexpr std::size_t MaxEdges = (runner_output_count<BlockRunners>::value + ... + 0);
         using OnErrTerminateCallback = void (*)(void* context);
 
+        struct UnresolvedEdge {
+            uint8_t producer;
+            const void* address;
+        };
+
+        struct InputCounter {
+            const void* channel;
+            std::size_t (*read_count)(const void*);
+            uint8_t consumer;
+        };
+
+        using Partition = sched::Partition<_N, DEFAULT_MAX_WORKERS>;
+
         FlowGraph(BlockRunners... runners)
-            : _runners(std::make_tuple(std::forward<BlockRunners>(std::move(runners))...)) {}
+            : _runners(std::make_tuple(std::forward<BlockRunners>(std::move(runners))...)) {
+            derive_edges();
+        }
 
         ~FlowGraph() { stop(); }
 
@@ -235,50 +281,200 @@ namespace cler {
         OnErrTerminateCallback on_err_terminate_cb() const { return _on_err_terminate_cb; }
         void* on_err_terminate_context() const { return _on_err_terminate_context; }
 
+        class SchedulerHost {
+        public:
+            using TaskPolicyType = TaskPolicy;
+            using PartitionType = Partition;
+            static constexpr size_t block_count = _N;
+
+            explicit SchedulerHost(FlowGraph& graph) : _graph(&graph) {}
+
+            bool stop_requested() const {
+                return _graph->_stop_flag.load(std::memory_order_relaxed);
+            }
+
+            void request_stop() {
+                _graph->_stop_flag.store(true, std::memory_order_release);
+            }
+
+            void prepare_run() {
+                _graph->reset_run_state();
+                _graph->initialize_block_stats();
+            }
+
+            void launch_all_blocks(const FlowGraphConfig& config) {
+                _graph->launch_tasks_impl(std::make_index_sequence<_N>{}, config);
+            }
+
+            void reset_stop_flag() {
+                _graph->_stop_flag.store(false, std::memory_order_release);
+            }
+
+            void mark_block_start_times() {
+                auto start_time = std::chrono::high_resolution_clock::now();
+                for (size_t i = 0; i < _N; ++i) {
+                    _graph->_block_start_times[i] = start_time;
+                }
+            }
+
+            void launch_may_block_tasks(const FlowGraphConfig& config) {
+                _graph->template launch_may_block_tasks_impl<false>(
+                    std::make_index_sequence<_N>{}, config, NoProgressNotification{});
+            }
+
+            template<typename ProgressNotifier>
+            void launch_may_block_tasks_sampled(const FlowGraphConfig& config, ProgressNotifier notify_progress) {
+                _graph->template launch_may_block_tasks_impl<true>(
+                    std::make_index_sequence<_N>{}, config, notify_progress);
+            }
+
+            void warn_unresolved_edges() {
+                for (size_t i = 0; i < _graph->_unresolved_edge_count; ++i) {
+                    TaskPolicy::warn_unresolved_edge(_graph->block_name(_graph->_unresolved_edges[i].producer),
+                                                     _graph->_unresolved_edges[i].address);
+                }
+            }
+
+            void note_affinity_failure() {
+                _graph->_affinity_failures.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            void rebuild_partition(size_t worker_count, bool use_costs, Partition& out) {
+                std::array<uint8_t, _N> ids{};
+                const size_t count = collect_regular_ids(ids);
+                _graph->rebuild_partition_from(ids, count, worker_count, use_costs, out);
+            }
+
+            void collect_block_weights(const Partition& partition, std::array<double, _N>& weights) {
+                sched::detail::collect_cost_weights<_N>(_graph->_cost_samples, partition.block_ids,
+                                                        partition.block_count, weights);
+                sched::detail::fill_unsampled_with_median<_N>(partition.block_ids,
+                                                              partition.block_count, weights);
+            }
+
+            void mark_item_counters() { _graph->mark_item_counters(); }
+
+            size_t collect_regular_blocks(std::array<uint8_t, _N>& ids) {
+                return collect_regular_ids(ids);
+            }
+
+            void launch_task_per_regular_block(const FlowGraphConfig& config) {
+                std::array<uint8_t, _N> ids{};
+                const size_t count = collect_regular_ids(ids);
+                for (size_t idx = 0; idx < count; ++idx) {
+                    _graph->template launch_thread_per_block_task_dispatch_impl<false>(
+                        std::make_index_sequence<_N>{}, ids[idx], config, NoProgressNotification{});
+                }
+            }
+
+            template<typename Callable>
+            void add_task(Callable&& callable) {
+                _graph->_tasks[_graph->_active_task_count] =
+                    TaskPolicy::create_task(std::forward<Callable>(callable));
+                _graph->_active_task_count++;
+            }
+
+            bool execute_block(size_t index, const FlowGraphConfig& config) {
+                return _graph->template execute_block_at_index<false>(index, config);
+            }
+
+            bool execute_block_sampled(size_t index, const FlowGraphConfig& config) {
+                return _graph->template execute_block_at_index<true>(index, config);
+            }
+
+            void add_block_dead_time(size_t index, double seconds) {
+                _graph->_stats[index].total_dead_time_s += seconds;
+            }
+
+            void set_block_runtime_from_start(size_t index) {
+                auto end_time = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double> total_runtime = end_time - _graph->_block_start_times[index];
+                _graph->_stats[index].total_runtime_s = total_runtime.count();
+            }
+
+        private:
+            size_t collect_regular_ids(std::array<uint8_t, _N>& ids) {
+                size_t count = 0;
+                _graph->collect_regular_block_ids_impl(std::make_index_sequence<_N>{}, ids, count);
+                return count;
+            }
+
+            FlowGraph* _graph;
+        };
+
+        using ThreadPerBlockScheduler = sched::ThreadPerBlockScheduler<SchedulerHost>;
+        using FixedThreadPoolScheduler = sched::FixedThreadPoolScheduler<SchedulerHost>;
+        using PinnedIslandsScheduler = sched::PinnedIslandsScheduler<SchedulerHost>;
+
         void run(const FlowGraphConfig& config = FlowGraphConfig{}) {
             _config = config;
             _stop_flag.store(false, std::memory_order_release);
             
             
             switch (config.scheduler) {
-                case SchedulerType::ThreadPerBlock:
-                    run_thread_per_block(config);
+                case SchedulerType::ThreadPerBlock: {
+                    SchedulerHost host(*this);
+                    ThreadPerBlockScheduler::start(host, _thread_state, config);
                     break;
+                }
                     
-                case SchedulerType::FixedThreadPool:
-                    run_fixed_thread_pool(config);
+                case SchedulerType::FixedThreadPool: {
+                    SchedulerHost host(*this);
+                    FixedThreadPoolScheduler::start(host, _fixed_state, config);
                     break;
+                }
+
+                case SchedulerType::PinnedIslands: {
+                    SchedulerHost host(*this);
+                    PinnedIslandsScheduler::start(host, _pinned_state, config);
+                    break;
+                }
             }
         }
         
         template<typename Rep, typename Period>
         void run_for(const std::chrono::duration<Rep, Period>& duration, const FlowGraphConfig& config = FlowGraphConfig{}) {
-            // Start the flowgraph
             auto start_time = std::chrono::high_resolution_clock::now();
             run(config);
             
-            // For longer durations, use sleep_us to avoid busy waiting
             static constexpr int64_t PRECISE_TIMING_THRESHOLD_US = 100000;  // 100ms
             static constexpr int64_t PRECISE_TIMING_BUFFER_US = 50000;      // 50ms
             
             auto total_us = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
             if (total_us > PRECISE_TIMING_THRESHOLD_US) { // More than 100ms
-                // Sleep for most of the duration, leaving 50ms for precise timing
                 TaskPolicy::sleep_us(total_us - PRECISE_TIMING_BUFFER_US);
             }
             
-            // Use relax for the remaining time for precise timing
             while (std::chrono::high_resolution_clock::now() - start_time < duration) {
                 TaskPolicy::relax();
             }
             
-            // Stop the flowgraph
             stop();
         }
 
         void stop() {
             _stop_flag.store(true, std::memory_order_release);
-            // Only join tasks that were actually created to prevent hang
+
+            switch (_config.scheduler) {
+                case SchedulerType::ThreadPerBlock: {
+                    SchedulerHost host(*this);
+                    ThreadPerBlockScheduler::notify_stop(host, _thread_state);
+                    break;
+                }
+
+                case SchedulerType::FixedThreadPool: {
+                    SchedulerHost host(*this);
+                    FixedThreadPoolScheduler::notify_stop(host, _fixed_state);
+                    break;
+                }
+
+                case SchedulerType::PinnedIslands: {
+                    SchedulerHost host(*this);
+                    PinnedIslandsScheduler::notify_stop(host, _pinned_state);
+                    break;
+                }
+            }
+
             for (size_t i = 0; i < _active_task_count; ++i) {
                 TaskPolicy::join_task(_tasks[i]);
             }
@@ -288,76 +484,221 @@ namespace cler {
             return _stop_flag.load(std::memory_order_acquire);
         }
 
-        // Immutable config accessor
         const FlowGraphConfig& config() const { return _config; }
         const std::array<BlockExecutionStats, _N>& stats() const { return _stats; }
 
+        std::array<BlockCost, _N> block_costs() const {
+            std::array<BlockCost, _N> out{};
+            for (size_t i = 0; i < _N; ++i) {
+                out[i].ewma_ns_per_call = sched::detail::bits_to_double(_cost_samples[i].ewma_ns_per_call_bits.load(std::memory_order_relaxed));
+                out[i].ewma_items_per_call = sched::detail::bits_to_double(_cost_samples[i].ewma_items_per_call_bits.load(std::memory_order_relaxed));
+            }
+            return out;
+        }
+
+        const Partition& partition() const { return _pinned_state.partition; }
+
+        IslandCheck check_islands(const FlowGraphConfig& config) const {
+            std::array<uint8_t, _N> ids{};
+            size_t count = 0;
+            for (size_t i = 0; i < _N; ++i) {
+                if (_is_regular_block[i]) ids[count++] = static_cast<uint8_t>(i);
+            }
+            Partition scratch;
+            return build_manual_partition(config, ids, count,
+                                          (std::max)(config.num_workers, config.pinned_islands.island_count),
+                                          scratch);
+        }
+        size_t repartition_count() const { return _pinned_state.barrier.count(); }
+        size_t affinity_failure_count() const { return _affinity_failures.load(std::memory_order_relaxed); }
+
+        uint64_t total_park_events() const {
+            return _pinned_state.park_states.total_park_events();
+        }
+
+        const std::array<Edge, MaxEdges>& edges() const { return _edges; }
+        size_t edge_count() const { return _edge_count; }
+        size_t unresolved_edge_count() const { return _unresolved_edge_count; }
+        const std::array<UnresolvedEdge, MaxEdges>& unresolved_edges() const { return _unresolved_edges; }
+        const char* block_name(size_t index) const { return _block_bases[index]->name(); }
+
     private:
-        // Block-centric adaptive sleep logic (works with all schedulers)
-        void handle_adaptive_sleep(size_t block_idx, bool procedure_succeeded) {
-            if (!_config.adaptive_sleep) return;
-            
-            auto& stats = _stats[block_idx];
-            
-            if (procedure_succeeded) {
-                // Exponential decay instead of hard reset for better bursty workload handling
-                stats.consecutive_fails.store(0);
-                double current_sleep = stats.current_adaptive_sleep_us.load();
-                stats.current_adaptive_sleep_us.store(current_sleep * 0.5);  // Gradual decay
-            } else {
-                // Increment failure count
-                size_t fails = stats.consecutive_fails.fetch_add(1) + 1;
-                
-                // Check if we should sleep
-                if (fails > _config.adaptive_sleep_fail_threshold) {
-                    double current_sleep = stats.current_adaptive_sleep_us.load();
-                    
-                    if (current_sleep == 0.0) {
-                        // Start sleeping with 1 microsecond
-                        static constexpr double INITIAL_SLEEP_US = 1.0;
-                        stats.current_adaptive_sleep_us.store(INITIAL_SLEEP_US);
-                        TaskPolicy::sleep_us(static_cast<size_t>(INITIAL_SLEEP_US));
-                    } else {
-                        // Exponential backoff with deterministic jitter to prevent thundering herd
-                        double base_sleep = current_sleep * _config.adaptive_sleep_multiplier;
-                        
-                        // Deterministic jitter based on block index (10% variation)
-                        static constexpr double JITTER_FACTOR = 0.1;
-                        double block_jitter = 1.0 + JITTER_FACTOR * (double(block_idx % 10) / 10.0 - 0.5);
-                        
-                        double new_sleep = std::min(
-                            base_sleep * block_jitter,
-                            _config.adaptive_sleep_max_us
-                        );
-                        stats.current_adaptive_sleep_us.store(new_sleep);
-                        TaskPolicy::sleep_us(static_cast<size_t>(new_sleep));
-                    }
-                } else {
-                    // Not enough failures yet, use relax instead of pure yield
-                    TaskPolicy::relax();
+        struct BlockSpan {
+            const void* begin;
+            const void* end;
+        };
+
+        template<std::size_t I>
+        void collect_block_base_for_index() {
+            _block_bases[I] = static_cast<const BlockBase*>(std::get<I>(_runners).block);
+        }
+
+        template<std::size_t... Is>
+        void collect_regular_flags_impl(std::index_sequence<Is...>) {
+            ((_is_regular_block[Is] = !std::get<Is>(_runners).may_block), ...);
+        }
+
+        template<std::size_t... Is>
+        void collect_block_bases_impl(std::index_sequence<Is...>) {
+            (collect_block_base_for_index<Is>(), ...);
+        }
+
+        template<std::size_t I>
+        void collect_span_for_index(std::array<BlockSpan, _N>& spans) {
+            auto* block = std::get<I>(_runners).block;
+            const void* begin = static_cast<const void*>(block);
+            const void* end = static_cast<const void*>(
+                reinterpret_cast<const unsigned char*>(begin) + sizeof(*block));
+            spans[I] = BlockSpan{begin, end};
+        }
+
+        template<std::size_t... Is>
+        void collect_spans_impl(std::index_sequence<Is...>, std::array<BlockSpan, _N>& spans) {
+            (collect_span_for_index<Is>(spans), ...);
+        }
+
+        template<typename Ch>
+        void resolve_and_add_edge(uint8_t producer, Ch* channel, const std::array<BlockSpan, _N>& spans) {
+            const void* address = static_cast<const void*>(channel);
+            for (size_t k = 0; k < _N; ++k) {
+                if (address >= spans[k].begin && address < spans[k].end) {
+                    _edges[_edge_count++] = Edge{producer, static_cast<uint8_t>(k)};
+                    _input_counters[_input_counter_count++] = InputCounter{
+                        address,
+                        [](const void* p) -> std::size_t {
+                            return static_cast<const Ch*>(p)->consumer_thread_cumulative_read_count();
+                        },
+                        static_cast<uint8_t>(k)
+                    };
+                    return;
                 }
             }
+            _unresolved_edges[_unresolved_edge_count++] = UnresolvedEdge{producer, address};
         }
-        
-    public:
-        // These methods must be public because they are called from lambdas passed to 
-        // TaskPolicy::create_task(). Even though the lambdas are created within the class,
-        // they are technically separate callable objects. Different compilers interpret 
-        // lambda access to private members differently - GCC allows it while Clang doesn't.
-        // Making these public ensures portability across compilers.
-        
-        // C++17 compatible member template functions replacing templated lambdas
+
         template<std::size_t I>
-        void run_block_at_index_thread_per_block(const FlowGraphConfig& config) {
+        void collect_edges_for_index(const std::array<BlockSpan, _N>& spans) {
+            auto& runner = std::get<I>(_runners);
+            std::apply([&](auto*... outs) {
+                (resolve_and_add_edge(static_cast<uint8_t>(I), outs, spans), ...);
+            }, runner.outputs);
+        }
+
+        template<std::size_t... Is>
+        void collect_edges_impl(std::index_sequence<Is...>, const std::array<BlockSpan, _N>& spans) {
+            (collect_edges_for_index<Is>(spans), ...);
+        }
+
+        void derive_edges() {
+            collect_block_bases_impl(std::make_index_sequence<_N>{});
+            collect_regular_flags_impl(std::make_index_sequence<_N>{});
+            std::array<BlockSpan, _N> spans{};
+            collect_spans_impl(std::make_index_sequence<_N>{}, spans);
+            collect_edges_impl(std::make_index_sequence<_N>{}, spans);
+        }
+
+        
+
+        template<typename... Channels>
+        static std::size_t sum_output_cumulative_write_count(const std::tuple<Channels*...>& outputs) {
+            return std::apply([](auto*... outs) {
+                return (std::size_t{0} + ... + outs->producer_thread_cumulative_write_count());
+            }, outputs);
+        }
+
+        bool snapshot_input_reads(uint8_t block_id, std::array<std::size_t, MaxEdges>& snap) const {
+            bool found = false;
+            for (size_t i = 0; i < _input_counter_count; ++i) {
+                const auto& ic = _input_counters[i];
+                if (ic.consumer != block_id) continue;
+                found = true;
+                snap[i] = ic.read_count(ic.channel);
+            }
+            return found;
+        }
+
+        std::size_t max_input_read_delta(uint8_t block_id,
+                                         const std::array<std::size_t, MaxEdges>& snap) const {
+            std::size_t max_delta = 0;
+            for (size_t i = 0; i < _input_counter_count; ++i) {
+                const auto& ic = _input_counters[i];
+                if (ic.consumer != block_id) continue;
+                const std::size_t delta = ic.read_count(ic.channel) - snap[i];
+                if (delta > max_delta) max_delta = delta;
+            }
+            return max_delta;
+        }
+
+        template<std::size_t I, bool CostSampling>
+        Result<Empty, Error> sample_and_invoke_procedure() {
+            auto& runner = std::get<I>(_runners);
+
+            if constexpr (!CostSampling) {
+                return std::apply([&](auto*... outs) {
+                    return runner.block->procedure(outs...);
+                }, runner.outputs);
+            } else {
+            auto& sample = _cost_samples[I];
+
+            if (--sample.calls_until_sample != 0) {
+                return std::apply([&](auto*... outs) {
+                    return runner.block->procedure(outs...);
+                }, runner.outputs);
+            }
+            sample.calls_until_sample = sched::detail::COST_SAMPLE_PERIOD_CALLS;
+
+            std::array<std::size_t, MaxEdges> input_snapshot{};
+            const bool has_inputs = snapshot_input_reads(static_cast<uint8_t>(I), input_snapshot);
+            const std::size_t writes_before = sum_output_cumulative_write_count(runner.outputs);
+
+            const auto t_before = std::chrono::steady_clock::now();
+            auto result = std::apply([&](auto*... outs) {
+                return runner.block->procedure(outs...);
+            }, runner.outputs);
+            const auto t_after = std::chrono::steady_clock::now();
+
+            if (result.is_ok()) {
+                const double observed_ns = std::chrono::duration<double, std::nano>(t_after - t_before).count();
+                const std::size_t write_delta =
+                    sum_output_cumulative_write_count(runner.outputs) - writes_before;
+                const std::size_t read_delta = has_inputs
+                    ? max_input_read_delta(static_cast<uint8_t>(I), input_snapshot)
+                    : std::size_t{0};
+                const double observed_items =
+                    static_cast<double>(read_delta > 0 ? read_delta : write_delta);
+
+                const double prev_ns = sched::detail::bits_to_double(sample.ewma_ns_per_call_bits.load(std::memory_order_relaxed));
+                sample.ewma_ns_per_call_bits.store(sched::detail::double_to_bits(prev_ns + (observed_ns - prev_ns) / 8.0),
+                                                   std::memory_order_relaxed);
+
+                const double prev_items = sched::detail::bits_to_double(sample.ewma_items_per_call_bits.load(std::memory_order_relaxed));
+                sample.ewma_items_per_call_bits.store(sched::detail::double_to_bits(prev_items + (observed_items - prev_items) / 8.0),
+                                                      std::memory_order_relaxed);
+            }
+
+            return result;
+            }
+        }
+
+    public:
+        
+        struct NoProgressNotification {
+            void operator()() const {}
+        };
+
+        template<std::size_t I, bool CostSampling, typename ProgressNotifier>
+        void run_block_at_index_thread_per_block(const FlowGraphConfig& config,
+                                                 ProgressNotifier notify_progress) {
             static_assert(I < _N, "Block index out of bounds");
             auto& runner = std::get<I>(_runners);
             auto& stats = _stats[I];
+
+            TaskPolicy::configure_thread_for_low_latency_sleep();
 
             if (config.collect_detailed_stats) {
                 stats.name = runner.block->name();
             }
 
-            // Only declare timing variables if needed
             std::chrono::high_resolution_clock::time_point t_start, t_last;
             size_t successful = 0, failed = 0;
             double total_dead_time_s = 0.0;
@@ -366,11 +707,13 @@ namespace cler {
                 t_start = t_last = std::chrono::high_resolution_clock::now();
             }
 
-            while (!_stop_flag) {
+            BackoffState backoff_state{};
+
+            while (!_stop_flag.load(std::memory_order_relaxed)) {
                 bool did_work_in_batch = false;
-                
-                // Micro-batching: run block multiple times per tick
-                for (size_t c = 0; c < config.max_calls_per_tick && !_stop_flag; ++c) {
+                bool batch_failed = false;
+
+                for (size_t c = 0; c < config.max_calls_per_tick && !_stop_flag.load(std::memory_order_relaxed); ++c) {
                     std::chrono::duration<double> dt{};
                     if (config.collect_detailed_stats) {
                         auto t_now = std::chrono::high_resolution_clock::now();
@@ -378,9 +721,7 @@ namespace cler {
                         t_last = t_now;
                     }
 
-                    Result<Empty, Error> result = std::apply([&](auto*... outs) {
-                        return runner.block->procedure(outs...);
-                    }, runner.outputs);
+                    Result<Empty, Error> result = sample_and_invoke_procedure<I, CostSampling>();
 
                     if (result.is_err()) {
                         if (config.collect_detailed_stats) {
@@ -400,24 +741,23 @@ namespace cler {
                             if (config.collect_detailed_stats) {
                                 total_dead_time_s += dt.count();
                             }
-                            handle_adaptive_sleep(I, false);
-                            break;  // Exit micro-batch loop
-                        } else {
-                            TaskPolicy::relax();
-                            break;  // Exit micro-batch loop on soft error
                         }
+                        batch_failed = true;
+                        break;
 
                     } else {
                         if (config.collect_detailed_stats) {
                             successful++;
                         }
                         did_work_in_batch = true;
-                        // Keep looping up to max_calls_per_tick
                     }
                 }
-                
+
                 if (did_work_in_batch) {
-                    handle_adaptive_sleep(I, true);
+                    TaskPolicy::backoff_reset(backoff_state);
+                    notify_progress();
+                } else if (batch_failed) {
+                    TaskPolicy::backoff(backoff_state);
                 }
             }
 
@@ -428,7 +768,6 @@ namespace cler {
                 stats.successful_procedures = successful;
                 stats.failed_procedures = failed;
                 stats.total_dead_time_s = total_dead_time_s;
-                stats.final_adaptive_sleep_us = config.adaptive_sleep ? stats.current_adaptive_sleep_us.load() : 0.0;
                 stats.total_runtime_s = total_runtime_s.count();
             }
         }
@@ -436,10 +775,9 @@ namespace cler {
     private:  // Return to private section for internal implementation
         template<std::size_t... Is>
         void launch_tasks_impl(std::index_sequence<Is...>, const FlowGraphConfig& config) {
-            // C++17 fold expression: validates all indices are within bounds at compile time
             static_assert(((Is < _N) && ...), "All block indices must be within bounds");
             ((_tasks[Is] = TaskPolicy::create_task([this, config]() {
-                run_block_at_index_thread_per_block<Is>(config);
+                run_block_at_index_thread_per_block<Is, false>(config, NoProgressNotification{});
             })), ...);
             _active_task_count = _N;  // ThreadPerBlock creates one task per block
         }
@@ -450,240 +788,339 @@ namespace cler {
             ((_stats[Is].name = std::get<Is>(_runners).block->name()), ...);
         }
         
-        template<std::size_t... Is>
+        template<bool CostSampling, std::size_t... Is>
         bool execute_block_dispatch_impl(std::index_sequence<Is...>, size_t index, const FlowGraphConfig& config) {
             static_assert(((Is < _N) && ...), "All block indices must be within bounds");
             bool result = false;
-            (void)((index == Is ? (result = execute_block_at_index_helper<Is>(config), true) : false) || ...);
+            (void)((index == Is ? (result = execute_block_at_index_helper<Is, CostSampling>(config), true) : false) || ...);
             return result;
         }
-        
-        void run_thread_per_block(const FlowGraphConfig& config) {
-            // Initialize stats for all blocks
-            initialize_block_stats();
-            // Launch one thread per block using C++17 compatible approach
-            launch_tasks_impl(std::make_index_sequence<_N>{}, config);
+
+        template<std::size_t I>
+        void collect_regular_block_id_for_index(std::array<uint8_t, _N>& ids, size_t& count) {
+            if (!std::get<I>(_runners).may_block) {
+                ids[count++] = static_cast<uint8_t>(I);
+            }
         }
 
+        template<std::size_t... Is>
+        void collect_regular_block_ids_impl(std::index_sequence<Is...>, std::array<uint8_t, _N>& ids, size_t& count) {
+            (collect_regular_block_id_for_index<Is>(ids, count), ...);
+        }
+
+        template<std::size_t I, bool CostSampling, typename ProgressNotifier>
+        void launch_may_block_task_for_index(const FlowGraphConfig& config, ProgressNotifier notify_progress) {
+            if (std::get<I>(_runners).may_block) {
+                _tasks[_active_task_count++] = TaskPolicy::create_task([this, config, notify_progress]() {
+                    run_block_at_index_thread_per_block<I, CostSampling>(config, notify_progress);
+                });
+            }
+        }
+
+        template<bool CostSampling, typename ProgressNotifier, std::size_t... Is>
+        void launch_may_block_tasks_impl(std::index_sequence<Is...>, const FlowGraphConfig& config,
+                                         ProgressNotifier notify_progress) {
+            (launch_may_block_task_for_index<Is, CostSampling>(config, notify_progress), ...);
+        }
+
+        template<bool CostSampling, typename ProgressNotifier, std::size_t... Is>
+        void launch_thread_per_block_task_dispatch_impl(std::index_sequence<Is...>, size_t index,
+                                                        const FlowGraphConfig& config,
+                                                        ProgressNotifier notify_progress) {
+            (void)((index == Is ? (_tasks[_active_task_count++] = TaskPolicy::create_task([this, config, notify_progress]() {
+                run_block_at_index_thread_per_block<Is, CostSampling>(config, notify_progress);
+            }), true) : false) || ...);
+        }
+
+
+        typename ThreadPerBlockScheduler::State _thread_state;
+        typename FixedThreadPoolScheduler::State _fixed_state;
+        typename PinnedIslandsScheduler::State _pinned_state;
         std::tuple<BlockRunners...> _runners;
         std::array<typename TaskPolicy::task_type, _N> _tasks;
         std::atomic<bool> _stop_flag{false};
         FlowGraphConfig _config;
         std::array<BlockExecutionStats, _N> _stats;
+        std::array<sched::detail::SchedulerCostSample, _N> _cost_samples;
+        std::array<const BlockBase*, _N> _block_bases{};
+        std::array<bool, _N> _is_regular_block{};
+        std::array<Edge, MaxEdges> _edges{};
+        size_t _edge_count = 0;
+        std::array<UnresolvedEdge, MaxEdges> _unresolved_edges{};
+        size_t _unresolved_edge_count = 0;
+        std::array<InputCounter, MaxEdges> _input_counters{};
+        size_t _input_counter_count = 0;
+        std::array<std::size_t, _N> _items_mark{};
+        std::chrono::steady_clock::time_point _items_mark_time{};
         OnErrTerminateCallback _on_err_terminate_cb = nullptr;
         void* _on_err_terminate_context = nullptr;
         std::array<std::chrono::high_resolution_clock::time_point, _N> _block_start_times;
         size_t _active_task_count{0};  // Track actual created tasks to fix stop() hang
-        
-        // Initialize block stats with names (only if detailed stats enabled)
+
+        std::atomic<size_t> _affinity_failures{0};
+
         void initialize_block_stats() {
             if (_config.collect_detailed_stats) {
                 init_stats_impl(std::make_index_sequence<_N>{});
             }
         }
         
-        // Helper for conditional timing
-        auto get_time_if_needed(bool collect_stats) {
-            return collect_stats ? std::chrono::high_resolution_clock::now() : 
-                                 std::chrono::high_resolution_clock::time_point{};
-        }
-        
-        
-        template<size_t MaxBlocksParam, size_t MaxWorkers = DEFAULT_MAX_WORKERS>
-        class FixedThreadPoolScheduler {
-            using block_index_t = uint8_t;
-            
-            // Compile-time validation
-            static_assert(MaxBlocksParam >= 1, "Must support at least one block");
-            static_assert(MaxWorkers >= 1, "Must support at least one worker");
-            static_assert(MaxBlocksParam <= (std::numeric_limits<block_index_t>::max)(), 
-                          "MaxBlocksParam exceeds block_index_t capacity");
-            
-            // Align to cache line to prevent false sharing
-            struct alignas(platform::cache_line_size) WorkerQueue {
-                std::array<block_index_t, MaxBlocksParam> blocks;
-                uint32_t count = 0;
-                uint32_t current = 0;
-                
-                bool get_block(size_t& block_idx_out) {
-                    if (current < count) {
-                        block_idx_out = blocks[current++];
-                        return true;
-                    }
-                    return false;
-                }
-                
-                void reset() {
-                    current = 0;
-                }
-            };
-            
-            // Ensure WorkerQueue doesn't grow too large for cache efficiency
-            static_assert(sizeof(WorkerQueue) <= platform::cache_line_size * 4, 
-                          "WorkerQueue is too large, consider reducing MaxBlocksParam");
-            
-            std::array<WorkerQueue, MaxWorkers> queues;
-            std::array<size_t, MaxBlocksParam> block_owner;  // Track which worker owns each block
-            size_t num_blocks = 0;
-            size_t num_workers = 0;
-            
-        public:
-            void initialize(size_t blocks, size_t workers) {
-                num_blocks = blocks;
-                num_workers = workers;
-                
-                // NEW: Contiguous grouping instead of round-robin
-                // This keeps producer->consumer chains on the same core,
-                // dramatically reducing SPSC queue cache coherency traffic
-                for (auto& q : queues) { 
-                    q.count = 0; 
-                    q.current = 0; 
-                }
-                
-                const size_t per = (blocks + workers - 1) / workers;  // ceil(blocks/workers)
-                size_t idx = 0;
-                for (size_t w = 0; w < workers && idx < blocks; ++w) {
-                    auto& q = queues[w];
-                    for (size_t k = 0; k < per && idx < blocks; ++k, ++idx) {
-                        q.blocks[q.count++] = static_cast<block_index_t>(idx);
-                        block_owner[idx] = w;  // Track ownership for stats finalization
-                    }
-                }
-            }
-            
-            bool get_next_block(size_t worker_id, size_t& block_idx_out) {
-                // Super fast path - no atomics!
-                if (queues[worker_id].get_block(block_idx_out)) {
-                    return true;
-                }
-                
-                // Reset and go again (continuous round-robin)
-                queues[worker_id].reset();
-                return queues[worker_id].get_block(block_idx_out);
-            }
-            
-            bool is_block_owner(size_t worker_id, size_t block_idx) const {
-                return block_idx < num_blocks && block_owner[block_idx] == worker_id;
-            }
-        };
-        
-        
-        FixedThreadPoolScheduler<MaxBlocks, DEFAULT_MAX_WORKERS> fixed_thread_pool_scheduler;
-        
-        // FixedThreadPool implementation
-        void run_fixed_thread_pool(const FlowGraphConfig& config) {
-            _stop_flag.store(false, std::memory_order_release);
 
-            // Validate worker count - must be at least 2 for fixed thread pool scheduling
-            size_t num_workers = config.num_workers;
-            assert(num_workers >= 2 && "FixedThreadPoolScheduler requires at least 2 workers. Use ThreadPerBlock scheduler for single-threaded execution.");
-            
-            // Initialize stats for all blocks
-            initialize_block_stats();
-            
-            // If more workers than blocks, use thread-per-block scheduling
-            if (num_workers >= _N) {
-                // More workers than blocks - use thread-per-block (current behavior)
-                run_thread_per_block(config);
+        void rebuild_partition_from(const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
+                                    size_t worker_count, bool use_costs, Partition& out) {
+            const auto& pinned = _config.pinned_islands;
+            if (pinned.islands != nullptr || pinned.island_names != nullptr) {
+                const IslandCheck check =
+                    build_manual_partition(_config, regular_ids, regular_count, worker_count, out);
+                if (!check) {
+                    TaskPolicy::fatal(check.message(),
+                                      check.block != nullptr ? check.block->name() : "");
+                }
             } else {
-                // Fewer workers than blocks - use fixed thread pool scheduler
-                // Initialize with contiguous block grouping (keeps producer->consumer chains together)
-                fixed_thread_pool_scheduler.initialize(_N, num_workers);
-                
-                // Record start time for all blocks (only if detailed stats enabled)
-                if (config.collect_detailed_stats) {
-                    auto start_time = std::chrono::high_resolution_clock::now();
-                    for (size_t i = 0; i < _N; ++i) {
-                        _block_start_times[i] = start_time;
-                    }
-                }
-                
-                // Create worker tasks using fixed thread pool scheduler
-                _active_task_count = 0;
-                for (size_t worker_id = 0; worker_id < num_workers && worker_id < _N; ++worker_id) {
-                    _tasks[worker_id] = TaskPolicy::create_task([this, worker_id, config]() {
-                        run_fixed_thread_pool_worker(worker_id, config);
-                    });
-                    _active_task_count++;
-                }
+                std::array<double, _N> weights{};
+                sched::detail::collect_cost_weights<_N>(_cost_samples, regular_ids, regular_count, weights);
+                sched::detail::build_partition<_N, DEFAULT_MAX_WORKERS>(
+                    _edges.data(), _edge_count, weights,
+                    regular_ids, regular_count, worker_count,
+                    use_costs, _unresolved_edge_count == 0, out);
+            }
+            if (pinned.report_partition) {
+                report_partition(out);
             }
         }
-        
-    public:  // Making run_fixed_thread_pool_worker public for lambda access (see comment above)
-        void run_fixed_thread_pool_worker(size_t worker_id, const FlowGraphConfig& config) {
-            // Optional: pin worker to specific CPU core
-            if (config.pin_workers) {
-                TaskPolicy::pin_to_core(worker_id);
-            }
-            
-            while (!_stop_flag) {
-                bool did_work = false;
-                size_t block_idx;
 
-                // Get next block from fixed thread pool scheduler (super fast - no atomics!)
-                while (fixed_thread_pool_scheduler.get_next_block(worker_id, block_idx)) {
-                    if (_stop_flag) break;
-                    
-                    // Track timing for dead time calculation (only if detailed stats enabled)
-                    auto t_before = get_time_if_needed(config.collect_detailed_stats);
-                    
-                    bool block_did_work = execute_block_at_index(block_idx, config);
-                    
-                    // Update dead time if block failed to process
-                    if (!block_did_work && config.collect_detailed_stats) {
-                        auto t_after = std::chrono::high_resolution_clock::now();
-                        std::chrono::duration<double> dt = t_after - t_before;
-                        _stats[block_idx].total_dead_time_s += dt.count();
-                    }
-                    
-                    did_work = did_work || block_did_work;
+        size_t index_of_block(const BlockBase* block) const {
+            for (size_t i = 0; i < _N; ++i) {
+                if (_block_bases[i] == block) return i;
+            }
+            return _N;
+        }
+
+        static bool token_equals(const char* begin, const char* end, const char* name) {
+            while (begin != end && (*begin == ' ' || *begin == '\t' || *begin == '\n')) ++begin;
+            while (end != begin && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\n')) --end;
+            const size_t length = static_cast<size_t>(end - begin);
+            return std::strlen(name) == length && std::strncmp(begin, name, length) == 0;
+        }
+
+        size_t index_of_name(const char* begin, const char* end) const {
+            for (size_t i = 0; i < _N; ++i) {
+                if (token_equals(begin, end, _block_bases[i]->name())) return i;
+            }
+            return _N;
+        }
+
+        static bool is_regular(size_t index, const std::array<uint8_t, _N>& regular_ids,
+                               size_t regular_count) {
+            for (size_t i = 0; i < regular_count; ++i) {
+                if (regular_ids[i] == index) return true;
+            }
+            return false;
+        }
+
+        IslandCheck add_island_block(size_t index, size_t island,
+                                     const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
+                                     std::array<bool, _N>& used, Partition& out, size_t& cursor) const {
+            if (!is_regular(index, regular_ids, regular_count)) {
+                return IslandCheck{IslandCheck::Code::NotSchedulable, island, _block_bases[index]};
+            }
+            if (used[index]) {
+                return IslandCheck{IslandCheck::Code::Duplicate, island, _block_bases[index]};
+            }
+            used[index] = true;
+            out.block_ids[cursor++] = static_cast<uint8_t>(index);
+            return IslandCheck{};
+        }
+
+        IslandCheck append_island_blocks(const IslandList& list, size_t island,
+                                         const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
+                                         std::array<bool, _N>& used, Partition& out, size_t& cursor) const {
+            for (size_t k = 0; k < list.count; ++k) {
+                const BlockBase* block = list.blocks[k];
+                const size_t index = index_of_block(block);
+                if (index == _N) {
+                    return IslandCheck{IslandCheck::Code::NotInGraph, island, block};
                 }
-                
-                if (!did_work) {
-                    // No work available, use relax instead of pure yield
-                    TaskPolicy::relax();
+                const IslandCheck check =
+                    add_island_block(index, island, regular_ids, regular_count, used, out, cursor);
+                if (!check) return check;
+            }
+            return IslandCheck{};
+        }
+
+        IslandCheck append_island_names(const char* spec, size_t island,
+                                        const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
+                                        std::array<bool, _N>& used, Partition& out, size_t& cursor) const {
+            if (spec == nullptr) return IslandCheck{IslandCheck::Code::EmptyIsland, island};
+
+            const char* current = spec;
+            while (*current != '\0') {
+                const char* comma = std::strchr(current, ',');
+                const char* end = comma != nullptr ? comma : current + std::strlen(current);
+                const size_t index = index_of_name(current, end);
+                if (index == _N) {
+                    return IslandCheck{IslandCheck::Code::NotInGraph, island, nullptr};
+                }
+                const IslandCheck check =
+                    add_island_block(index, island, regular_ids, regular_count, used, out, cursor);
+                if (!check) return check;
+                current = comma != nullptr ? comma + 1 : end;
+            }
+            return IslandCheck{};
+        }
+
+        IslandCheck check_within_island_order(const Partition& out) const {
+            std::array<uint16_t, _N> position{};
+            std::array<uint8_t, _N> island_of{};
+            std::array<bool, _N> listed{};
+
+            for (size_t island = 0; island < out.island_count; ++island) {
+                for (uint16_t k = out.island_begin[island]; k < out.island_begin[island + 1]; ++k) {
+                    const uint8_t id = out.block_ids[k];
+                    position[id] = k;
+                    island_of[id] = static_cast<uint8_t>(island);
+                    listed[id] = true;
                 }
             }
-            
-            // Finalize stats when worker exits (only if detailed stats enabled)
-            if (config.collect_detailed_stats) {
-                auto end_time = std::chrono::high_resolution_clock::now();
-                // IMPORTANT: In this scheduler each block is executed only by its owning worker.
-                // Stats writes are safe because there's no work-stealing or migration.
-                // If work-stealing is added later, _stats writes must be made thread-safe or owner-only.
-                for (size_t i = 0; i < _N; ++i) {
-                    if (fixed_thread_pool_scheduler.is_block_owner(worker_id, i)) {
-                        std::chrono::duration<double> total_runtime = end_time - _block_start_times[i];
-                        _stats[i].total_runtime_s = total_runtime.count();
-                        _stats[i].final_adaptive_sleep_us = config.adaptive_sleep ? _stats[i].current_adaptive_sleep_us.load() : 0.0;
-                    }
+
+            for (size_t e = 0; e < _edge_count; ++e) {
+                const uint8_t producer = _edges[e].producer;
+                const uint8_t consumer = _edges[e].consumer;
+                if (producer == consumer) continue;
+                if (!listed[producer] || !listed[consumer]) continue;
+                if (island_of[producer] != island_of[consumer]) continue;
+                if (position[producer] >= position[consumer]) {
+                    return IslandCheck{IslandCheck::Code::NotTopological, island_of[consumer],
+                                       _block_bases[consumer]};
+                }
+            }
+            return IslandCheck{};
+        }
+
+        IslandCheck build_manual_partition(const FlowGraphConfig& config,
+                                           const std::array<uint8_t, _N>& regular_ids, size_t regular_count,
+                                           size_t worker_count, Partition& out) const {
+            const auto& pinned = config.pinned_islands;
+            if (pinned.islands != nullptr && pinned.island_names != nullptr) {
+                return IslandCheck{IslandCheck::Code::BothFormsGiven};
+            }
+            if (pinned.island_count == 0) return IslandCheck{IslandCheck::Code::NoIslands};
+            if (pinned.island_count > worker_count) {
+                return IslandCheck{IslandCheck::Code::TooManyIslands};
+            }
+
+            std::array<bool, _N> used{};
+            size_t cursor = 0;
+
+            for (size_t island = 0; island < pinned.island_count; ++island) {
+                out.island_begin[island] = static_cast<uint16_t>(cursor);
+                const IslandCheck check =
+                    pinned.islands != nullptr
+                        ? append_island_blocks(pinned.islands[island], island, regular_ids,
+                                               regular_count, used, out, cursor)
+                        : append_island_names(pinned.island_names[island], island, regular_ids,
+                                              regular_count, used, out, cursor);
+                if (!check) return check;
+                if (cursor == out.island_begin[island]) {
+                    return IslandCheck{IslandCheck::Code::EmptyIsland, island};
+                }
+            }
+
+            out.island_begin[pinned.island_count] = static_cast<uint16_t>(cursor);
+            out.block_count = static_cast<uint16_t>(cursor);
+            out.island_count = static_cast<uint16_t>(pinned.island_count);
+
+            for (size_t i = 0; i < regular_count; ++i) {
+                if (!used[regular_ids[i]]) {
+                    return IslandCheck{IslandCheck::Code::Missing, 0, _block_bases[regular_ids[i]]};
+                }
+            }
+            return check_within_island_order(out);
+        }
+
+        void report_partition(const Partition& partition) {
+            std::array<double, _N> weights{};
+            collect_utilisation_weights(weights);
+            sched::detail::fill_unsampled_with_median<_N>(partition.block_ids,
+                                                          partition.block_count, weights);
+            for (size_t island = 0; island < partition.island_count; ++island) {
+                for (uint16_t k = partition.island_begin[island]; k < partition.island_begin[island + 1]; ++k) {
+                    const uint8_t id = partition.block_ids[k];
+                    TaskPolicy::report_partition_block(island, k, block_name(id), weights[id]);
                 }
             }
         }
-        
-    private:  // Return to private section for internal implementation details
+
         template<size_t I>
+        std::size_t cumulative_items_for_index() const {
+            std::size_t reads = 0;
+            bool has_inputs = false;
+            for (size_t i = 0; i < _input_counter_count; ++i) {
+                const auto& ic = _input_counters[i];
+                if (ic.consumer != static_cast<uint8_t>(I)) continue;
+                has_inputs = true;
+                const std::size_t count = ic.read_count(ic.channel);
+                if (count > reads) reads = count;
+            }
+            if (has_inputs) return reads;
+            return sum_output_cumulative_write_count(std::get<I>(_runners).outputs);
+        }
+
+        template<std::size_t... Is>
+        void fill_cumulative_items(std::array<std::size_t, _N>& items, std::index_sequence<Is...>) const {
+            ((items[Is] = cumulative_items_for_index<Is>()), ...);
+        }
+
+        void mark_item_counters() {
+            fill_cumulative_items(_items_mark, std::make_index_sequence<_N>{});
+            _items_mark_time = std::chrono::steady_clock::now();
+        }
+
+        void collect_utilisation_weights(std::array<double, _N>& weights) {
+            std::array<std::size_t, _N> items{};
+            fill_cumulative_items(items, std::make_index_sequence<_N>{});
+
+            const double elapsed_s =
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - _items_mark_time).count();
+
+            for (size_t i = 0; i < _N; ++i) {
+                const double ns = sched::detail::ns_per_item(_cost_samples[i]);
+                const std::size_t delta = items[i] >= _items_mark[i] ? items[i] - _items_mark[i] : 0;
+                const double items_per_second =
+                    elapsed_s > 0.0 ? static_cast<double>(delta) / elapsed_s : 0.0;
+                weights[i] = ns * items_per_second;
+            }
+        }
+
+        void reset_run_state() {
+            for (auto& stats : _stats) stats = BlockExecutionStats{};
+            for (auto& sample : _cost_samples) {
+                sample.calls_until_sample = sched::detail::COST_SAMPLE_PERIOD_CALLS;
+                sample.ewma_ns_per_call_bits.store(0, std::memory_order_relaxed);
+                sample.ewma_items_per_call_bits.store(0, std::memory_order_relaxed);
+            }
+            _pinned_state.reset();
+            _affinity_failures.store(0, std::memory_order_relaxed);
+            _active_task_count = 0;
+        }
+
+        template<size_t I, bool CostSampling>
         bool execute_block_at_index_helper(const FlowGraphConfig& config) {
             static_assert(I < _N, "Block index out of bounds");
-            
-            auto& runner = std::get<I>(_runners);
+
             auto& stats = _stats[I];
-            
+
             bool did_work = false;
-            
-            // Micro-batching: run block multiple times if it's making progress
-            for (size_t c = 0; c < config.max_calls_per_tick && !_stop_flag; ++c) {
-                // Execute procedure and handle errors
-                auto result = std::apply([&](auto*... outs) {
-                    return runner.block->procedure(outs...);
-                }, runner.outputs);
-                
+
+            for (size_t c = 0; c < config.max_calls_per_tick; ++c) {
+                auto result = sample_and_invoke_procedure<I, CostSampling>();
+
                 if (result.is_err()) {
                     if (config.collect_detailed_stats) {
                         stats.failed_procedures++;
                     }
                     auto err = result.unwrap_err();
-                    
+
                     if (is_fatal(err)) {
                         _stop_flag.store(true, std::memory_order_release);
                         if (_on_err_terminate_cb) {
@@ -691,36 +1128,22 @@ namespace cler {
                         }
                         break;
                     }
-                    
-                    // No progress - leave the burst early to let others run
-                    if (err == Error::NotEnoughSamples || err == Error::NotEnoughSpace ||
-                        err == Error::NotEnoughSpaceOrSamples) {
-                        handle_adaptive_sleep(I, false);
-                        break;  // Exit micro-batch loop
-                    } else {
-                        // Soft error, brief relax and stop bursting
-                        TaskPolicy::relax();
-                        break;
-                    }
+
+                    break;
                 } else {
                     if (config.collect_detailed_stats) {
                         stats.successful_procedures++;
                     }
                     did_work = true;
-                    // Keep looping up to max_calls_per_tick
                 }
             }
-            
-            if (did_work) {
-                handle_adaptive_sleep(I, true);
-            }
-            
+
             return did_work;
         }
-        
+
+        template<bool CostSampling>
         bool execute_block_at_index(size_t index, const FlowGraphConfig& config) {
-            // Runtime dispatch to compile-time template using C++17 compatible approach
-            return execute_block_dispatch_impl(std::make_index_sequence<_N>{}, index, config);
+            return execute_block_dispatch_impl<CostSampling>(std::make_index_sequence<_N>{}, index, config);
         }
         
     };

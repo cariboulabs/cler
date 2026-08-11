@@ -93,6 +93,10 @@ struct MultiStageResamplerBlock : public cler::BlockBase {
         size_t max_input_by_output = static_cast<size_t>(available_output / _ratio);
         size_t max_input = std::min({available_input, max_input_by_output, _buffer_size});
 
+        if (max_input == 0) {
+            return cler::Error::NotEnoughSpaceOrSamples;
+        }
+
         in.readN(_input_buffer, max_input);
 
         unsigned int n_resampled = 0;

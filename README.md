@@ -114,8 +114,7 @@ CLER is fully supported on **Linux** and **macOS**. Windows users should use [Wi
   - **Simple Setup**: WSL2 takes minutes to install and integrates seamlessly with Windows
 
 * **Schedulers** </br>
-CLER includes two schedulers: **ThreadPerBlock** (default, simple, debuggable) and **FixedThreadPool** (better for constrained systems).  It also has Performance mode which eliminates stats overhead for ultra-high throughput applications,
-and Adaptive_sleep mode which can help mitigate chocked CPU in expensive of throughput.
+CLER includes three schedulers: **ThreadPerBlock** (default, simple, debuggable), **FixedThreadPool** (better for constrained systems) and **PinnedIslands** (core-pinned, cost-partitioned islands whose idle workers park instead of spinning).  It also has Performance mode which eliminates stats overhead for ultra-high throughput applications.
 
 * **Flowgraph vs Streamlined** </br>
 CLER supports two architectural styles:

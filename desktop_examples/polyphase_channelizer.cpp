@@ -79,15 +79,13 @@ int main() {
     CustomSourceBlock cw_source4("CW Source 4", 1*10000.0f, 0.01f,  ch4_freq, SPS);
 
 
-    AddBlock<std::complex<float>> adder("Adder", NUM_CHANNELS);
+    AddBlock<std::complex<float>, NUM_CHANNELS> adder("Adder");
 
     ThroughputBlock<std::complex<float>> throughput("Throughput");
 
-    PolyphaseChannelizerBlock channelizer(
+    PolyphaseChannelizerBlock<NUM_CHANNELS, 3> channelizer(
         "Polyphase Channelizer",
-        NUM_CHANNELS, // number of channels
-        80.0f, // kaiser attenuation
-        3 // kaiser filter semilength
+        80.0f // kaiser attenuation
     );
 
     PlotCSpectrumBlock plot_polyphase_cspectrum(
@@ -128,7 +126,6 @@ int main() {
     cler::FlowGraphConfig config;
     config.scheduler = cler::SchedulerType::FixedThreadPool;
     config.collect_detailed_stats = true;
-    config.adaptive_sleep = true;
     flowgraph.run(config);
     
     const float GW = 1800.0f;

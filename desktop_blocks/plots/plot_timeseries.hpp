@@ -3,9 +3,12 @@
 #include "cler.hpp"
 #include <vector>
 #include <mutex>
+#include <type_traits>
 #include "imgui.h"
 
 struct PlotTimeSeriesBlock : public cler::BlockBase {
+    static constexpr size_t MAX_INPUT_CHANNEL_SLOTS = 16;
+
     cler::Channel<float>* in;
 
     PlotTimeSeriesBlock(const char* name,
@@ -28,6 +31,8 @@ private:
 
     cler::Channel<float>* _y_channels;   // ring buffers for each signal
     cler::Channel<float>* _x_channel;    // ring buffer for timestamps
+
+    std::aligned_storage_t<sizeof(cler::Channel<float>), alignof(cler::Channel<float>)> _in_storage[MAX_INPUT_CHANNEL_SLOTS];
 
     float* _snapshot_x_buffer = nullptr; // holds last good snapshot
     float** _snapshot_y_buffers = nullptr;

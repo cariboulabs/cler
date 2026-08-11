@@ -240,9 +240,9 @@ int main() {
     // Test 1: Baseline ThreadPerBlock
     results.push_back(run_baseline_test(test_duration));
     
-    // Test 2: FixedThreadPool with 2 workers (embedded-style)
+    // Test 2: embedded_optimized() preset (PinnedIslands, 2 workers)
     auto conservative_config = cler::flowgraph_config::embedded_optimized();
-    results.push_back(run_enhanced_test("FixedThreadPool (2 workers)", conservative_config, test_duration));
+    results.push_back(run_enhanced_test("embedded_optimized (PinnedIslands 2)", conservative_config, test_duration));
     
     // Test 3: FixedThreadPool with 4 workers (desktop-style)
     auto default_config = cler::flowgraph_config::desktop_performance();
@@ -258,32 +258,12 @@ int main() {
     minimal_fixed_config.num_workers = 2;  // Minimal workers for comparison
     results.push_back(run_enhanced_test("FixedThreadPool (2 workers)", minimal_fixed_config, test_duration));
     
-    // Test 6: ThreadPerBlock with conservative adaptive sleep (rarely sleeps)
-    auto conservative_sleep_config = cler::flowgraph_config::thread_per_block_adaptive_sleep();
-    conservative_sleep_config.adaptive_sleep_max_us = 1000.0; // Lower max sleep time
-    conservative_sleep_config.adaptive_sleep_multiplier = 2.0; // High growth
-    conservative_sleep_config.adaptive_sleep_fail_threshold = 20; // More fails before sleeping
-    results.push_back(run_enhanced_test("ThreadPerBlock (conservative adaptive sleep)", conservative_sleep_config, test_duration));
+    auto pinned_islands_2 = cler::flowgraph_config::pinned_islands(2);
+    results.push_back(run_enhanced_test("PinnedIslands (2 workers)", pinned_islands_2, test_duration));
 
-    // Test 7: ThreadPerBlock with adaptive sleep (for sparse data)
-    auto adaptive_sleep_config = cler::flowgraph_config::thread_per_block_adaptive_sleep();
-    results.push_back(run_enhanced_test("ThreadPerBlock (default adaptive sleep)", adaptive_sleep_config, test_duration));
-    
-    // Test 8: ThreadPerBlock with aggressive adaptive sleep (for very sparse data)
-    auto aggressive_sleep_config = cler::flowgraph_config::thread_per_block_adaptive_sleep();
-    aggressive_sleep_config.adaptive_sleep_multiplier = 2.0; // Aggressive growth
-    aggressive_sleep_config.adaptive_sleep_fail_threshold = 5; // Fewer fails before sleeping
-    aggressive_sleep_config.adaptive_sleep_max_us = 10000.0; // Higher max
-    results.push_back(run_enhanced_test("ThreadPerBlock (aggressive adaptive sleep)", aggressive_sleep_config, test_duration));
-    
-    // Test 9: FixedThreadPool with adaptive sleep (NEW - now possible!)
-    auto fixed_pool_sleep_config = cler::flowgraph_config::desktop_performance();
-    fixed_pool_sleep_config.adaptive_sleep = true;
-    fixed_pool_sleep_config.adaptive_sleep_multiplier = 1.5;
-    fixed_pool_sleep_config.adaptive_sleep_max_us = 5000.0;
-    fixed_pool_sleep_config.adaptive_sleep_fail_threshold = 10;
-    results.push_back(run_enhanced_test("FixedThreadPool (with adaptive sleep)", fixed_pool_sleep_config, test_duration));
-    
+    auto pinned_islands_4 = cler::flowgraph_config::pinned_islands(4);
+    results.push_back(run_enhanced_test("PinnedIslands (4 workers)", pinned_islands_4, test_duration));
+
 
     // Print results
     std::cout << "========================================" << std::endl;

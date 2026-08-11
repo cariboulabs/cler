@@ -8,6 +8,7 @@
 #include "desktop_blocks/adsb/adsb_aggregate.hpp"
 #include "desktop_blocks/sinks/sink_null.hpp"
 #include "desktop_blocks/math/frequency_shift.hpp"
+#include <cmath>
 
 void on_aircraft_update(const ADSBState&, void*) {}
 
@@ -145,7 +146,10 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "=== ADSB Receiver ===" << std::endl;
-    std::cout << "Map center: " << initial_lat << "°N, " << initial_lon << "°E" << std::endl;
+    std::cout << "Map center: " << std::fabs(initial_lat)
+              << "°" << (initial_lat >= 0.0f ? 'N' : 'S') << ", "
+              << std::fabs(initial_lon)
+              << "°" << (initial_lon >= 0.0f ? 'E' : 'W') << std::endl;
     std::cout << std::endl;
 
     // ADS-B frequency and settings

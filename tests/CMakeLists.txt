@@ -24,3 +24,4 @@ enable_testing()
 # Add test subdirectories
 add_subdirectory(spsc-queue)
 add_subdirectory(desktop_blocks)
+add_subdirectory(scheduler)

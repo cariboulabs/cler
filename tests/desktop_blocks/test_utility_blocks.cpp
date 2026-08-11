@@ -108,10 +108,10 @@ TEST_F(UtilityBlocksTest, FanoutBlockEmptyInput) {
     cler::Channel<float> output1(buffer_size);
     cler::Channel<float> output2(buffer_size);
     
-    // Run the block with empty input
     auto result = fanout_block.procedure(&output1, &output2);
-    EXPECT_TRUE(result.is_ok());
-    
+    ASSERT_TRUE(result.is_err());
+    EXPECT_EQ(result.unwrap_err(), cler::Error::NotEnoughSpaceOrSamples);
+
     // Verify outputs are empty
     EXPECT_EQ(output1.size(), 0);
     EXPECT_EQ(output2.size(), 0);
@@ -175,6 +175,41 @@ TEST_F(UtilityBlocksTest, ThrottleBlockEmptyInput) {
     auto result = throttle_block.procedure(&output);
     EXPECT_FALSE(result.is_ok()); // Should return NotEnoughSamples error
     EXPECT_EQ(output.size(), 0);
+}
+
+TEST_F(UtilityBlocksTest, ThrottleBlockHighRateThroughput) {
+    const size_t buffer_size = 4096;
+    const size_t sps = 1000000;
+    const size_t total = 100000;
+
+    ThrottleBlock<float> throttle_block("test_throttle_rate", sps, buffer_size);
+    cler::Channel<float> output(buffer_size);
+
+    size_t pushed = 0;
+    size_t popped = 0;
+    size_t out_of_order = 0;
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+    while (popped < total) {
+        while (pushed < total && throttle_block.in.space() > 0) {
+            throttle_block.in.push(static_cast<float>(pushed));
+            ++pushed;
+        }
+        throttle_block.procedure(&output);
+        float sample;
+        while (output.try_pop(sample)) {
+            if (sample != static_cast<float>(popped)) ++out_of_order;
+            ++popped;
+        }
+    }
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::high_resolution_clock::now() - start_time);
+
+    EXPECT_EQ(out_of_order, 0u) << "sample order not preserved";
+
+    const int64_t nominal_ms = static_cast<int64_t>(1000.0 * total / sps);
+    EXPECT_GE(elapsed.count(), nominal_ms * 8 / 10) << "throttle ran free, did not pace";
+    EXPECT_LE(elapsed.count(), nominal_ms * 10) << "throttle did not batch what came due";
 }
 
 // Test ThroughputBlock - verify passthrough and counting
@@ -290,10 +325,10 @@ TEST_F(UtilityBlocksTest, ThroughputBlockEmptyInput) {
     ThroughputBlock<float> throughput_block("test_throughput_empty", buffer_size);
     cler::Channel<float> output(buffer_size);
     
-    // Run with empty input
     auto result = throughput_block.procedure(&output);
-    EXPECT_TRUE(result.is_ok());
-    
+    ASSERT_TRUE(result.is_err());
+    EXPECT_EQ(result.unwrap_err(), cler::Error::NotEnoughSpaceOrSamples);
+
     // Verify no samples passed
     EXPECT_EQ(throughput_block.samples_passed(), 0);
     EXPECT_EQ(output.size(), 0);
