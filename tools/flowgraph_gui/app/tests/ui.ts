@@ -22,6 +22,10 @@ export type FakeTarget = {
   binary: string | null;
 };
 
+export type FakeAssistant = { available: boolean; model: string; reason: string | null };
+
+export type Ask = { path: string; question: string; history: { role: string; text: string }[] };
+
 type Setup = {
   path: string;
   model: FileModel;
@@ -30,11 +34,14 @@ type Setup = {
   refusal: unknown;
   openError: string | null;
   target: FakeTarget | null;
+  assistant: FakeAssistant;
+  askError: string | null;
 };
 
 type Fake = {
   log: Command[][];
   calls: string[];
+  asks: Ask[];
   bases: number[];
   source: () => string;
   refuse: (value: unknown) => void;
@@ -66,6 +73,7 @@ function installFake(setup: Setup) {
   const redone: string[] = [];
   const log: unknown[][] = [];
   const calls: string[] = [];
+  const asks: unknown[] = [];
   const bases: number[] = [];
   const callbacks = new Map<number, (message: unknown) => void>();
   const listeners: { event: string; handler: number }[] = [];
@@ -300,6 +308,17 @@ function installFake(setup: Setup) {
     }
     if (command === 'plugin:dialog|open') return state.path;
     calls.push(command);
+    if (command === 'assistant_status') return setup.assistant;
+    if (command === 'assistant_stop') return null;
+    if (command === 'assistant_ask') {
+      asks.push({
+        path: args.path,
+        question: args.question,
+        history: args.history
+      });
+      if (setup.askError !== null) throw setup.askError;
+      return null;
+    }
     if (command === 'open_document' && setup.openError !== null) throw setup.openError;
     if (command === 'palette') return JSON.parse(JSON.stringify(palette));
     if (command === 'find_target') {
@@ -345,6 +364,7 @@ function installFake(setup: Setup) {
   scope.__fake = {
     log,
     calls,
+    asks,
     bases,
     source: () => state.source,
     refuse: (value: unknown) => {
@@ -397,6 +417,21 @@ export type BootOptions = {
   openError?: string;
   empty?: boolean;
   target?: FakeTarget | null;
+  assistant?: FakeAssistant;
+  askError?: string;
+};
+
+export const ASSISTANT_READY: FakeAssistant = {
+  available: true,
+  model: 'claude-opus-5',
+  reason: null
+};
+
+export const NO_KEY: FakeAssistant = {
+  available: false,
+  model: 'claude-opus-5',
+  reason:
+    'no Anthropic API key — export ANTHROPIC_API_KEY before starting the editor, or write the key into /home/pilot/.config/dev.cler.flowgraph-gui/anthropic-key and chmod 600 it'
 };
 
 export const NO_TARGET: FakeTarget = {
@@ -431,7 +466,9 @@ export async function boot(options: BootOptions = {}): Promise<Page> {
     specs,
     refusal: options.refusal ?? null,
     openError: options.openError ?? null,
-    target: options.target === undefined ? NO_TARGET : options.target
+    target: options.target === undefined ? NO_TARGET : options.target,
+    assistant: options.assistant ?? ASSISTANT_READY,
+    askError: options.askError ?? null
   });
   await page.addInitScript(openInspector);
   await page.goto(origin, { waitUntil: 'load' });
@@ -452,6 +489,9 @@ export const commands = async (page: Page) => (await sent(page)).flat();
 
 export const calls = (page: Page) =>
   page.evaluate(() => (window as unknown as FakeWindow).__fake.calls);
+
+export const asks = (page: Page) =>
+  page.evaluate(() => (window as unknown as FakeWindow).__fake.asks);
 
 export const bases = (page: Page) =>
   page.evaluate(() => (window as unknown as FakeWindow).__fake.bases);

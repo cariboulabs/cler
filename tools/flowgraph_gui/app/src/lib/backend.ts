@@ -159,6 +159,42 @@ export function onTaskEnd(
   );
 }
 
+export type AssistantStatus = { available: boolean; model: string; reason: string | null };
+
+export type AssistantDelta = { path: string; text: string };
+
+export type AssistantDone = {
+  path: string;
+  usage: { input_tokens: number; output_tokens: number };
+  error: string | null;
+};
+
+export function assistantStatus(): Promise<AssistantStatus> {
+  return invoker('assistant_status', {}) as Promise<AssistantStatus>;
+}
+
+export function assistantAsk(
+  path: string,
+  question: string,
+  history: { role: string; text: string }[]
+): Promise<void> {
+  return invoker('assistant_ask', { path, question, history }) as Promise<void>;
+}
+
+export function assistantStop(path: string): Promise<void> {
+  return invoker('assistant_stop', { path }) as Promise<void>;
+}
+
+export function onAssistantDelta(
+  handler: (payload: AssistantDelta) => void
+): Promise<UnlistenFn> {
+  return listen<AssistantDelta>('assistant-delta', (event) => handler(event.payload));
+}
+
+export function onAssistantDone(handler: (payload: AssistantDone) => void): Promise<UnlistenFn> {
+  return listen<AssistantDone>('assistant-done', (event) => handler(event.payload));
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   return value as Record<string, unknown>;

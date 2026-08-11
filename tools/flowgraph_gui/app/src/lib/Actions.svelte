@@ -57,6 +57,7 @@
     ontoggleleft: () => void;
     ontoggleright: () => void;
     ontoggledrawer: () => void;
+    ontoggleassistant: () => void;
     ontogglechrome: () => void;
     onviewsource: (block: string) => void;
     oncopydeclaration: (block: string) => void;
@@ -107,6 +108,7 @@
     ontoggleleft,
     ontoggleright,
     ontoggledrawer,
+    ontoggleassistant,
     ontogglechrome,
     onviewsource,
     oncopydeclaration,
@@ -140,6 +142,7 @@
     _: 'zoom-out',
     '0': 'fit',
     '`': 'drawer',
+    j: 'assistant',
     '\\': 'chrome'
   };
   const ICONS: Record<string, string[]> = {
@@ -168,6 +171,9 @@
       'M1.5 9.4h13',
       'M4.4 5.1 6.2 6.9 4.4 8.7',
       'M8 8.7h3.4'
+    ],
+    assistant: [
+      'M2.5 3.4h11a.9.9 0 0 1 .9.9v6a.9.9 0 0 1-.9.9H6.8L3.4 13.6v-2.4h-.9a.9.9 0 0 1-.9-.9v-6a.9.9 0 0 1 .9-.9Z'
     ],
     chrome: [
       'M2 3.5h12',
@@ -259,6 +265,14 @@
       shortcut: 'Ctrl+`',
       enabled: true,
       run: ontoggledrawer
+    },
+    {
+      id: 'assistant',
+      label: 'Toggle assistant',
+      shortcut: 'Ctrl+J',
+      enabled: true,
+      hint: 'ask about this flowgraph (Ctrl+J)',
+      run: ontoggleassistant
     },
     {
       id: 'chrome',

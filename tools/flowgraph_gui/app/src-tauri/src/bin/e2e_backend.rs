@@ -3,6 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use cler_flowgraph_gui::assistant;
 use cler_flowgraph_gui::build::{self, Emit, Jobs};
 use cler_flowgraph_gui::document::{self, Documents};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -142,6 +143,13 @@ fn dispatch(
     events: &Events,
     jobs: &Jobs,
 ) -> Reply {
+    if cmd == "assistant_status" {
+        return carry(assistant::Status {
+            available: false,
+            model: assistant::MODEL.to_string(),
+            reason: assistant::locate(None, Path::new("/nonexistent/cler-e2e")).err(),
+        });
+    }
     let path = match args.get("path").and_then(Value::as_str) {
         Some(text) => text.to_string(),
         None => return Reply::Loud(format!("{cmd} needs a path argument")),

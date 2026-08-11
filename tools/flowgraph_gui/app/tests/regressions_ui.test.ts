@@ -929,7 +929,7 @@ describe('C. exactly one command per intentional commit', () => {
       await page.waitForTimeout(1800);
 
       const observed = (await names(page)).filter(
-        (name) => !['open_document', 'palette', 'find_target'].includes(name)
+        (name) => !['open_document', 'palette', 'find_target', 'assistant_status'].includes(name)
       );
       expect(observed, 'the draft commits first, the undo follows, neither is dropped').toEqual([
         'apply_commands',
@@ -1582,7 +1582,7 @@ describe('G. fixture mode never reaches for a backend', () => {
       await page.locator('[data-testid="redo"]').click({ force: true });
       await page.waitForTimeout(400);
 
-      expect(await names(page)).toEqual([]);
+      expect((await names(page)).filter((name) => name !== 'assistant_status')).toEqual([]);
       expect(await sent(page)).toEqual([]);
       expect(await page.textContent('[data-testid="status"]')).toBe(DESKTOP_NOTE);
       expect(problems).toEqual([]);

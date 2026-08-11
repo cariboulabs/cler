@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import RailTabs, { type RailTab } from './RailTabs.svelte';
   import {
     blockFields,
     blurAction,
@@ -23,9 +24,10 @@
     submit: (command: Command) => Promise<Outcome>;
     open: boolean;
     ontoggle: () => void;
+    ontab: (next: RailTab) => void;
   };
 
-  const { path, site, siteIndex, selected, spec, enabled, submit, open, ontoggle }: Props =
+  const { path, site, siteIndex, selected, spec, enabled, submit, open, ontoggle, ontab }: Props =
     $props();
 
   const IME_KEY_CODE = 229;
@@ -182,7 +184,7 @@
         </svg>
       {/if}
     </button>
-    <h1>Inspector</h1>
+    <RailTabs tab="inspector" {ontab} />
   </div>
 
   <div class="body">
@@ -309,15 +311,7 @@
     border-color: var(--accent);
     color: var(--accent-hi);
   }
-  h1 {
-    margin: 0;
-    font-size: 11px;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--muted);
-    font-weight: 600;
-  }
-  .collapsed h1 {
+  .collapsed :global(.tabs) {
     display: none;
   }
   .body {

@@ -342,7 +342,7 @@ describe('editing against a fake backend', () => {
 
   const sent = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.log);
   const rawCalls = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.calls);
-  const quiet = ['palette', 'find_target'];
+  const quiet = ['palette', 'find_target', 'assistant_status'];
   const calls = async () => (await rawCalls()).filter((name) => !quiet.includes(name));
 
   async function select(blockVar: string) {
@@ -543,7 +543,7 @@ describe('top bar, context menu and shortcuts', () => {
   const PANE_SPOT = { x: 660, y: 760 };
 
   const rawCalls = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.calls);
-  const quiet = ['palette', 'find_target'];
+  const quiet = ['palette', 'find_target', 'assistant_status'];
   const calls = async () => (await rawCalls()).filter((name) => !quiet.includes(name));
   const menu = () => editor.locator('[data-testid="context-menu"]');
   const param = () => editor.locator('input[data-field="source1.ctor.1"]');

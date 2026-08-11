@@ -15,14 +15,23 @@
     type Tasks
   } from './lib/Actions.svelte';
   import AddBlock from './lib/AddBlock.svelte';
+  import Assistant from './lib/Assistant.svelte';
   import BlockNode from './lib/BlockNode.svelte';
   import DefineBlock from './lib/DefineBlock.svelte';
   import Inspector from './lib/Inspector.svelte';
   import Palette from './lib/Palette.svelte';
+  import { type RailTab } from './lib/RailTabs.svelte';
   import RoutedEdge from './lib/RoutedEdge.svelte';
   import TypeLegend from './lib/TypeLegend.svelte';
+  import { historyOf, type Message, type Usage } from './lib/assistant';
   import {
     applyCommands,
+    assistantAsk,
+    assistantStatus,
+    assistantStop,
+    onAssistantDelta,
+    onAssistantDone,
+    type AssistantStatus,
     buildTarget,
     checkDocument,
     closeDocument,
@@ -130,6 +139,7 @@
   const DISK_NOTE = 'this file changed on disk — reload before building or running';
   const NO_SITE = 'no flowgraph site found in this file';
   const DROP_HINT = 'dropped — release on an input port to connect';
+  const NO_SHELL = 'the assistant runs on your machine — open the desktop shell to use it';
   const RAIL_WIDTH = 44;
   const SIDEBAR_WIDTH = 280;
   const INSPECTOR_WIDTH = 320;
@@ -196,6 +206,11 @@
   let output = $state.raw<string[]>([]);
   let busy = $state<TaskKind | null>(null);
   let running = $state(false);
+  let rightTab = $state<RailTab>('inspector');
+  let keyStatus = $state.raw<AssistantStatus | null>(null);
+  let chat = $state.raw<Message[]>([]);
+  let pendingReply = $state<number | null>(null);
+  let turns = 0;
   let generation = 0;
   let alerted = 0;
   let pinned = new Map<string, EdgePoint>();
@@ -232,6 +247,12 @@
   const shownSpecs = $derived(editable ? specs : specsFromSites(doc.model.sites, doc.path));
   const problems = $derived<Problem[]>(problemsOf(site));
   const declared = $derived(site ? site.blocks.map((block) => block.var) : []);
+  const selectedBlock = $derived(site?.blocks.find((block) => block.var === selected) ?? null);
+  const chatSelection = $derived(
+    selectedBlock
+      ? { label: selectedBlock.display_name ?? selectedBlock.var, var: selectedBlock.var }
+      : null
+  );
   const selectedSpec = $derived.by(() => {
     const block = site?.blocks.find((candidate) => candidate.var === selected);
     return block ? specOfBlock(specs, block) : undefined;
@@ -325,6 +346,30 @@
   });
 
   $effect(() => {
+    void refreshAssistant();
+  });
+
+  $effect(() => {
+    if (!desktop) return;
+    const deltas = onAssistantDelta((payload) => {
+      if (payload.path !== doc.path || pendingReply === null) return;
+      const target = pendingReply;
+      chat = chat.map((message) =>
+        message.id === target ? { ...message, text: message.text + payload.text } : message
+      );
+    });
+    const ends = onAssistantDone((payload) => {
+      if (payload.path !== doc.path) return;
+      closeReply(payload.usage, payload.error);
+    });
+    return () => {
+      void Promise.all([deltas, ends]).then((pending) => {
+        for (const unlisten of pending) unlisten();
+      });
+    };
+  });
+
+  $effect(() => {
     const current = site;
     const key = current ? `${doc.path}#${viewId}` : '';
     if (!current) {
@@ -376,6 +421,7 @@
   }
 
   function install(next: DocumentState, fresh: boolean) {
+    if (fresh && pendingReply !== null) void assistantStop(doc.path).catch(() => undefined);
     doc = next;
     generation += 1;
     changedOnDisk = false;
@@ -386,6 +432,8 @@
       siteIndex = 0;
       selected = null;
       selectedEdge = null;
+      chat = [];
+      pendingReply = null;
     }
     clampContext();
     inspector?.discardDrafts();
@@ -409,6 +457,62 @@
   function hint(message: string) {
     alerted += 1;
     alert = { text: message, at: alerted, tone: 'note' };
+  }
+
+  async function refreshAssistant() {
+    if (!desktop) {
+      keyStatus = { available: false, model: '—', reason: NO_SHELL };
+      return;
+    }
+    try {
+      keyStatus = await assistantStatus();
+    } catch (error) {
+      keyStatus = { available: false, model: '—', reason: describeApplyError(error) };
+    }
+  }
+
+  function closeReply(usage: Usage | null, error: string | null) {
+    pendingReply = null;
+    const last = chat.at(-1);
+    if (!last || last.role !== 'assistant') return;
+    chat = [...chat.slice(0, -1), { ...last, usage: usage ?? last.usage, error: error ?? last.error }];
+  }
+
+  async function askAssistant(question: string) {
+    if (!editable) {
+      announce(viewerNote);
+      return;
+    }
+    if (pendingReply !== null) return;
+    const history = historyOf(chat);
+    const asked: Message = { id: ++turns, role: 'user', text: question, usage: null, error: null };
+    const reply: Message = { id: ++turns, role: 'assistant', text: '', usage: null, error: null };
+    chat = [...chat, asked, reply];
+    pendingReply = reply.id;
+    try {
+      await assistantAsk(doc.path, question, history);
+    } catch (error) {
+      closeReply(null, describeApplyError(error));
+    }
+  }
+
+  function stopAssistant() {
+    pendingReply = null;
+    void assistantStop(doc.path).catch(() => undefined);
+  }
+
+  function pickRailTab(next: RailTab) {
+    rightTab = next;
+    rightOpen = true;
+  }
+
+  function toggleAssistant() {
+    if (rightOpen && rightTab === 'assistant') {
+      rightOpen = false;
+      return;
+    }
+    rightTab = 'assistant';
+    rightOpen = true;
   }
 
   function toggleChrome() {
@@ -987,6 +1091,7 @@
             ontoggleleft={() => (leftOpen = !leftOpen)}
             ontoggleright={() => (rightOpen = !rightOpen)}
             ontoggledrawer={() => (drawerOpen = !drawerOpen)}
+            ontoggleassistant={toggleAssistant}
             ontogglechrome={toggleChrome}
             onviewsource={viewSource}
             oncopydeclaration={(block) => void copyDeclaration(block)}
@@ -1093,18 +1198,36 @@
     </div>
   </main>
 
-  <Inspector
-    bind:this={inspector}
-    path={doc.path}
-    {site}
-    {siteIndex}
-    {selected}
-    spec={selectedSpec}
-    enabled={editable}
-    {submit}
-    open={rightOpen}
-    ontoggle={() => (rightOpen = !rightOpen)}
-  />
+  {#if rightTab === 'assistant'}
+    <Assistant
+      open={rightOpen}
+      status={keyStatus}
+      messages={chat}
+      pending={pendingReply}
+      selection={chatSelection}
+      enabled={editable}
+      note={viewerNote}
+      ontoggle={() => (rightOpen = !rightOpen)}
+      ontab={pickRailTab}
+      onask={(question) => void askAssistant(question)}
+      onstop={stopAssistant}
+      onrecheck={() => void refreshAssistant()}
+    />
+  {:else}
+    <Inspector
+      bind:this={inspector}
+      path={doc.path}
+      {site}
+      {siteIndex}
+      {selected}
+      spec={selectedSpec}
+      enabled={editable}
+      {submit}
+      open={rightOpen}
+      ontoggle={() => (rightOpen = !rightOpen)}
+      ontab={pickRailTab}
+    />
+  {/if}
 </div>
 
 <style>
