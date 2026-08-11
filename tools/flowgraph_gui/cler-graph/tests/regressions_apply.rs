@@ -656,12 +656,11 @@ fn s9_connect_and_disconnect_on_one_runner_compose() {
 }
 
 #[test]
-fn s8_an_empty_transaction_keeps_the_revision_and_the_redo_stack() {
+fn s8_an_empty_transaction_keeps_the_revision() {
     let mut session = session("hello_world.cpp");
     session
         .apply(tx(0, vec![set_param("source1", 1, "7.5f")]))
         .expect("edit");
-    session.undo().expect("undo");
     let revision = session.revision();
     let bytes = session.source().to_string();
 
@@ -669,7 +668,6 @@ fn s8_an_empty_transaction_keeps_the_revision_and_the_redo_stack() {
     assert_eq!(outcome.revision, revision);
     assert_eq!(session.revision(), revision, "a revision was consumed");
     assert_eq!(session.source(), bytes);
-    assert!(session.redo().is_ok(), "the redo stack was destroyed");
 }
 
 #[test]
@@ -685,7 +683,6 @@ fn s8_an_identity_set_param_is_not_an_edit() {
         0,
         "an identity edit consumed a revision"
     );
-    assert!(matches!(session.undo(), Err(ApplyError::NothingToUndo)));
 }
 
 #[test]
@@ -743,39 +740,6 @@ fn s17_multibyte_text_does_not_shift_splices() {
     assert!(session
         .source()
         .contains("source1(\"CWSource\", 4.25f, 1.0f, SPS); //amplitude (振幅 🎛), frequency"));
-}
-
-#[test]
-fn apply_after_undo_rejects_the_pre_undo_revision() {
-    let mut session = session("hello_world.cpp");
-    session
-        .apply(tx(0, vec![set_param("source1", 1, "7.5f")]))
-        .expect("edit");
-    let stale = session.revision();
-    session.undo().expect("undo");
-    let bytes = session.source().to_string();
-    let error = session
-        .apply(tx(stale, vec![set_param("source1", 1, "9.5f")]))
-        .expect_err("a pre-undo revision must not land");
-    assert!(matches!(error, ApplyError::RevisionMismatch { .. }));
-    assert_eq!(session.source(), bytes);
-}
-
-#[test]
-fn apply_clears_the_redo_stack() {
-    let mut session = session("hello_world.cpp");
-    for text in ["7.5f", "8.5f"] {
-        let base = session.revision();
-        session
-            .apply(tx(base, vec![set_param("source1", 1, text)]))
-            .expect("edit");
-    }
-    session.undo().expect("undo");
-    let base = session.revision();
-    session
-        .apply(tx(base, vec![set_param("source2", 1, "3.0f")]))
-        .expect("fresh edit");
-    assert!(matches!(session.redo(), Err(ApplyError::NothingToRedo)));
 }
 
 fn scratch(tag: &str) -> PathBuf {

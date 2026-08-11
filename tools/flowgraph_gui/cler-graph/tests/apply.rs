@@ -583,7 +583,6 @@ fn a_failing_command_rejects_the_whole_transaction() {
     assert!(matches!(error, ApplyError::IndexOutOfRange { .. }));
     assert_eq!(session.source(), before);
     assert_eq!(session.revision(), 0);
-    assert!(session.undo().is_err());
 }
 
 #[test]
@@ -653,59 +652,12 @@ fn a_foreign_schema_version_is_rejected() {
 }
 
 #[test]
-fn undo_and_redo_round_trip_the_bytes() {
+fn reload_replaces_the_source_and_bumps_the_revision() {
     let mut session = session("hello_world.cpp");
-    let original = session.source().to_string();
-    session
-        .apply(transaction(
-            0,
-            vec![Command::SetParam {
-                site: 0,
-                block: "source1".to_string(),
-                ctor_arg_index: 1,
-                new_text: "7.5f".to_string(),
-            }],
-        ))
-        .expect("edit applies");
-    let edited = session.source().to_string();
-    assert_ne!(edited, original);
-
-    assert_eq!(session.undo().expect("undo"), 2);
-    assert_eq!(session.source(), original);
-    assert_eq!(
-        only_site(&session).block("source1").unwrap().ctor_args[1].text,
-        "1.0f"
-    );
-
-    assert_eq!(session.redo().expect("redo"), 3);
-    assert_eq!(session.source(), edited);
-    assert!(session.redo().is_err());
-
-    assert_eq!(session.undo().expect("undo again"), 4);
-    assert_eq!(session.source(), original);
-    assert!(session.undo().is_err());
-}
-
-#[test]
-fn reloading_external_content_clears_the_undo_stacks() {
-    let mut session = session("hello_world.cpp");
-    session
-        .apply(transaction(
-            0,
-            vec![Command::SetParam {
-                site: 0,
-                block: "source1".to_string(),
-                ctor_arg_index: 1,
-                new_text: "7.5f".to_string(),
-            }],
-        ))
-        .expect("edit applies");
-    session.undo().expect("undo");
+    let revision = session.revision();
     session.reload(source("flowgraph.cpp")).expect("reload");
-
-    assert!(matches!(session.undo(), Err(ApplyError::NothingToUndo)));
-    assert!(matches!(session.redo(), Err(ApplyError::NothingToRedo)));
     assert_eq!(session.source(), source("flowgraph.cpp"));
+    assert_eq!(session.revision(), revision + 1);
 }
 
 #[test]

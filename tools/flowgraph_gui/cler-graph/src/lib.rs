@@ -49,7 +49,6 @@ pub struct DocumentSession {
     tree: Tree,
     revision: u64,
     file: Option<String>,
-    history: ActionQueue<SourcePatch>,
 }
 
 pub(crate) fn parse_source(source: &str) -> Result<Tree, Error> {
@@ -69,7 +68,6 @@ impl DocumentSession {
             tree,
             revision: 0,
             file: None,
-            history: ActionQueue::default(),
         })
     }
 
@@ -116,13 +114,5 @@ impl DocumentSession {
 
     pub fn has_errors(&self) -> bool {
         self.tree.root_node().has_error()
-    }
-
-    pub fn can_undo(&self) -> bool {
-        self.history.can_undo()
-    }
-
-    pub fn can_redo(&self) -> bool {
-        self.history.can_redo()
     }
 }

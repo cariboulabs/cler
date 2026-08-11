@@ -234,10 +234,10 @@ pub fn apply(
             .cloned()
             .ok_or_else(|| ApplyError::HistoryMismatch.to_string())?;
         write_working(doc, pending.source())?;
-        doc.session.commit_untracked(pending);
+        doc.session.commit(pending);
         doc.history.push(Action::Source(patch));
     } else {
-        doc.session.commit_untracked(pending);
+        doc.session.commit(pending);
     }
     Ok(snapshot(&target, doc))
 }
@@ -671,7 +671,7 @@ fn step(
                 .preview_source(source)
                 .map_err(|cause| cause.to_string())?;
             write_working(doc, pending.source())?;
-            doc.session.commit_untracked(pending);
+            doc.session.commit(pending);
         }
         Action::MoveNodes { view, moves } => {
             let mut cache = doc.cache.clone();

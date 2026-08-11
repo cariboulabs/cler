@@ -361,20 +361,6 @@ fn a_name_known_only_to_the_wider_palette_is_the_callers_to_refuse() {
 }
 
 #[test]
-fn undo_restores_the_file_byte_for_byte() {
-    let mut open = session("hello_world.cpp");
-    let before = open.source().to_string();
-    open.apply(transaction(0, vec![gain_command()]))
-        .expect("define_block applies");
-    assert_ne!(open.source(), before);
-    open.undo().expect("undo rewinds the definition");
-    assert_eq!(open.source(), before);
-    assert!(open.can_redo());
-    open.redo().expect("redo replays the definition");
-    assert!(open.source().contains("struct MyGainBlock"));
-}
-
-#[test]
 fn the_command_round_trips_through_json() {
     let json = r#"{
         "version": "0.3.0",
