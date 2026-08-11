@@ -543,6 +543,7 @@ describe('each right-click target has its own menu', () => {
       expect(await page.getAttribute('[data-testid="context-menu"]', 'data-menu')).toBe('pane');
       expect(await menuIds(page)).toEqual([
         'menu-add-here',
+        'menu-new-block',
         'menu-undo',
         'menu-redo',
         'menu-fit'

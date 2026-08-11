@@ -1,6 +1,6 @@
 {
   "sha256": "980a8faee6c7f4c7e9e6d2db54576e12e4b06af3f7b428a02ea6cc1f16596368",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "file": "desktop_examples/adsb_receiver.cpp",
   "has_errors": false,
   "errors": [],

@@ -51,6 +51,7 @@ function installFake(setup: Setup) {
     canRedo: false,
     externalChange: false
   };
+  const palette = setup.specs.map((spec) => structuredClone(spec));
   const undone: string[] = [];
   const redone: string[] = [];
   const log: unknown[][] = [];
@@ -128,6 +129,45 @@ function installFake(setup: Setup) {
 
   function restate(index: number) {
     for (const entry of blocks(index)) entry.in_graph = wired(index, String(entry.var));
+  }
+
+  function define(command: Loose) {
+    const name = String(command.name);
+    const value = String(command.value_type);
+    const inputs = (command.inputs ?? []) as Loose[];
+    const outputs = Number(command.outputs ?? 0);
+    const params = (command.params ?? []) as Loose[];
+    const port = (label: string, direction: string) => ({
+      name: label,
+      direction,
+      element_type: value,
+      variable: false
+    });
+    palette.unshift({
+      name,
+      origin: state.path,
+      synonyms: [],
+      template_params: [],
+      ctor_params: [
+        { name: 'name', param_type: 'const char*', default: null },
+        ...params.map((entry) => ({
+          name: String(entry.name),
+          param_type: String(entry.cpp_type),
+          default: (entry.default ?? null) as string | null
+        }))
+      ],
+      may_block: command.may_block === true,
+      conditional_members: false,
+      ports: [
+        ...inputs.map((entry) => port(String(entry.name), 'input')),
+        ...Array.from({ length: outputs }, (_, index) => port(`out${index}`, 'output'))
+      ],
+      input_count: { fixed: inputs.length },
+      output_count: { fixed: outputs }
+    } as unknown as BlockSpec);
+    const at = state.source.indexOf('int main()');
+    const text = `struct ${name} : public cler::BlockBase {\n    // TODO: implement\n};\n\n`;
+    splice({ start: at, end: at }, text);
   }
 
   function apply(commands: Loose[]) {
@@ -214,6 +254,8 @@ function installFake(setup: Setup) {
         site(at).runners = runners(at).filter((runner) => runner.block !== name);
         site(at).edges = edges(at).filter((edge) => edge.from !== name);
         restate(at);
+      } else if (command.command === 'define_block') {
+        define(command);
       } else if (command.command === 'delete_block') {
         const name = String(command.block);
         site(at).blocks = blocks(at).filter((entry) => entry.var !== name);
@@ -245,7 +287,7 @@ function installFake(setup: Setup) {
     if (command === 'plugin:dialog|open') return state.path;
     calls.push(command);
     if (command === 'open_document' && setup.openError !== null) throw setup.openError;
-    if (command === 'palette') return JSON.parse(JSON.stringify(setup.specs));
+    if (command === 'palette') return JSON.parse(JSON.stringify(palette));
     if (command === 'apply_commands') {
       const commands = args.commands as Loose[];
       bases.push(args.baseRevision as number);

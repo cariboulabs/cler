@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 
 use tree_sitter::{Parser, Tree};
 
-pub use apply::{ApplyError, ApplyOutcome, Command, PendingApply, Splice, Transaction};
+pub use apply::{
+    ApplyError, ApplyOutcome, BlockParam, Command, InputPort, PendingApply, Splice, Transaction,
+};
 pub use model::{FileModel, Site, SCHEMA_VERSION};
 pub use palette::{extract_specs, palette_specs, source_files};
 pub use palette_types::BlockSpec;

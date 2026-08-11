@@ -1,6 +1,6 @@
 {
   "sha256": "9886be66d8bf98dc58022b823feae54dc1a6d033adc0d2faa063c24419c84320",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "file": "desktop_examples/uhd_device.cpp",
   "has_errors": false,
   "errors": [],

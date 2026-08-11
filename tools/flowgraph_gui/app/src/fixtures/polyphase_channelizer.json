@@ -1,6 +1,6 @@
 {
   "sha256": "be739eeb3175d38268191d86022ef4734998084713422143a17d51aeb959b993",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "file": "desktop_examples/polyphase_channelizer.cpp",
   "has_errors": false,
   "errors": [],

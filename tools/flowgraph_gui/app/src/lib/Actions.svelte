@@ -10,7 +10,14 @@
     reason: string | null;
   };
 
-  export type Alert = { text: string; at: number; tone: 'error' | 'note' };
+  export type AlertAction = { label: string; run: () => void };
+
+  export type Alert = {
+    text: string;
+    at: number;
+    tone: 'error' | 'note';
+    action?: AlertAction;
+  };
 
   export type FitPadding = {
     top: `${number}px`;
@@ -48,6 +55,7 @@
     ondeleteblock: (block: string) => void;
     ondisconnect: (edge: string) => void;
     onaddhere: (clientX: number, clientY: number) => void;
+    onnewblock: () => void;
     onproblem: (problem: Problem) => void;
   };
 
@@ -91,6 +99,7 @@
     ondeleteblock,
     ondisconnect,
     onaddhere,
+    onnewblock,
     onproblem
   }: Props = $props();
 
@@ -102,7 +111,7 @@
   const SAVED_MS = 1500;
   const ALERT_MS = 4000;
   const MENU_WIDTH = 200;
-  const MENU_HEIGHT = 160;
+  const MENU_HEIGHT = 190;
   const MENU_IDS = ['undo', 'redo', 'fit'];
   const CTRL_KEYS: Record<string, string> = {
     y: 'redo',
@@ -147,7 +156,7 @@
   };
 
   let menu = $state<Menu | null>(null);
-  let toast = $state<{ text: string; danger: boolean } | null>(null);
+  let toast = $state<{ text: string; danger: boolean; action: AlertAction | null } | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let problemsOpen = $state(false);
 
@@ -156,7 +165,7 @@
   let rails: string | null = null;
 
   $effect(() => {
-    if (alert) flash(alert.text, alert.tone === 'error', ALERT_MS);
+    if (alert) flash(alert.text, alert.tone === 'error', ALERT_MS, alert.action ?? null);
   });
 
   $effect(() => {
@@ -222,6 +231,14 @@
         enabled: canEdit,
         hint: canEdit ? undefined : editNote,
         run: () => onaddhere(at.x, at.y)
+      },
+      {
+        id: 'new-block',
+        label: 'New block type…',
+        shortcut: '',
+        enabled: canEdit,
+        hint: canEdit ? 'defines a new struct in this file' : editNote,
+        run: onnewblock
       },
       ...actions.filter((action) => MENU_IDS.includes(action.id))
     ];
@@ -309,10 +326,16 @@
     if (action?.enabled) action.run();
   }
 
-  function flash(text: string, danger: boolean, life: number) {
-    toast = { text, danger };
+  function flash(text: string, danger: boolean, life: number, action: AlertAction | null = null) {
+    toast = { text, danger, action };
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => (toast = null), life);
+  }
+
+  function takeToastAction(action: AlertAction) {
+    toast = null;
+    clearTimeout(toastTimer);
+    action.run();
   }
 
   function flashSaved() {
@@ -468,6 +491,17 @@
     data-testid={toast.danger ? 'alert-toast' : 'note-toast'}
   >
     <span>{toast.text}</span>
+    {#if toast.action}
+      {@const action = toast.action}
+      <button
+        class="act"
+        data-testid="toast-action"
+        onclick={(event) => {
+          event.stopPropagation();
+          takeToastAction(action);
+        }}>{action.label}</button
+      >
+    {/if}
     {#if toast.danger}
       <button
         class="dismiss"
@@ -738,6 +772,12 @@
     border-color: var(--danger-border);
     background: var(--danger-bg);
     color: var(--danger-fg);
+  }
+  .act {
+    flex: none;
+    width: auto;
+    padding: var(--sp-0) var(--sp-2);
+    font-size: 11px;
   }
   .dismiss {
     flex: none;

@@ -1,6 +1,6 @@
 {
   "sha256": "46b74203888baaa35439e4f46048820c629959bcdea0a6368c51a05eda43f4bf",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "file": "desktop_examples/mass_spring_damper.cpp",
   "has_errors": false,
   "errors": [],

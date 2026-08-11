@@ -713,7 +713,7 @@ fn overlapping_commands_are_rejected() {
 #[test]
 fn the_command_schema_round_trips_through_json() {
     let json = r#"{
-        "version": "0.2.0",
+        "version": "0.3.0",
         "base_revision": 3,
         "commands": [
             {"command": "set_param", "site": 0, "block": "source1", "ctor_arg_index": 1, "new_text": "2.0f"},
@@ -1051,6 +1051,10 @@ fn check(before: &Site, after: &Site, command: &Command) {
                 .all(|e| e.from != *block && e.to != *block));
             assert_eq!(after.blocks.len(), before.blocks.len() - 1);
         }
+        Command::DefineBlock { .. } => {
+            assert_eq!(after.blocks.len(), before.blocks.len());
+            assert_eq!(after.runners.len(), before.runners.len());
+        }
     }
 }
 
@@ -1067,7 +1071,8 @@ fn corrupt(rng: &mut Lcg, command: &Command) -> (u64, Command) {
             | Command::Disconnect { site, .. }
             | Command::AddBlock { site, .. }
             | Command::RemoveFromGraph { site, .. }
-            | Command::DeleteBlock { site, .. } => *site = 900,
+            | Command::DeleteBlock { site, .. }
+            | Command::DefineBlock { site, .. } => *site = 900,
         },
         2 => match &mut broken {
             Command::SetParam { block, .. }
@@ -1079,6 +1084,7 @@ fn corrupt(rng: &mut Lcg, command: &Command) -> (u64, Command) {
             Command::Disconnect { edge, .. } => *edge = 4242,
             Command::AddBlock { var_name, .. } => *var_name = "not an identifier".to_string(),
             Command::SetConfig { site, .. } => *site = 900,
+            Command::DefineBlock { name, .. } => *name = "not an identifier".to_string(),
         },
         3 => match &mut broken {
             Command::SetParam { ctor_arg_index, .. } => *ctor_arg_index = 999,
@@ -1092,6 +1098,7 @@ fn corrupt(rng: &mut Lcg, command: &Command) -> (u64, Command) {
             | Command::RemoveFromGraph { block, .. }
             | Command::DeleteBlock { block, .. } => *block = "no_such_block".to_string(),
             Command::SetConfig { path, .. } => *path = "x = 1; std::abort(); //".to_string(),
+            Command::DefineBlock { name, .. } => *name = "LacksTheSuffix".to_string(),
         },
         _ => match &mut broken {
             Command::SetParam { new_text, .. } => {
@@ -1111,6 +1118,9 @@ fn corrupt(rng: &mut Lcg, command: &Command) -> (u64, Command) {
             }
             Command::RemoveFromGraph { block, .. } | Command::DeleteBlock { block, .. } => {
                 *block = "no_such_block".to_string()
+            }
+            Command::DefineBlock { value_type, .. } => {
+                *value_type = "float> pwned; using other = int".to_string()
             }
         },
     }
@@ -1316,7 +1326,7 @@ fn the_cli_writes_atomically_and_prints_a_diff() {
     let original = source("hello_world.cpp");
     std::fs::write(&file, &original).expect("seed the temp copy");
 
-    let command = r#"{"version":"0.2.0","base_revision":0,"commands":[{"command":"set_param","site":0,"block":"source1","ctor_arg_index":1,"new_text":"4.25f"}]}"#;
+    let command = r#"{"version":"0.3.0","base_revision":0,"commands":[{"command":"set_param","site":0,"block":"source1","ctor_arg_index":1,"new_text":"4.25f"}]}"#;
     let dry = std::process::Command::new(env!("CARGO_BIN_EXE_cler-graph"))
         .args([
             "apply",
@@ -1375,7 +1385,7 @@ fn the_cli_writes_atomically_and_prints_a_diff() {
             "apply",
             &file.display().to_string(),
             "--transaction",
-            r#"{"version":"0.2.0","base_revision":4,"commands":[]}"#,
+            r#"{"version":"0.3.0","base_revision":4,"commands":[]}"#,
             "--unguarded",
         ])
         .output()

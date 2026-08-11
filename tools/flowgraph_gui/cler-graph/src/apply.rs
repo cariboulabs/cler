@@ -63,6 +63,34 @@ pub enum Command {
         site: usize,
         block: String,
     },
+    DefineBlock {
+        site: usize,
+        name: String,
+        value_type: String,
+        #[serde(default)]
+        inputs: Vec<InputPort>,
+        #[serde(default)]
+        outputs: usize,
+        #[serde(default)]
+        params: Vec<BlockParam>,
+        #[serde(default)]
+        may_block: bool,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputPort {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlockParam {
+    pub name: String,
+    pub cpp_type: String,
+    #[serde(default)]
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -192,6 +220,16 @@ pub enum ApplyError {
     InvalidExpression {
         element: String,
         text: String,
+    },
+    InvalidType {
+        element: String,
+        text: String,
+    },
+    InvalidBlockName {
+        name: String,
+    },
+    DuplicateType {
+        name: String,
     },
     ReservedIdentifier {
         text: String,
@@ -332,6 +370,11 @@ const CPP_KEYWORDS: &[&str] = &[
 
 const EXPRESSION_PROBE: (&str, &str) = ("void cler_probe(){cler_probe_call(", ");}\n");
 const TEMPLATE_PROBE: (&str, &str) = ("using cler_probe = cler_probe_template<", ">;\n");
+const TYPE_PROBE: (&str, &str) = ("using cler_probe = ", ";\n");
+
+const BLOCK_SUFFIX: &str = "Block";
+const SKELETON_TODO: &str = "// TODO: implement";
+const CHANNEL_CAPACITY: &str = "cler::DOUBLY_MAPPED_MIN_SIZE / sizeof";
 
 fn is_identifier(text: &str) -> bool {
     let mut chars = text.chars();
@@ -382,6 +425,53 @@ fn holds_one_node(probe: (&str, &str), text: &str, list_kind: &str) -> bool {
 
 fn is_expression(text: &str) -> bool {
     holds_one_node(EXPRESSION_PROBE, text, "argument_list")
+}
+
+fn is_type(text: &str) -> bool {
+    if text.is_empty() || text.trim() != text {
+        return false;
+    }
+    let (prefix, suffix) = TYPE_PROBE;
+    let source = format!("{prefix}{text}{suffix}");
+    let Ok(tree) = parse_source(&source) else {
+        return false;
+    };
+    let root = tree.root_node();
+    if root.has_error() {
+        return false;
+    }
+    let start = prefix.len();
+    let end = start + text.len();
+    descendants(root).into_iter().any(|node| {
+        node.kind() == "alias_declaration"
+            && node
+                .child_by_field_name("type")
+                .is_some_and(|held| held.start_byte() == start && held.end_byte() == end)
+    })
+}
+
+fn type_text(element: &str, text: &str) -> Result<(), ApplyError> {
+    if is_type(text) {
+        return Ok(());
+    }
+    Err(ApplyError::InvalidType {
+        element: element.to_string(),
+        text: text.to_string(),
+    })
+}
+
+fn identifier_name(text: &str) -> Result<(), ApplyError> {
+    if !is_identifier(text) {
+        return Err(ApplyError::InvalidIdentifier {
+            text: text.to_string(),
+        });
+    }
+    if is_keyword(text) {
+        return Err(ApplyError::ReservedIdentifier {
+            text: text.to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn is_template_argument(text: &str) -> bool {
@@ -440,6 +530,139 @@ fn channel_argument(block: &str, port: &str, index: Option<usize>) -> String {
 
 fn contains(outer: Span, inner: Span) -> bool {
     inner.start >= outer.start && inner.end <= outer.end
+}
+
+struct Skeleton<'a> {
+    name: &'a str,
+    value_type: &'a str,
+    inputs: &'a [InputPort],
+    outputs: usize,
+    params: &'a [BlockParam],
+    may_block: bool,
+    eol: &'a str,
+}
+
+impl Skeleton<'_> {
+    fn shortfall(&self) -> &'static str {
+        match (self.inputs.is_empty(), self.outputs == 0) {
+            (true, _) => "NotEnoughSpace",
+            (_, true) => "NotEnoughSamples",
+            _ => "NotEnoughSpaceOrSamples",
+        }
+    }
+
+    fn render(&self) -> String {
+        let outs: Vec<String> = (0..self.outputs)
+            .map(|index| format!("out{index}"))
+            .collect();
+        let mut lines: Vec<String> = Vec::new();
+
+        lines.push(format!("struct {} : public cler::BlockBase {{", self.name));
+        if self.may_block {
+            lines.push("    static constexpr bool may_block = true;".to_string());
+        }
+        for input in self.inputs {
+            lines.push(format!(
+                "    cler::Channel<{}> {};",
+                self.value_type, input.name
+            ));
+        }
+        if lines.len() > 1 {
+            lines.push(String::new());
+        }
+
+        let mut declared = vec!["const char* name".to_string()];
+        for param in self.params {
+            declared.push(match &param.default {
+                Some(value) => format!("{} {} = {}", param.cpp_type, param.name, value),
+                None => format!("{} {}", param.cpp_type, param.name),
+            });
+        }
+        lines.push(format!("    {}({})", self.name, declared.join(", ")));
+
+        let mut inits = vec!["cler::BlockBase(name)".to_string()];
+        for input in self.inputs {
+            inits.push(format!(
+                "{}({CHANNEL_CAPACITY}({}))",
+                input.name, self.value_type
+            ));
+        }
+        for param in self.params {
+            inits.push(format!("_{}({})", param.name, param.name));
+        }
+        lines.push(format!("        : {} {{}}", inits.join(", ")));
+        lines.push(String::new());
+
+        let taken: Vec<String> = outs
+            .iter()
+            .map(|out| format!("cler::ChannelBase<{}>* {out}", self.value_type))
+            .collect();
+        lines.push(format!(
+            "    cler::Result<cler::Empty, cler::Error> procedure({}) {{",
+            taken.join(", ")
+        ));
+        lines.push(format!("        {SKELETON_TODO}"));
+
+        let mut sizes: Vec<String> = Vec::new();
+        for input in self.inputs {
+            lines.push(format!(
+                "        auto [{0}_ptr, {0}_size] = {0}.read_dbf();",
+                input.name
+            ));
+            sizes.push(format!("{}_size", input.name));
+        }
+        for out in &outs {
+            lines.push(format!(
+                "        auto [{out}_ptr, {out}_size] = {out}->write_dbf();"
+            ));
+            sizes.push(format!("{out}_size"));
+        }
+        let transferable = match sizes.as_slice() {
+            [only] => only.clone(),
+            [first, second] => format!("std::min({first}, {second})"),
+            many => format!("std::min({{{}}})", many.join(", ")),
+        };
+        lines.push(format!("        size_t transferable = {transferable};"));
+        lines.push("        if (transferable == 0) {".to_string());
+        lines.push(format!(
+            "            return cler::Error::{};",
+            self.shortfall()
+        ));
+        lines.push("        }".to_string());
+
+        if !outs.is_empty() {
+            let sample = match self.inputs.first() {
+                Some(first) => format!("{}_ptr[i]", first.name),
+                None => format!("{}{{}}", self.value_type),
+            };
+            lines.push(String::new());
+            lines.push("        for (size_t i = 0; i < transferable; ++i) {".to_string());
+            for out in &outs {
+                lines.push(format!("            {out}_ptr[i] = {sample};"));
+            }
+            lines.push("        }".to_string());
+        }
+
+        lines.push(String::new());
+        for input in self.inputs {
+            lines.push(format!("        {}.commit_read(transferable);", input.name));
+        }
+        for out in &outs {
+            lines.push(format!("        {out}->commit_write(transferable);"));
+        }
+        lines.push("        return cler::Empty{};".to_string());
+        lines.push("    }".to_string());
+
+        if !self.params.is_empty() {
+            lines.push(String::new());
+            lines.push("private:".to_string());
+            for param in self.params {
+                lines.push(format!("    {} _{};", param.cpp_type, param.name));
+            }
+        }
+        lines.push("};".to_string());
+        lines.join(self.eol)
+    }
 }
 
 struct Planner<'a> {
@@ -580,6 +803,26 @@ impl<'a> Planner<'a> {
         out
     }
 
+    fn enclosing_function(&self, site: &Site) -> Result<Node<'a>, ApplyError> {
+        let mut node = self.node(site.span)?;
+        loop {
+            if node.kind() == "function_definition" {
+                return Ok(node);
+            }
+            node = node.parent().ok_or_else(|| ApplyError::UnsupportedShape {
+                detail: "site is not held by a function definition".to_string(),
+            })?;
+        }
+    }
+
+    fn unit_identifiers(&self) -> HashSet<&'a str> {
+        descendants(self.tree.root_node())
+            .into_iter()
+            .filter(|node| matches!(node.kind(), "identifier" | "type_identifier"))
+            .map(|node| self.text(node))
+            .collect()
+    }
+
     fn scope_identifiers(&self, body: Node<'a>) -> HashSet<&'a str> {
         self.scope_nodes(body)
             .into_iter()
@@ -715,7 +958,8 @@ impl<'a> Planner<'a> {
             | Command::Disconnect { site, .. }
             | Command::AddBlock { site, .. }
             | Command::RemoveFromGraph { site, .. }
-            | Command::DeleteBlock { site, .. } => *site,
+            | Command::DeleteBlock { site, .. }
+            | Command::DefineBlock { site, .. } => *site,
         };
         self.usable_site(site_index)?;
 
@@ -926,16 +1170,7 @@ impl<'a> Planner<'a> {
                 var_name,
             } => {
                 let target = self.site(*site)?;
-                if !is_identifier(var_name) {
-                    return Err(ApplyError::InvalidIdentifier {
-                        text: var_name.clone(),
-                    });
-                }
-                if is_keyword(var_name) {
-                    return Err(ApplyError::ReservedIdentifier {
-                        text: var_name.clone(),
-                    });
-                }
+                identifier_name(var_name)?;
                 if !is_qualified_type(type_name) {
                     return Err(ApplyError::InvalidIdentifier {
                         text: type_name.clone(),
@@ -1022,6 +1257,81 @@ impl<'a> Planner<'a> {
                     });
                 }
                 Ok(splices)
+            }
+
+            Command::DefineBlock {
+                site,
+                name,
+                value_type,
+                inputs,
+                outputs,
+                params,
+                may_block,
+            } => {
+                let target = self.site(*site)?;
+                identifier_name(name)?;
+                if name.len() <= BLOCK_SUFFIX.len() || !name.ends_with(BLOCK_SUFFIX) {
+                    return Err(ApplyError::InvalidBlockName { name: name.clone() });
+                }
+                if self.unit_identifiers().contains(name.as_str()) {
+                    return Err(ApplyError::DuplicateType { name: name.clone() });
+                }
+                type_text("value_type", value_type)?;
+                if inputs.is_empty() && *outputs == 0 {
+                    return Err(ApplyError::UnsupportedShape {
+                        detail: format!("{name} declares no inputs and no outputs"),
+                    });
+                }
+                let mut taken: HashSet<String> =
+                    (0..*outputs).map(|index| format!("out{index}")).collect();
+                taken.insert("name".to_string());
+                for member in inputs
+                    .iter()
+                    .map(|input| &input.name)
+                    .chain(params.iter().map(|param| &param.name))
+                {
+                    identifier_name(member)?;
+                    if member.starts_with('_') {
+                        return Err(ApplyError::ReservedIdentifier {
+                            text: member.clone(),
+                        });
+                    }
+                    if !taken.insert(member.clone()) {
+                        return Err(ApplyError::DuplicateVariable {
+                            var_name: member.clone(),
+                        });
+                    }
+                }
+                for param in params {
+                    type_text("cpp_type", &param.cpp_type)?;
+                    if let Some(default) = &param.default {
+                        expression("default", default)?;
+                    }
+                }
+
+                let eol = self.line_ending();
+                let skeleton = Skeleton {
+                    name,
+                    value_type,
+                    inputs,
+                    outputs: *outputs,
+                    params,
+                    may_block: *may_block,
+                    eol,
+                }
+                .render();
+                let function = self.enclosing_function(target)?;
+                let at = self.line_start(function.start_byte());
+                let head = self.src.get(..at).unwrap_or("");
+                let gap = if at == 0 || head.ends_with(&format!("{eol}{eol}")) {
+                    ""
+                } else {
+                    eol
+                };
+                Ok(vec![Splice::insert(
+                    at,
+                    format!("{gap}{skeleton}{eol}{eol}"),
+                )])
             }
         }
     }

@@ -219,7 +219,7 @@ fn parse_file_reports_the_crate_model_with_a_digest() {
     let docs = Documents::default();
     let json = document::parse_file(&docs, as_str(&path)).expect("parse_file");
     let value: Value = serde_json::from_str(&json).expect("json");
-    assert_eq!(value["version"], "0.2.0");
+    assert_eq!(value["version"], "0.3.0");
     assert_eq!(value["hasErrors"], false);
     assert_eq!(value["has_errors"], false);
     assert_eq!(value["sha256"].as_str().map(str::len), Some(64));

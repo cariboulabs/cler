@@ -1,6 +1,6 @@
 {
   "sha256": "a95a87baad1bd6167e14652debbbb7c2d21a336f0342047640fc6865080dbd3d",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "file": "desktop_examples/spike.cpp",
   "has_errors": false,
   "errors": [],

@@ -11,6 +11,7 @@
   import Actions, { type Alert, type EdgeInfo, type FitPadding } from './lib/Actions.svelte';
   import AddBlock from './lib/AddBlock.svelte';
   import BlockNode from './lib/BlockNode.svelte';
+  import DefineBlock from './lib/DefineBlock.svelte';
   import Inspector from './lib/Inspector.svelte';
   import Palette from './lib/Palette.svelte';
   import RoutedEdge from './lib/RoutedEdge.svelte';
@@ -49,6 +50,12 @@
     type FieldRefusal,
     type Wire
   } from './lib/palette';
+  import {
+    defineCommand,
+    defineRefusal,
+    structSpan,
+    type DefineForm
+  } from './lib/define';
   import {
     anchorSpans,
     blockSpans,
@@ -153,6 +160,7 @@
   let drawer = $state<typeof CodeDrawer | null>(null);
   let inspector = $state<Inspector | null>(null);
   let adder = $state<AddBlock | null>(null);
+  let definer = $state<DefineBlock | null>(null);
   let specs = $state.raw<BlockSpec[]>([]);
   let selectedEdge = $state<string | null>(null);
   let focus = $state<Span | null>(null);
@@ -553,6 +561,35 @@
     return addRefusal(outcome.record, form) ?? { field: null, message: outcome.message };
   }
 
+  function placeSpec(spec: BlockSpec) {
+    adder?.openAt(window.innerWidth / 2, window.innerHeight / 2, spec);
+  }
+
+  async function defineBlock(form: DefineForm): Promise<FieldRefusal | null> {
+    const outcome = await submit(defineCommand(siteIndex, form));
+    if (!outcome.ok) {
+      return defineRefusal(outcome.record, form) ?? { field: null, message: outcome.message };
+    }
+    const name = form.name.trim();
+    await refreshPalette(doc.path);
+    const span = structSpan(doc.source, name);
+    if (drawerOpen && span) focus = span;
+    alerted += 1;
+    alert = {
+      text: `${name} is in the palette`,
+      at: alerted,
+      tone: 'note',
+      action: {
+        label: 'Place it',
+        run: () => {
+          const spec = specFor(shownSpecs, name);
+          if (spec) placeSpec(spec);
+        }
+      }
+    };
+    return null;
+  }
+
   function droppedSpec(event: DragEvent): BlockSpec | null {
     const name = event.dataTransfer?.getData(DRAG_TYPE);
     return name ? (specFor(shownSpecs, name) ?? null) : null;
@@ -681,9 +718,11 @@
         specs={shownSpecs}
         documentPath={doc.path}
         enabled={editable}
+        note={viewerNote}
         open={blocksOpen}
         ontoggle={() => (blocksOpen = !blocksOpen)}
-        onpick={(spec) => adder?.openAt(window.innerWidth / 2, window.innerHeight / 2, spec)}
+        onpick={placeSpec}
+        onnew={() => definer?.open()}
       />
 
       {#if site}
@@ -815,6 +854,7 @@
             ondeleteblock={(block) => void deleteBlock(block)}
             ondisconnect={disconnect}
             onaddhere={addHere}
+            onnewblock={() => definer?.open()}
             onproblem={pickProblem}
           />
           <AddBlock
@@ -854,6 +894,13 @@
           </div>
         </div>
       {/if}
+
+      <DefineBlock
+        bind:this={definer}
+        specs={shownSpecs}
+        documentPath={doc.path}
+        ondefine={defineBlock}
+      />
 
       {#if refusal}
         <div class="dialog" role="dialog" aria-modal="true" data-testid="delete-refusal">

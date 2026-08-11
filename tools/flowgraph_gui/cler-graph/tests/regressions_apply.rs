@@ -700,7 +700,7 @@ fn s16_a_transaction_without_a_version_is_rejected() {
 
 #[test]
 fn s16_a_transaction_with_duplicate_fields_is_rejected() {
-    let json = r#"{"version":"0.2.0","base_revision":0,"base_revision":99,"commands":[]}"#;
+    let json = r#"{"version":"0.3.0","base_revision":0,"base_revision":99,"commands":[]}"#;
     let parsed: Result<Transaction, _> = serde_json::from_str(json);
     assert!(parsed.is_err(), "duplicate base_revision was accepted");
 }

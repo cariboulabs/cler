@@ -1,6 +1,6 @@
 {
   "sha256": "072f17e4e3a1e76b41b980200656a61ab7472f700cb588b1534be13a14b8e1bb",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "file": "tools/flowgraph_gui/cler-graph/tests/data/type_conflict.cpp",
   "has_errors": false,
   "errors": [],

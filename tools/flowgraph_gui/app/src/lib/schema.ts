@@ -139,7 +139,17 @@ export type Command =
       var_name: string;
     }
   | { command: 'remove_from_graph'; site: number; block: string }
-  | { command: 'delete_block'; site: number; block: string };
+  | { command: 'delete_block'; site: number; block: string }
+  | {
+      command: 'define_block';
+      site: number;
+      name: string;
+      value_type: string;
+      inputs: { name: string }[];
+      outputs: number;
+      params: { name: string; cpp_type: string; default: string | null }[];
+      may_block: boolean;
+    };
 
 export function siteViewIds(sites: Site[]): string[] {
   const seen = new Map<string, number>();
