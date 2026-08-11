@@ -113,7 +113,7 @@
     type Span
   } from './lib/schema';
   import type { CodeMark } from './lib/code';
-  import type CodeDrawer from './lib/CodeDrawer.svelte';
+  import CodeDrawer from './lib/CodeDrawer.svelte';
   import type { Tab } from './lib/CodeDrawer.svelte';
   import { fixtureNames } from './fixtures';
   import type { Outcome } from './lib/inspector';
@@ -224,7 +224,7 @@
   let drawerHeight = $state(storedHeight());
   let stashed = $state.raw<[boolean, boolean, boolean] | null>(null);
   let failure = $state<string | null>(null);
-  let drawer = $state<typeof CodeDrawer | null>(null);
+  let drawerMounted = $state(false);
   let actions = $state<Actions | null>(null);
   let inspector = $state<Inspector | null>(null);
   let adder = $state<AddBlock | null>(null);
@@ -377,8 +377,7 @@
   });
 
   $effect(() => {
-    if (!drawerOpen || untrack(() => drawer)) return;
-    void import('./lib/CodeDrawer.svelte').then((module) => (drawer = module.default));
+    if (drawerOpen) drawerMounted = true;
   });
 
   $effect(() => {
@@ -1505,9 +1504,8 @@
         >
       {/if}
 
-      {#if drawer}
-        {@const Drawer = drawer}
-        <Drawer
+      {#if drawerMounted}
+        <CodeDrawer
           open={drawerOpen}
           source={doc.source}
           path={doc.path}
