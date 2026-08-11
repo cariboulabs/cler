@@ -14,6 +14,14 @@ const SHOTS = (globalThis as { process?: { env: Record<string, string | undefine
   ?.env.CLER_SHOTS;
 export const specs = shipped.blocks as unknown as BlockSpec[];
 
+export type FakeTarget = {
+  available: boolean;
+  reason: string | null;
+  name: string;
+  buildDir: string | null;
+  binary: string | null;
+};
+
 type Setup = {
   path: string;
   model: FileModel;
@@ -21,6 +29,7 @@ type Setup = {
   specs: BlockSpec[];
   refusal: unknown;
   openError: string | null;
+  target: FakeTarget | null;
 };
 
 type Fake = {
@@ -31,6 +40,7 @@ type Fake = {
   refuse: (value: unknown) => void;
   hold: () => void;
   release: () => void;
+  emit: (event: string, payload: unknown) => void;
 };
 
 export type FakeWindow = { __fake: Fake };
@@ -58,6 +68,7 @@ function installFake(setup: Setup) {
   const calls: string[] = [];
   const bases: number[] = [];
   const callbacks = new Map<number, (message: unknown) => void>();
+  const listeners: { event: string; handler: number }[] = [];
   let refusal: unknown = setup.refusal;
   let nextCallback = 1;
   let gate: { waited: Promise<void>; open: () => void } | null = null;
@@ -283,11 +294,21 @@ function installFake(setup: Setup) {
   }
 
   async function invoke(command: string, args: Record<string, unknown>): Promise<unknown> {
-    if (command === 'plugin:event|listen') return args.handler;
+    if (command === 'plugin:event|listen') {
+      listeners.push({ event: String(args.event), handler: args.handler as number });
+      return args.handler;
+    }
     if (command === 'plugin:dialog|open') return state.path;
     calls.push(command);
     if (command === 'open_document' && setup.openError !== null) throw setup.openError;
     if (command === 'palette') return JSON.parse(JSON.stringify(palette));
+    if (command === 'find_target') {
+      if (setup.target === null) throw 'that file is not inside a cler repository';
+      return setup.target;
+    }
+    if (['check_document', 'build_target', 'run_target', 'stop_target'].includes(command)) {
+      return null;
+    }
     if (command === 'apply_commands') {
       const commands = args.commands as Loose[];
       bases.push(args.baseRevision as number);
@@ -337,6 +358,12 @@ function installFake(setup: Setup) {
     release: () => {
       gate?.open();
       gate = null;
+    },
+    emit: (event: string, payload: unknown) => {
+      for (const entry of listeners) {
+        if (entry.event !== event) continue;
+        callbacks.get(entry.handler)?.({ event, id: entry.handler, payload });
+      }
     }
   };
 }
@@ -369,6 +396,23 @@ export type BootOptions = {
   refusal?: unknown;
   openError?: string;
   empty?: boolean;
+  target?: FakeTarget | null;
+};
+
+export const NO_TARGET: FakeTarget = {
+  available: false,
+  reason: 'only files under desktop_examples/ have a cmake target',
+  name: 'hello_world',
+  buildDir: null,
+  binary: null
+};
+
+export const BUILDABLE: FakeTarget = {
+  available: true,
+  reason: null,
+  name: 'hello_world',
+  buildDir: '/tmp/fake/build',
+  binary: '/tmp/fake/build/desktop_examples/hello_world'
 };
 
 export function openInspector(): void {
@@ -386,7 +430,8 @@ export async function boot(options: BootOptions = {}): Promise<Page> {
     source: sourceOf(name),
     specs,
     refusal: options.refusal ?? null,
-    openError: options.openError ?? null
+    openError: options.openError ?? null,
+    target: options.target === undefined ? NO_TARGET : options.target
   });
   await page.addInitScript(openInspector);
   await page.goto(origin, { waitUntil: 'load' });
@@ -416,6 +461,13 @@ export const hold = (page: Page) =>
 
 export const release = (page: Page) =>
   page.evaluate(() => (window as unknown as FakeWindow).__fake.release());
+
+export const emit = (page: Page, event: string, payload: unknown) =>
+  page.evaluate(
+    ([name, sent]) =>
+      (window as unknown as FakeWindow).__fake.emit(name as string, sent),
+    [event, payload] as [string, unknown]
+  );
 
 export async function highlighted(page: Page): Promise<string> {
   const pieces = await page.locator('[data-testid="code-drawer"] .hit').allTextContents();

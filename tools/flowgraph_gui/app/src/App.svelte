@@ -8,7 +8,12 @@
   } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import { untrack } from 'svelte';
-  import Actions, { type Alert, type EdgeInfo, type FitPadding } from './lib/Actions.svelte';
+  import Actions, {
+    type Alert,
+    type EdgeInfo,
+    type FitPadding,
+    type Tasks
+  } from './lib/Actions.svelte';
   import AddBlock from './lib/AddBlock.svelte';
   import BlockNode from './lib/BlockNode.svelte';
   import DefineBlock from './lib/DefineBlock.svelte';
@@ -18,22 +23,37 @@
   import TypeLegend from './lib/TypeLegend.svelte';
   import {
     applyCommands,
+    buildTarget,
+    checkDocument,
     closeDocument,
     describeApplyError,
     errorRecord,
+    findTarget,
     inTauri,
     loadFixture,
     loadPalette,
     onExternalChange,
+    onTaskEnd,
+    onTaskLine,
     openDocument,
     openInEditor,
     pickFile,
     queued,
     redoDocument,
     reloadDocument,
+    runTarget,
     spansOf,
-    undoDocument
+    stopTarget,
+    undoDocument,
+    type TargetInfo,
+    type TaskKind
   } from './lib/backend';
+  import {
+    compileProblems,
+    parseDiagnostics,
+    placeDiagnostics,
+    type Placed
+  } from './lib/diagnostics';
   import { layout } from './lib/layout';
   import {
     addBlockCommand,
@@ -85,6 +105,7 @@
   } from './lib/schema';
   import type { CodeMark } from './lib/code';
   import type CodeDrawer from './lib/CodeDrawer.svelte';
+  import type { Tab } from './lib/CodeDrawer.svelte';
   import { fixtureNames } from './fixtures';
   import type { Outcome } from './lib/inspector';
 
@@ -106,6 +127,7 @@
   const NOTE_DESKTOP = 'example mode — read-only viewer — use Open file… to edit the real file';
   const viewerNote = desktop ? NOTE_DESKTOP : NOTE_BROWSER;
   const DISK_DRIFT = 'changed on disk';
+  const DISK_NOTE = 'this file changed on disk — reload before building or running';
   const NO_SITE = 'no flowgraph site found in this file';
   const DROP_HINT = 'dropped — release on an input port to connect';
   const RAIL_WIDTH = 44;
@@ -121,6 +143,7 @@
   const DRAWER_PANEL = 'cler.panel.drawer';
   const DRAWER_HEIGHT = 'cler.panel.drawer.height';
   const DEFAULT_DRAWER_HEIGHT = 260;
+  const OUTPUT_LINES = 2000;
   const MIN_DRAWER_HEIGHT = 90;
 
   function storedOpen(key: string, fallback: boolean): boolean {
@@ -166,6 +189,13 @@
   let focus = $state<Span | null>(null);
   let refusal = $state<{ block: string; spans: Span[] } | null>(null);
   let alert = $state.raw<Alert | null>(null);
+  let tab = $state<Tab>('code');
+  let target = $state.raw<TargetInfo | null>(null);
+  let targetError = $state<string | null>(null);
+  let diagLines = $state.raw<string[]>([]);
+  let output = $state.raw<string[]>([]);
+  let busy = $state<TaskKind | null>(null);
+  let running = $state(false);
   let generation = 0;
   let alerted = 0;
   let pinned = new Map<string, EdgePoint>();
@@ -206,6 +236,27 @@
     const block = site?.blocks.find((candidate) => candidate.var === selected);
     return block ? specOfBlock(specs, block) : undefined;
   });
+  const diagnostics = $derived<Placed[]>(
+    placeDiagnostics(parseDiagnostics(diagLines), doc.path, doc.source, doc.model.sites)
+  );
+  const compiled = $derived<Problem[]>(compileProblems(diagnostics));
+  const blocked = $derived<string | null>(
+    !editable ? viewerNote : needsReload ? DISK_NOTE : null
+  );
+  const tasks = $derived<Tasks>({
+    check: {
+      enabled: blocked === null && targetError === null && busy === null,
+      hint: blocked ?? targetError ?? 'syntax-check this file with g++ (F7)'
+    },
+    build: {
+      enabled: blocked === null && busy === null && target?.available === true,
+      hint: blocked ?? target?.reason ?? targetError ?? 'build this example with cmake (Ctrl+B)'
+    },
+    run: {
+      enabled: blocked === null && (running || (busy === null && target?.available === true)),
+      hint: blocked ?? target?.reason ?? targetError ?? 'run the built example (Ctrl+R)'
+    }
+  });
 
   $effect(() => storeOpen(LEFT_PANEL, leftOpen));
   $effect(() => storeOpen(RIGHT_PANEL, rightOpen));
@@ -225,6 +276,51 @@
     });
     return () => {
       void pending.then((unlisten) => unlisten());
+    };
+  });
+
+  $effect(() => {
+    const path = doc.path;
+    if (!editable) {
+      target = null;
+      targetError = null;
+      return;
+    }
+    let stale = false;
+    void findTarget(path).then(
+      (found) => {
+        if (stale) return;
+        target = found;
+        targetError = null;
+      },
+      (error: unknown) => {
+        if (stale) return;
+        target = null;
+        targetError = describeApplyError(error);
+      }
+    );
+    return () => {
+      stale = true;
+    };
+  });
+
+  $effect(() => {
+    if (!editable) return;
+    const streams = onTaskLine((kind, payload) => {
+      if (payload.path !== doc.path) return;
+      output = [...output, payload.line].slice(-OUTPUT_LINES);
+      if (kind !== 'run') diagLines = [...diagLines, payload.line];
+    });
+    const ends = onTaskEnd((kind, payload) => {
+      if (payload.path !== doc.path) return;
+      if (kind === 'run') running = false;
+      else busy = null;
+      output = [...output, `— ${kind} finished (exit ${payload.code ?? 'signal'})`];
+    });
+    return () => {
+      void Promise.all([streams, ends]).then((pending) => {
+        for (const unlisten of pending.flat()) unlisten();
+      });
     };
   });
 
@@ -293,6 +389,10 @@
     }
     clampContext();
     inspector?.discardDrafts();
+    diagLines = [];
+    output = [];
+    busy = null;
+    running = false;
     status = '';
   }
 
@@ -533,6 +633,41 @@
   function jumpTo(span: Span) {
     focus = span;
     drawerOpen = true;
+    tab = 'code';
+  }
+
+  async function task(kind: TaskKind, action: (path: string) => Promise<void>) {
+    output = [];
+    if (kind !== 'run') diagLines = [];
+    if (kind === 'run') running = true;
+    else busy = kind;
+    tab = kind === 'check' ? 'diagnostics' : 'output';
+    drawerOpen = true;
+    try {
+      await action(doc.path);
+    } catch (error) {
+      if (kind === 'run') running = false;
+      else busy = null;
+      announce(describeApplyError(error));
+    }
+  }
+
+  async function toggleRun() {
+    if (!running) {
+      await task('run', runTarget);
+      return;
+    }
+    try {
+      await stopTarget(doc.path);
+    } catch (error) {
+      announce(describeApplyError(error));
+    }
+  }
+
+  function pickDiagnostic(entry: Placed) {
+    if (entry.site !== null) siteIndex = entry.site;
+    if (entry.block) selectNode(entry.block);
+    if (entry.span) jumpTo(entry.span);
   }
 
   function pickProblem(problem: Problem) {
@@ -839,7 +974,13 @@
             selectedNode={selected}
             {selectedEdge}
             {problems}
+            {compiled}
+            {tasks}
+            {running}
             edgeAt={edgeInfo}
+            oncheck={() => void task('check', checkDocument)}
+            onbuild={() => void task('build', buildTarget)}
+            onrun={() => void toggleRun()}
             onundo={() => void run(undoDocument)}
             onredo={() => void run(redoDocument)}
             onopen={() => void openFile()}
@@ -938,9 +1079,15 @@
           {anchors}
           {siteAnchor}
           height={drawerHeight}
+          {tab}
+          {diagnostics}
+          {output}
+          {busy}
           onpick={pickInCode}
           ontoggle={() => (drawerOpen = !drawerOpen)}
           onheight={(next) => (drawerHeight = next)}
+          ontab={(next: Tab) => (tab = next)}
+          ondiagnostic={pickDiagnostic}
         />
       {/if}
     </div>

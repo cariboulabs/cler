@@ -544,6 +544,9 @@ describe('each right-click target has its own menu', () => {
       expect(await menuIds(page)).toEqual([
         'menu-add-here',
         'menu-new-block',
+        'menu-check',
+        'menu-build',
+        'menu-run',
         'menu-undo',
         'menu-redo',
         'menu-fit'

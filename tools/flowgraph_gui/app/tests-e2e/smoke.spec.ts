@@ -36,7 +36,12 @@ const SURFACE = [
   'redo',
   'reload_document',
   'parse_file',
-  'palette'
+  'palette',
+  'check_document',
+  'find_target',
+  'build_target',
+  'run_target',
+  'stop_target'
 ];
 
 type Bridge = { invoke: (cmd: string, args: Record<string, unknown>) => Promise<unknown> };

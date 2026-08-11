@@ -3,6 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use cler_flowgraph_gui::build::{self, Emit, Jobs};
 use cler_flowgraph_gui::document::{self, Documents};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -26,6 +27,7 @@ fn main() {
 
     let docs: Shared = Arc::new(Documents::default());
     let events: Events = Arc::new(Mutex::new(Vec::new()));
+    let jobs = Jobs::default();
     let watcher: FileWatcher = Arc::new(Mutex::new(
         build_watcher(docs.clone(), events.clone()).expect("file watcher"),
     ));
@@ -37,17 +39,24 @@ fn main() {
         let docs = docs.clone();
         let events = events.clone();
         let watcher = watcher.clone();
+        let jobs = jobs.clone();
         std::thread::spawn(move || {
-            serve(stream, &docs, &watcher, &events);
+            serve(stream, &docs, &watcher, &events, &jobs);
         });
     }
 }
 
-fn serve(mut stream: TcpStream, docs: &Shared, watcher: &FileWatcher, events: &Events) {
+fn serve(
+    mut stream: TcpStream,
+    docs: &Shared,
+    watcher: &FileWatcher,
+    events: &Events,
+    jobs: &Jobs,
+) {
     let Some((method, target, body)) = request(&stream) else {
         return;
     };
-    let (status, payload) = route(&method, &target, &body, docs, watcher, events);
+    let (status, payload) = route(&method, &target, &body, docs, watcher, events, jobs);
     respond(&mut stream, status, &payload);
 }
 
@@ -87,6 +96,7 @@ fn route(
     docs: &Shared,
     watcher: &FileWatcher,
     events: &Events,
+    jobs: &Jobs,
 ) -> (u16, Value) {
     if method == "OPTIONS" {
         return (204, Value::Null);
@@ -94,7 +104,7 @@ fn route(
     match target {
         "/health" => (200, json!({ "ok": true })),
         "/events/poll" => (200, json!({ "ok": drain(events) })),
-        "/invoke" => invoke(body, docs, watcher),
+        "/invoke" => invoke(body, docs, watcher, events, jobs),
         _ => (
             404,
             json!({ "loud": format!("no route for {method} {target}") }),
@@ -102,7 +112,13 @@ fn route(
     }
 }
 
-fn invoke(body: &[u8], docs: &Shared, watcher: &FileWatcher) -> (u16, Value) {
+fn invoke(
+    body: &[u8],
+    docs: &Shared,
+    watcher: &FileWatcher,
+    events: &Events,
+    jobs: &Jobs,
+) -> (u16, Value) {
     let parsed: Value = match serde_json::from_slice(body) {
         Ok(value) => value,
         Err(cause) => return (500, json!({ "loud": format!("bad /invoke body: {cause}") })),
@@ -111,14 +127,21 @@ fn invoke(body: &[u8], docs: &Shared, watcher: &FileWatcher) -> (u16, Value) {
         return (500, json!({ "loud": "/invoke needs a cmd" }));
     };
     let args = parsed.get("args").cloned().unwrap_or(Value::Null);
-    match dispatch(cmd, &args, docs, watcher) {
+    match dispatch(cmd, &args, docs, watcher, events, jobs) {
         Reply::Value(value) => (200, json!({ "ok": value })),
         Reply::Refused(message) => (200, json!({ "err": message })),
         Reply::Loud(message) => (500, json!({ "loud": message })),
     }
 }
 
-fn dispatch(cmd: &str, args: &Value, docs: &Shared, watcher: &FileWatcher) -> Reply {
+fn dispatch(
+    cmd: &str,
+    args: &Value,
+    docs: &Shared,
+    watcher: &FileWatcher,
+    events: &Events,
+    jobs: &Jobs,
+) -> Reply {
     let path = match args.get("path").and_then(Value::as_str) {
         Some(text) => text.to_string(),
         None => return Reply::Loud(format!("{cmd} needs a path argument")),
@@ -155,8 +178,23 @@ fn dispatch(cmd: &str, args: &Value, docs: &Shared, watcher: &FileWatcher) -> Re
         "reload_document" => outcome(document::reload(docs, &path)),
         "parse_file" => outcome(document::parse_file(docs, &path)),
         "palette" => outcome(document::palette(docs, &path)),
+        "check_document" => outcome(build::check(jobs, &path, emitter(events))),
+        "find_target" => outcome(build::find_target(&path)),
+        "build_target" => outcome(build::build(jobs, &path, emitter(events))),
+        "run_target" => outcome(build::start(jobs, &path, emitter(events))),
+        "stop_target" => outcome(build::stop(jobs, &path)),
         _ => Reply::Loud(format!("unknown command: {cmd}")),
     }
+}
+
+fn emitter(events: &Events) -> Emit {
+    let events = events.clone();
+    Arc::new(move |event: &str, payload: Value| {
+        events
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(json!({ "event": event, "payload": payload }));
+    })
 }
 
 fn outcome<T: Serialize>(result: Result<T, String>) -> Reply {
@@ -206,7 +244,10 @@ fn build_watcher(docs: Shared, events: Events) -> notify::Result<RecommendedWatc
                 events
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
-                    .push(json!({ "path": path.display().to_string() }));
+                    .push(json!({
+                        "event": "document-changed-externally",
+                        "payload": { "path": path.display().to_string() },
+                    }));
             }
         }
     })

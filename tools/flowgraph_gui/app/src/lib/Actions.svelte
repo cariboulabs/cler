@@ -26,6 +26,10 @@
     left: `${number}px`;
   };
 
+  export type Gate = { enabled: boolean; hint: string };
+
+  export type Tasks = { check: Gate; build: Gate; run: Gate };
+
   type Props = {
     canUndo: boolean;
     canRedo: boolean;
@@ -40,7 +44,13 @@
     selectedNode: string | null;
     selectedEdge: string | null;
     problems: Problem[];
+    compiled: Problem[];
+    tasks: Tasks;
+    running: boolean;
     edgeAt: (id: string) => EdgeInfo | null;
+    oncheck: () => void;
+    onbuild: () => void;
+    onrun: () => void;
     onundo: () => void;
     onredo: () => void;
     onopen: () => void;
@@ -84,7 +94,13 @@
     selectedNode,
     selectedEdge,
     problems,
+    compiled,
+    tasks,
+    running,
     edgeAt,
+    oncheck,
+    onbuild,
+    onrun,
     onundo,
     onredo,
     onopen,
@@ -111,11 +127,13 @@
   const SAVED_MS = 1500;
   const ALERT_MS = 4000;
   const MENU_WIDTH = 200;
-  const MENU_HEIGHT = 190;
-  const MENU_IDS = ['undo', 'redo', 'fit'];
+  const MENU_HEIGHT = 260;
+  const MENU_IDS = ['check', 'build', 'run', 'undo', 'redo', 'fit'];
   const CTRL_KEYS: Record<string, string> = {
     y: 'redo',
     o: 'open',
+    b: 'build',
+    r: 'run',
     '=': 'zoom-in',
     '+': 'zoom-in',
     '-': 'zoom-out',
@@ -125,6 +143,10 @@
     '\\': 'chrome'
   };
   const ICONS: Record<string, string[]> = {
+    check: ['M2.5 8.6 6 12.1 13.5 3.9'],
+    build: ['M8 1.8 14 5v6l-6 3.2L2 11V5Z', 'M2 5l6 3.2L14 5', 'M8 8.2v6.4'],
+    run: ['M5.5 3.4 12.5 8l-7 4.6Z'],
+    stop: ['M4.6 4.6h6.8v6.8H4.6Z'],
     open: ['M2 12.6V4.4a.9.9 0 0 1 .9-.9h3.1l1.3 1.6h5.8a.9.9 0 0 1 .9.9v6.6a.9.9 0 0 1-.9.9H2.9a.9.9 0 0 1-.9-.9Z'],
     undo: ['M2.8 6.8h7.4a3.4 3.4 0 1 1 0 6.8H6.4', 'M5.4 4.2 2.8 6.8l2.6 2.6'],
     redo: ['M13.2 6.8H5.8a3.4 3.4 0 1 0 0 6.8H9.6', 'M10.6 4.2 13.2 6.8l-2.6 2.6'],
@@ -160,7 +182,8 @@
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let problemsOpen = $state(false);
 
-  const failing = $derived(problems.some((problem) => problem.severity === 'error'));
+  const listed = $derived<Problem[]>([...compiled, ...problems]);
+  const failing = $derived(listed.some((problem) => problem.severity === 'error'));
 
   let rails: string | null = null;
 
@@ -182,6 +205,30 @@
   });
 
   const actions = $derived<Action[]>([
+    {
+      id: 'check',
+      label: 'Check',
+      shortcut: 'F7',
+      enabled: tasks.check.enabled,
+      hint: tasks.check.hint,
+      run: oncheck
+    },
+    {
+      id: 'build',
+      label: 'Build',
+      shortcut: 'Ctrl+B',
+      enabled: tasks.build.enabled,
+      hint: tasks.build.hint,
+      run: onbuild
+    },
+    {
+      id: 'run',
+      label: running ? 'Stop' : 'Run',
+      shortcut: 'Ctrl+R',
+      enabled: tasks.run.enabled,
+      hint: tasks.run.hint,
+      run: onrun
+    },
     { id: 'open', label: 'Open file', shortcut: 'Ctrl+O', enabled: true, run: onopen },
     { id: 'undo', label: 'Undo', shortcut: 'Ctrl+Z', enabled: canUndo, run: onundo },
     { id: 'redo', label: 'Redo', shortcut: 'Ctrl+Shift+Z', enabled: canRedo, run: onredo },
@@ -375,6 +422,7 @@
       event.preventDefault();
       return;
     }
+    if (ctrl && key === 'r') event.preventDefault();
     if (isTyping(event.target)) return;
     if (ctrl) {
       const id = shortcutId(key, event.shiftKey);
@@ -385,6 +433,7 @@
     }
     if (event.altKey) return;
     if (key === 'delete' || key === 'backspace') deleteSelection();
+    else if (key === 'f7') act(byId('check'));
     else if (key === '[') ontoggleleft();
     else if (key === ']') ontoggleright();
     else return;
@@ -402,12 +451,7 @@
     if (!node && !edge && !target.closest('.svelte-flow__pane')) return;
     event.preventDefault();
     problemsOpen = false;
-    menu = {
-      x: Math.min(event.clientX, window.innerWidth - MENU_WIDTH),
-      y: Math.min(event.clientY, window.innerHeight - MENU_HEIGHT),
-      node,
-      edge
-    };
+    menu = { x: event.clientX, y: event.clientY, node, edge };
   }
 
   function pickProblem(problem: Problem) {
@@ -436,31 +480,34 @@
   <button
     class="problems"
     class:danger={failing}
-    class:clear={problems.length === 0}
+    class:clear={listed.length === 0}
     data-testid="problems"
-    data-count={problems.length}
+    data-count={listed.length}
     aria-expanded={problemsOpen}
-    disabled={problems.length === 0}
-    title={problems.length === 0
+    disabled={listed.length === 0}
+    title={listed.length === 0
       ? 'no conflicts, nothing unresolved, every block runs'
-      : `${problems.length} conflicts, unresolved elements and runnerless blocks in this site`}
+      : `${listed.length} compiler diagnostics, conflicts, unresolved elements and runnerless blocks`}
     onclick={(event) => {
       event.stopPropagation();
       menu = null;
       problemsOpen = !problemsOpen;
     }}
   >
-    {problems.length} problem{problems.length === 1 ? '' : 's'}
+    {listed.length} problem{listed.length === 1 ? '' : 's'}
   </button>
   {#each actions as action (action.id)}
-    {#if action.id === 'zoom-out' || action.id === 'drawer'}
+    {#if action.id === 'open' || action.id === 'zoom-out' || action.id === 'drawer'}
       <span class="sep"></span>
     {/if}
     <button
       class="icon"
+      class:live={action.id === 'run' && running}
       data-testid={action.id}
       aria-label={action.label}
-      title="{action.label} ({action.shortcut})"
+      title={action.enabled
+        ? `${action.label} (${action.shortcut})`
+        : (action.hint ?? `${action.label} (${action.shortcut})`)}
       disabled={!action.enabled}
       onclick={() => act(action)}
     >
@@ -475,7 +522,7 @@
         stroke-linejoin="round"
         aria-hidden="true"
       >
-        {#each ICONS[action.id] ?? [] as d (d)}
+        {#each ICONS[action.id === 'run' && running ? 'stop' : action.id] ?? [] as d (d)}
           <path {d} />
         {/each}
       </svg>
@@ -515,15 +562,29 @@
 
 {#if problemsOpen}
   <div class="drop" data-testid="problems-list">
+    {#if compiled.length > 0}
+      <span class="section" data-testid="section-compiler">compiler</span>
+    {/if}
+    {#each compiled as problem (problem.id)}
+      <button data-problem={problem.id} onclick={() => pickProblem(problem)}>
+        <span class="kind {problem.severity}">{problem.kind}</span>
+        <span class="what">{problem.title}</span>
+        <span class="key">{problem.detail}</span>
+      </button>
+    {/each}
+    {#if compiled.length > 0 && problems.length > 0}
+      <span class="section" data-testid="section-graph">graph</span>
+    {/if}
     {#each problems as problem (problem.id)}
       <button data-problem={problem.id} onclick={() => pickProblem(problem)}>
         <span class="kind {problem.severity}">{problem.kind}</span>
         <span class="what">{problem.title}</span>
         <span class="key">{problem.detail}</span>
       </button>
-    {:else}
-      <span class="empty">no type conflicts, nothing unresolved</span>
     {/each}
+    {#if listed.length === 0}
+      <span class="empty">no type conflicts, nothing unresolved</span>
+    {/if}
   </div>
 {/if}
 
@@ -532,7 +593,10 @@
     class="menu"
     data-testid="context-menu"
     data-menu={menuKind}
-    style="left: {menu.x}px; top: {menu.y}px"
+    style="left: {Math.min(menu.x, window.innerWidth - MENU_WIDTH)}px; top: {Math.min(
+      menu.y,
+      window.innerHeight - MENU_HEIGHT
+    )}px"
   >
     {#if menuInfo}
       <span class="info" data-testid="menu-edge-info">{menuInfo}</span>
@@ -621,6 +685,28 @@
     background: var(--bg-2);
     border-color: var(--border-hi);
     color: var(--fg);
+  }
+  .icon.live {
+    position: relative;
+    color: var(--danger-fg);
+  }
+  .icon.live::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--danger);
+  }
+  .section {
+    padding: var(--sp-1) var(--sp-2) var(--sp-0);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
   }
   .menu {
     position: fixed;

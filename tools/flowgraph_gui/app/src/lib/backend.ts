@@ -103,6 +103,62 @@ export function openInEditor(path: string, line: number): Promise<void> {
   return invoker('open_in_editor', { path, line }) as Promise<void>;
 }
 
+export const TASKS = ['check', 'build', 'run'] as const;
+
+export type TaskKind = (typeof TASKS)[number];
+
+export type TaskLine = { path: string; line: string };
+
+export type TaskEnd = { path: string; code: number | null };
+
+export type TargetInfo = {
+  available: boolean;
+  reason: string | null;
+  name: string;
+  buildDir: string | null;
+  binary: string | null;
+};
+
+export function checkDocument(path: string): Promise<void> {
+  return invoker('check_document', { path }) as Promise<void>;
+}
+
+export function findTarget(path: string): Promise<TargetInfo> {
+  return invoker('find_target', { path }) as Promise<TargetInfo>;
+}
+
+export function buildTarget(path: string): Promise<void> {
+  return invoker('build_target', { path }) as Promise<void>;
+}
+
+export function runTarget(path: string): Promise<void> {
+  return invoker('run_target', { path }) as Promise<void>;
+}
+
+export function stopTarget(path: string): Promise<void> {
+  return invoker('stop_target', { path }) as Promise<void>;
+}
+
+export function onTaskLine(
+  handler: (kind: TaskKind, payload: TaskLine) => void
+): Promise<UnlistenFn[]> {
+  return Promise.all(
+    TASKS.map((kind) =>
+      listen<TaskLine>(`${kind}-output`, (event) => handler(kind, event.payload))
+    )
+  );
+}
+
+export function onTaskEnd(
+  handler: (kind: TaskKind, payload: TaskEnd) => void
+): Promise<UnlistenFn[]> {
+  return Promise.all(
+    TASKS.map((kind) =>
+      listen<TaskEnd>(`${kind}-finished`, (event) => handler(kind, event.payload))
+    )
+  );
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   return value as Record<string, unknown>;

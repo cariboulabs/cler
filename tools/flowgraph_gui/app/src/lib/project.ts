@@ -370,7 +370,7 @@ export function anchorSpans(sites: Site[]): Span[] {
 
 export type Problem = {
   id: string;
-  kind: 'conflict' | 'unresolved' | 'no runner';
+  kind: 'conflict' | 'unresolved' | 'no runner' | 'compile';
   severity: 'error' | 'warning';
   title: string;
   detail: string;

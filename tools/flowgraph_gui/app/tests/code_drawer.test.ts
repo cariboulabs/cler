@@ -565,7 +565,16 @@ describe('the node context menu reaches the code', () => {
         await page.locator('[data-testid="context-menu"] button').evaluateAll((buttons) =>
           buttons.map((button) => button.getAttribute('data-testid'))
         )
-      ).toEqual(['menu-add-here', 'menu-new-block', 'menu-undo', 'menu-redo', 'menu-fit']);
+      ).toEqual([
+        'menu-add-here',
+        'menu-new-block',
+        'menu-check',
+        'menu-build',
+        'menu-run',
+        'menu-undo',
+        'menu-redo',
+        'menu-fit'
+      ]);
       await page.close();
     },
     CASE

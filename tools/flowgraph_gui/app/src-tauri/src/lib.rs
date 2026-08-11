@@ -1,10 +1,12 @@
+pub mod build;
 pub mod document;
 
 use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use build::{Emit, Jobs, Target};
 use cler_graph::BlockSpec;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -88,6 +90,37 @@ fn parse_file(path: String, docs: State<'_, Documents>) -> Result<String, String
 #[tauri::command]
 fn palette(path: String, docs: State<'_, Documents>) -> Result<Vec<BlockSpec>, String> {
     document::palette(&docs, &path)
+}
+
+fn emitter(app: AppHandle) -> Emit {
+    Arc::new(move |event: &str, payload: Value| {
+        let _ = app.emit(event, payload);
+    })
+}
+
+#[tauri::command]
+fn check_document(path: String, app: AppHandle, jobs: State<'_, Jobs>) -> Result<(), String> {
+    build::check(jobs.inner(), &path, emitter(app))
+}
+
+#[tauri::command]
+fn find_target(path: String) -> Result<Target, String> {
+    build::find_target(&path)
+}
+
+#[tauri::command]
+fn build_target(path: String, app: AppHandle, jobs: State<'_, Jobs>) -> Result<(), String> {
+    build::build(jobs.inner(), &path, emitter(app))
+}
+
+#[tauri::command]
+fn run_target(path: String, app: AppHandle, jobs: State<'_, Jobs>) -> Result<(), String> {
+    build::start(jobs.inner(), &path, emitter(app))
+}
+
+#[tauri::command]
+fn stop_target(path: String, jobs: State<'_, Jobs>) -> Result<(), String> {
+    build::stop(jobs.inner(), &path)
 }
 
 #[tauri::command]
@@ -189,6 +222,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Documents::default())
+        .manage(Jobs::default())
         .setup(|app| {
             let watcher = build_watcher(app.handle().clone())?;
             app.manage(Mutex::new(watcher));
@@ -203,7 +237,12 @@ pub fn run() {
             reload_document,
             parse_file,
             palette,
-            open_in_editor
+            open_in_editor,
+            check_document,
+            find_target,
+            build_target,
+            run_target,
+            stop_target
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

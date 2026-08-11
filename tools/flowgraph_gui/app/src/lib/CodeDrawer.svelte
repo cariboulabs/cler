@@ -1,7 +1,10 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { codeLines, type CodeMark } from './code';
+  import type { Placed } from './diagnostics';
   import type { Span } from './schema';
+
+  export type Tab = 'code' | 'diagnostics' | 'output';
 
   type Props = {
     open: boolean;
@@ -14,9 +17,15 @@
     anchors: Span[];
     siteAnchor: Span | null;
     height: number;
+    tab: Tab;
+    diagnostics: Placed[];
+    output: string[];
+    busy: string | null;
     onpick: (offset: number) => void;
     ontoggle: () => void;
     onheight: (height: number) => void;
+    ontab: (tab: Tab) => void;
+    ondiagnostic: (entry: Placed) => void;
   };
 
   const {
@@ -30,16 +39,26 @@
     anchors,
     siteAnchor,
     height,
+    tab,
+    diagnostics,
+    output,
+    busy,
     onpick,
     ontoggle,
-    onheight
+    onheight,
+    ontab,
+    ondiagnostic
   }: Props = $props();
+
+  const TABS: Tab[] = ['code', 'diagnostics', 'output'];
 
   const MIN_HEIGHT = 90;
   const TOP_GUTTER = 120;
   const REVEAL_FRACTION = 3;
 
   let body = $state<HTMLElement | null>(null);
+  let stream = $state<HTMLElement | null>(null);
+  let stuck = $state(true);
   let shown = $state(false);
   let dragged = $state<number | null>(null);
 
@@ -47,6 +66,7 @@
   const basename = $derived(path.split('/').pop() ?? path);
   const anchor = $derived(hits[0]?.start ?? siteAnchor?.start ?? null);
   const tall = $derived(dragged ?? height);
+  const failing = $derived(diagnostics.filter((entry) => entry.severity === 'error').length);
 
   $effect(() => {
     const wanted = open;
@@ -56,10 +76,26 @@
 
   $effect(() => {
     const at = anchor;
-    const visible = shown;
+    const visible = shown && tab === 'code';
     if (at === null || !visible) return;
     untrack(() => reveal(at));
   });
+
+  $effect(() => {
+    const host = stream;
+    if (output.length === 0 || !host || !stuck) return;
+    host.scrollTop = host.scrollHeight;
+  });
+
+  function trackScroll(event: Event) {
+    const host = event.currentTarget;
+    if (!(host instanceof HTMLElement)) return;
+    stuck = host.scrollTop + host.clientHeight >= host.scrollHeight - 4;
+  }
+
+  function place(entry: Placed): string {
+    return `${entry.file.split('/').pop() ?? entry.file}:${entry.line}`;
+  }
 
   function ceiling(): number {
     return Math.max(MIN_HEIGHT, window.innerHeight - TOP_GUTTER);
@@ -134,12 +170,29 @@
     onpointerdown={startDrag}
   ></div>
   <header>
-    <h2>Code</h2>
+    <div class="tabs" data-testid="drawer-tabs">
+      {#each TABS as name (name)}
+        <button
+          class="tab"
+          class:on={tab === name}
+          data-testid="tab-{name}"
+          aria-pressed={tab === name}
+          onclick={() => ontab(name)}
+        >
+          {name}{#if name === 'diagnostics' && diagnostics.length > 0}
+            <span class="count" class:danger={failing > 0}>{diagnostics.length}</span>
+          {/if}
+        </button>
+      {/each}
+    </div>
     <span class="file" title={path} data-testid="drawer-file">{basename}</span>
     <span class="chip" data-testid="drawer-revision">rev {revision}</span>
     <span class="chip" class:locked={readOnly > 0} data-testid="drawer-readonly">
       {readOnly} read-only
     </span>
+    {#if busy}
+      <span class="chip" data-testid="drawer-busy">{busy}…</span>
+    {/if}
     <span class="grow"></span>
     <button
       class="close"
@@ -151,7 +204,13 @@
   </header>
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="body" bind:this={body} data-testid="drawer-body" onclick={pickFrom}>
+  <div
+    class="body"
+    class:away={tab !== 'code'}
+    bind:this={body}
+    data-testid="drawer-body"
+    onclick={pickFrom}
+  >
     {#each lines as line (line.number)}
       <div class="row" data-line={line.number}>
         <span class="num">{line.number}</span><code
@@ -166,6 +225,41 @@
       </div>
     {/each}
   </div>
+
+  {#if tab === 'diagnostics'}
+    <div class="panel" data-testid="diagnostics-list">
+      {#each diagnostics as entry (entry.id)}
+        <button data-diagnostic={entry.id} onclick={() => ondiagnostic(entry)}>
+          <span class="dot {entry.severity}"></span>
+          <span class="what">{entry.message}</span>
+          {#if entry.block}<span class="owner" data-diagnostic-block>{entry.block}</span>{/if}
+          <span class="key">{place(entry)}</span>
+        </button>
+        {#each entry.notes as note (note)}
+          <span class="note">{note}</span>
+        {/each}
+      {:else}
+        <span class="empty" data-testid="diagnostics-empty">
+          {busy === 'check' ? 'checking…' : 'nothing from the compiler — press F7 to check'}
+        </span>
+      {/each}
+    </div>
+  {/if}
+
+  {#if tab === 'output'}
+    <div
+      class="panel stream"
+      bind:this={stream}
+      data-testid="output-body"
+      onscroll={trackScroll}
+    >
+      {#each output as line, index (index)}
+        <div class="line">{line}</div>
+      {:else}
+        <span class="empty">no output yet</span>
+      {/each}
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -208,13 +302,34 @@
     gap: var(--sp-2);
     padding: 0 var(--sp-2) var(--sp-1) var(--sp-3);
   }
-  h2 {
-    margin: 0;
+  .tabs {
+    display: flex;
+    gap: var(--sp-1);
+  }
+  .tab {
+    flex: none;
+    width: auto;
+    padding: 0 var(--sp-2);
+    background: transparent;
+    border-color: transparent;
     font-size: 11px;
     letter-spacing: 0.09em;
     text-transform: uppercase;
     color: var(--muted);
     font-weight: 600;
+  }
+  .tab.on {
+    background: var(--bg-2);
+    border-color: var(--border-hi);
+    color: var(--fg);
+  }
+  .count {
+    margin-left: var(--sp-1);
+    font-family: var(--mono);
+    color: var(--fg);
+  }
+  .count.danger {
+    color: var(--danger-fg);
   }
   .file {
     font-family: var(--mono);
@@ -255,6 +370,87 @@
   }
   .collapsed .body {
     visibility: hidden;
+  }
+  .body.away {
+    display: none;
+  }
+  .panel {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 0 var(--sp-2) var(--sp-2);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-0);
+    font-size: 12px;
+  }
+  .panel button {
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+    padding: var(--sp-0) var(--sp-2);
+    background: transparent;
+    border-color: transparent;
+    text-align: left;
+  }
+  .panel button:hover {
+    background: var(--bg-2);
+    border-color: transparent;
+  }
+  .dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--danger);
+  }
+  .dot.warning {
+    background: var(--warn-border);
+  }
+  .what {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fg);
+  }
+  .owner {
+    flex: none;
+    padding: 0 var(--sp-1);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-xs);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg);
+  }
+  .key {
+    margin-left: auto;
+    flex: none;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .note {
+    padding: 0 var(--sp-2) 0 calc(2 * var(--sp-4));
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .empty {
+    padding: var(--sp-1) var(--sp-2);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .stream {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .line {
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--fg);
   }
   .row {
     display: flex;

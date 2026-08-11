@@ -102,10 +102,11 @@ function shim(base: string): void {
     ticking = true;
     void post('/events/poll', {})
       .then((pending) => {
-        for (const payload of (pending as unknown[]) ?? []) {
+        for (const sent of (pending as { event: string; payload: unknown }[]) ?? []) {
           for (const [id, entry] of listeners) {
+            if (entry.event !== sent.event) continue;
             const callback = callbacks.get(entry.handler);
-            if (callback) callback({ event: entry.event, id, payload });
+            if (callback) callback({ event: sent.event, id, payload: sent.payload });
           }
         }
       })

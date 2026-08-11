@@ -416,6 +416,7 @@ name = "cler-flowgraph-gui"
 version = "0.1.0"
 dependencies = [
  "cler-graph",
+ "libc",
  "notify",
  "serde",
  "serde_json",
