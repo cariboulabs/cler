@@ -14,7 +14,7 @@ declare -A sources=(
   [mass_spring_damper]=desktop_examples/mass_spring_damper.cpp
   [plots]=desktop_examples/plots.cpp
   [polyphase_channelizer]=desktop_examples/polyphase_channelizer.cpp
-  [spike]=desktop_examples/spike.cpp
+  [spike]=desktop_examples/spike/spike.cpp
   [uhd_device]=desktop_examples/uhd_device.cpp
   [type_conflict]=tools/flowgraph_gui/cler-graph/tests/data/type_conflict.cpp
 )

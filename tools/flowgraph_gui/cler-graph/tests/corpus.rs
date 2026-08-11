@@ -145,7 +145,7 @@ fn uhd_device_keeps_four_sites_apart() {
 
 #[test]
 fn spike_resolves_the_trig_alias() {
-    let site = only_site("spike.cpp");
+    let site = only_site("spike/spike.cpp");
     let trigger = site.block("trigger").expect("trigger block");
     assert_eq!(trigger.type_text, "Trig");
     assert_eq!(trigger.type_name, "TriggerBlock");
@@ -155,12 +155,10 @@ fn spike_resolves_the_trig_alias() {
     assert_eq!(site.blocks.len(), 7);
     assert_eq!(site.edges.len(), 6);
 
-    // run_app is a template; `source` is constructed in main() and passed in.
     let source = site.block("source").expect("source block");
-    assert!(!source.editable);
-    assert_eq!(source.read_only_reason, Some(Reason::UndeclaredBlock));
-    assert!(!site.editable);
-    assert_eq!(site.read_only_reason, Some(Reason::SiteHasReadOnlyElements));
+    assert_eq!(source.type_name, "SpikeSourceBlock");
+    assert!(source.editable);
+    assert!(site.editable);
 }
 
 #[test]
@@ -576,7 +574,7 @@ int main() {
 
 #[test]
 fn a_type_outside_the_palette_stays_unresolved() {
-    let site = typed_site("spike.cpp");
+    let site = typed_site("spike/spike.cpp");
     let unknown = site.edges_between("fanout", "power");
     assert_eq!(unknown[0].sample_type, None);
     assert_eq!(unknown[0].source_type, None);

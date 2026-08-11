@@ -114,13 +114,24 @@ else()
     message(STATUS "Skipping uhd_device - requires UHD and GUI blocks")
 endif()
 
-# spike supports both UHD and HackRF sources selectable at runtime, so it needs
-# both libraries present to compile (libhackrf comes via cler::desktop_blocks).
-if (UHD_FOUND AND HACKRF_FOUND AND CLER_BUILD_BLOCKS_GUI AND CLER_BUILD_BLOCKS_LIQUID)
-    add_executable(spike spike.cpp)
-    target_link_libraries(spike PRIVATE cler::desktop_blocks uhd)
+# spike selects its UHD / HackRF / Pluto source at runtime. Each source is
+# compiled in only if its library was found; asking for a missing one panics
+# at startup. At least one source library is required to build.
+if ((UHD_FOUND OR HACKRF_FOUND OR LIBIIO_FOUND) AND CLER_BUILD_BLOCKS_GUI AND CLER_BUILD_BLOCKS_LIQUID)
+    add_executable(spike spike/spike.cpp)
+    target_link_libraries(spike PRIVATE cler::desktop_blocks)
+    if (UHD_FOUND)
+        target_compile_definitions(spike PRIVATE SPIKE_HAVE_UHD)
+        target_link_libraries(spike PRIVATE uhd)
+    endif()
+    if (HACKRF_FOUND)
+        target_compile_definitions(spike PRIVATE SPIKE_HAVE_HACKRF)
+    endif()
+    if (LIBIIO_FOUND)
+        target_compile_definitions(spike PRIVATE SPIKE_HAVE_PLUTO)
+    endif()
 else()
-    message(STATUS "Skipping spike - requires UHD, HackRF, and GUI/LIQUID blocks")
+    message(STATUS "Skipping spike - requires GUI/LIQUID blocks and at least one of UHD, HackRF, libiio")
 endif()
 
 if (CLER_BUILD_BLOCKS_GUI AND SOAPYSDR_FOUND)

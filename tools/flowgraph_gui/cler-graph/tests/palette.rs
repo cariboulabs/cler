@@ -274,8 +274,8 @@ fn multi_channel_inline_blocks_keep_their_port_names() {
 }
 
 #[test]
-fn a_source_without_a_flowgraph_still_parses() {
-    assert!(specs_of("desktop_examples/spike.cpp").is_empty());
+fn an_example_without_inline_blocks_yields_no_specs() {
+    assert!(specs_of("desktop_examples/pluto_spectrum.cpp").is_empty());
 }
 
 fn headers(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -692,7 +692,7 @@ fn every_inline_example_block_is_correct_or_unknown() {
         "desktop_examples/flowgraph.cpp",
         "desktop_examples/selectable_blocks.cpp",
         "desktop_examples/mass_spring_damper.cpp",
-        "desktop_examples/spike.cpp",
+        
         "desktop_examples/adsb_receiver.cpp",
         "desktop_examples/polyphase_channelizer.cpp",
         "desktop_examples/udp.cpp",

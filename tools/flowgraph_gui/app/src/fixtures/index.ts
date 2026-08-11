@@ -12,7 +12,7 @@ import hello_world_source from '../../../../../desktop_examples/hello_world.cpp?
 import mass_spring_damper_source from '../../../../../desktop_examples/mass_spring_damper.cpp?raw';
 import plots_source from '../../../../../desktop_examples/plots.cpp?raw';
 import polyphase_channelizer_source from '../../../../../desktop_examples/polyphase_channelizer.cpp?raw';
-import spike_source from '../../../../../desktop_examples/spike.cpp?raw';
+import spike_source from '../../../../../desktop_examples/spike/spike.cpp?raw';
 import type_conflict_source from '../../../cler-graph/tests/data/type_conflict.cpp?raw';
 import uhd_device_source from '../../../../../desktop_examples/uhd_device.cpp?raw';
 
