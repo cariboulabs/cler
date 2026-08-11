@@ -11,6 +11,11 @@ import {
   connectPlan,
   countOf,
   ctorSignature,
+  blockIsValid,
+  initialBlockArguments,
+  isRequiredArgumentPlaceholder,
+  missingRequiredFields,
+  REQUIRED_ARGUMENT_PLACEHOLDER,
   portsSummary,
   reconnectPlan,
   renameInForm,
@@ -160,6 +165,69 @@ describe('port-count authorities read the instance', () => {
   it('matches a block to its spec through its type name', () => {
     expect(specOfBlock(specs, blockOf(hello, 'adder'))?.name).toBe('AddBlock');
     expect(specOfBlock(specs, blockOf(msd, 'plant'))?.name).toBe('PlantBlock');
+  });
+});
+
+describe('required block fields', () => {
+  it('creates parser-safe placeholders and still treats them as missing', () => {
+    const sourceSpec = spec('SourceCWBlock');
+    const block = structuredClone(blockOf(siteOf('hello_world'), 'source1'));
+    const initial = initialBlockArguments(sourceSpec);
+    block.template_args = initial.templateArgs.map((text) => ({
+      text,
+      resolved: null,
+      span: { start: 0, end: 0 }
+    }));
+    block.ctor_args = initial.ctorArgs.map((text) => ({ text, span: { start: 0, end: 0 } }));
+
+    expect(initial).toEqual({
+      templateArgs: [REQUIRED_ARGUMENT_PLACEHOLDER],
+      ctorArgs: Array(4).fill(REQUIRED_ARGUMENT_PLACEHOLDER)
+    });
+    expect(initialBlockArguments(sourceSpec, 'source3').ctorArgs[0]).toBe('"source3"');
+    expect(isRequiredArgumentPlaceholder(` ${REQUIRED_ARGUMENT_PLACEHOLDER} `)).toBe(true);
+    expect(missingRequiredFields(block, sourceSpec).map((field) => field.name)).toEqual([
+      'T',
+      'name',
+      'amplitude',
+      'frequency_hz',
+      'sps'
+    ]);
+  });
+
+  it('reports missing required template and constructor arguments by name', () => {
+    const block = structuredClone(blockOf(siteOf('hello_world'), 'source1'));
+    block.template_args[0]!.text = '  ';
+    block.ctor_args = block.ctor_args.slice(0, 2);
+
+    expect(missingRequiredFields(block, spec('SourceCWBlock'))).toEqual([
+      { kind: 'template', index: 0, name: 'T' },
+      { kind: 'constructor', index: 2, name: 'frequency_hz' },
+      { kind: 'constructor', index: 3, name: 'sps' }
+    ]);
+    expect(blockIsValid(block, spec('SourceCWBlock'))).toBe(false);
+  });
+
+  it('accepts complete blocks and does not require defaulted fields or packs', () => {
+    const source = blockOf(siteOf('hello_world'), 'source1');
+    expect(missingRequiredFields(source, spec('SourceCWBlock'))).toEqual([]);
+
+    const gain = structuredClone(blockOf(siteOf('hello_world'), 'source1'));
+    gain.type_name = 'GainBlock';
+    gain.template_args = [{ ...gain.template_args[0]!, text: 'float' }];
+    gain.ctor_args = gain.ctor_args.slice(0, 2);
+    expect(missingRequiredFields(gain, spec('GainBlock'))).toEqual([]);
+    expect(blockIsValid(gain, spec('GainBlock'))).toBe(true);
+    expect(blockIsValid(gain, undefined)).toBe(true);
+  });
+
+  it('projects missing fields into node data for the renderer and run gate', () => {
+    const site = siteOf('hello_world');
+    blockOf(site, 'source1').ctor_args = blockOf(site, 'source1').ctor_args.slice(0, 3);
+    const node = projectSite(site, specs).nodes.find((candidate) => candidate.id === 'source1');
+    expect(node?.data.missingRequiredFields).toEqual([
+      { kind: 'constructor', index: 3, name: 'sps' }
+    ]);
   });
 });
 

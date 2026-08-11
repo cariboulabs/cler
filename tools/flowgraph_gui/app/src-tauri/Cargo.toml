@@ -1,5 +1,6 @@
 [package]
 name = "cler-flowgraph-gui"
+default-run = "cler-flowgraph-gui"
 version = "0.1.0"
 description = "cler flowgraph viewer"
 edition = "2021"

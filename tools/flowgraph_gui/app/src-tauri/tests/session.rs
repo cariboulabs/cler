@@ -31,6 +31,19 @@ fn as_str(path: &Path) -> &str {
     path.to_str().expect("utf-8 path")
 }
 
+#[test]
+fn bundled_example_paths_resolve_from_the_application_directory() {
+    let target = document::canonical("desktop_examples/hello_world.cpp").expect("example path");
+    assert_eq!(
+        target,
+        corpus("hello_world.cpp").canonicalize().expect("corpus")
+    );
+    let conflict =
+        document::canonical("tools/flowgraph_gui/cler-graph/tests/data/type_conflict.cpp")
+            .expect("fixture path");
+    assert!(conflict.ends_with("cler-graph/tests/data/type_conflict.cpp"));
+}
+
 fn set_param(block: &str, index: usize, new_text: &str) -> Vec<Value> {
     vec![json!({
         "command": "set_param",

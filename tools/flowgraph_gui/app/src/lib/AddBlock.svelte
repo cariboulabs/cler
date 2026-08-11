@@ -5,6 +5,7 @@
     addGaps,
     categoryOf,
     ctorSignature,
+    initialBlockArguments,
     portsSummary,
     renameInForm,
     searchSpecs,
@@ -87,6 +88,33 @@
     form = addForm(spec, suggestVarName(spec.name, taken));
     refusal = null;
     attempted = false;
+  }
+
+  function initialForm(spec: BlockSpec): AddForm {
+    const base = addForm(spec, suggestVarName(spec.name, taken));
+    const initial = initialBlockArguments(spec);
+    return {
+      ...base,
+      templateArgs: base.templateArgs.map((field, index) => ({
+        ...field,
+        value: field.value || initial.templateArgs[index] || ''
+      })),
+      ctorArgs: base.ctorArgs.map((field, index) => ({
+        ...field,
+        value: field.value || initial.ctorArgs[index] || ''
+      }))
+    };
+  }
+
+  export function placeAt(clientX: number, clientY: number, spec: BlockSpec): void {
+    const next = initialForm(spec);
+    const position = flow.screenToFlowPosition({ x: clientX, y: clientY });
+    void onadd(spec, next, position).then((outcome) => {
+      if (!outcome) return;
+      openAt(clientX, clientY, spec);
+      form = next;
+      refusal = outcome;
+    });
   }
 
   function setVarName(text: string) {

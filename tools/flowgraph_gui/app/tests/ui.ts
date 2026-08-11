@@ -497,7 +497,6 @@ export async function boot(options: BootOptions = {}): Promise<Page> {
   });
   await page.addInitScript(openInspector);
   await page.goto(origin, { waitUntil: 'load' });
-  await page.click('button.primary');
   if (options.empty === true) {
     await page.waitForSelector('[data-testid="empty-state"]');
     return page;

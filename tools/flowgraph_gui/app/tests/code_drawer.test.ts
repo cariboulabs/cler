@@ -173,14 +173,13 @@ async function boot(name = 'hello_world'): Promise<Page> {
     source: fixtureSource(name)
   });
   await page.goto(origin, { waitUntil: 'load' });
-  await page.click('button.primary');
   await page.waitForSelector(`.path[title="${FAKE_PATH}"]`);
   await page.waitForSelector('.svelte-flow__node');
   return page;
 }
 
 async function openDrawer(page: Page): Promise<void> {
-  await page.click('[data-testid="drawer"]');
+  await page.click('[data-testid="drawer-toggle"]');
   await page.waitForSelector('[data-testid="drawer-body"] .row');
   await page.waitForTimeout(250);
 }
@@ -308,7 +307,7 @@ describe('codeLines decorates exactly the spans it is given', () => {
 
 describe('the code drawer opens, persists and resizes', () => {
   it(
-    'toggles from the top bar and remembers its state and height across a reload',
+    'toggles from the canvas edge and remembers its state and height across a reload',
     async () => {
       const page = await boot();
       expect(await page.locator('[data-testid="code-drawer"]').count()).toBe(0);
@@ -567,7 +566,6 @@ describe('the node context menu reaches the code', () => {
         )
       ).toEqual([
         'menu-add-here',
-        'menu-new-block',
         'menu-check',
         'menu-build',
         'menu-run',

@@ -31,7 +31,7 @@ describe('the drawer carries code, diagnostics and output', () => {
     'shows three tabs and switches between them',
     async () => {
       const page = await boot();
-      await page.click('[data-testid="drawer"]');
+      await page.keyboard.press('Control+`');
       await page.waitForSelector('[data-testid="drawer-tabs"]');
 
       expect(await page.locator('[data-testid="drawer-tabs"] button').count()).toBe(3);

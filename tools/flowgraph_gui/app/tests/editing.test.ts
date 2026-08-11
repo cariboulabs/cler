@@ -127,10 +127,13 @@ function mutatorLines(source: string): string[] {
 }
 
 describe('editability belongs to the document, not the environment', () => {
-  it('derives it from a document opened through open_document', () => {
+  it('opens the selected example as a real document in the desktop shell', () => {
     expect(APP).toContain('const editable = $derived(desktop && opened !== null);');
     expect(APP).not.toMatch(/const editable = inTauri\(\)/);
-    expect(bodyOf(APP, 'function openFixture()')).toContain('opened = null;');
+    expect(APP).toContain('void openExample(name);');
+    expect(bodyOf(APP, 'async function openExample(name: string)')).toContain(
+      'await openDocument(loadFixture(name).path)'
+    );
   });
 
   it('routes every mutating backend call through the guarded attempt', () => {

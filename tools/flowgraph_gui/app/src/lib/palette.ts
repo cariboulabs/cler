@@ -136,6 +136,55 @@ export function specOfBlock(specs: BlockSpec[], block: Block): BlockSpec | undef
   return specFor(specs, block.alias ?? block.type_name);
 }
 
+export type RequiredBlockField = {
+  kind: 'template' | 'constructor';
+  index: number;
+  name: string;
+};
+
+export const REQUIRED_ARGUMENT_PLACEHOLDER = 'cler::gui::required_field';
+
+export function isRequiredArgumentPlaceholder(text: string | null | undefined): boolean {
+  return text?.trim() === REQUIRED_ARGUMENT_PLACEHOLDER;
+}
+
+export type InitialBlockArguments = { templateArgs: string[]; ctorArgs: string[] };
+
+export function initialBlockArguments(spec: BlockSpec, varName?: string): InitialBlockArguments {
+  return {
+    templateArgs: spec.template_params.flatMap((param) => {
+      if (param.pack) return [];
+      return [param.default ?? REQUIRED_ARGUMENT_PLACEHOLDER];
+    }),
+    ctorArgs: spec.ctor_params.map((param, index) => {
+      if (index === 0 && varName && param.param_type.includes('char*')) return `"${varName}"`;
+      return param.default ?? REQUIRED_ARGUMENT_PLACEHOLDER;
+    })
+  };
+}
+
+function missingArgument(text: string | null | undefined): boolean {
+  return !text?.trim() || isRequiredArgumentPlaceholder(text);
+}
+
+export function missingRequiredFields(block: Block, spec: BlockSpec): RequiredBlockField[] {
+  const templates = spec.template_params.flatMap((param, index): RequiredBlockField[] => {
+    if (param.default !== null || param.pack) return [];
+    const value = block.template_args[index]?.text;
+    return missingArgument(value) ? [{ kind: 'template', index, name: param.name }] : [];
+  });
+  const constructors = spec.ctor_params.flatMap((param, index): RequiredBlockField[] => {
+    if (param.default !== null) return [];
+    const value = block.ctor_args[index]?.text;
+    return missingArgument(value) ? [{ kind: 'constructor', index, name: param.name }] : [];
+  });
+  return [...templates, ...constructors];
+}
+
+export function blockIsValid(block: Block, spec: BlockSpec | undefined): boolean {
+  return spec === undefined || missingRequiredFields(block, spec).length === 0;
+}
+
 export function categoryOf(spec: BlockSpec, documentPath: string): string {
   if (spec.origin === documentPath) return 'this file';
   const parts = spec.origin.split(/[\\/]/);

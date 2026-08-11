@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 pub type Documents = Mutex<HashMap<PathBuf, Document>>;
 
 const PALETTE_DIR: &str = "desktop_blocks";
+const REPOSITORY_MARKER: &str = "include/cler.hpp";
 const DIFF_CONTEXT: usize = 3;
 
 pub struct Document {
@@ -76,9 +77,24 @@ enum WriteFailure {
 }
 
 pub fn canonical(path: &str) -> Result<PathBuf, String> {
-    Path::new(path)
+    let given = Path::new(path);
+    given
         .canonicalize()
+        .or_else(|cause| {
+            if given.is_absolute() {
+                return Err(cause);
+            }
+            repository_root().join(given).canonicalize()
+        })
         .map_err(|cause| format!("cannot resolve {path}: {cause}"))
+}
+
+fn repository_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .find(|dir| dir.join(REPOSITORY_MARKER).is_file())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
 }
 
 pub fn open(docs: &Documents, path: &str) -> Result<DocumentState, String> {

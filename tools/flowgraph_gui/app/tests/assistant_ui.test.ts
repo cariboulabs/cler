@@ -26,7 +26,7 @@ const STOP = '[data-testid="assistant-stop"]';
 const USAGE = '[data-testid="assistant-usage"]';
 
 async function openAssistant(page: Page): Promise<void> {
-  await page.click('[data-testid="assistant"]');
+  await page.click('[data-testid="rail-tab-assistant"]');
   await page.waitForSelector('[data-testid="assistant-panel"]');
 }
 

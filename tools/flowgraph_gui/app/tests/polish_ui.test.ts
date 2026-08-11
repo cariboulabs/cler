@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   boot,
+  calls,
   CASE,
   centre,
   handle,
@@ -32,20 +33,33 @@ function siteless(): FileModel {
 
 describe('the empty-state card carries the honest reason', () => {
   it(
-    'greets a first run over the bundled example and stands down once one is picked',
+    'shows the bundled graph immediately without a first-run banner',
     async () => {
       const page = await viewer('', 'first-run');
-      await page.waitForSelector('[data-testid="empty-state"]');
+      await page.waitForSelector('.svelte-flow__node');
       expect(await widthOf(page, '.inspector')).toBeCloseTo(RAIL, 0);
-      expect(await page.textContent('[data-testid="empty-reason"]')).toContain('example mode');
+      expect(await page.locator('[data-testid="empty-state"]').count()).toBe(0);
       expect(await page.locator('[data-testid="demo-chip"]').count()).toBe(1);
       expect(await page.locator('[data-testid="palette-notice"]').count()).toBe(0);
       expect(await page.locator('[data-testid="viewer-note"]').count()).toBe(0);
       await shot(page, 'first-run-empty-state');
 
-      await page.selectOption('[data-testid="empty-examples"]', 'plots');
+      await page.selectOption('[data-testid="example-select"]', 'plots');
       await page.waitForSelector('.svelte-flow__node[data-id="cw_throttle"]');
-      await expect.poll(() => page.locator('[data-testid="empty-state"]').count()).toBe(0);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'opens the bundled example as an editable desktop document on startup',
+    async () => {
+      const page = await boot();
+      expect((await calls(page)).filter((name) => name === 'open_document')).toHaveLength(1);
+      expect(await page.locator('[data-testid="demo-chip"]').count()).toBe(0);
+      await page.click('.svelte-flow__node[data-id="source1"]');
+      await page.waitForSelector('.inspector input');
+      expect(await page.locator('.inspector input').first().isDisabled()).toBe(false);
       await page.close();
     },
     CASE
@@ -88,7 +102,7 @@ describe('the chrome gets out of the way', () => {
     'Ctrl+backslash folds both rails and the drawer away, and gives them back',
     async () => {
       const page = await boot();
-      await page.click('[data-testid="drawer"]');
+      await page.keyboard.press('Control+`');
       await page.waitForSelector('[data-testid="drawer-body"] .row');
       await expect.poll(() => widthOf(page, '.sidebar')).toBeCloseTo(SIDEBAR, 0);
       await expect.poll(() => widthOf(page, '.inspector')).toBeCloseTo(INSPECTOR, 0);
@@ -330,7 +344,7 @@ describe('the cheap repaints', () => {
       const path = page.locator('.sidebar .path');
       expect(await path.textContent()).toBe('hello_world.cpp');
       expect(await path.getAttribute('title')).toBe('/tmp/fake/hello_world.cpp');
-      expect(await page.locator('[data-testid="examples-head"]').count()).toBe(0);
+      expect(await page.textContent('[data-testid="examples-head"]')).toBe('Examples');
       await page.close();
     },
     CASE
@@ -340,7 +354,7 @@ describe('the cheap repaints', () => {
     'opens the drawer at the flowgraph, not at line one',
     async () => {
       const page = await boot({ fixture: 'adsb_receiver' });
-      await page.click('[data-testid="drawer"]');
+      await page.keyboard.press('Control+`');
       await page.waitForSelector('[data-testid="drawer-body"] .row');
       await expect
         .poll(

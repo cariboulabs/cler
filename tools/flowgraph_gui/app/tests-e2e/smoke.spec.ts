@@ -80,7 +80,7 @@ test('the backend still answers the whole command surface', async ({ page }) => 
   expect(unknown).toContain('unknown command: not_a_command');
 });
 
-test('a) picking an example inside the desktop shell drops to a read-only viewer', async ({
+test('a) picking an example inside the desktop shell opens its editable source', async ({
   page,
   calls,
   forget,
@@ -97,20 +97,21 @@ test('a) picking an example inside the desktop shell drops to a read-only viewer
   await node('cw_throttle').click();
   await shot('example-picked');
 
-  await expect(page.getByTestId('demo-chip')).toBeVisible();
+  await expect(page.getByTestId('demo-chip')).toHaveCount(0);
   const fields = page.locator('input[data-field]');
   await expect(fields.first()).toBeVisible();
   const count = await fields.count();
   for (let index = 0; index < count; index += 1) {
-    await expect(fields.nth(index)).toBeDisabled();
+    await expect(fields.nth(index)).toBeEnabled();
   }
 
   await node('cw_throttle').click({ button: 'right' });
-  await expect(page.getByTestId('menu-remove')).toBeDisabled();
-  await expect(page.getByTestId('menu-delete-block')).toBeDisabled();
+  await expect(page.getByTestId('menu-remove')).toBeEnabled();
+  await expect(page.getByTestId('menu-delete-block')).toBeEnabled();
   await page.keyboard.press('Escape');
 
-  expect(await calls()).toEqual([]);
+  expect(await calls('open_document')).toHaveLength(1);
+  expect(await calls('apply_commands')).toEqual([]);
 });
 
 test('b+c) editing a real file writes the bytes and undo restores them', async ({
@@ -139,7 +140,7 @@ test('b+c) editing a real file writes the bytes and undo restores them', async (
       .toContain('ThrottleBlock<float> throttle("Throttle", 4242)');
     await expect.poll(() => revision(page)).toBe(1);
 
-    await page.getByTestId('drawer').click();
+    await page.getByTestId('drawer-toggle').click();
     await expect(page.getByTestId('drawer-revision')).toHaveText('rev 1');
     await expect(page.getByTestId('drawer-body')).toContainText('"Throttle", 4242');
     await shot('edited');
@@ -270,19 +271,25 @@ test('g) a new block reaches disk with its template and every constructor argume
 
   await page.getByTestId('palette-search').fill('SourceCW');
   await page.locator('[data-block="SourceCWBlock"] .row').dblclick();
-  await expect(page.getByTestId('add-block')).toBeVisible();
-  await expect(page.getByTestId('add-confirm')).toBeDisabled();
+  const node = page.locator('.svelte-flow__node[data-id="source_c_w"]');
+  await expect(node).toBeVisible();
+  await expect(node.locator('.block')).toHaveAttribute('data-invalid', 'true');
+  await expect(page.getByTestId('run')).toBeDisabled();
   await shot('required-args');
 
-  await page.locator('[data-add-field="template.0"]').fill('float');
-  await page.locator('[data-add-field="ctor.1"]').fill('1.0f');
-  await page.locator('[data-add-field="ctor.2"]').fill('2.0f');
-  await page.locator('[data-add-field="ctor.3"]').fill('1000');
-  await expect(page.getByTestId('add-confirm')).toBeEnabled();
-  await page.getByTestId('add-confirm').click();
+  for (const [field, value] of [
+    ['source_c_w.template.0', 'float'],
+    ['source_c_w.ctor.1', '1.0f'],
+    ['source_c_w.ctor.2', '2.0f'],
+    ['source_c_w.ctor.3', '1000']
+  ]) {
+    const input = page.locator(`input[data-field="${field}"]`);
+    await input.fill(value);
+    await input.press('Enter');
+  }
 
   await expect
     .poll(() => work.bytes(file), { timeout: 20_000 })
     .toContain('SourceCWBlock<float> source_c_w("source_c_w", 1.0f, 2.0f, 1000);');
-  await expect(page.locator('.svelte-flow__node[data-id="source_c_w"]')).toBeVisible();
+  await expect(node.locator('.block')).not.toHaveAttribute('data-invalid', 'true');
 });
