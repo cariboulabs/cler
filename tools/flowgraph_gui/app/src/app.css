@@ -95,8 +95,9 @@ button:hover:not(:disabled) {
 }
 
 button:disabled {
-  color: var(--muted);
-  border-color: var(--border);
+  color: var(--danger-fg);
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
   cursor: not-allowed;
 }
 

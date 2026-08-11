@@ -12,6 +12,8 @@ import {
   highlighted,
   openLibrary,
   shot,
+  styleOf,
+  token,
   useBrowser,
   viewer
 } from './ui';
@@ -172,6 +174,14 @@ describe('build and run follow what find_target reports', () => {
       expect(await page.locator('[data-testid="check"]').isDisabled()).toBe(false);
       expect(await page.locator('[data-testid="build"]').isDisabled()).toBe(true);
       expect(await page.locator('[data-testid="run"]').isDisabled()).toBe(true);
+      for (const action of ['build', 'run']) {
+        expect(await styleOf(page, `[data-testid="${action}"]`, 'background-color')).toBe(
+          await token(page, '--danger-bg')
+        );
+        expect(await styleOf(page, `[data-testid="${action}"]`, 'border-top-color')).toBe(
+          await token(page, '--danger-border')
+        );
+      }
       expect(await page.textContent('[data-testid="build-tooltip"]')).toContain(
         'desktop_examples'
       );

@@ -751,7 +751,9 @@
     color: var(--fg);
   }
   .icon:disabled {
-    color: var(--muted);
+    border-color: var(--danger-border);
+    background: var(--danger-bg);
+    color: var(--danger-fg);
   }
   .icon:hover:not(:disabled) {
     background: var(--bg-2);
