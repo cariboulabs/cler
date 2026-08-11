@@ -86,11 +86,26 @@ function installFake(setup: Setup) {
     canRedo: false,
     dirty: false,
     externalChange: false,
-    cache: {}
+    cache: {} as Record<string, unknown>
+  };
+  type HistoricalState = {
+    model: FileModel;
+    source: string;
+    cache: Record<string, unknown>;
+    dirty: boolean;
+  };
+  enum HistoryKind {
+    Source,
+    Position
+  }
+  type HistoryAction = {
+    kind: HistoryKind;
+    before: HistoricalState;
+    after: HistoricalState;
   };
   const palette = setup.specs.map((spec) => structuredClone(spec));
-  const undone: string[] = [];
-  const redone: string[] = [];
+  const undone: HistoryAction[] = [];
+  const redone: HistoryAction[] = [];
   const log: unknown[][] = [];
   const calls: string[] = [];
   const asks: unknown[] = [];
@@ -109,6 +124,29 @@ function installFake(setup: Setup) {
 
   function snapshot(): unknown {
     return JSON.parse(JSON.stringify(state));
+  }
+
+  function historicalState(): HistoricalState {
+    return structuredClone({
+      model: state.model,
+      source: state.source,
+      cache: state.cache,
+      dirty: state.dirty
+    });
+  }
+
+  function restore(saved: HistoricalState): void {
+    state.model = saved.model;
+    state.source = saved.source;
+    state.cache = saved.cache;
+    state.dirty = saved.dirty;
+  }
+
+  function record(kind: HistoryKind, before: HistoricalState): void {
+    undone.push({ kind, before, after: historicalState() });
+    redone.length = 0;
+    state.canUndo = true;
+    state.canRedo = false;
   }
 
   function site(index: number): Loose {
@@ -214,8 +252,7 @@ function installFake(setup: Setup) {
   }
 
   function apply(commands: Loose[]) {
-    undone.push(JSON.stringify({ model: state.model, source: state.source }));
-    redone.length = 0;
+    const before = historicalState();
     log.push(commands);
     for (const command of commands) {
       const at = command.site as number;
@@ -308,20 +345,18 @@ function installFake(setup: Setup) {
       }
     }
     state.revision += 1;
-    state.canUndo = undone.length > 0;
-    state.canRedo = redone.length > 0;
     state.dirty = true;
+    record(HistoryKind.Source, before);
   }
 
-  function step(from: string[], to: string[]) {
-    const previous = from.pop();
-    if (previous) {
-      to.push(JSON.stringify({ model: state.model, source: state.source }));
-      const restored = JSON.parse(previous) as { model: FileModel; source: string };
-      state.model = restored.model;
-      state.source = restored.source;
-      state.revision += 1;
-      state.dirty = true;
+  function step(direction: 'undo' | 'redo') {
+    const from = direction === 'undo' ? undone : redone;
+    const to = direction === 'undo' ? redone : undone;
+    const action = from.pop();
+    if (action) {
+      restore(direction === 'undo' ? action.before : action.after);
+      to.push(action);
+      if (action.kind === HistoryKind.Source) state.revision += 1;
     }
     state.canUndo = undone.length > 0;
     state.canRedo = redone.length > 0;
@@ -400,8 +435,19 @@ function installFake(setup: Setup) {
       }
       return snapshot();
     }
-    if (command === 'undo') step(undone, redone);
-    if (command === 'redo') step(redone, undone);
+    if (command === 'move_nodes') {
+      const before = historicalState();
+      const views = (state.cache.views ??= {}) as Loose;
+      const view = (views[String(args.view)] ??= {}) as Loose;
+      const positions = (view.positions ??= {}) as Loose;
+      for (const movement of args.moves as { node: string; to: { x: number; y: number } }[]) {
+        positions[movement.node] = movement.to;
+      }
+      record(HistoryKind.Position, before);
+      return snapshot();
+    }
+    if (command === 'undo') step('undo');
+    if (command === 'redo') step('redo');
     if (command === 'save_document') state.dirty = false;
     if (command === 'close_document') return null;
     if (command === 'open_in_editor') return null;

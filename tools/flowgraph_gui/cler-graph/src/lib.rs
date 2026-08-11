@@ -1,4 +1,5 @@
 mod apply;
+mod history;
 pub mod model;
 mod palette;
 pub mod palette_types;
@@ -12,8 +13,10 @@ use std::path::{Path, PathBuf};
 use tree_sitter::{Parser, Tree};
 
 pub use apply::{
-    ApplyError, ApplyOutcome, BlockParam, Command, InputPort, PendingApply, Splice, Transaction,
+    ApplyError, ApplyOutcome, BlockParam, Command, InputPort, PatchDirection, PendingApply,
+    SourcePatch, Splice, Transaction,
 };
+pub use history::{ActionQueue, ACTION_HISTORY_CAPACITY};
 pub use model::{FileModel, Site, SCHEMA_VERSION};
 pub use palette::{extract_specs, palette_specs, source_files};
 pub use palette_types::BlockSpec;
@@ -46,8 +49,7 @@ pub struct DocumentSession {
     tree: Tree,
     revision: u64,
     file: Option<String>,
-    undo: Vec<String>,
-    redo: Vec<String>,
+    history: ActionQueue<SourcePatch>,
 }
 
 pub(crate) fn parse_source(source: &str) -> Result<Tree, Error> {
@@ -67,8 +69,7 @@ impl DocumentSession {
             tree,
             revision: 0,
             file: None,
-            undo: Vec::new(),
-            redo: Vec::new(),
+            history: ActionQueue::default(),
         })
     }
 
@@ -118,10 +119,10 @@ impl DocumentSession {
     }
 
     pub fn can_undo(&self) -> bool {
-        !self.undo.is_empty()
+        self.history.can_undo()
     }
 
     pub fn can_redo(&self) -> bool {
-        !self.redo.is_empty()
+        self.history.can_redo()
     }
 }

@@ -113,7 +113,14 @@ function editor(target: Field) {
 
 const APP = readFileSync(fileURLToPath(new URL('../src/App.svelte', import.meta.url)), 'utf8');
 
-const MUTATORS = ['applyCommands', 'undoDocument', 'redoDocument', 'saveDocument', 'reloadDocument'];
+const MUTATORS = [
+  'applyCommands',
+  'moveNodes',
+  'undoDocument',
+  'redoDocument',
+  'saveDocument',
+  'reloadDocument'
+];
 
 function bodyOf(source: string, header: string): string {
   const start = source.indexOf(header);
@@ -143,7 +150,7 @@ describe('editability belongs to the document, not the environment', () => {
     const lines = mutatorLines(APP);
     expect(lines.length).toBeGreaterThanOrEqual(MUTATORS.length);
     for (const line of lines) {
-      expect(line, `unguarded backend call: ${line.trim()}`).toMatch(/\b(run|attempt)\(/);
+      expect(line, `unguarded backend call: ${line.trim()}`).toMatch(/\b(run|runHistory|attempt)\(/);
     }
   });
 

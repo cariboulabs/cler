@@ -68,6 +68,16 @@ export function redoDocument(path: string): Promise<DocumentState> {
   return documentCall('redo', { path });
 }
 
+export type NodeMove = {
+  node: string;
+  from: { x: number; y: number };
+  to: { x: number; y: number };
+};
+
+export function moveNodes(path: string, view: string, moves: NodeMove[]): Promise<DocumentState> {
+  return documentCall('move_nodes', { path, view, moves });
+}
+
 export function saveDocument(path: string): Promise<DocumentState> {
   return documentCall('save_document', { path });
 }

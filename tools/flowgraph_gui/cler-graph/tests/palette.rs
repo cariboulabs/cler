@@ -60,6 +60,14 @@ fn fanout_output_count_is_a_ctor_arg() {
 }
 
 #[test]
+fn kaiser_filter_has_usable_constructor_defaults() {
+    let spec = spec_named("desktop_blocks/filters/kaiser_lpf.hpp", "KaiserLPFBlock");
+    assert_eq!(spec.ctor_params[1].default.as_deref(), Some("1.0e6"));
+    assert_eq!(spec.ctor_params[2].default.as_deref(), Some("100.0e3"));
+    assert_eq!(spec.ctor_params[3].default.as_deref(), Some("20.0e3"));
+}
+
+#[test]
 fn plot_input_count_is_a_ctor_arg_length_not_the_slot_cap() {
     let spec = spec_named(
         "desktop_blocks/plots/plot_cspectrum.hpp",
