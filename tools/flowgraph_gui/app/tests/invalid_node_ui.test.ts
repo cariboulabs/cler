@@ -51,10 +51,6 @@ describe('invalid block nodes', () => {
       await page.fill('input[data-field="source1.ctor.2"]', '20.0f');
       await page.press('input[data-field="source1.ctor.2"]', 'Enter');
 
-      await expect
-        .poll(() => page.locator('[data-testid="run-tooltip"]').textContent())
-        .toContain('save the draft');
-      await page.click('[data-testid="save"]');
       await expect.poll(() => run.isDisabled()).toBe(false);
       await page.close();
     },
@@ -62,7 +58,7 @@ describe('invalid block nodes', () => {
   );
 
   it(
-    'explains why Check is blocked after a CWSource2 frequency edit',
+    'keeps Check available after a CWSource2 frequency edit',
     async () => {
       const page = await boot({ target: BUILDABLE });
       const check = page.locator('[data-testid="check"]');
@@ -73,14 +69,8 @@ describe('invalid block nodes', () => {
       await frequency.fill('25.0f');
       await frequency.press('Enter');
 
-      await expect.poll(() => check.isDisabled()).toBe(true);
-      await check.hover();
-      const tooltip = page.locator('[data-testid="check-tooltip"]');
-      expect(await tooltip.isVisible()).toBe(true);
-      expect(await tooltip.textContent()).toContain('save the draft');
-
-      await page.click('[data-testid="save"]');
       await expect.poll(() => check.isDisabled()).toBe(false);
+      expect(await check.getAttribute('title')).toContain('temporary draft');
       await page.close();
     },
     CASE

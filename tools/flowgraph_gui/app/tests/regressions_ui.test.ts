@@ -54,7 +54,8 @@ function installFake(setup: Setup) {
     canUndo: false,
     canRedo: false,
     dirty: false,
-    externalChange: false
+    externalChange: false,
+    cache: JSON.parse(localStorage.getItem('__fake_cfgc') ?? '{}') as Record<string, unknown>
   };
   const undone: string[] = [];
   const redone: string[] = [];
@@ -158,6 +159,11 @@ function installFake(setup: Setup) {
   async function invoke(command: string, args: Record<string, unknown>): Promise<unknown> {
     if (command === 'plugin:event|listen') return args.handler;
     if (command === 'plugin:dialog|open') return state.path;
+    if (command === 'save_cache') {
+      state.cache = args.ui as Record<string, unknown>;
+      localStorage.setItem('__fake_cfgc', JSON.stringify(state.cache));
+      return null;
+    }
 
     const mine = ++seq;
     const start = performance.now();
@@ -752,6 +758,24 @@ describe('A. view state survives an ordinary edit', () => {
 
       expect((await positions(page)).spectrum).toBe(moved);
       expect(await viewport()).toBe(movedViewport);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'A9 restores the active flowgraph after reloading the application',
+    async () => {
+      const page = await boot({ model: uhdModel() });
+      await page.selectOption('[data-testid="site-select"]', { index: 1 });
+      await page.waitForSelector('.svelte-flow__node[data-id="chirp"]');
+      await page.waitForTimeout(300);
+
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForSelector(`.path[title="${FAKE_PATH}"]`);
+      await page.waitForSelector('.svelte-flow__node[data-id="chirp"]');
+
+      expect(await page.locator('[data-testid="site-select"]').inputValue()).toBe('1');
       await page.close();
     },
     CASE

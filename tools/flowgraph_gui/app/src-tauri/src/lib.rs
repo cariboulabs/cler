@@ -95,6 +95,11 @@ fn save_document(path: String, docs: State<'_, Documents>) -> Result<DocumentSta
 }
 
 #[tauri::command]
+fn save_cache(path: String, ui: Value, docs: State<'_, Documents>) -> Result<(), String> {
+    document::store_cache(&docs, &path, ui)
+}
+
+#[tauri::command]
 fn reload_document(path: String, docs: State<'_, Documents>) -> Result<DocumentState, String> {
     document::reload(&docs, &path)
 }
@@ -122,8 +127,8 @@ fn check_document(
     docs: State<'_, Documents>,
     jobs: State<'_, Jobs>,
 ) -> Result<(), String> {
-    document::require_saved(&docs, &path)?;
-    build::check(jobs.inner(), &path, emitter(app))
+    let working = document::working_path(&docs, &path)?;
+    build::check_draft(jobs.inner(), &path, &working, emitter(app))
 }
 
 #[tauri::command]
@@ -138,8 +143,8 @@ fn build_target(
     docs: State<'_, Documents>,
     jobs: State<'_, Jobs>,
 ) -> Result<(), String> {
-    document::require_saved(&docs, &path)?;
-    build::build(jobs.inner(), &path, emitter(app))
+    let working = document::working_path(&docs, &path)?;
+    build::build_draft(jobs.inner(), &path, &working, emitter(app))
 }
 
 #[tauri::command]
@@ -149,8 +154,8 @@ fn run_target(
     docs: State<'_, Documents>,
     jobs: State<'_, Jobs>,
 ) -> Result<(), String> {
-    document::require_saved(&docs, &path)?;
-    build::start(jobs.inner(), &path, emitter(app))
+    let working = document::working_path(&docs, &path)?;
+    build::start_draft(jobs.inner(), &path, &working, emitter(app))
 }
 
 #[tauri::command]
@@ -307,6 +312,7 @@ pub fn run() {
             undo,
             redo,
             save_document,
+            save_cache,
             reload_document,
             parse_file,
             palette,

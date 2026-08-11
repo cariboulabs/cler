@@ -97,6 +97,7 @@ export type DocumentState = {
   canRedo: boolean;
   dirty: boolean;
   externalChange: boolean;
+  cache?: unknown;
 };
 
 export function lineOfOffset(source: string, offset: number): number {

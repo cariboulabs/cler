@@ -7,6 +7,7 @@ import {
   describeApplyError,
   redoDocument,
   reloadDocument,
+  saveCache,
   saveDocument,
   setInvoker,
   undoDocument
@@ -391,22 +392,28 @@ describe('ipc payloads', () => {
     expect(state.revision).toBe(7);
   });
 
-  it('uses the contract command names for history, save and reload', async () => {
+  it('uses the contract command names for history, save, cache and reload', async () => {
     const next = model('hello_world');
     const calls = record(() => documentState(next));
 
     await undoDocument('/tmp/a.cpp');
     await redoDocument('/tmp/a.cpp');
     await saveDocument('/tmp/a.cpp');
+    await saveCache('/tmp/a.cpp', { version: 1 });
     await reloadDocument('/tmp/a.cpp');
 
     expect(calls.map((call) => call.command)).toEqual([
       'undo',
       'redo',
       'save_document',
+      'save_cache',
       'reload_document'
     ]);
-    for (const call of calls) expect(Object.keys(call.args)).toEqual(['path']);
+    expect(calls[0]?.args).toEqual({ path: '/tmp/a.cpp' });
+    expect(calls[1]?.args).toEqual({ path: '/tmp/a.cpp' });
+    expect(calls[2]?.args).toEqual({ path: '/tmp/a.cpp' });
+    expect(calls[3]?.args).toEqual({ path: '/tmp/a.cpp', ui: { version: 1 } });
+    expect(calls[4]?.args).toEqual({ path: '/tmp/a.cpp' });
   });
 });
 

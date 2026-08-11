@@ -35,6 +35,7 @@ const SURFACE = [
   'preview_commands',
   'undo',
   'redo',
+  'save_cache',
   'reload_document',
   'parse_file',
   'palette',
@@ -138,7 +139,8 @@ test('b+c) edits stay drafted until Save and undo can be saved too', async ({
     expect(work.bytes(file)).toBe(original);
     await expect.poll(() => revision(page)).toBe(1);
     await expect(page.getByTestId('draft-chip')).toBeVisible();
-    await expect(page.getByTestId('check')).toBeDisabled();
+    await expect(page.getByTestId('check')).toBeEnabled();
+    await expect(page.getByTestId('check')).toHaveAttribute('title', /temporary draft/);
 
     await page.getByTestId('drawer-toggle').click();
     await expect(page.getByTestId('drawer-revision')).toHaveText('rev 1');

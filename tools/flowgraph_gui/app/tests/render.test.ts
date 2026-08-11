@@ -145,7 +145,8 @@ function installFakeBackend(setup: FakeSetup) {
     canUndo: false,
     canRedo: false,
     dirty: false,
-    externalChange: false
+    externalChange: false,
+    cache: {}
   };
   const undone: string[] = [];
   const redone: string[] = [];
@@ -216,6 +217,10 @@ function installFakeBackend(setup: FakeSetup) {
       return args.handler;
     }
     if (command === 'plugin:dialog|open') return setup.path;
+    if (command === 'save_cache') {
+      state.cache = args.ui as Record<string, unknown>;
+      return null;
+    }
     calls.push(command);
     if (command === 'apply_commands') {
       const commands = args.commands as Command[];

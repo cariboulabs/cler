@@ -82,6 +82,13 @@ fn have_gxx() -> bool {
         .is_ok()
 }
 
+fn have_cmake() -> bool {
+    std::process::Command::new("cmake")
+        .arg("--version")
+        .output()
+        .is_ok()
+}
+
 #[test]
 fn find_target_takes_the_newest_configured_build_directory() {
     let root = repo("newest");
@@ -229,6 +236,46 @@ fn a_clean_file_finishes_with_no_diagnostics() {
 
     assert_eq!(await_event(&seen, "check-finished")["code"].as_i64(), Some(0));
     assert_eq!(lines(&seen, "check-output"), Vec::<String>::new());
+}
+
+#[test]
+fn a_draft_build_and_run_leave_the_repository_source_untouched() {
+    if !have_cmake() {
+        eprintln!("skipping: no cmake on this machine");
+        return;
+    }
+    let root = repo("draft-project");
+    write(
+        &root.join("CMakeLists.txt"),
+        "cmake_minimum_required(VERSION 3.16)\nproject(draft_test LANGUAGES CXX)\nadd_subdirectory(desktop_examples)\n",
+    );
+    write(
+        &root.join("desktop_examples/CMakeLists.txt"),
+        "add_executable(hello_world hello_world.cpp)\n",
+    );
+    let source = root.join("desktop_examples/hello_world.cpp");
+    write(&source, "int main() { return 0; }\n");
+    let configured = std::process::Command::new("cmake")
+        .args(["-S", as_str(&root), "-B", as_str(&root.join("build"))])
+        .status()
+        .expect("configure source build");
+    assert!(configured.success());
+
+    let workspace = temp_dir("draft-workspace");
+    let draft = workspace.join("hello_world.cpp");
+    write(&draft, "int main() { return 7; }\n");
+    let jobs = Jobs::default();
+    let (seen, emit) = recorder();
+    build::build_draft(&jobs, as_str(&source), &draft, emit).expect("draft build starts");
+    assert_eq!(await_event(&seen, "build-finished")["code"], 0);
+    assert_eq!(
+        std::fs::read_to_string(&source).expect("source"),
+        "int main() { return 0; }\n"
+    );
+
+    let (run_seen, run_emit) = recorder();
+    build::start_draft(&jobs, as_str(&source), &draft, run_emit).expect("draft run starts");
+    assert_eq!(await_event(&run_seen, "run-finished")["code"], 7);
 }
 
 #[cfg(unix)]

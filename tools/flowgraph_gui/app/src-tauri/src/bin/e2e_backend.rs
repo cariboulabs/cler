@@ -197,21 +197,26 @@ fn dispatch(
         "undo" => outcome(document::undo(docs, &path)),
         "redo" => outcome(document::redo(docs, &path)),
         "save_document" => outcome(document::save(docs, &path)),
+        "save_cache" => outcome(document::store_cache(
+            docs,
+            &path,
+            args.get("ui").cloned().unwrap_or(Value::Null),
+        )),
         "reload_document" => outcome(document::reload(docs, &path)),
         "parse_file" => outcome(document::parse_file(docs, &path)),
         "palette" => outcome(document::palette(docs, &path)),
         "check_document" => outcome(
-            document::require_saved(docs, &path)
-                .and_then(|()| build::check(jobs, &path, emitter(events))),
+            document::working_path(docs, &path)
+                .and_then(|working| build::check_draft(jobs, &path, &working, emitter(events))),
         ),
         "find_target" => outcome(build::find_target(&path)),
         "build_target" => outcome(
-            document::require_saved(docs, &path)
-                .and_then(|()| build::build(jobs, &path, emitter(events))),
+            document::working_path(docs, &path)
+                .and_then(|working| build::build_draft(jobs, &path, &working, emitter(events))),
         ),
         "run_target" => outcome(
-            document::require_saved(docs, &path)
-                .and_then(|()| build::start(jobs, &path, emitter(events))),
+            document::working_path(docs, &path)
+                .and_then(|working| build::start_draft(jobs, &path, &working, emitter(events))),
         ),
         "stop_target" => outcome(build::stop(jobs, &path)),
         _ => Reply::Loud(format!("unknown command: {cmd}")),

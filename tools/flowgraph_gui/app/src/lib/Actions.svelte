@@ -527,7 +527,9 @@
         data-testid={action.id}
         aria-label={action.label}
         aria-describedby={!action.enabled ? `${action.id}-tooltip` : undefined}
-        title={action.enabled ? `${action.label} (${action.shortcut})` : undefined}
+        title={action.enabled
+          ? `${action.label} (${action.shortcut})${action.hint ? ` — ${action.hint}` : ''}`
+          : undefined}
         disabled={!action.enabled}
         onclick={() => act(action)}
       >

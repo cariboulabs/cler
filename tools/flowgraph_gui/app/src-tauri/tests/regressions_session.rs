@@ -158,7 +158,7 @@ fn a_failed_save_preserves_the_draft_for_the_next_edit() {
 }
 
 #[test]
-fn close_after_a_failed_save_discards_only_the_draft() {
+fn close_after_a_failed_save_recovers_the_temporary_draft() {
     let path = temp_copy("hello_world.cpp");
     let original = text(&path);
     let docs = Documents::default();
@@ -172,9 +172,9 @@ fn close_after_a_failed_save_discards_only_the_draft() {
 
     document::close(&docs, as_str(&path));
     let reopened = document::open(&docs, as_str(&path)).expect("reopen");
-    assert_eq!(reopened.revision, 0);
-    assert_eq!(reopened.model.sha256, digest(&original));
-    assert_eq!(text(&path), original, "nothing was pending to lose");
+    assert!(reopened.dirty);
+    assert!(reopened.source.contains("9.75f"));
+    assert_eq!(text(&path), original, "the source file stays untouched");
 }
 
 #[test]

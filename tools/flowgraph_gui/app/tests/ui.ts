@@ -81,7 +81,8 @@ function installFake(setup: Setup) {
     canUndo: false,
     canRedo: false,
     dirty: false,
-    externalChange: false
+    externalChange: false,
+    cache: {}
   };
   const palette = setup.specs.map((spec) => structuredClone(spec));
   const undone: string[] = [];
@@ -325,6 +326,10 @@ function installFake(setup: Setup) {
       return args.handler;
     }
     if (command === 'plugin:dialog|open') return state.path;
+    if (command === 'save_cache') {
+      state.cache = args.ui as Record<string, unknown>;
+      return null;
+    }
     calls.push(command);
     if (command === 'assistant_status') return setup.assistant;
     if (command === 'assistant_stop') return null;

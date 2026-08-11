@@ -54,6 +54,7 @@
     redoDocument,
     reloadDocument,
     runTarget,
+    saveCache,
     saveDocument,
     spansOf,
     stopTarget,
@@ -136,7 +137,6 @@
   const viewerNote = desktop ? NOTE_DESKTOP : NOTE_BROWSER;
   const DISK_DRIFT = 'changed on disk';
   const DISK_NOTE = 'this file changed on disk — reload before building or running';
-  const DRAFT_NOTE = 'save the draft before checking, building, or running';
   const NO_SITE = 'no flowgraph site found in this file';
   const DROP_HINT = 'dropped — release on an input port to connect';
   const NO_SHELL = 'the assistant runs on your machine — open the desktop shell to use it';
@@ -156,6 +156,41 @@
   const DEFAULT_DRAWER_HEIGHT = 260;
   const OUTPUT_LINES = 2000;
   const MIN_DRAWER_HEIGHT = 90;
+
+  type CachedView = {
+    positions?: Record<string, EdgePoint>;
+    viewport?: Viewport | null;
+    [key: string]: unknown;
+  };
+
+  type UiCache = {
+    version: number;
+    activeView: string | null;
+    views: Record<string, CachedView>;
+    panels: {
+      left?: boolean;
+      right?: boolean;
+      drawer?: boolean;
+      drawerHeight?: number;
+      rightTab?: RailTab;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
+
+  function cacheOf(value: unknown): UiCache {
+    const stored = value && typeof value === 'object' ? structuredClone(value) : {};
+    const record = stored as Record<string, unknown>;
+    const views = record.views && typeof record.views === 'object' ? record.views : {};
+    const panels = record.panels && typeof record.panels === 'object' ? record.panels : {};
+    return {
+      ...record,
+      version: typeof record.version === 'number' ? record.version : 1,
+      activeView: typeof record.activeView === 'string' ? record.activeView : null,
+      views: views as Record<string, CachedView>,
+      panels: panels as UiCache['panels']
+    };
+  }
 
   function storedOpen(key: string, fallback: boolean): boolean {
     const stored = localStorage.getItem(key);
@@ -214,6 +249,8 @@
   let opening = 0;
   let alerted = 0;
   let pinned = new Map<string, EdgePoint>();
+  let flowCache = $state.raw<UiCache>(cacheOf({}));
+  let cacheTimer: ReturnType<typeof setTimeout> | undefined;
   const positionsByView = new Map<string, Map<string, EdgePoint>>();
   const viewportsByView = new Map<string, Viewport>();
   const loadedViews = new Set<string>();
@@ -277,28 +314,26 @@
   const blocked = $derived<string | null>(
     !editable ? viewerNote : needsReload ? DISK_NOTE : null
   );
-  const taskBlocked = $derived(blocked ?? (doc.dirty ? DRAFT_NOTE : null));
   const tasks = $derived<Tasks>({
     check: {
-      enabled: taskBlocked === null && targetError === null && busy === null,
-      hint: taskBlocked ?? targetError ?? 'syntax-check this file with g++ (F7)'
+      enabled: blocked === null && targetError === null && busy === null,
+      hint: blocked ?? targetError ?? 'syntax-check the temporary draft with g++ (F7)'
     },
     build: {
-      enabled: taskBlocked === null && busy === null && target?.available === true,
-      hint:
-        taskBlocked ?? target?.reason ?? targetError ?? 'build this example with cmake (Ctrl+B)'
+      enabled: blocked === null && busy === null && target?.available === true,
+      hint: blocked ?? target?.reason ?? targetError ?? 'build the temporary draft (Ctrl+B)'
     },
     run: {
       enabled:
         running ||
-        (taskBlocked === null &&
+        (blocked === null &&
           incompleteNote === null &&
           busy === null &&
           target?.available === true),
       hint:
         running
           ? 'stop the running example (Ctrl+R)'
-          : taskBlocked ??
+          : blocked ??
             incompleteNote ??
             target?.reason ??
             targetError ??
@@ -306,10 +341,34 @@
     }
   });
 
-  $effect(() => storeOpen(LEFT_PANEL, leftOpen));
-  $effect(() => storeOpen(RIGHT_PANEL, rightOpen));
-  $effect(() => storeOpen(DRAWER_PANEL, drawerOpen));
-  $effect(() => localStorage.setItem(DRAWER_HEIGHT, String(drawerHeight)));
+  $effect(() => {
+    storeOpen(LEFT_PANEL, leftOpen);
+    untrack(storePanels);
+  });
+  $effect(() => {
+    storeOpen(RIGHT_PANEL, rightOpen);
+    untrack(storePanels);
+  });
+  $effect(() => {
+    storeOpen(DRAWER_PANEL, drawerOpen);
+    untrack(storePanels);
+  });
+  $effect(() => {
+    localStorage.setItem(DRAWER_HEIGHT, String(drawerHeight));
+    untrack(storePanels);
+  });
+  $effect(() => {
+    if (rightTab) untrack(storePanels);
+  });
+
+  $effect(() => {
+    if (!editable || !viewId) return;
+    const activeView = viewId;
+    untrack(() => {
+      flowCache = { ...flowCache, activeView };
+      persistCache();
+    });
+  });
 
   $effect(() => {
     if (!desktop) return;
@@ -416,7 +475,7 @@
       const merged = mergeProjection(untrack(() => ({ nodes, edges })), fresh, pinned);
       nodes = merged.nodes;
       edges = merged.edges;
-      rememberPositions(key, merged.nodes, true);
+      untrack(() => rememberPositions(key, merged.nodes, true));
       return;
     }
     let stale = false;
@@ -474,16 +533,18 @@
     if (loadedViews.has(key)) return;
     loadedViews.add(key);
     try {
-      const stored = JSON.parse(localStorage.getItem(LAYOUT_PREFIX + key) ?? '{}') as {
+      const stored = (editable
+        ? flowCache.views[cacheViewKey(key)]
+        : JSON.parse(localStorage.getItem(LAYOUT_PREFIX + key) ?? '{}')) as {
         positions?: Record<string, EdgePoint>;
         viewport?: Viewport;
-      };
+      } | undefined;
       const positions = new Map<string, EdgePoint>();
-      for (const [id, point] of Object.entries(stored.positions ?? {})) {
+      for (const [id, point] of Object.entries(stored?.positions ?? {})) {
         if (Number.isFinite(point.x) && Number.isFinite(point.y)) positions.set(id, point);
       }
       if (positions.size > 0) positionsByView.set(key, positions);
-      const viewport = stored.viewport;
+      const viewport = stored?.viewport;
       if (
         viewport &&
         Number.isFinite(viewport.x) &&
@@ -500,7 +561,49 @@
   function storeLayout(key: string): void {
     const positions = Object.fromEntries(positionsByView.get(key) ?? []);
     const viewport = viewportsByView.get(key) ?? null;
-    localStorage.setItem(LAYOUT_PREFIX + key, JSON.stringify({ positions, viewport }));
+    if (!editable) {
+      localStorage.setItem(LAYOUT_PREFIX + key, JSON.stringify({ positions, viewport }));
+      return;
+    }
+    const id = cacheViewKey(key);
+    flowCache = {
+      ...flowCache,
+      views: {
+        ...flowCache.views,
+        [id]: { ...flowCache.views[id], positions, viewport }
+      }
+    };
+    persistCache();
+  }
+
+  function cacheViewKey(key: string): string {
+    return key.startsWith(`${doc.path}#`) ? key.slice(doc.path.length + 1) : key;
+  }
+
+  function storePanels(): void {
+    if (!editable) return;
+    flowCache = {
+      ...flowCache,
+      panels: {
+        ...flowCache.panels,
+        left: leftOpen,
+        right: rightOpen,
+        drawer: drawerOpen,
+        drawerHeight,
+        rightTab
+      }
+    };
+    persistCache();
+  }
+
+  function persistCache(): void {
+    if (!editable) return;
+    if (cacheTimer) clearTimeout(cacheTimer);
+    const path = doc.path;
+    const cached = structuredClone(flowCache);
+    cacheTimer = setTimeout(() => {
+      void queued(path, () => saveCache(path, cached)).catch(() => undefined);
+    }, 120);
   }
 
   function clampContext() {
@@ -534,7 +637,30 @@
     focus = null;
     void refreshPalette(next.path);
     if (fresh) {
-      siteIndex = 0;
+      flowCache = cacheOf(next.cache);
+      positionsByView.clear();
+      viewportsByView.clear();
+      loadedViews.clear();
+      const panels = flowCache.panels;
+      if (typeof panels.left === 'boolean') leftOpen = panels.left;
+      if (typeof panels.right === 'boolean') rightOpen = panels.right;
+      if (typeof panels.drawer === 'boolean') drawerOpen = panels.drawer;
+      if (
+        typeof panels.drawerHeight === 'number' &&
+        Number.isFinite(panels.drawerHeight) &&
+        panels.drawerHeight >= MIN_DRAWER_HEIGHT
+      ) {
+        drawerHeight = panels.drawerHeight;
+      }
+      if (
+        panels.rightTab === 'inspector' ||
+        panels.rightTab === 'library' ||
+        panels.rightTab === 'assistant'
+      ) {
+        rightTab = panels.rightTab;
+      }
+      const cachedSite = siteViewIds(next.model.sites).indexOf(flowCache.activeView ?? '');
+      siteIndex = cachedSite >= 0 ? cachedSite : 0;
       selected = null;
       selectedEdge = null;
       chat = [];

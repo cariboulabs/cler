@@ -194,33 +194,49 @@ fn a_refused_command_leaves_the_file_untouched() {
 }
 
 #[test]
-fn close_drops_the_session() {
+fn close_keeps_the_temporary_draft_for_recovery() {
     let path = temp_copy("hello_world.cpp");
+    let original = text(&path);
     let docs = Documents::default();
     document::open(&docs, as_str(&path)).expect("open");
+    document::apply(&docs, as_str(&path), 0, set_param("source1", 1, "6.25f")).expect("draft");
     let working = document::working_path(&docs, as_str(&path)).expect("working copy");
     assert!(working.exists());
     document::close(&docs, as_str(&path));
-    assert!(!working.exists());
+    assert!(working.exists());
 
     let missing = document::undo(&docs, as_str(&path)).expect_err("the session is gone");
     assert!(missing.contains("no open document"), "{missing}");
+    let recovered = document::open(&docs, as_str(&path)).expect("recover");
+    assert!(recovered.dirty);
+    assert!(recovered.source.contains("6.25f"));
+    assert_eq!(text(&path), original);
 }
 
 #[test]
-fn dirty_documents_must_be_saved_before_tasks_run() {
+fn cfgc_updates_preserve_other_namespaces_and_unknown_fields() {
     let path = temp_copy("hello_world.cpp");
     let docs = Documents::default();
     document::open(&docs, as_str(&path)).expect("open");
-    document::require_saved(&docs, as_str(&path)).expect("clean document");
+    document::store_cache(&docs, as_str(&path), json!({"version": 1, "views": {}})).expect("cache");
+    let working = document::working_path(&docs, as_str(&path)).expect("working copy");
+    let cache = working.with_extension("cfgc");
+    let mut value: Value = serde_json::from_str(&text(&cache)).expect("cfgc json");
+    value["build"] = json!({"futureCompiler": "kept"});
+    value["futureSection"] = json!({"also": "kept"});
+    std::fs::write(&cache, serde_json::to_string_pretty(&value).expect("json")).expect("extend");
 
-    document::apply(&docs, as_str(&path), 0, set_param("source1", 1, "6.25f"))
-        .expect("apply");
-    let refusal = document::require_saved(&docs, as_str(&path)).expect_err("dirty draft");
-    assert!(refusal.contains("save the draft"), "{refusal}");
-
-    document::save(&docs, as_str(&path)).expect("save");
-    document::require_saved(&docs, as_str(&path)).expect("saved document");
+    document::close(&docs, as_str(&path));
+    document::open(&docs, as_str(&path)).expect("reopen extended cache");
+    document::store_cache(
+        &docs,
+        as_str(&path),
+        json!({"version": 1, "activeView": "main"}),
+    )
+    .expect("update ui only");
+    let updated: Value = serde_json::from_str(&text(&cache)).expect("updated cfgc");
+    assert_eq!(updated["build"]["futureCompiler"], "kept");
+    assert_eq!(updated["futureSection"]["also"], "kept");
 }
 
 #[test]

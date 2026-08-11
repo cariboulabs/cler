@@ -41,7 +41,8 @@ function installFake(setup: Setup) {
     canUndo: false,
     canRedo: false,
     dirty: false,
-    externalChange: false
+    externalChange: false,
+    cache: {}
   };
   const calls: { name: string; args: Record<string, unknown> }[] = [];
   const callbacks = new Map<number, (message: unknown) => void>();
@@ -104,6 +105,10 @@ function installFake(setup: Setup) {
   async function invoke(command: string, args: Record<string, unknown>): Promise<unknown> {
     if (command === 'plugin:event|listen') return args.handler;
     if (command === 'plugin:dialog|open') return state.path;
+    if (command === 'save_cache') {
+      state.cache = args.ui as Record<string, unknown>;
+      return null;
+    }
     calls.push({ name: command, args });
     if (command === 'apply_commands') apply(args.commands as Record<string, unknown>[]);
     if (command === 'save_document') state.dirty = false;

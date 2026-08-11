@@ -172,7 +172,7 @@ describe('build and run follow what find_target reports', () => {
       expect(await page.locator('[data-testid="check"]').isDisabled()).toBe(false);
       expect(await page.locator('[data-testid="build"]').isDisabled()).toBe(true);
       expect(await page.locator('[data-testid="run"]').isDisabled()).toBe(true);
-      expect(await page.getAttribute('[data-testid="build"]', 'title')).toContain(
+      expect(await page.textContent('[data-testid="build-tooltip"]')).toContain(
         'desktop_examples'
       );
 
@@ -265,7 +265,7 @@ describe('build and run follow what find_target reports', () => {
 
       for (const id of ['check', 'build', 'run']) {
         expect(await page.locator(`[data-testid="${id}"]`).isDisabled()).toBe(true);
-        expect(await page.getAttribute(`[data-testid="${id}"]`, 'title')).toContain('example mode');
+        expect(await page.textContent(`[data-testid="${id}-tooltip"]`)).toContain('example mode');
       }
 
       await page.keyboard.press('F7');

@@ -9,8 +9,8 @@ use cler_graph::{
     extract_specs, palette_specs, BlockSpec, Command, DocumentSession, FileModel, Splice,
     Transaction, SCHEMA_VERSION,
 };
-use serde::Serialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 pub type Documents = Mutex<HashMap<PathBuf, Document>>;
@@ -18,22 +18,53 @@ pub type Documents = Mutex<HashMap<PathBuf, Document>>;
 const PALETTE_DIR: &str = "desktop_blocks";
 const REPOSITORY_MARKER: &str = "include/cler.hpp";
 const DIFF_CONTEXT: usize = 3;
+const CACHE_FORMAT: &str = "cler-flowgraph-cache";
+const CACHE_VERSION: u32 = 1;
 
 pub struct Document {
     session: DocumentSession,
     spelling: String,
     saved: String,
     working: PathBuf,
-    working_dir: PathBuf,
+    cache_path: PathBuf,
+    cache: CacheFile,
     external_change: bool,
     palette: Vec<BlockSpec>,
 }
 
-impl Drop for Document {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.working_dir).ok();
-        if let Some(root) = self.working_dir.parent() {
-            std::fs::remove_dir(root).ok();
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DocumentCache {
+    source_path: String,
+    saved_sha256: String,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CacheFile {
+    format: String,
+    version: u32,
+    #[serde(default)]
+    document: DocumentCache,
+    #[serde(default)]
+    ui: Value,
+    #[serde(default)]
+    build: Value,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
+
+impl Default for CacheFile {
+    fn default() -> Self {
+        Self {
+            format: CACHE_FORMAT.to_string(),
+            version: CACHE_VERSION,
+            document: DocumentCache::default(),
+            ui: Value::Object(Map::new()),
+            build: Value::Object(Map::new()),
+            extra: Map::new(),
         }
     }
 }
@@ -58,6 +89,7 @@ pub struct DocumentState {
     pub can_redo: bool,
     pub dirty: bool,
     pub external_change: bool,
+    pub cache: Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -291,6 +323,7 @@ pub fn save(docs: &Documents, path: &str) -> Result<DocumentState, String> {
     if doc.session.source() != doc.saved {
         let source = doc.session.source().to_string();
         persist(doc, &target, &source)?;
+        update_cache_document(doc, &target);
     }
     Ok(snapshot(&target, doc))
 }
@@ -306,6 +339,7 @@ pub fn reload(docs: &Documents, path: &str) -> Result<DocumentState, String> {
             .map_err(|cause| cause.to_string())?;
     }
     doc.saved = text;
+    update_cache_document(doc, &target);
     doc.external_change = false;
     Ok(snapshot(&target, doc))
 }
@@ -318,14 +352,11 @@ pub fn working_path(docs: &Documents, path: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("no open document for {path}"))
 }
 
-pub fn require_saved(docs: &Documents, path: &str) -> Result<(), String> {
+pub fn store_cache(docs: &Documents, path: &str, ui: Value) -> Result<(), String> {
     let mut map = lock(docs);
-    let (target, doc) = document(&mut map, path)?;
-    refuse_external(doc, &target)?;
-    if doc.session.source() != doc.saved {
-        return Err("save the draft before checking, building, or running".to_string());
-    }
-    Ok(())
+    let (_, doc) = document(&mut map, path)?;
+    doc.cache.ui = ui;
+    write_cache(&doc.cache_path, &doc.cache)
 }
 
 pub fn parse_file(docs: &Documents, path: &str) -> Result<String, String> {
@@ -384,15 +415,23 @@ fn step(docs: &Documents, path: &str, step: Step) -> Result<DocumentState, Strin
 }
 
 fn fresh(target: &Path, spelling: &str) -> Result<Document, String> {
-    let session = DocumentSession::open(target).map_err(|cause| cause.to_string())?;
+    let mut session = DocumentSession::open(target).map_err(|cause| cause.to_string())?;
     let saved = session.source().to_string();
-    let (working_dir, working) = create_working(target, &saved)?;
+    let (working, cache_path, mut cache, draft) = create_working(target, &saved)?;
+    if draft != saved && session.reload(draft).is_err() {
+        std::fs::write(&working, &saved)
+            .map_err(|cause| format!("cannot write {}: {cause}", working.display()))?;
+    }
+    cache.document.source_path = target.display().to_string();
+    cache.document.saved_sha256 = digest(&saved);
+    write_cache(&cache_path, &cache)?;
     Ok(Document {
         session,
         spelling: spelling.to_string(),
         saved,
         working,
-        working_dir,
+        cache_path,
+        cache,
         external_change: false,
         palette: nearby_palette(target),
     })
@@ -445,6 +484,7 @@ fn snapshot(target: &Path, doc: &Document) -> DocumentState {
         can_redo: doc.session.can_redo(),
         dirty: doc.session.source() != doc.saved,
         external_change: doc.external_change,
+        cache: doc.cache.ui.clone(),
     }
 }
 
@@ -494,29 +534,95 @@ fn persist(doc: &mut Document, target: &Path, contents: &str) -> Result<(), Stri
     }
 }
 
-fn create_working(target: &Path, contents: &str) -> Result<(PathBuf, PathBuf), String> {
-    let root = std::env::temp_dir().join(format!("cler-flowgraph-gui-{}", std::process::id()));
-    std::fs::create_dir_all(&root)
-        .map_err(|cause| format!("cannot create {}: {cause}", root.display()))?;
-    let token = RandomState::new().build_hasher().finish();
-    let dir = root.join(format!("{token:016x}"));
-    std::fs::create_dir(&dir)
-        .map_err(|cause| format!("cannot create {}: {cause}", dir.display()))?;
+fn create_working(
+    target: &Path,
+    contents: &str,
+) -> Result<(PathBuf, PathBuf, CacheFile, String), String> {
+    let root = std::env::temp_dir().join(format!("cler-flowgraph-gui-{}", user_scope()));
+    private_dir(&root)?;
+    let dir = root.join(digest(&target.display().to_string()));
+    private_dir(&dir)?;
     let name = target
         .file_name()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("document.cpp"));
     let working = dir.join(name);
-    if let Err(cause) = std::fs::write(&working, contents) {
-        std::fs::remove_dir(&dir).ok();
-        return Err(format!("cannot write {}: {cause}", working.display()));
+    let cache_name = target
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{name}.cfgc"))
+        .unwrap_or_else(|| "document.cfgc".to_string());
+    let cache_path = dir.join(cache_name);
+    let mut cache = read_cache(&cache_path).unwrap_or_default();
+    if cache.format != CACHE_FORMAT {
+        cache = CacheFile::default();
     }
-    Ok((dir, working))
+    let reusable = cache.version >= 1
+        && cache.document.source_path == target.display().to_string()
+        && cache.document.saved_sha256 == digest(contents);
+    let draft = reusable
+        .then(|| read(&working).ok())
+        .flatten()
+        .unwrap_or_else(|| contents.to_string());
+    std::fs::write(&working, &draft)
+        .map_err(|cause| format!("cannot write {}: {cause}", working.display()))?;
+    cache.format = CACHE_FORMAT.to_string();
+    cache.version = cache.version.max(CACHE_VERSION);
+    Ok((working, cache_path, cache, draft))
 }
 
 fn write_working(doc: &Document, contents: &str) -> Result<(), String> {
-    std::fs::write(&doc.working, contents)
-        .map_err(|cause| format!("cannot write {}: {cause}", doc.working.display()))
+    let staged = doc.working.with_extension("cpp.next");
+    std::fs::write(&staged, contents)
+        .map_err(|cause| format!("cannot write {}: {cause}", staged.display()))?;
+    std::fs::rename(&staged, &doc.working)
+        .map_err(|cause| format!("cannot replace {}: {cause}", doc.working.display()))
+}
+
+fn update_cache_document(doc: &mut Document, target: &Path) {
+    doc.cache.document.source_path = target.display().to_string();
+    doc.cache.document.saved_sha256 = digest(&doc.saved);
+    write_cache(&doc.cache_path, &doc.cache).ok();
+}
+
+fn read_cache(path: &Path) -> Result<CacheFile, String> {
+    let text = read(path)?;
+    serde_json::from_str(&text).map_err(|cause| format!("cannot parse {}: {cause}", path.display()))
+}
+
+fn write_cache(path: &Path, cache: &CacheFile) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(cache).map_err(|cause| cause.to_string())?;
+    let staged = path.with_extension("cfgc.next");
+    std::fs::write(&staged, format!("{text}\n"))
+        .map_err(|cause| format!("cannot write {}: {cause}", staged.display()))?;
+    std::fs::rename(&staged, path)
+        .map_err(|cause| format!("cannot replace {}: {cause}", path.display()))
+}
+
+fn digest(text: &str) -> String {
+    format!("{:x}", Sha256::digest(text.as_bytes()))
+}
+
+fn private_dir(path: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(path)
+        .map_err(|cause| format!("cannot create {}: {cause}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+            .map_err(|cause| format!("cannot protect {}: {cause}", path.display()))?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn user_scope() -> u32 {
+    unsafe { libc::geteuid() }
+}
+
+#[cfg(not(unix))]
+fn user_scope() -> u32 {
+    std::process::id()
 }
 
 fn read(target: &Path) -> Result<String, String> {

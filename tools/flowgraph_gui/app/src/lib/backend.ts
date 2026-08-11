@@ -71,6 +71,10 @@ export function saveDocument(path: string): Promise<DocumentState> {
   return documentCall('save_document', { path });
 }
 
+export function saveCache(path: string, ui: unknown): Promise<void> {
+  return invoker('save_cache', { path, ui }) as Promise<void>;
+}
+
 export function applyCommands(
   path: string,
   commands: Command[],
@@ -110,7 +114,8 @@ export function loadFixture(name: string): DocumentState {
     canUndo: false,
     canRedo: false,
     dirty: false,
-    externalChange: false
+    externalChange: false,
+    cache: {}
   };
 }
 
