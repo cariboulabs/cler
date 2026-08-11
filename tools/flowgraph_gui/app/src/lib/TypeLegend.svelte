@@ -32,19 +32,10 @@
 
 <style>
   .legend {
-    position: absolute;
-    left: calc(var(--rail-left) + 2 * var(--sp-3));
-    bottom: var(--sp-3);
-    z-index: 5;
-    transition: left 150ms ease;
-    min-width: 108px;
-    max-width: 260px;
     padding: var(--sp-1);
-    background: var(--glass);
-    backdrop-filter: blur(12px);
+    background: var(--bg-2);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    box-shadow: var(--shadow);
     animation: rise 150ms ease-out;
   }
   .head {

@@ -110,6 +110,7 @@ function installFake(setup: Setup) {
   const log: unknown[][] = [];
   const calls: string[] = [];
   const runs: unknown[] = [];
+  const pristine = structuredClone({ model: setup.model, source: setup.source });
   const asks: unknown[] = [];
   const peeks: unknown[] = [];
   const bases: number[] = [];
@@ -452,6 +453,14 @@ function installFake(setup: Setup) {
     if (command === 'undo') step('undo');
     if (command === 'redo') step('redo');
     if (command === 'save_document') state.dirty = false;
+    if (command === 'reload_document') {
+      state.model = structuredClone(pristine.model);
+      state.source = pristine.source;
+      state.dirty = false;
+      state.canUndo = false;
+      state.canRedo = false;
+      state.revision += 1;
+    }
     if (command === 'close_document') return null;
     if (command === 'open_in_editor') return null;
     return snapshot();

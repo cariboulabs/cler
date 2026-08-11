@@ -906,6 +906,13 @@
     if (!outcome.ok) changedOnDisk = true;
   }
 
+  async function discardDraft() {
+    if (!doc.dirty) return;
+    if (!confirm('Discard the draft and restore the saved file?')) return;
+    await reload();
+    hint('draft discarded, saved file restored');
+  }
+
   async function save() {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     const outcome = await run(saveDocument);
@@ -1319,6 +1326,28 @@
         </section>
       {/if}
 
+      <section>
+        <h2>Run</h2>
+        <input
+          class="runargs"
+          data-testid="run-args"
+          type="text"
+          placeholder="command-line args"
+          title="command-line arguments passed to the binary on Run"
+          value={runArgs}
+          onchange={(event) => {
+            runArgs = event.currentTarget.value;
+            storePanels();
+          }}
+        />
+      </section>
+
+      {#if site}
+        <section>
+          <TypeLegend entries={legend} />
+        </section>
+      {/if}
+
       {#if site}
         <section>
           <h2>Read-only ({notes.length})</h2>
@@ -1426,11 +1455,7 @@
             {compiled}
             {tasks}
             {running}
-            {runArgs}
-            onrunargs={(value) => {
-              runArgs = value;
-              storePanels();
-            }}
+            ondiscarddraft={() => void discardDraft()}
             edgeAt={edgeInfo}
             oncheck={() => void task('check', checkDocument)}
             onbuild={() => void task('build', buildTarget)}
@@ -1460,7 +1485,6 @@
             taken={declared}
             onadd={addBlock}
           />
-          <TypeLegend entries={legend} />
           {#if nodes.length >= MINIMAP_MIN}
             <MiniMap bgColor="var(--bg-1)" maskColor="var(--scrim)" nodeColor="var(--border-hi)" />
           {/if}
@@ -1679,6 +1703,16 @@
     font-size: 11px;
     color: var(--muted);
     word-break: break-all;
+  }
+  .runargs {
+    width: 100%;
+    padding: var(--sp-0) var(--sp-1);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg);
   }
   dl {
     display: grid;

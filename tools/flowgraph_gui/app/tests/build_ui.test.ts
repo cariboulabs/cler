@@ -341,3 +341,24 @@ describe('run arguments', () => {
     CASE
   );
 });
+
+describe('draft chip', () => {
+  it(
+    'click discards the draft and restores the saved file after confirmation',
+    async () => {
+      const page = await boot();
+      page.on('dialog', (dialog) => void dialog.accept());
+      await page.click('.svelte-flow__node[data-id="source1"]');
+      await page.fill('input[data-field="source1.ctor.1"]', '2.0f');
+      await page.press('input[data-field="source1.ctor.1"]', 'Enter');
+      await page.waitForSelector('[data-testid="draft-chip"]');
+
+      await page.click('[data-testid="draft-chip"]');
+      await expect.poll(() => page.locator('[data-testid="draft-chip"]').count()).toBe(0);
+      await page.click('.svelte-flow__node[data-id="source1"]');
+      expect(await page.inputValue('input[data-field="source1.ctor.1"]')).toBe('1.0f');
+      await page.close();
+    },
+    CASE
+  );
+});
