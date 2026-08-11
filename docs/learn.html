@@ -370,6 +370,14 @@ const double items_per_second = items / seconds;</code></pre>
 
                 <section id="tools">
                     <h2>Tools and tests</h2>
+                    <h3>Flowgraph GUI</h3>
+                    <div class="code-block">
+                        <button class="copy-button" onclick="copyCode(this)">Copy</button>
+                        <pre><code class="language-bash line-numbers">cd tools/flowgraph_gui/app
+npm install
+npm run tauri dev</code></pre>
+                    </div>
+
                     <h3>Flowgraph diagram</h3>
                     <div class="code-block">
                         <button class="copy-button" onclick="copyCode(this)">Copy</button>
@@ -380,7 +388,6 @@ cmake ..
 make -j4
 ./cler-mermaid ../../../desktop_examples/hello_world.cpp -o graph</code></pre>
                     </div>
-                    <p>A VS Code preview extension is in <code>tools/mermaid/vscode-extension</code>.</p>
 
                     <h3>Tests and benchmarks</h3>
                     <div class="code-block">

@@ -1,7 +1,8 @@
 # Cler Flowgraph GUI — Architecture
 
-A GNU Radio Companion-style desktop editor for cler flowgraphs. Replaces
-`tools/mermaid` (vscode extension + mermaid preview).
+A GNU Radio Companion-style desktop editor for cler flowgraphs. Replaces the
+interactive preview from `tools/mermaid/vscode-extension`; the standalone
+Mermaid CLI remains available for headless diagram generation.
 
 Reviewed adversarially by three independent critics (two architecture/parsing
 refuters grounded in the full `desktop_examples/` + `desktop_blocks/` corpus,
@@ -214,7 +215,8 @@ tools/flowgraph_gui/
 ```
 
 Rust and node toolchains are confined here; never a dependency of the
-framework. `tools/mermaid` is deleted at M1.
+framework. The old Mermaid VS Code extension is retired once the desktop GUI
+supersedes it.
 
 ## Milestones
 
@@ -240,7 +242,7 @@ value is scale, not degradation; nine corpus files lack a trailing newline.
 - **M1 — read-only canvas.** Open file, site selector, elk layout. Explicit
   acceptance cases: `mass_spring_damper.cpp` (cyclic), `plots.cpp` (parallel
   edges), `uhd_device.cpp` (four sites), `spike.cpp` (scale + read-only
-  elements shown). Delete `tools/mermaid`.
+  elements shown). Retire `tools/mermaid/vscode-extension`.
 - **M2 — param edits.** Ctor/template args, display name, direct config
   assignments. Commit-on-blur fields, undo, external-edit guard end to end.
 - **M3 — topology edits.** Add from palette (declare-then-wire staging),
