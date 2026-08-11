@@ -119,6 +119,7 @@ const MUTATORS = [
   'undoDocument',
   'redoDocument',
   'saveDocument',
+  'saveDocumentAs',
   'reloadDocument'
 ];
 

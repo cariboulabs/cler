@@ -52,11 +52,13 @@
     openDocument,
     openInEditor,
     pickFile,
+    pickSavePath,
     queued,
     redoDocument,
     reloadDocument,
     runTarget,
     saveDocument,
+    saveDocumentAs,
     spansOf,
     stopTarget,
     undoDocument,
@@ -913,6 +915,20 @@
     hint('draft discarded, saved file restored');
   }
 
+  async function saveAs() {
+    if (!desktop) {
+      announce('save as needs the desktop shell');
+      return;
+    }
+    const picked = await pickSavePath(doc.path);
+    if (!picked) return;
+    const outcome = await attempt((path) => saveDocumentAs(path, picked), (next) => {
+      opened = picked;
+      install(next, true);
+    });
+    if (outcome.ok) hint(`saved as ${picked.split('/').pop() ?? picked}`);
+  }
+
   async function save() {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     const outcome = await run(saveDocument);
@@ -1456,6 +1472,7 @@
             {tasks}
             {running}
             ondiscarddraft={() => void discardDraft()}
+            onsaveas={() => void saveAs()}
             edgeAt={edgeInfo}
             oncheck={() => void task('check', checkDocument)}
             onbuild={() => void task('build', buildTarget)}

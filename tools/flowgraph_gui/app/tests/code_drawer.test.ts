@@ -581,6 +581,7 @@ describe('the node context menu reaches the code', () => {
         'menu-build',
         'menu-run',
         'menu-save',
+        'menu-save-as',
         'menu-undo',
         'menu-redo',
         'menu-fit'

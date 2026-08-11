@@ -51,6 +51,7 @@
     tasks: Tasks;
     running: boolean;
     ondiscarddraft: () => void;
+    onsaveas: () => void;
     edgeAt: (id: string) => EdgeInfo | null;
     oncheck: () => void;
     onbuild: () => void;
@@ -106,6 +107,7 @@
     tasks,
     running,
     ondiscarddraft,
+    onsaveas,
     edgeAt,
     oncheck,
     onbuild,
@@ -136,7 +138,7 @@
   const ALERT_MS = 4000;
   const MENU_WIDTH = 200;
   const MENU_HEIGHT = 260;
-  const MENU_IDS = ['check', 'build', 'run', 'save', 'undo', 'redo', 'fit'];
+  const MENU_IDS = ['check', 'build', 'run', 'save', 'save-as', 'undo', 'redo', 'fit'];
   const TOOLBAR_IDS = [
     'check',
     'build',
@@ -198,6 +200,7 @@
   let toast = $state<{ text: string; danger: boolean; action: AlertAction | null } | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let problemsOpen = $state(false);
+  let draftOpen = $state(false);
 
   const listed = $derived<Problem[]>([...compiled, ...problems]);
   const failing = $derived(listed.some((problem) => problem.severity === 'error'));
@@ -239,6 +242,14 @@
       enabled: canSave,
       hint: saveNote,
       run: onsave
+    },
+    {
+      id: 'save-as',
+      label: 'Save as…',
+      shortcut: '',
+      enabled: true,
+      hint: 'write the current draft to a new file and open it',
+      run: onsaveas
     },
     {
       id: 'undo',
@@ -485,6 +496,7 @@
   onclick={() => {
     menu = null;
     problemsOpen = false;
+    draftOpen = false;
   }}
 />
 
@@ -495,16 +507,52 @@
     <span class="demo" data-testid="demo-chip" title={editNote}>demo</span>
   {/if}
   {#if dirty}
-    <button
-      class="draft"
-      data-testid="draft-chip"
-      title="unsaved draft — click to discard it and restore the saved file"
-      onclick={ondiscarddraft}
-      oncontextmenu={(event) => {
-        event.preventDefault();
-        ondiscarddraft();
-      }}>draft</button
-    >
+    <span class="draft-slot">
+      <button
+        class="draft"
+        data-testid="draft-chip"
+        aria-expanded={draftOpen}
+        title="unsaved draft — click for options"
+        onclick={(event) => {
+          event.stopPropagation();
+          menu = null;
+          problemsOpen = false;
+          draftOpen = !draftOpen;
+        }}
+        oncontextmenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          draftOpen = !draftOpen;
+        }}>draft</button
+      >
+      {#if draftOpen}
+        <div class="draft-menu" data-testid="draft-menu">
+          <button
+            data-testid="draft-save"
+            disabled={!canSave}
+            title={canSave ? undefined : saveNote}
+            onclick={() => {
+              draftOpen = false;
+              onsave();
+            }}>Save</button
+          >
+          <button
+            data-testid="draft-save-as"
+            onclick={() => {
+              draftOpen = false;
+              onsaveas();
+            }}>Save as…</button
+          >
+          <button
+            data-testid="draft-discard"
+            onclick={() => {
+              draftOpen = false;
+              ondiscarddraft();
+            }}>Return to saved</button
+          >
+        </div>
+      {/if}
+    </span>
   {/if}
   <span class="tagline">flowgraph editor</span>
   <span class="grow"></span>
@@ -693,6 +741,40 @@
     text-transform: uppercase;
     color: var(--muted);
     cursor: help;
+  }
+  .draft-slot {
+    position: relative;
+    display: inline-flex;
+  }
+  .draft-menu {
+    position: absolute;
+    top: calc(100% + var(--sp-1));
+    left: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    min-width: 150px;
+    padding: var(--sp-0);
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+  }
+  .draft-menu button {
+    justify-content: flex-start;
+    text-align: left;
+    width: 100%;
+    padding: var(--sp-0) var(--sp-2);
+    background: transparent;
+    border: none;
+    font-size: 12px;
+    color: var(--fg);
+  }
+  .draft-menu button:hover:not(:disabled) {
+    background: var(--bg-2);
+  }
+  .draft-menu button:disabled {
+    color: var(--muted);
   }
   .draft {
     flex: none;

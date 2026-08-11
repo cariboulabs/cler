@@ -107,6 +107,19 @@ fn save_document(path: String, docs: State<'_, Documents>) -> Result<DocumentSta
 }
 
 #[tauri::command]
+fn save_document_as(
+    path: String,
+    new_path: String,
+    docs: State<'_, Documents>,
+    watcher: State<'_, FileWatcher>,
+) -> Result<DocumentState, String> {
+    let state = document::save_as(&docs, &path, &new_path)?;
+    let target = document::canonical(&new_path)?;
+    watch_parent(&watcher, &target)?;
+    Ok(state)
+}
+
+#[tauri::command]
 fn save_cache(path: String, ui: Value, docs: State<'_, Documents>) -> Result<(), String> {
     document::store_cache(&docs, &path, ui)
 }
@@ -347,6 +360,7 @@ pub fn run() {
             undo,
             redo,
             save_document,
+            save_document_as,
             save_cache,
             reload_document,
             parse_file,

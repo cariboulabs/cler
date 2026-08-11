@@ -446,6 +446,17 @@ pub fn save(docs: &Documents, path: &str) -> Result<DocumentState, String> {
     Ok(snapshot(&target, doc))
 }
 
+pub fn save_as(docs: &Documents, path: &str, new_path: &str) -> Result<DocumentState, String> {
+    let source = {
+        let mut map = lock(docs);
+        let (_, doc) = document(&mut map, path)?;
+        doc.session.source().to_string()
+    };
+    std::fs::write(new_path, &source)
+        .map_err(|cause| format!("cannot write {new_path}: {cause}"))?;
+    open(docs, new_path)
+}
+
 pub fn reload(docs: &Documents, path: &str) -> Result<DocumentState, String> {
     let mut map = lock(docs);
     let (target, doc) = document(&mut map, path)?;

@@ -173,6 +173,7 @@ describe('1. an argument without a default is required, never dropped', () => {
       const confirm = page.locator('[data-testid="add-confirm"]');
       expect(await confirm.isDisabled()).toBe(true);
       expect(await page.locator('[data-add-required="ctor.3"]').count()).toBe(1);
+      expect(await page.textContent('[data-testid="add-why"]')).toContain('required field');
 
       await page.press('[data-add-field="ctor.1"]', 'Enter');
       await expect.poll(() => page.textContent('[data-add-error="template.0"]')).toBe('required');
@@ -184,6 +185,7 @@ describe('1. an argument without a default is required, never dropped', () => {
       await page.fill('[data-add-field="ctor.2"]', '2.0f');
       await page.fill('[data-add-field="ctor.3"]', '1000');
       await expect.poll(() => confirm.isDisabled()).toBe(false);
+      expect(await page.locator('[data-testid="add-why"]').count()).toBe(0);
       await confirm.click();
 
       await expect.poll(() => commands(page)).toEqual([

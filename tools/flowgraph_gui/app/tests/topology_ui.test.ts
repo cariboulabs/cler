@@ -601,6 +601,7 @@ describe('each right-click target has its own menu', () => {
         'menu-build',
         'menu-run',
         'menu-save',
+        'menu-save-as',
         'menu-undo',
         'menu-redo',
         'menu-fit'

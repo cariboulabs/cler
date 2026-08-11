@@ -224,6 +224,11 @@
       {/if}
       <p class="note">declared unwired — wire it to put it in the graph</p>
       <footer>
+        {#if gaps.length > 0}
+          <span class="why" data-testid="add-why">
+            {gaps.length} required field{gaps.length === 1 ? '' : 's'} to fill
+          </span>
+        {/if}
         <button data-testid="add-cancel" onclick={close}>Cancel</button>
         <button
           class="primary"
@@ -372,8 +377,14 @@
   }
   footer {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
     gap: var(--sp-2);
+  }
+  .why {
+    margin-right: auto;
+    font-size: 11px;
+    color: var(--muted);
   }
   footer button {
     flex: none;

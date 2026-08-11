@@ -371,6 +371,7 @@ function installFake(setup: Setup) {
       return args.handler;
     }
     if (command === 'plugin:dialog|open') return state.path;
+    if (command === 'plugin:dialog|save') return state.path.replace(/\.cpp$/, '_copy.cpp');
     if (command === 'save_cache') {
       state.cache = args.ui as Record<string, unknown>;
       return null;
@@ -453,6 +454,11 @@ function installFake(setup: Setup) {
     if (command === 'undo') step('undo');
     if (command === 'redo') step('redo');
     if (command === 'save_document') state.dirty = false;
+    if (command === 'save_document_as') {
+      state.path = String((args as Loose).newPath);
+      state.dirty = false;
+      state.revision += 1;
+    }
     if (command === 'reload_document') {
       state.model = structuredClone(pristine.model);
       state.source = pristine.source;

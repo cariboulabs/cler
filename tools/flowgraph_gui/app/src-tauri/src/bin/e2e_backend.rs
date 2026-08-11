@@ -223,6 +223,20 @@ fn dispatch(
                 emitter(events),
             )
         })),
+        "save_document_as" => {
+            let Some(new_path) = args.get("newPath").and_then(Value::as_str) else {
+                return Reply::Loud("save_document_as needs a newPath argument".to_string());
+            };
+            match document::save_as(docs, &path, new_path).and_then(|state| {
+                document::canonical(new_path).map(|target| {
+                    watch_parent(watcher, &target).ok();
+                    state
+                })
+            }) {
+                Ok(state) => carry(state),
+                Err(message) => Reply::Refused(message),
+            }
+        }
         "run_target" => {
             let run_args: Vec<String> = args
                 .get("args")

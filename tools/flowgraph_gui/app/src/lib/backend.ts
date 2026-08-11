@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import { fixtures, fixtureSources } from '../fixtures';
 import type { BlockSpec } from './palette';
 import type { Command, DocumentState } from './schema';
@@ -24,6 +24,14 @@ export async function pickFile(): Promise<string | null> {
   const picked = await open({
     multiple: false,
     directory: false,
+    filters: [{ name: 'C++ source', extensions: ['cpp', 'cc', 'cxx'] }]
+  });
+  return typeof picked === 'string' ? picked : null;
+}
+
+export async function pickSavePath(defaultPath?: string): Promise<string | null> {
+  const picked = await save({
+    defaultPath,
     filters: [{ name: 'C++ source', extensions: ['cpp', 'cc', 'cxx'] }]
   });
   return typeof picked === 'string' ? picked : null;
@@ -80,6 +88,10 @@ export function moveNodes(path: string, view: string, moves: NodeMove[]): Promis
 
 export function saveDocument(path: string): Promise<DocumentState> {
   return documentCall('save_document', { path });
+}
+
+export function saveDocumentAs(path: string, newPath: string): Promise<DocumentState> {
+  return documentCall('save_document_as', { path, newPath });
 }
 
 export function saveCache(path: string, ui: unknown): Promise<void> {

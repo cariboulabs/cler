@@ -343,20 +343,40 @@ describe('run arguments', () => {
 });
 
 describe('draft chip', () => {
+  async function makeDraft(page: Page) {
+    await page.click('.svelte-flow__node[data-id="source1"]');
+    await page.fill('input[data-field="source1.ctor.1"]', '2.0f');
+    await page.press('input[data-field="source1.ctor.1"]', 'Enter');
+    await page.waitForSelector('[data-testid="draft-chip"]');
+    await page.click('[data-testid="draft-chip"]');
+    await page.waitForSelector('[data-testid="draft-menu"]');
+  }
+
   it(
-    'click discards the draft and restores the saved file after confirmation',
+    'opens a menu whose Return to saved restores the file after confirmation',
     async () => {
       const page = await boot();
       page.on('dialog', (dialog) => void dialog.accept());
-      await page.click('.svelte-flow__node[data-id="source1"]');
-      await page.fill('input[data-field="source1.ctor.1"]', '2.0f');
-      await page.press('input[data-field="source1.ctor.1"]', 'Enter');
-      await page.waitForSelector('[data-testid="draft-chip"]');
+      await makeDraft(page);
+      expect(await page.locator('[data-testid="draft-menu"] button').count()).toBe(3);
 
-      await page.click('[data-testid="draft-chip"]');
+      await page.click('[data-testid="draft-discard"]');
       await expect.poll(() => page.locator('[data-testid="draft-chip"]').count()).toBe(0);
       await page.click('.svelte-flow__node[data-id="source1"]');
       expect(await page.inputValue('input[data-field="source1.ctor.1"]')).toBe('1.0f');
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'save as writes the draft to the picked path and switches to it',
+    async () => {
+      const page = await boot();
+      await makeDraft(page);
+      await page.click('[data-testid="draft-save-as"]');
+      await expect.poll(() => ran(page, 'save_document_as')).toBe(1);
+      await expect.poll(() => page.locator('[data-testid="draft-chip"]').count()).toBe(0);
       await page.close();
     },
     CASE
