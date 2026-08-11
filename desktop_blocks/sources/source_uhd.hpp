@@ -43,7 +43,12 @@ struct SourceUHDBlock : public cler::BlockBase {
           _quiet(quiet),
           _configuring(false) {
 
-        usrp = uhd::usrp::multi_usrp::make(device_address);
+        try {
+            usrp = uhd::usrp::multi_usrp::make(device_address);
+        } catch (const uhd::exception& error) {
+            std::string message = std::string("SourceUHDBlock: ") + error.what();
+            cler::panic(message.c_str());
+        }
         if (!usrp) {
             cler::panic("SourceUHDBlock: Failed to create USRP device");
         }
