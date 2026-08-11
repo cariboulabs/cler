@@ -60,6 +60,15 @@ make -j"$(nproc --ignore=1)"
 cmake -DCMAKE_BUILD_TYPE=Debug ..   # debug symbols
 ```
 
+### Resource safety (mandatory)
+
+- Before starting a build or test suite, check for existing compiler/test jobs
+  and current CPU and memory pressure.
+- Choose parallelism conservatively for the available machine and leave enough
+  headroom for the system to remain responsive. Avoid overlapping
+  resource-intensive builds or test suites.
+- Read-only work, code editing, and lightweight checks may proceed concurrently.
+
 Examples land in `build/desktop_examples/` (`hello_world`, `flowgraph`,
 `polyphase_channelizer`, `streamlined`, `udp`, ...).
 
