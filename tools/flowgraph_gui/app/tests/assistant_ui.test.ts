@@ -345,6 +345,12 @@ const REWIRE = [
   { command: 'connect', site: 0, from: 'adder', to: 'plot', port: 'in', port_index: 0 }
 ];
 
+const SPARSE = [
+  { command: 'add_block', site: 0, type: 'GuiManager', var_name: 'gui2' },
+  { command: 'connect', site: 0, from: 'adder', to: 'throttle', port: 'in' },
+  { command: 'define_block', site: 0, name: 'GainBlock', value_type: 'float' }
+];
+
 async function propose(
   page: Page,
   sent: unknown[] = RENAME,
@@ -408,6 +414,24 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
         'disconnect edge 3',
         'connect adder → plot.in[0]'
       ]);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'reads commands whose optional fields the model left out',
+    async () => {
+      const page = await boot();
+      await openAssistant(page);
+      await propose(page, SPARSE, 'add a gui, wire the adder, define a gain block');
+
+      expect(await page.locator('[data-testid="proposal-command"]').allTextContents()).toEqual([
+        'add GuiManager as gui2',
+        'connect adder → throttle.in',
+        'define block GainBlock with 0 inputs and 0 outputs'
+      ]);
+      expect(await page.locator(ACCEPT).count()).toBe(1);
       await page.close();
     },
     CASE

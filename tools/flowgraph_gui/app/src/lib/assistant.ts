@@ -120,16 +120,17 @@ export function diffLines(text: string): DiffLine[] {
   });
 }
 
-function portOf(name: string, index: number | null): string {
-  return index === null ? name : `${name}[${index}]`;
+function portOf(name: string, index: number | null | undefined): string {
+  return index === null || index === undefined ? name : `${name}[${index}]`;
 }
 
-function typeOf(type: string, args: string[]): string {
-  return args.length === 0 ? type : `${type}<${args.join(', ')}>`;
+function typeOf(type: string, args: string[] | undefined): string {
+  return args === undefined || args.length === 0 ? type : `${type}<${args.join(', ')}>`;
 }
 
-function counted(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+function counted(count: number | undefined, noun: string): string {
+  const total = count ?? 0;
+  return `${total} ${noun}${total === 1 ? '' : 's'}`;
 }
 
 export function describeCommand(command: Command): string {
@@ -153,7 +154,7 @@ export function describeCommand(command: Command): string {
     case 'delete_block':
       return `delete ${command.block} and its declaration`;
     case 'define_block':
-      return `define block ${command.name} with ${counted(command.inputs.length, 'input')} and ${counted(command.outputs, 'output')}`;
+      return `define block ${command.name} with ${counted(command.inputs?.length, 'input')} and ${counted(command.outputs, 'output')}`;
   }
 }
 
