@@ -12,7 +12,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::document::{canonical, DraftState};
+use crate::document::{canonical, BuildRequirements, DraftState};
 use crate::provenance::{ArtifactRecord, ArtifactStatus, InputKey};
 
 pub type Emit = Arc<dyn Fn(&str, Value) + Send + Sync>;
@@ -46,7 +46,9 @@ const STANDARD: &str = "-std=c++17";
 const GRACE: Duration = Duration::from_secs(3);
 const PRODUCER: &str = "cmake";
 const DRAFT_INPUT: &str = "draft";
+const REQUIREMENTS_INPUT: &str = "requirements";
 const CMAKE_INPUT: &str = "cmake";
+const COMPONENT_REGISTRY_INPUT: &str = "component-registry";
 const REPO_DEPENDENCY: &str = "dependency:repo:";
 const EXTERNAL_DEPENDENCY: &str = "dependency:absolute:";
 static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
@@ -157,7 +159,7 @@ pub fn find_draft_target(jobs: &Jobs, path: &str, draft: &DraftState) -> Result<
     }
     let (_, _, binary) = draft_tree(&target, &draft.workspace)?;
     let name = artifact_name(&target, &found)?;
-    let input_key = build_input(&target, &found, &draft.sha256)?;
+    let input_key = build_input(&target, &found, draft)?;
     let reason = "build the current draft before running".to_string();
     found.binary = Some(binary.display().to_string());
     if let Some(job_id) = running_job(jobs, "build", &target) {
@@ -221,11 +223,21 @@ pub fn build_draft(
     usable(&found)?;
     let (source_dir, build_dir, binary) = draft_tree(&target, &draft.workspace)?;
     prepare_overlay(&target, &draft.path, &source_dir)?;
-    let script = draft_runner(&found, &source_dir, &build_dir)?;
+    let requirements_file = draft
+        .requirements
+        .exact
+        .then(|| write_requirements(&draft.workspace, &draft.requirements))
+        .transpose()?;
+    let script = draft_runner(
+        &found,
+        &source_dir,
+        &build_dir,
+        requirements_file.as_deref(),
+    )?;
     let mut command = Command::new("cmake");
     command.arg("-P").arg(script);
     let name = artifact_name(&target, &found)?;
-    let input_key = build_input(&target, &found, &draft.sha256)?;
+    let input_key = build_input(&target, &found, draft)?;
     let started = SystemTime::now();
     let completed = ArtifactRecord {
         input_key: input_key.clone(),
@@ -313,7 +325,7 @@ pub fn start_draft(
     if let Some(dir) = binary.parent() {
         command.current_dir(dir);
     }
-    let input_key = build_input(&target, &found, &draft.sha256)?;
+    let input_key = build_input(&target, &found, draft)?;
     spawn(jobs, "run", &target, command, emit, input_key, None)
 }
 
@@ -363,7 +375,7 @@ fn artifact_name(target: &Path, found: &Target) -> Result<String, String> {
     Ok(format!("{PRODUCER}:{}:{}", relative.display(), found.name))
 }
 
-fn build_input(target: &Path, found: &Target, draft_sha256: &str) -> Result<InputKey, String> {
+fn build_input(target: &Path, found: &Target, draft: &DraftState) -> Result<InputKey, String> {
     let root = repo_root(target).ok_or_else(|| outside(target))?;
     let relative = target.strip_prefix(&root).map_err(|_| outside(target))?;
     let configured = found.build_dir.as_deref().unwrap_or_default();
@@ -380,8 +392,16 @@ fn build_input(target: &Path, found: &Target, draft_sha256: &str) -> Result<Inpu
         "arch": std::env::consts::ARCH,
     });
     let mut inputs = BTreeMap::new();
-    inputs.insert(DRAFT_INPUT.to_string(), draft_sha256.to_string());
+    inputs.insert(DRAFT_INPUT.to_string(), draft.sha256.clone());
+    inputs.insert(
+        REQUIREMENTS_INPUT.to_string(),
+        requirements_digest(&draft.requirements),
+    );
     inputs.insert(CMAKE_INPUT.to_string(), project_config_digest(&root)?);
+    inputs.insert(
+        COMPONENT_REGISTRY_INPUT.to_string(),
+        component_registry_digest(&root)?,
+    );
     Ok(InputKey {
         inputs,
         recipe_sha256: hash_text(&recipe.to_string()),
@@ -399,13 +419,46 @@ fn input_matches(target: &Path, current: &InputKey, recorded: &InputKey) -> bool
     }
     recorded.inputs.iter().all(|(name, expected)| {
         let actual = match name.as_str() {
-            DRAFT_INPUT | CMAKE_INPUT => current.inputs.get(name).cloned(),
+            DRAFT_INPUT | REQUIREMENTS_INPUT | CMAKE_INPUT | COMPONENT_REGISTRY_INPUT => {
+                current.inputs.get(name).cloned()
+            }
             _ => dependency_path(target, name)
                 .and_then(|path| std::fs::read(path).ok())
                 .map(|bytes| hash_bytes(&bytes)),
         };
         actual.as_deref() == Some(expected)
     })
+}
+
+fn requirements_text(requirements: &BuildRequirements) -> String {
+    let origins = requirements
+        .origins
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if origins.is_empty() {
+        origins
+    } else {
+        format!("{origins}\n")
+    }
+}
+
+fn requirements_digest(requirements: &BuildRequirements) -> String {
+    hash_text(&format!(
+        "exact={}\n{}",
+        requirements.exact,
+        requirements_text(requirements)
+    ))
+}
+
+fn component_registry_digest(root: &Path) -> Result<String, String> {
+    let registry = root.join("cmake/ClerBlockComponents.cmake");
+    match std::fs::read(&registry) {
+        Ok(bytes) => Ok(hash_bytes(&bytes)),
+        Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => Ok(hash_text("missing")),
+        Err(cause) => Err(format!("cannot read {}: {cause}", registry.display())),
+    }
 }
 
 fn dependency_path(target: &Path, name: &str) -> Option<PathBuf> {
@@ -775,7 +828,31 @@ fn replace_link(_target: &Path, _link: &Path) -> Result<(), String> {
     Err("temporary draft builds require a Unix-compatible filesystem".to_string())
 }
 
-fn draft_runner(found: &Target, source_dir: &Path, build_dir: &Path) -> Result<PathBuf, String> {
+fn write_requirements(
+    workspace: &Path,
+    requirements: &BuildRequirements,
+) -> Result<PathBuf, String> {
+    let dir = workspace.join("requirements");
+    private_dir(&dir)?;
+    let text = requirements_text(requirements);
+    let path = dir.join(format!("{}.origins", hash_text(&text)));
+    if matches!(std::fs::read_to_string(&path), Ok(ref current) if current == &text) {
+        return Ok(path);
+    }
+    let staged = path.with_extension("origins.next");
+    std::fs::write(&staged, &text)
+        .map_err(|cause| format!("cannot write {}: {cause}", staged.display()))?;
+    std::fs::rename(&staged, &path)
+        .map_err(|cause| format!("cannot replace {}: {cause}", path.display()))?;
+    Ok(path)
+}
+
+fn draft_runner(
+    found: &Target,
+    source_dir: &Path,
+    build_dir: &Path,
+    requirements_file: Option<&Path>,
+) -> Result<PathBuf, String> {
     std::fs::create_dir_all(build_dir)
         .map_err(|cause| format!("cannot create {}: {cause}", build_dir.display()))?;
     let mut configure = vec![
@@ -785,7 +862,18 @@ fn draft_runner(found: &Target, source_dir: &Path, build_dir: &Path) -> Result<P
         build_dir.display().to_string(),
         "-DCLER_BUILD_TESTS=OFF".to_string(),
         "-DCLER_BUILD_PERFORMANCE=OFF".to_string(),
+        format!("-DCLER_EDITOR_TARGET={}", found.name),
     ];
+    if let Some(requirements_file) = requirements_file {
+        configure.push(format!(
+            "-DCLER_EDITOR_REQUIREMENTS_FILE={}",
+            requirements_file.display()
+        ));
+        configure.push("-DCLER_EDITOR_REQUIREMENTS_EXACT=ON".to_string());
+    } else {
+        configure.push("-DCLER_EDITOR_REQUIREMENTS_FILE=".to_string());
+        configure.push("-DCLER_EDITOR_REQUIREMENTS_EXACT=OFF".to_string());
+    }
     if let Some(existing) = found.build_dir.as_deref() {
         let cache = Path::new(existing).join("CMakeCache.txt");
         for key in ["CMAKE_BUILD_TYPE", "CMAKE_C_COMPILER", "CMAKE_CXX_COMPILER"] {
@@ -836,6 +924,18 @@ fn draft_runner(found: &Target, source_dir: &Path, build_dir: &Path) -> Result<P
 
 fn cmake_quote(text: &str) -> String {
     format!("[==[{text}]==]")
+}
+
+fn private_dir(path: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(path)
+        .map_err(|cause| format!("cannot create {}: {cause}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+            .map_err(|cause| format!("cannot protect {}: {cause}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn cache_value(cache: &Path, key: &str) -> Option<String> {

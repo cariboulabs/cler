@@ -3,6 +3,7 @@ pub mod model;
 mod palette;
 pub mod palette_types;
 mod parse;
+mod requirements;
 mod sample_types;
 
 use std::fmt;
@@ -16,6 +17,7 @@ pub use apply::{
 pub use model::{FileModel, Site, SCHEMA_VERSION};
 pub use palette::{extract_specs, palette_specs, source_files};
 pub use palette_types::BlockSpec;
+pub use requirements::{block_requirements, required_block_origins, BlockRequirements};
 
 #[derive(Debug)]
 pub enum Error {

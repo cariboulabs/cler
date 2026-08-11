@@ -2,4 +2,4 @@
 add_library(blocks_filters INTERFACE)
 add_library(cler::blocks_filters ALIAS blocks_filters)
 
-target_link_libraries(blocks_filters INTERFACE liquid)
+target_link_libraries(blocks_filters INTERFACE cler::blocks_liquid)

@@ -804,9 +804,12 @@ fn template_param(param: Node, src: &str) -> Option<TemplateParam> {
 }
 
 fn attach_synonyms(root: Node, src: &str, specs: &mut [BlockSpec]) {
-    let mut cursor = root.walk();
-    for child in root.children(&mut cursor) {
+    let mut stack = vec![root];
+    while let Some(child) = stack.pop() {
         if child.kind() != "alias_declaration" {
+            let mut cursor = child.walk();
+            let children: Vec<Node> = child.children(&mut cursor).collect();
+            stack.extend(children.into_iter().rev());
             continue;
         }
         let declaration = text(child, src);
@@ -817,20 +820,28 @@ fn attach_synonyms(root: Node, src: &str, specs: &mut [BlockSpec]) {
             continue;
         };
         let value = value.trim().trim_end_matches(';').trim();
-        let Some(open) = value.find('<') else {
-            continue;
+        let (base, template_args) = match value.find('<') {
+            Some(open) => {
+                let Some(close) = value.rfind('>') else {
+                    continue;
+                };
+                (
+                    last_segment(value[..open].trim()),
+                    split_template_args(&value[open + 1..close]),
+                )
+            }
+            None => (last_segment(value), Vec::new()),
         };
-        let Some(close) = value.rfind('>') else {
-            continue;
-        };
-        let base = value[..open].trim();
         let Some(spec) = specs.iter_mut().find(|s| s.name == base) else {
             continue;
         };
-        spec.synonyms.push(Synonym {
+        let synonym = Synonym {
             name: name.trim().to_string(),
-            template_args: split_template_args(&value[open + 1..close]),
-        });
+            template_args,
+        };
+        if !spec.synonyms.contains(&synonym) {
+            spec.synonyms.push(synonym);
+        }
     }
 }
 

@@ -7,8 +7,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use cler_graph::{
-    extract_specs, palette_specs, BlockSpec, Command, DocumentSession, FileModel, Splice,
-    Transaction, SCHEMA_VERSION,
+    block_requirements, extract_specs, palette_specs, BlockSpec, Command, DocumentSession,
+    FileModel, Splice, Transaction, SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -31,7 +31,14 @@ pub struct DraftState {
     pub path: PathBuf,
     pub workspace: PathBuf,
     pub sha256: String,
+    pub requirements: BuildRequirements,
     pub artifacts: ArtifactCatalog,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BuildRequirements {
+    pub origins: Vec<String>,
+    pub exact: bool,
 }
 
 pub struct Document {
@@ -380,6 +387,7 @@ pub fn draft_state(docs: &Documents, path: &str) -> Result<DraftState, String> {
         path: doc.working.clone(),
         workspace,
         sha256: digest(doc.session.source()),
+        requirements: build_requirements(doc.session.source(), &doc.palette),
         artifacts: ArtifactCatalog::read(&doc.cache.build),
     })
 }
@@ -420,8 +428,18 @@ pub fn snapshot_draft(docs: &Documents, path: &str) -> Result<DraftState, String
             .ok_or_else(|| format!("{} has no workspace", snapshots.display()))?
             .to_path_buf(),
         sha256,
+        requirements: build_requirements(source, &doc.palette),
         artifacts: ArtifactCatalog::read(&doc.cache.build),
     })
+}
+
+fn build_requirements(source: &str, palette: &[BlockSpec]) -> BuildRequirements {
+    let requirements = block_requirements(source, palette);
+    let exact = !requirements.needs_fallback();
+    BuildRequirements {
+        origins: requirements.origins,
+        exact,
+    }
 }
 
 pub fn record_artifact(
