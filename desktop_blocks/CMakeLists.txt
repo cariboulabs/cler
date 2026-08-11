@@ -1,7 +1,14 @@
 add_library(cler_desktop_blocks INTERFACE)
 add_library(cler::desktop_blocks ALIAS cler_desktop_blocks)
 
-target_link_libraries(cler_desktop_blocks INTERFACE cler::cler)
+add_library(blocks_core INTERFACE)
+add_library(cler::blocks_core ALIAS blocks_core)
+target_link_libraries(blocks_core INTERFACE cler::cler)
+target_include_directories(blocks_core INTERFACE
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
+)
+
+target_link_libraries(cler_desktop_blocks INTERFACE cler::blocks_core)
 
 target_include_directories(cler_desktop_blocks INTERFACE #so people call #include "desktop_blocks/..."
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
@@ -25,12 +32,16 @@ if (CLER_BUILD_BLOCKS_LIQUID)
     GIT_PROGRESS   TRUE
   )
   FetchContent_MakeAvailable(liquid)
+
+  add_library(blocks_liquid INTERFACE)
+  add_library(cler::blocks_liquid ALIAS blocks_liquid)
+  target_link_libraries(blocks_liquid INTERFACE cler::blocks_core liquid)
 endif()
 
 #so any block that wants can use this..
 add_library(blocks_blob STATIC blob.cpp)
 add_library(cler::blocks_blob ALIAS blocks_blob)
-target_link_libraries(blocks_blob PUBLIC cler::cler)
+target_link_libraries(blocks_blob PUBLIC cler::blocks_core)
 
 add_subdirectory(sources)
 target_link_libraries(cler_desktop_blocks INTERFACE
@@ -82,3 +93,5 @@ if (CLER_BUILD_BLOCKS_GUI)
 else()
   message(STATUS "Skipping ADSB blocks because CLER_BUILD_BLOCKS_GUI is OFF")
 endif()
+
+cler_register_standard_block_components()

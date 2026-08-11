@@ -3,7 +3,8 @@ add_library(cler_blocks_adsb STATIC modes.c modes_2400.c cpr.c)
 add_library(cler::blocks_adsb ALIAS cler_blocks_adsb)
 
 target_link_libraries(cler_blocks_adsb PUBLIC
-    cler::cler
+    cler::blocks_core
+    cler::blocks_gui
 )
 
 target_include_directories(cler_blocks_adsb PUBLIC

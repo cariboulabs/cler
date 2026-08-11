@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use cler_flowgraph_gui::build::{self, Emit, Jobs};
-use cler_flowgraph_gui::document::DraftState;
+use cler_flowgraph_gui::document::{BuildRequirements, DraftState};
 use cler_flowgraph_gui::provenance::{ArtifactCatalog, ArtifactRecord, ArtifactStatus};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -37,6 +37,7 @@ fn draft_state(path: &Path, artifacts: ArtifactCatalog) -> DraftState {
         path: path.to_path_buf(),
         workspace: path.parent().expect("draft workspace").to_path_buf(),
         sha256: format!("{:x}", Sha256::digest(bytes)),
+        requirements: BuildRequirements::default(),
         artifacts,
     }
 }
@@ -263,9 +264,17 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
         "cmake_minimum_required(VERSION 3.16)\nproject(draft_test LANGUAGES CXX)\nadd_subdirectory(desktop_examples)\n",
     );
     write(
+        &root.join("cmake/ClerBlockComponents.cmake"),
+        "set(CLER_TEST_REGISTRY one)\n",
+    );
+    write(
         &root.join("desktop_examples/CMakeLists.txt"),
         "add_executable(hello_world hello_world.cpp)\n\
          target_include_directories(hello_world PRIVATE ${CMAKE_SOURCE_DIR}/include)\n\
+         if(CLER_EDITOR_REQUIREMENTS_EXACT)\n\
+           file(READ ${CLER_EDITOR_REQUIREMENTS_FILE} CLER_TEST_ORIGINS)\n\
+           file(WRITE ${CMAKE_BINARY_DIR}/editor-requirements.txt ${CLER_TEST_ORIGINS})\n\
+         endif()\n\
          add_custom_command(TARGET hello_world PRE_BUILD COMMAND ${CMAKE_COMMAND} -E sleep 1)\n",
     );
     let header = root.join("include/config.hpp");
@@ -282,7 +291,11 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
     let draft = workspace.join("hello_world.cpp");
     let draft_source = "#include \"config.hpp\"\nint main() { return EXIT_CODE; }\n";
     write(&draft, draft_source);
-    let state = draft_state(&draft, ArtifactCatalog::default());
+    let mut state = draft_state(&draft, ArtifactCatalog::default());
+    state.requirements = BuildRequirements {
+        origins: vec!["desktop_blocks/math".to_string()],
+        exact: true,
+    };
     let recorded: Arc<Mutex<Option<(String, ArtifactRecord)>>> = Arc::new(Mutex::new(None));
     let captured = recorded.clone();
     let jobs = Jobs::default();
@@ -342,6 +355,11 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
         std::fs::read_to_string(&source).expect("source"),
         "int main() { return 0; }\n"
     );
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("build/editor-requirements.txt"))
+            .expect("CMake received requirements"),
+        "desktop_blocks/math\n"
+    );
 
     let (name, artifact) = recorded
         .lock()
@@ -373,7 +391,27 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
     ));
     let mut artifacts = ArtifactCatalog::default();
     artifacts.put(name, artifact).expect("catalog accepts artifact");
-    let ready = draft_state(&draft, artifacts);
+    let mut ready = draft_state(&draft, artifacts);
+    ready.requirements = state.requirements.clone();
+    let mut changed_requirements = ready.clone();
+    changed_requirements.requirements = BuildRequirements {
+        origins: vec!["desktop_blocks/udp".to_string()],
+        exact: true,
+    };
+    assert!(matches!(
+        build::find_draft_target(&jobs, as_str(&source), &changed_requirements)
+            .expect("changed requirements")
+            .artifact,
+        ArtifactStatus::NeedsBuild { .. }
+    ));
+    let mut incomplete_requirements = ready.clone();
+    incomplete_requirements.requirements.exact = false;
+    assert!(matches!(
+        build::find_draft_target(&jobs, as_str(&source), &incomplete_requirements)
+            .expect("incomplete requirements")
+            .artifact,
+        ArtifactStatus::NeedsBuild { .. }
+    ));
     let (run_seen, run_emit) = recorder();
     build::start_draft(&jobs, as_str(&source), &ready, run_emit).expect("draft run starts");
     assert_eq!(await_event(&run_seen, "run-finished")["code"], 7);
@@ -398,15 +436,27 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
     ));
     write(&cmake_lists, &cmake_source);
 
+    let registry = root.join("cmake/ClerBlockComponents.cmake");
+    write(&registry, "set(CLER_TEST_REGISTRY two)\n");
+    assert!(matches!(
+        build::find_draft_target(&jobs, as_str(&source), &ready)
+            .expect("changed component registry")
+            .artifact,
+        ArtifactStatus::NeedsBuild { .. }
+    ));
+    write(&registry, "set(CLER_TEST_REGISTRY one)\n");
+
     write(&draft, "int main() { return 9; }\n");
-    let stale = draft_state(&draft, ready.artifacts.clone());
+    let mut stale = draft_state(&draft, ready.artifacts.clone());
+    stale.requirements = ready.requirements.clone();
     let (_, refused_emit) = recorder();
     let refusal = build::start_draft(&jobs, as_str(&source), &stale, refused_emit)
         .expect_err("a stale draft cannot run");
     assert!(refusal.contains("build the current draft"), "{refusal}");
 
     write(&draft, draft_source);
-    let restored = draft_state(&draft, ready.artifacts.clone());
+    let mut restored = draft_state(&draft, ready.artifacts.clone());
+    restored.requirements = ready.requirements.clone();
     assert!(matches!(
         build::find_draft_target(&jobs, as_str(&source), &restored)
             .expect("restored target")
