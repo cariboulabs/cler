@@ -159,6 +159,8 @@ private:
     static constexpr int HACKRF_LNA_STEP_DB = 8;
     static constexpr int HACKRF_VGA_MAX_DB  = 62;
     static constexpr int HACKRF_VGA_STEP_DB = 2;
+    static constexpr size_t HACKRF_USB_TRANSFER_SAMPLES = 131072;
+    static constexpr size_t HACKRF_RING_SAMPLES = 4 * HACKRF_USB_TRANSFER_SAMPLES;
 
     static int snap_gain(int requested_db, int max_db, int step_db) {
         int clamped = std::min(std::max(requested_db, 0), max_db);
@@ -205,7 +207,8 @@ private:
                 return SourceVariant(std::in_place_type<SourceHackRFBlock>, "HackRF",
                                      static_cast<uint64_t>(freq_hz + 0.5),
                                      static_cast<uint32_t>(rate_hz + 0.5),
-                                     lna_gain_db, vga_gain_db, amp_enable);
+                                     lna_gain_db, vga_gain_db, amp_enable,
+                                     HACKRF_RING_SAMPLES);
 #else
                 cler::panic("spike: built without HackRF support (libhackrf not found at configure time)");
 #endif
