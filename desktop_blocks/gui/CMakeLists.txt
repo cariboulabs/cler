@@ -76,6 +76,17 @@ target_link_libraries(blocks_gui PUBLIC
 # Add GLFW library directories for systems like macOS
 target_link_directories(blocks_gui PUBLIC ${GLFW_LIBRARY_DIRS})
 
+# Optional: PNG screenshots (request_screenshot with a .png path). Without zlib
+# those requests silently degrade to BMP, so this is a soft dependency.
+find_package(ZLIB QUIET)
+if (ZLIB_FOUND)
+  target_link_libraries(blocks_gui PRIVATE ZLIB::ZLIB)
+  target_compile_definitions(blocks_gui PRIVATE CLER_GUI_HAVE_ZLIB)
+  message(STATUS "blocks_gui: zlib found, PNG screenshots enabled")
+else()
+  message(STATUS "blocks_gui: zlib NOT found, screenshots fall back to BMP")
+endif()
+
 if(UNIX AND NOT APPLE)
   target_link_libraries(blocks_gui PUBLIC dl)
 endif()

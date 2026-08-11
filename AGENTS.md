@@ -140,6 +140,27 @@ cd build/desktop_examples
 ./udp                           # Network communication
 ```
 
+### Screenshotting a GUI app (unattended / from an agent)
+`GuiManager::request_screenshot(path)` grabs the next finished frame; a `.png`
+path writes a PNG (zlib, detected at build time), anything else a BMP. Prefer
+PNG — most tools, and Claude's own image reading, cannot open BMP.
+
+`spike` exposes this on the CLI so a script or agent can capture the trigger
+scope with no clicking. It needs a real display (`DISPLAY` set), takes the
+snapshot only once the trigger publishes a new frame, and always shows the
+scope regardless of the saved conf:
+```bash
+./spike -s hackrf --capture /tmp/shots \
+        --capture-on-trigger 1 --capture-timeout 20 \
+        --capture-force --capture-exit --capture-no-dat
+# stdout: capture: wrote /tmp/shots/spike_<ts>.png
+# exit 0 = captured on a trigger frame, 2 = timed out (snapshot taken anyway)
+```
+`--capture-force` fires the trigger itself, so a frame appears with no signal
+present; `--capture-no-dat` skips the companion `.dat` (the spectrogram blob
+makes it tens of MB). Capture runs never write `~/.cler_spike.conf`, so they
+can't clobber hand-tuned settings.
+
 ## 4. CMake Integration Patterns
 
 ### Library Targets

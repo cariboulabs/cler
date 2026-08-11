@@ -144,6 +144,16 @@ struct SpikeArgs {
     double history_s = 0.0;         // waterfall ring depth (s) at min frames/row; 0 = default
     bool   rate_from_cli = false;   // -r given explicitly: overrides saved rate_hz
     std::string device_address;
+
+    // Unattended capture (--capture DIR): snapshot on trigger frames, then
+    // optionally exit -- the path a script/agent uses instead of the button.
+    std::string capture_dir;
+    int    capture_frames    = 1;      // snapshots to take before stopping
+    double capture_timeout_s = 30.0;   // per-snapshot wait for a trigger frame
+    bool   capture_exit      = false;  // quit once the last snapshot is written
+    bool   capture_force     = false;  // force each capture (no RF needed)
+    bool   capture_no_dat    = false;  // screenshot only (the .dat can be tens of MB)
+    bool   capture_mode() const { return !capture_dir.empty(); }
 };
 
 static void print_usage(const char* prog) {
@@ -162,7 +172,27 @@ static void print_usage(const char* prog) {
               << "                    spectrogram ring; default ~4.1s at 1MS/s. Lower this\n"
               << "                    to reach a shorter history, e.g. --history 1)\n"
               << "  -d, --dev  ADDR   [uhd] USRP device address (default auto)\n"
-              << "  -h, --help\n" << std::endl;
+              << "  -h, --help\n"
+              << "\nUnattended capture (for scripts / agents; needs a display):\n"
+              << "      --capture DIR      Snapshot automatically into DIR (created if\n"
+              << "                         needed): <base>.png screenshot of the whole\n"
+              << "                         window + <base>.dat plot data, same as the\n"
+              << "                         Snapshot button. Prints each path on stdout.\n"
+              << "                         Forces the trigger scope visible and does NOT\n"
+              << "                         save settings back to the conf file.\n"
+              << "      --capture-on-trigger N  Snapshot on each of the next N trigger\n"
+              << "                         frames (default 1)\n"
+              << "      --capture-timeout S     Give up waiting for a trigger frame after\n"
+              << "                         S seconds; snapshots the current view anyway\n"
+              << "                         and exits 2 (default 30, 0 = wait forever)\n"
+              << "      --capture-force    Force the trigger for each snapshot, so a frame\n"
+              << "                         appears with no signal over the threshold\n"
+              << "      --capture-no-dat   Screenshot only, skip the .dat (which carries the\n"
+              << "                         spectrogram blob and can reach tens of MB)\n"
+              << "      --capture-exit     Quit once the last snapshot is written\n"
+              << "\n  e.g. " << prog << " -s hackrf --capture /tmp/shots \\\n"
+              << "            --capture-on-trigger 1 --capture-timeout 20 --capture-exit\n"
+              << std::endl;
 }
 
 static SpikeArgs parse_args(int argc, char** argv) {
@@ -189,7 +219,24 @@ static SpikeArgs parse_args(int argc, char** argv) {
         else if (arg == "-F" || arg == "--fft")  a.fft  = std::stoul(next());
         else if (arg == "-H" || arg == "--history") a.history_s = std::stod(next());
         else if (arg == "-d" || arg == "--dev" || arg == "--device") a.device_address = next();
+        else if (arg == "--capture") a.capture_dir = next();
+        else if (arg == "--capture-on-trigger") a.capture_frames = std::stoi(next());
+        else if (arg == "--capture-timeout") a.capture_timeout_s = std::stod(next());
+        else if (arg == "--capture-force")  a.capture_force  = true;
+        else if (arg == "--capture-no-dat") a.capture_no_dat = true;
+        else if (arg == "--capture-exit")  a.capture_exit  = true;
         else { std::cerr << "Unknown option: " << arg << "\n"; print_usage(argv[0]); exit(1); }
+    }
+    if (a.capture_frames < 1) {
+        std::cerr << "Error: --capture-on-trigger needs N >= 1\n"; exit(1);
+    }
+    if (a.capture_timeout_s < 0.0) {
+        std::cerr << "Error: --capture-timeout must be >= 0\n"; exit(1);
+    }
+    if (!a.capture_mode() &&
+        (a.capture_exit || a.capture_force || a.capture_no_dat ||
+         a.capture_frames != 1)) {
+        std::cerr << "Error: --capture-* options need --capture DIR\n"; exit(1);
     }
     return a;
 }
@@ -329,7 +376,7 @@ struct ControlPanel {
                 snapshot_requested = true;
             }
         }
-        help("Save a screenshot of the whole window (.bmp) plus the data behind "
+        help("Save a screenshot of the whole window (.png) plus the data behind "
              "the currently visible plots (.dat, self-describing text with a "
              "binary spectrogram blob) into the snapshot directory. The "
              "directory is asked for once and remembered in the conf file.");
@@ -562,6 +609,9 @@ struct ControlPanel {
     }
 
     const std::string& snapshot_dir() const { return _snapshot_dir; }
+    // Override the loaded/asked-for directory (--capture DIR). Call after
+    // load(); capture runs skip save(), so this never lands in the conf file.
+    void set_snapshot_dir(const std::string& dir) { _snapshot_dir = dir; }
     float  freq_mhz() const { return _freq_mhz; }
     double rate_hz()  const { return _rate_hz; }
 
@@ -908,7 +958,7 @@ static std::string config_path(const char* leaf) {
     return dir + "/" + leaf;
 }
 
-// Snapshot: <base>.bmp (screenshot, GuiManager) + <base>.dat (plot data); runs on the GUI thread.
+// Snapshot: <base>.png (screenshot, GuiManager) + <base>.dat (plot data); runs on the GUI thread.
 
 static bool file_exists(const std::string& p) {
     std::ifstream f(p);
@@ -924,7 +974,7 @@ static std::string snapshot_base_path(const std::string& dir) {
     std::strftime(ts, sizeof(ts), "%Y%m%d_%H%M%S", &tmv);
     const std::string stem = dir + "/spike_" + ts;
     std::string base = stem;
-    for (int i = 1; file_exists(base + ".bmp") || file_exists(base + ".dat"); ++i) {
+    for (int i = 1; file_exists(base + ".png") || file_exists(base + ".dat"); ++i) {
         if (i > 999) return std::string();
         base = stem + "_" + std::to_string(i);
     }
@@ -1114,6 +1164,20 @@ static int run_app(SourceBlock& source, ISource& src_if, SpikeArgs& args,
     const std::string settings_file = config_path(".cler_spike.conf");
     panel.load(settings_file);   // restore last session's settings if present
 
+    // Capture mode overrides two loaded settings: the destination directory, and
+    // the scope's visibility (a conf that hid it would yield useless snapshots).
+    if (args.capture_mode()) {
+        std::error_code ec;
+        std::filesystem::create_directories(args.capture_dir, ec);
+        if (!std::filesystem::is_directory(args.capture_dir)) {
+            std::cerr << "Error: --capture dir " << args.capture_dir
+                      << " is not usable: " << ec.message() << "\n";
+            return 1;
+        }
+        panel.set_snapshot_dir(args.capture_dir);
+        panel.show_scope = true;
+    }
+
     // Trigger is a sink: renders its own capture (oscilloscope-style), no downstream channel.
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source,  &fanout.in),
@@ -1141,6 +1205,27 @@ static int run_app(SourceBlock& source, ISource& src_if, SpikeArgs& args,
     ImVec2 tiled_work_size(0.0f, 0.0f);     // WorkSize used by the last tiling
     ImVec2 pending_work_size(0.0f, 0.0f);   // last observed WorkSize
     int    work_size_stable = 0;            // frames it has been unchanged
+
+    // --capture state. Snapshots wait for the trigger's published-frame counter
+    // to advance, so the image always shows a real capture rather than whatever
+    // the scope happened to hold at startup. The warmup lets the first tiling
+    // and the plots draw before anything is grabbed.
+    constexpr int kCaptureWarmupFrames = 45;   // ~0.75 s at 60 fps
+    int  capture_warmup     = 0;
+    int  captures_done      = 0;
+    bool capture_waiting    = false;          // baseline taken, watching for a new frame
+    bool capture_timed_out  = false;
+    bool capture_finished   = false;          // last snapshot written this frame
+    unsigned long capture_baseline = 0;
+    auto capture_wait_start = std::chrono::steady_clock::now();
+    if (args.capture_mode()) {
+        std::cout << "capture: dir " << args.capture_dir << ", waiting for "
+                  << args.capture_frames << " trigger frame(s)"
+                  << (args.capture_force ? " (forced)" : "") << std::endl;
+        if (!args.capture_exit)
+            std::cout << "capture: --capture-exit not given, window stays open "
+                         "after the last snapshot" << std::endl;
+    }
 
     while (!gui.should_close()) {
         // Hidden plots keep draining input (fanout never stalls) but skip FFT/copy work, so they can't jitter the trigger path.
@@ -1206,6 +1291,42 @@ static int run_app(SourceBlock& source, ISource& src_if, SpikeArgs& args,
         if (panel.show_spectrogram) spectrogram.render();
         if (panel.show_channelizer) channelizer.render();
 
+        // Drive unattended snapshots the same way the button does (set the
+        // one-shot flag), so both paths share the write code below.
+        if (args.capture_mode() && captures_done < args.capture_frames) {
+            if (capture_warmup < kCaptureWarmupFrames) {
+                ++capture_warmup;
+            } else {
+                if (!capture_waiting) {
+                    capture_baseline   = trigger.frame_count();
+                    capture_wait_start = std::chrono::steady_clock::now();
+                    capture_waiting    = true;
+                    if (args.capture_force) trigger.force_trigger();
+                }
+                const double waited = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - capture_wait_start).count();
+                const bool have_frame = trigger.frame_count() != capture_baseline;
+                const bool timed_out  = args.capture_timeout_s > 0.0 &&
+                                        waited >= args.capture_timeout_s;
+                if (have_frame || timed_out) {
+                    if (timed_out && !have_frame) {
+                        std::cerr << "capture: no trigger frame within "
+                                  << args.capture_timeout_s
+                                  << " s; snapshotting the current view anyway"
+                                  << std::endl;
+                        capture_timed_out = true;
+                    }
+                    panel.snapshot_requested = true;
+                    capture_waiting = false;
+                    ++captures_done;
+                    // A timeout means the trigger isn't firing, so don't sit
+                    // through the same wait again for the remaining frames.
+                    if (capture_timed_out) captures_done = args.capture_frames;
+                    if (captures_done >= args.capture_frames) capture_finished = true;
+                }
+            }
+        }
+
         // Consumed after render() (exported data matches this frame) and before end_frame()'s screenshot pass.
         if (panel.snapshot_requested) {
             panel.snapshot_requested = false;
@@ -1213,36 +1334,54 @@ static int run_app(SourceBlock& source, ISource& src_if, SpikeArgs& args,
             if (base.empty()) {
                 panel.set_status("Snapshot failed: no free filename in " +
                                  panel.snapshot_dir());
+                if (args.capture_mode())
+                    std::cerr << "capture: no free filename in "
+                              << panel.snapshot_dir() << std::endl;
             } else {
                 std::string err;
-                bool dat_ok = write_snapshot_dat(
-                    base + ".dat",
-                    panel.show_scope, panel.show_spectrum, panel.show_spectrogram,
-                    panel.rate_hz(),
-                    static_cast<double>(panel.detection_rate()),
-                    static_cast<double>(panel.freq_mhz()),
-                    trigger, spectrum, spectrogram, err);
-                gui.request_screenshot(base + ".bmp");   // written in end_frame()
+                const bool want_dat = !args.capture_no_dat;
+                bool dat_ok = true;
+                if (want_dat) {
+                    dat_ok = write_snapshot_dat(
+                        base + ".dat",
+                        panel.show_scope, panel.show_spectrum, panel.show_spectrogram,
+                        panel.rate_hz(),
+                        static_cast<double>(panel.detection_rate()),
+                        static_cast<double>(panel.freq_mhz()),
+                        trigger, spectrum, spectrogram, err);
+                }
+                gui.request_screenshot(base + ".png");   // written in end_frame()
                 // Absolute path so files are easy to locate even if snapshot dir was relative.
                 std::string full =
                     std::filesystem::absolute(base).lexically_normal().string();
-                if (dat_ok) {
-                    panel.set_status("Saved " + full + ".bmp/.dat");
-                } else {
-                    panel.set_status("Saved " + full + ".bmp; .dat failed: " + err);
+                const std::string tail = !want_dat ? std::string()
+                                       : dat_ok    ? std::string("/.dat")
+                                                   : "; .dat failed: " + err;
+                panel.set_status("Saved " + full + ".png" + tail);
+                // stdout so an unattended caller can read the path it just got.
+                if (args.capture_mode()) {
+                    std::cout << "capture: wrote " << full << ".png"
+                              << (!want_dat ? "" : dat_ok ? " (+ .dat)"
+                                                          : " (.dat failed)")
+                              << std::endl;
                 }
             }
         }
 
-        gui.end_frame();
+        gui.end_frame();   // the screenshot requested above is written in here
+        if (capture_finished && args.capture_exit) break;
         // Vsync already paces this loop; the tiny sleep just keeps CPU low if vsync is off/bypassed.
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 
     flowgraph.stop();
-    panel.save(settings_file);   // remember settings for next session
+    // Capture runs must not persist settings: --capture overrides the snapshot
+    // dir and scope visibility, and an unattended run would overwrite the
+    // user's tuned conf with them.
+    if (!args.capture_mode())
+        panel.save(settings_file);   // remember settings for next session
     std::cout << "Overflows: " << src_if.get_overflow_count() << std::endl;
-    return 0;
+    return capture_timed_out ? 2 : 0;
 }
 
 int main(int argc, char** argv) {

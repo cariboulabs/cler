@@ -116,6 +116,12 @@ struct TriggerBlock : public cler::BlockBase {
     void rearm()         { _rearm.store(true, std::memory_order_release); }
 
     State  state()       const { return _state.load(std::memory_order_acquire); }
+    // Published-frame counter, lock-free mirror of the snapshot's _frame_count
+    // (same value render() shows as "Frames"). Lets a poller notice a new
+    // capture without export_frame()'s copy or touching _snap_mutex.
+    unsigned long frame_count() const {
+        return _frames_published.load(std::memory_order_acquire);
+    }
     // Rate of the most recently requested config (ctor rate until set_config
     // is first called). max_window_ms() is the fixed sample capacity expressed
     // at that rate, so it shrinks as the requested rate rises.
@@ -454,6 +460,9 @@ private:
             _snap_level    = _active.threshold;
             ++_frame_count;
         }
+        // Published after the lock so a poller that sees the bump can then read
+        // a fully written snapshot.
+        _frames_published.store(_frame_count, std::memory_order_release);
         _holdoff_counter = _active.holdoff_samples;
         reset_edge_latch();
         if (_active.mode == Mode::Single) _state.store(State::Idle, std::memory_order_release);
@@ -487,6 +496,9 @@ private:
     float         _snap_level = 0.0f;
     size_t        _snap_rate = 1;   // rate the published frame was captured at
     unsigned long _frame_count = 0;
+    // Lock-free mirror of _frame_count for frame_count(); written by the block
+    // thread just after publish_frame() releases _snap_mutex.
+    std::atomic<unsigned long> _frames_published{0};
 
     static constexpr size_t MAX_PLOT_POINTS    = 8000;  // large windows decimate to a min/max envelope of this many points
     static constexpr size_t MAX_CAPTURE_SAMPLES = 16u * 1024 * 1024;  // ~256 MB across buffers

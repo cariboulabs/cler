@@ -25,8 +25,10 @@ public:
 
     // Request a one-shot screenshot of the next completed frame. The capture
     // happens inside end_frame() after the UI is drawn but before the buffer
-    // swap, and is written as a 24-bit uncompressed BMP to `path`. Failures
-    // are reported on stderr. GUI-thread only (same thread as end_frame()).
+    // swap. A `.png` path writes an 8-bit RGB PNG (needs zlib at build time,
+    // else it falls back to the same base name as .bmp); any other extension
+    // writes a 24-bit uncompressed BMP. Failures are reported on stderr.
+    // GUI-thread only (same thread as end_frame()).
     void request_screenshot(const std::string& path);
 
 private:
