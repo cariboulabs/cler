@@ -31,6 +31,7 @@ export type Cler = {
   calls: (cmd?: string) => Promise<Call[]>;
   forget: () => Promise<void>;
   openFile: (path: string) => Promise<string>;
+  emit: (event: string, payload: unknown) => Promise<void>;
   node: (blockVar: string) => Locator;
   handle: (blockVar: string, handleId: string) => Locator;
   dragWire: (from: string, to: string, targetHandle: string) => Promise<void>;
@@ -93,6 +94,12 @@ function shim(base: string): void {
     forget: () => calls.splice(0, calls.length),
     answerDialog: (value: unknown) => {
       dialogAnswer = value;
+    },
+    emit: (event: string, payload: unknown) => {
+      for (const [id, entry] of listeners) {
+        if (entry.event !== event) continue;
+        callbacks.get(entry.handler)?.({ event, id, payload });
+      }
     }
   };
 
@@ -194,6 +201,20 @@ export const test = base.extend<Cler>({
       await expect(shown).toHaveAttribute('title', resolve(path), { timeout: 30_000 });
       await expect(page.locator('.svelte-flow__node').first()).toBeVisible({ timeout: 30_000 });
       return resolve(path);
+    });
+  },
+
+  emit: async ({ page }, use) => {
+    await use(async (event: string, payload: unknown) => {
+      await page.evaluate(
+        ([name, sent]) =>
+          (
+            window as unknown as {
+              __CLER_E2E__: { emit: (event: string, payload: unknown) => void };
+            }
+          ).__CLER_E2E__.emit(name as string, sent),
+        [event, payload] as [string, unknown]
+      );
     });
   },
 

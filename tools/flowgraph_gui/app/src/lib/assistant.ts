@@ -1,6 +1,24 @@
+import type { Command } from './schema';
+
 export type Role = 'user' | 'assistant';
 
 export type Usage = { input_tokens: number; output_tokens: number };
+
+export type ProposalState = 'ready' | 'refused' | 'accepted' | 'rejected';
+
+export type DiffLine = { kind: 'add' | 'del' | 'meta' | 'same'; text: string };
+
+export type Proposal = {
+  rationale: string;
+  commands: Command[];
+  baseRevision: number;
+  dropped: number;
+  diff: DiffLine[];
+  splices: number;
+  refusal: string | null;
+  state: ProposalState;
+  appliedAt: number | null;
+};
 
 export type Message = {
   id: number;
@@ -8,6 +26,7 @@ export type Message = {
   text: string;
   usage: Usage | null;
   error: string | null;
+  proposal: Proposal | null;
 };
 
 export type Piece = { text: string; code: boolean; strong: boolean };
@@ -88,6 +107,54 @@ export function chips(selection: { label: string; var: string } | null): Chip[] 
       hint: selection ? '' : NO_SELECTION
     }
   ];
+}
+
+export function diffLines(text: string): DiffLine[] {
+  const raw = text.split('\n');
+  if (raw.at(-1) === '') raw.pop();
+  return raw.map((line) => {
+    if (line.startsWith('@@')) return { kind: 'meta' as const, text: line };
+    if (line.startsWith('+')) return { kind: 'add' as const, text: line.slice(1) };
+    if (line.startsWith('-')) return { kind: 'del' as const, text: line.slice(1) };
+    return { kind: 'same' as const, text: line.slice(1) };
+  });
+}
+
+function portOf(name: string, index: number | null): string {
+  return index === null ? name : `${name}[${index}]`;
+}
+
+function typeOf(type: string, args: string[]): string {
+  return args.length === 0 ? type : `${type}<${args.join(', ')}>`;
+}
+
+function counted(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+export function describeCommand(command: Command): string {
+  switch (command.command) {
+    case 'set_param':
+      return `set argument ${command.ctor_arg_index} of ${command.block} to ${command.new_text}`;
+    case 'set_template_arg':
+      return `set template argument ${command.template_arg_index} of ${command.block} to ${command.new_text}`;
+    case 'set_display_name':
+      return `rename ${command.block} to "${command.new_text}"`;
+    case 'set_config':
+      return `set ${command.path} to ${command.new_value}`;
+    case 'connect':
+      return `connect ${command.from} → ${command.to}.${portOf(command.port, command.port_index)}`;
+    case 'disconnect':
+      return `disconnect edge ${command.edge}`;
+    case 'add_block':
+      return `add ${typeOf(command.type, command.template_args)} as ${command.var_name}`;
+    case 'remove_from_graph':
+      return `take ${command.block} out of the graph, keeping its declaration`;
+    case 'delete_block':
+      return `delete ${command.block} and its declaration`;
+    case 'define_block':
+      return `define block ${command.name} with ${counted(command.inputs.length, 'input')} and ${counted(command.outputs, 'output')}`;
+  }
 }
 
 export function historyOf(messages: Message[]): { role: Role; text: string }[] {

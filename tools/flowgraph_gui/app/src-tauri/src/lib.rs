@@ -15,7 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use document::{DocumentState, Documents};
+use document::{DocumentState, Documents, Preview};
 
 const EXTERNAL_CHANGE_EVENT: &str = "document-changed-externally";
 
@@ -67,6 +67,16 @@ fn apply_commands(
     docs: State<'_, Documents>,
 ) -> Result<DocumentState, String> {
     document::apply(&docs, &path, base_revision, commands)
+}
+
+#[tauri::command]
+fn preview_commands(
+    path: String,
+    base_revision: u64,
+    commands: Vec<Value>,
+    docs: State<'_, Documents>,
+) -> Result<Preview, String> {
+    document::preview(&docs, &path, base_revision, commands)
 }
 
 #[tauri::command]
@@ -270,6 +280,7 @@ pub fn run() {
             open_document,
             close_document,
             apply_commands,
+            preview_commands,
             undo,
             redo,
             reload_document,

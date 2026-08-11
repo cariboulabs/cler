@@ -1,6 +1,6 @@
 <script lang="ts">
   import RailTabs, { type RailTab } from './RailTabs.svelte';
-  import { chips, render, type Message } from './assistant';
+  import { chips, describeCommand, render, type Message, type Proposal } from './assistant';
   import type { AssistantStatus } from './backend';
 
   type Props = {
@@ -11,11 +11,15 @@
     selection: { label: string; var: string } | null;
     enabled: boolean;
     note: string;
+    revision: number;
     ontoggle: () => void;
     ontab: (next: RailTab) => void;
     onask: (question: string) => void;
     onstop: () => void;
     onrecheck: () => void;
+    onaccept: (id: number) => void;
+    onreject: (id: number) => void;
+    onreplan: (id: number) => void;
   };
 
   const {
@@ -26,15 +30,26 @@
     selection,
     enabled,
     note,
+    revision,
     ontoggle,
     ontab,
     onask,
     onstop,
-    onrecheck
+    onrecheck,
+    onaccept,
+    onreject,
+    onreplan
   }: Props = $props();
 
   const TRANSIENT = 'this conversation is not saved — it goes when the file closes';
-  const EXPLAINS = 'explains only — it cannot edit the graph yet';
+  const EXPLAINS = 'explains only — this file is open read-only';
+  const PROPOSES = 'proposes changes — nothing is applied until you accept';
+  const STALE = 'the graph moved on since this was checked — re-check it before applying';
+  const CEILING = 'one proposal per answer: further tool calls in that turn were dropped';
+
+  function stale(proposal: Proposal): boolean {
+    return proposal.state === 'ready' && proposal.baseRevision !== revision;
+  }
 
   let draft = $state('');
   let list = $state<HTMLDivElement | null>(null);
@@ -44,6 +59,8 @@
   const starters = $derived(chips(selection));
   const canSend = $derived(ready && !streaming && draft.trim().length > 0);
   const hint = $derived(status === null ? 'looking for an API key…' : enabled ? '' : note);
+  const showRecord = $derived(messages.length > 0 || status?.available === true);
+  const showComposer = $derived(status === null || status.available);
 
   $effect(() => {
     void messages;
@@ -94,7 +111,7 @@
   <div class="body">
     <div class="model" data-testid="assistant-model">
       <span class="name">{status?.model ?? '—'}</span>
-      <span class="faint">{EXPLAINS}</span>
+      <span class="faint">{enabled ? PROPOSES : EXPLAINS}</span>
     </div>
 
     {#if status !== null && !status.available}
@@ -104,7 +121,9 @@
         <p class="faint">Every answer costs money on your own Anthropic key.</p>
         <button data-testid="assistant-recheck" onclick={onrecheck}>Check again</button>
       </div>
-    {:else}
+    {/if}
+
+    {#if showRecord}
       <div class="list" data-testid="assistant-messages" bind:this={list}>
         {#each messages as message (message.id)}
           {@const lines = render(message.text)}
@@ -126,6 +145,64 @@
             </div>
             {#if message.error}
               <p class="failed" data-testid="assistant-error">{message.error}</p>
+            {/if}
+            {#if message.proposal}
+              {@const plan = message.proposal}
+              <div class="plan" data-testid="assistant-proposal" data-state={plan.state}>
+                <p class="rationale" data-testid="proposal-rationale">{plan.rationale}</p>
+                <ul class="commands" data-testid="proposal-commands">
+                  {#each plan.commands as command, at (at)}
+                    <li data-testid="proposal-command">{describeCommand(command)}</li>
+                  {/each}
+                </ul>
+
+                {#if plan.refusal}
+                  <p class="refusal" data-testid="proposal-refusal">{plan.refusal}</p>
+                {:else if plan.diff.length === 0}
+                  <p class="faint" data-testid="proposal-empty">this changes nothing in the file</p>
+                {:else}
+                  <pre class="diff" data-testid="proposal-diff">{#each plan.diff as line, at (at)}<span
+                        class="row {line.kind}">{line.text}
+</span>{/each}</pre>
+                {/if}
+
+                {#if plan.dropped > 0}
+                  <p class="faint" data-testid="proposal-dropped">{CEILING}</p>
+                {/if}
+
+                {#if plan.state === 'accepted'}
+                  <p class="settled" data-testid="proposal-applied">
+                    applied at revision {plan.appliedAt}
+                  </p>
+                {:else if plan.state === 'rejected'}
+                  <p class="settled" data-testid="proposal-rejected">rejected — nothing was applied</p>
+                {:else if plan.state === 'refused'}
+                  <button data-testid="proposal-reject" onclick={() => onreject(message.id)}>
+                    Dismiss
+                  </button>
+                {:else if stale(plan)}
+                  <p class="faint" data-testid="proposal-stale">{STALE}</p>
+                  <div class="choose">
+                    <button data-testid="proposal-recheck" onclick={() => onreplan(message.id)}>
+                      Re-check
+                    </button>
+                    <button data-testid="proposal-reject" onclick={() => onreject(message.id)}>
+                      Reject
+                    </button>
+                  </div>
+                {:else}
+                  <div class="choose">
+                    <button
+                      class="primary"
+                      data-testid="proposal-accept"
+                      onclick={() => onaccept(message.id)}>Accept</button
+                    >
+                    <button data-testid="proposal-reject" onclick={() => onreject(message.id)}>
+                      Reject
+                    </button>
+                  </div>
+                {/if}
+              </div>
             {/if}
             {#if message.usage}
               <p class="usage" data-testid="assistant-usage">
@@ -151,7 +228,9 @@
           </div>
         {/if}
       </div>
+    {/if}
 
+    {#if showComposer}
       <div class="composer">
         {#if hint}
           <p class="faint" data-testid="assistant-hint">{hint}</p>
@@ -349,6 +428,87 @@
     margin: 0;
     font-size: 11px;
     color: var(--danger-fg);
+  }
+  .plan {
+    margin-top: var(--sp-1);
+    padding: var(--sp-2);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .plan[data-state='accepted'] {
+    border-color: var(--ok);
+  }
+  .plan[data-state='refused'] {
+    border-color: var(--danger-border);
+  }
+  .rationale {
+    margin: 0;
+    font-size: 12px;
+    color: var(--fg);
+  }
+  .commands {
+    margin: 0;
+    padding-left: var(--sp-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-0);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .refusal {
+    margin: 0;
+    padding: var(--sp-1) var(--sp-2);
+    font-size: 11px;
+    color: var(--danger-fg);
+    background: var(--danger-bg);
+    border: 1px solid var(--danger-border);
+    border-radius: var(--radius-xs);
+  }
+  .diff {
+    margin: 0;
+    max-height: 220px;
+    overflow: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.45;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    color: var(--muted);
+    white-space: pre;
+  }
+  .row {
+    display: block;
+    padding: 0 var(--sp-1);
+  }
+  .row.add {
+    color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 14%, transparent);
+  }
+  .row.del {
+    color: var(--danger-fg);
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+  }
+  .row.meta {
+    color: var(--faint);
+  }
+  .choose {
+    display: flex;
+    gap: var(--sp-2);
+  }
+  .choose button {
+    flex: 1;
+    padding: var(--sp-1) var(--sp-2);
+    font-size: 11px;
+  }
+  .settled {
+    margin: 0;
+    font-size: 11px;
+    color: var(--muted);
   }
   .usage {
     margin: 0;

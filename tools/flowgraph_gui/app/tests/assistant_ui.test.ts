@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { Page } from 'playwright';
-import { asks, boot, CASE, calls, emit, FAKE_PATH, NO_KEY, shot, useBrowser } from './ui';
+import {
+  asks,
+  bases,
+  boot,
+  CASE,
+  calls,
+  commands,
+  emit,
+  FAKE_PATH,
+  NO_KEY,
+  peeks,
+  shot,
+  useBrowser
+} from './ui';
 
 useBrowser();
 
@@ -312,6 +325,222 @@ describe('the assistant shares the inspector rail', () => {
       await page.click('aside.sidebar button.primary');
       await expect.poll(() => page.locator(MESSAGE).count()).toBe(0);
       expect(await page.locator('[data-testid="assistant-empty"]').count()).toBe(1);
+      await page.close();
+    },
+    CASE
+  );
+});
+
+/* ============================================================ proposals */
+
+const ACCEPT = '[data-testid="proposal-accept"]';
+const CARD = '[data-testid="assistant-proposal"]';
+const DIFF = '[data-testid="proposal-diff"]';
+const REJECT = '[data-testid="proposal-reject"]';
+
+const RENAME = [{ command: 'set_display_name', site: 0, block: 'source1', new_text: 'Chirp' }];
+
+const REWIRE = [
+  { command: 'disconnect', site: 0, edge: 3 },
+  { command: 'connect', site: 0, from: 'adder', to: 'plot', port: 'in', port_index: 0 }
+];
+
+async function propose(
+  page: Page,
+  sent: unknown[] = RENAME,
+  rationale = 'rename source1 so the legend reads right',
+  dropped = 0
+): Promise<void> {
+  const before = await page.locator(CARD).count();
+  await emit(page, 'assistant-proposal', {
+    path: FAKE_PATH,
+    rationale,
+    commands: sent,
+    dropped
+  });
+  await expect.poll(() => page.locator(CARD).count()).toBe(before + 1);
+}
+
+describe('a proposal is a checked diff the user accepts or rejects', () => {
+  it(
+    'renders the rationale, the commands in words, and the checked diff',
+    async () => {
+      const page = await boot();
+      await openAssistant(page);
+      await ask(page, 'rename the first source');
+      await stream(page, ['Renaming source1.']);
+      await done(page);
+
+      await propose(page);
+
+      expect(await page.textContent('[data-testid="proposal-rationale"]')).toBe(
+        'rename source1 so the legend reads right'
+      );
+      expect(await page.locator('[data-testid="proposal-command"]').textContent()).toBe(
+        'rename source1 to "Chirp"'
+      );
+      expect(await page.locator(`${DIFF} .row.del`).textContent()).toContain('"CWSource"');
+      expect(await page.locator(`${DIFF} .row.add`).textContent()).toContain('"Chirp"');
+      expect(await page.locator(`${DIFF} .row.meta`).textContent()).toContain('@@');
+
+      const checked = (await peeks(page)) as { commands: unknown[]; baseRevision: number }[];
+      expect(checked.length).toBe(1);
+      expect(checked[0]?.commands).toEqual(RENAME);
+      expect(checked[0]?.baseRevision).toBe(1);
+      expect(await commands(page)).toEqual([]);
+
+      expect(await page.locator(ACCEPT).count()).toBe(1);
+      expect(await page.locator(REJECT).count()).toBe(1);
+      await shot(page, 'assistant-proposal');
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'says every command of a multi-command change in the vocabulary of the editor',
+    async () => {
+      const page = await boot();
+      await openAssistant(page);
+      await propose(page, REWIRE, 'route the adder straight into the plot');
+
+      expect(await page.locator('[data-testid="proposal-command"]').allTextContents()).toEqual([
+        'disconnect edge 3',
+        'connect adder → plot.in[0]'
+      ]);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'accept applies exactly those commands at the revision it was checked against',
+    async () => {
+      const page = await boot();
+      await openAssistant(page);
+      await propose(page);
+
+      await page.click(ACCEPT);
+      await page.waitForSelector('[data-testid="proposal-applied"]');
+
+      expect(await commands(page)).toEqual(RENAME);
+      expect(await bases(page)).toEqual([1]);
+      expect(await page.textContent('[data-testid="proposal-applied"]')).toContain('revision 2');
+      expect(await page.locator(ACCEPT).count()).toBe(0);
+      expect(await page.locator(REJECT).count()).toBe(0);
+      await shot(page, 'assistant-proposal-applied');
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'reject settles the card in the history and sends nothing',
+    async () => {
+      const page = await boot();
+      await openAssistant(page);
+      await propose(page);
+
+      await page.click(REJECT);
+      await page.waitForSelector('[data-testid="proposal-rejected"]');
+
+      expect(await commands(page)).toEqual([]);
+      expect((await calls(page)).filter((name) => name === 'apply_commands').length).toBe(0);
+      expect(await page.locator(ACCEPT).count()).toBe(0);
+      expect(await page.locator(CARD).count()).toBe(1);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'a proposal the validator refuses shows why and offers no Accept',
+    async () => {
+      const page = await boot({
+        previewError: JSON.stringify({
+          error: 'references_outside_graph',
+          block: 'plot',
+          spans: [
+            { start: 10, end: 20 },
+            { start: 30, end: 40 }
+          ]
+        })
+      });
+      await openAssistant(page);
+      await propose(page, [{ command: 'delete_block', site: 0, block: 'plot' }], 'drop the plot');
+
+      const reason = await page.textContent('[data-testid="proposal-refusal"]');
+      expect(reason).toContain('plot is still used in 2 places outside the flowgraph');
+      expect(await page.locator(ACCEPT).count()).toBe(0);
+      expect(await page.locator(DIFF).count()).toBe(0);
+      expect(await page.locator('[data-testid="proposal-command"]').textContent()).toBe(
+        'delete plot and its declaration'
+      );
+
+      const listed = page.locator('[data-testid="delete-refusal"]');
+      expect(await listed.locator('button[data-reference]').count()).toBe(2);
+      expect(await listed.textContent()).toContain('plot cannot be deleted');
+      await shot(page, 'assistant-proposal-refused');
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'a card whose graph moved on goes stale, blocks accept, and re-checks on demand',
+    async () => {
+      const page = await boot();
+      await openAssistant(page);
+      await propose(page);
+      await propose(page, REWIRE, 'route the adder straight into the plot');
+
+      const second = page.locator(CARD).nth(1);
+      await page.locator(CARD).nth(0).locator(ACCEPT).click();
+      await page.waitForSelector('[data-testid="proposal-applied"]');
+
+      await expect.poll(() => second.locator('[data-testid="proposal-stale"]').count()).toBe(1);
+      expect(await second.locator(ACCEPT).count()).toBe(0);
+      expect(await second.locator('[data-testid="proposal-recheck"]').count()).toBe(1);
+
+      await second.locator('[data-testid="proposal-recheck"]').click();
+      await expect.poll(() => second.locator(ACCEPT).count()).toBe(1);
+
+      const checked = (await peeks(page)) as { baseRevision: number }[];
+      expect(checked.map((entry) => entry.baseRevision)).toEqual([1, 1, 2]);
+      expect(await commands(page)).toEqual(RENAME);
+
+      await second.locator(ACCEPT).click();
+      await expect.poll(() => second.locator('[data-testid="proposal-applied"]').count()).toBe(1);
+      expect(await bases(page)).toEqual([1, 2]);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'names the one-proposal-per-answer ceiling when the model called the tool twice',
+    async () => {
+      const page = await boot();
+      await openAssistant(page);
+      await propose(page, RENAME, 'rename source1', 1);
+
+      expect(await page.textContent('[data-testid="proposal-dropped"]')).toContain(
+        'one proposal per answer'
+      );
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'says it proposes changes, not that it only explains',
+    async () => {
+      const page = await boot();
+      await openAssistant(page);
+
+      expect(await page.textContent('[data-testid="assistant-model"]')).toContain(
+        'nothing is applied until you accept'
+      );
       await page.close();
     },
     CASE

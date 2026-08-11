@@ -32,6 +32,7 @@ const SURFACE = [
   'open_document',
   'close_document',
   'apply_commands',
+  'preview_commands',
   'undo',
   'redo',
   'reload_document',

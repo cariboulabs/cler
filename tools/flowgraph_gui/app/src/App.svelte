@@ -23,7 +23,7 @@
   import { type RailTab } from './lib/RailTabs.svelte';
   import RoutedEdge from './lib/RoutedEdge.svelte';
   import TypeLegend from './lib/TypeLegend.svelte';
-  import { historyOf, type Message, type Usage } from './lib/assistant';
+  import { diffLines, historyOf, type Message, type Proposal, type Usage } from './lib/assistant';
   import {
     applyCommands,
     assistantAsk,
@@ -31,6 +31,9 @@
     assistantStop,
     onAssistantDelta,
     onAssistantDone,
+    onAssistantProposal,
+    previewCommands,
+    type AssistantProposal,
     type AssistantStatus,
     buildTarget,
     checkDocument,
@@ -140,6 +143,7 @@
   const NO_SITE = 'no flowgraph site found in this file';
   const DROP_HINT = 'dropped — release on an input port to connect';
   const NO_SHELL = 'the assistant runs on your machine — open the desktop shell to use it';
+  const MOVED_ON = 'the graph moved on since that proposal — re-check it before applying';
   const RAIL_WIDTH = 44;
   const SIDEBAR_WIDTH = 280;
   const INSPECTOR_WIDTH = 320;
@@ -362,8 +366,9 @@
       if (payload.path !== doc.path) return;
       closeReply(payload.usage, payload.error);
     });
+    const plans = onAssistantProposal((payload) => void attachProposal(payload));
     return () => {
-      void Promise.all([deltas, ends]).then((pending) => {
+      void Promise.all([deltas, ends, plans]).then((pending) => {
         for (const unlisten of pending) unlisten();
       });
     };
@@ -485,8 +490,22 @@
     }
     if (pendingReply !== null) return;
     const history = historyOf(chat);
-    const asked: Message = { id: ++turns, role: 'user', text: question, usage: null, error: null };
-    const reply: Message = { id: ++turns, role: 'assistant', text: '', usage: null, error: null };
+    const asked: Message = {
+      id: ++turns,
+      role: 'user',
+      text: question,
+      usage: null,
+      error: null,
+      proposal: null
+    };
+    const reply: Message = {
+      id: ++turns,
+      role: 'assistant',
+      text: '',
+      usage: null,
+      error: null,
+      proposal: null
+    };
     chat = [...chat, asked, reply];
     pendingReply = reply.id;
     try {
@@ -494,6 +513,98 @@
     } catch (error) {
       closeReply(null, describeApplyError(error));
     }
+  }
+
+  async function vetted(plan: Proposal, planned: number): Promise<Proposal> {
+    try {
+      const checked = await previewCommands(doc.path, plan.commands, planned);
+      return {
+        ...plan,
+        baseRevision: planned,
+        diff: diffLines(checked.diff),
+        splices: checked.summary.splices,
+        refusal: null,
+        state: 'ready'
+      };
+    } catch (error) {
+      const record = errorRecord(error);
+      if (record?.error === 'references_outside_graph' && typeof record.block === 'string') {
+        refusal = { block: record.block, spans: spansOf(record) };
+      }
+      return {
+        ...plan,
+        baseRevision: planned,
+        diff: [],
+        splices: 0,
+        refusal: describeApplyError(error),
+        state: 'refused'
+      };
+    }
+  }
+
+  async function attachProposal(payload: AssistantProposal) {
+    if (!editable || payload.path !== doc.path) return;
+    const planned = doc.revision;
+    const plan = await vetted(
+      {
+        rationale: payload.rationale,
+        commands: payload.commands,
+        baseRevision: planned,
+        dropped: payload.dropped,
+        diff: [],
+        splices: 0,
+        refusal: null,
+        state: 'ready',
+        appliedAt: null
+      },
+      planned
+    );
+    const last = chat.at(-1);
+    if (last && last.role === 'assistant' && last.proposal === null) {
+      chat = [...chat.slice(0, -1), { ...last, proposal: plan }];
+      return;
+    }
+    chat = [
+      ...chat,
+      { id: ++turns, role: 'assistant', text: '', usage: null, error: null, proposal: plan }
+    ];
+  }
+
+  function planOf(id: number): Proposal | null {
+    return chat.find((message) => message.id === id)?.proposal ?? null;
+  }
+
+  function setProposal(id: number, next: Proposal) {
+    chat = chat.map((message) => (message.id === id ? { ...message, proposal: next } : message));
+  }
+
+  async function acceptProposal(id: number) {
+    const plan = planOf(id);
+    if (!plan || plan.state !== 'ready') return;
+    if (plan.baseRevision !== doc.revision) {
+      announce(MOVED_ON);
+      return;
+    }
+    const outcome = await submitAll(plan.commands);
+    const settled = planOf(id);
+    if (!settled) return;
+    if (!outcome.ok) {
+      setProposal(id, { ...settled, refusal: outcome.message, state: 'refused' });
+      return;
+    }
+    setProposal(id, { ...settled, state: 'accepted', appliedAt: doc.revision });
+  }
+
+  function rejectProposal(id: number) {
+    const plan = planOf(id);
+    if (!plan || plan.state === 'accepted') return;
+    setProposal(id, { ...plan, state: 'rejected' });
+  }
+
+  async function replanProposal(id: number) {
+    const plan = planOf(id);
+    if (!plan || plan.state !== 'ready') return;
+    setProposal(id, await vetted(plan, doc.revision));
   }
 
   function stopAssistant() {
@@ -1207,11 +1318,15 @@
       selection={chatSelection}
       enabled={editable}
       note={viewerNote}
+      revision={doc.revision}
       ontoggle={() => (rightOpen = !rightOpen)}
       ontab={pickRailTab}
       onask={(question) => void askAssistant(question)}
       onstop={stopAssistant}
       onrecheck={() => void refreshAssistant()}
+      onaccept={(id) => void acceptProposal(id)}
+      onreject={rejectProposal}
+      onreplan={(id) => void replanProposal(id)}
     />
   {:else}
     <Inspector

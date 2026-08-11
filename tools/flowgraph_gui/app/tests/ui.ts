@@ -26,6 +26,17 @@ export type FakeAssistant = { available: boolean; model: string; reason: string 
 
 export type Ask = { path: string; question: string; history: { role: string; text: string }[] };
 
+export type Peek = { commands: unknown[]; baseRevision: number };
+
+export const SAMPLE_DIFF = [
+  '@@ -12,3 +12,3 @@',
+  '     const size_t SPS = 1000;',
+  '-    SourceCWBlock<float> source1("CWSource", 1.0f, 1.0f, SPS);',
+  '+    SourceCWBlock<float> source1("Chirp", 1.0f, 1.0f, SPS);',
+  '     SourceCWBlock<float> source2("CWSource2", 1.0f, 20.0f, SPS);',
+  ''
+].join('\n');
+
 type Setup = {
   path: string;
   model: FileModel;
@@ -36,12 +47,15 @@ type Setup = {
   target: FakeTarget | null;
   assistant: FakeAssistant;
   askError: string | null;
+  previewError: string | null;
+  diff: string;
 };
 
 type Fake = {
   log: Command[][];
   calls: string[];
   asks: Ask[];
+  peeks: Peek[];
   bases: number[];
   source: () => string;
   refuse: (value: unknown) => void;
@@ -74,6 +88,7 @@ function installFake(setup: Setup) {
   const log: unknown[][] = [];
   const calls: string[] = [];
   const asks: unknown[] = [];
+  const peeks: unknown[] = [];
   const bases: number[] = [];
   const callbacks = new Map<number, (message: unknown) => void>();
   const listeners: { event: string; handler: number }[] = [];
@@ -319,6 +334,11 @@ function installFake(setup: Setup) {
       if (setup.askError !== null) throw setup.askError;
       return null;
     }
+    if (command === 'preview_commands') {
+      peeks.push({ commands: args.commands, baseRevision: args.baseRevision });
+      if (setup.previewError !== null) throw setup.previewError;
+      return { diff: setup.diff, summary: { splices: 1 } };
+    }
     if (command === 'open_document' && setup.openError !== null) throw setup.openError;
     if (command === 'palette') return JSON.parse(JSON.stringify(palette));
     if (command === 'find_target') {
@@ -365,6 +385,7 @@ function installFake(setup: Setup) {
     log,
     calls,
     asks,
+    peeks,
     bases,
     source: () => state.source,
     refuse: (value: unknown) => {
@@ -419,6 +440,8 @@ export type BootOptions = {
   target?: FakeTarget | null;
   assistant?: FakeAssistant;
   askError?: string;
+  previewError?: string;
+  diff?: string;
 };
 
 export const ASSISTANT_READY: FakeAssistant = {
@@ -468,7 +491,9 @@ export async function boot(options: BootOptions = {}): Promise<Page> {
     openError: options.openError ?? null,
     target: options.target === undefined ? NO_TARGET : options.target,
     assistant: options.assistant ?? ASSISTANT_READY,
-    askError: options.askError ?? null
+    askError: options.askError ?? null,
+    previewError: options.previewError ?? null,
+    diff: options.diff ?? SAMPLE_DIFF
   });
   await page.addInitScript(openInspector);
   await page.goto(origin, { waitUntil: 'load' });
@@ -492,6 +517,9 @@ export const calls = (page: Page) =>
 
 export const asks = (page: Page) =>
   page.evaluate(() => (window as unknown as FakeWindow).__fake.asks);
+
+export const peeks = (page: Page) =>
+  page.evaluate(() => (window as unknown as FakeWindow).__fake.peeks);
 
 export const bases = (page: Page) =>
   page.evaluate(() => (window as unknown as FakeWindow).__fake.bases);

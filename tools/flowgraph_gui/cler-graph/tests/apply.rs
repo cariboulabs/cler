@@ -1395,3 +1395,40 @@ fn the_cli_writes_atomically_and_prints_a_diff() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_preview_reports_the_splices_it_would_write_without_committing() {
+    let session = session("hello_world.cpp");
+    let before = session.source().to_string();
+
+    let pending = session
+        .preview(transaction(
+            0,
+            vec![Command::SetParam {
+                site: 0,
+                block: "source1".to_string(),
+                ctor_arg_index: 1,
+                new_text: "4.25f".to_string(),
+            }],
+        ))
+        .expect("preview plans");
+
+    assert!(pending.changes());
+    let splices = pending.splices();
+    assert_eq!(splices.len(), 1, "one param, one splice");
+    let splice = &splices[0];
+    assert_eq!(splice.text, "4.25f");
+    assert_eq!(&before[splice.start..splice.end], "1.0f");
+    assert_eq!(
+        pending.source(),
+        format!(
+            "{}{}{}",
+            &before[..splice.start],
+            splice.text,
+            &before[splice.end..]
+        ),
+        "the splices reproduce the pending source exactly"
+    );
+    assert_eq!(session.source(), before, "preview committed nothing");
+    assert_eq!(session.revision(), 0);
+}
