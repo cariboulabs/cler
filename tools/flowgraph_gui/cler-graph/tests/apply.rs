@@ -361,6 +361,30 @@ fn add_block_stages_a_declaration_without_wiring_it() {
 }
 
 #[test]
+fn adding_a_palette_block_adds_its_header_once() {
+    let session = session("hello_world.cpp");
+    let pending = session
+        .preview_with_includes(
+            transaction(
+                0,
+                vec![Command::AddBlock {
+                    site: 0,
+                    type_name: "KaiserLPFBlock".to_string(),
+                    template_args: vec!["float".to_string()],
+                    ctor_args: vec!["\"LPF\"".to_string()],
+                    var_name: "lpf".to_string(),
+                }],
+            ),
+            &["desktop_blocks/filters/kaiser_lpf.hpp".to_string()],
+        )
+        .expect("add block previews");
+    assert!(pending
+        .source()
+        .contains("#include \"desktop_blocks/filters/kaiser_lpf.hpp\""));
+    assert!(pending.source().contains("KaiserLPFBlock<float> lpf(\"LPF\");"));
+}
+
+#[test]
 fn remove_from_graph_keeps_the_declaration() {
     let mut session = session("hello_world.cpp");
     let before = session.source().to_string();

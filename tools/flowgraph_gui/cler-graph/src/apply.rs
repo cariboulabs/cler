@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tree_sitter::{Node, Tree};
 
 use crate::model::{Block, FileModel, Reason, Runner, Site, Span, SCHEMA_VERSION};
@@ -141,6 +142,101 @@ impl Splice {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourcePatch {
+    before_sha256: [u8; 32],
+    after_sha256: [u8; 32],
+    forward: Vec<Splice>,
+    reverse: Vec<Splice>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatchDirection {
+    Forward,
+    Reverse,
+}
+
+impl SourcePatch {
+    fn new(before: &str, after: &str, forward: Vec<Splice>) -> Result<Self, ApplyError> {
+        let forward = coalesce_splices(forward);
+        let replayed = merge(
+            before,
+            forward.iter().cloned().enumerate().collect::<Vec<_>>(),
+        )?
+        .0;
+        if replayed != after {
+            return Err(ApplyError::HistoryMismatch);
+        }
+        let mut reverse = Vec::with_capacity(forward.len());
+        let mut shift = 0isize;
+        for splice in &forward {
+            let replaced = before
+                .get(splice.start..splice.end)
+                .ok_or(ApplyError::StaleSpan {
+                    span: splice.span(),
+                })?;
+            let start = splice
+                .start
+                .checked_add_signed(shift)
+                .ok_or(ApplyError::HistoryMismatch)?;
+            reverse.push(Splice {
+                start,
+                end: start + splice.text.len(),
+                text: replaced.to_string(),
+            });
+            shift += splice.text.len() as isize - (splice.end - splice.start) as isize;
+        }
+        let restored = merge(
+            after,
+            reverse.iter().cloned().enumerate().collect::<Vec<_>>(),
+        )?
+        .0;
+        if restored != before {
+            return Err(ApplyError::HistoryMismatch);
+        }
+        Ok(Self {
+            before_sha256: source_digest(before),
+            after_sha256: source_digest(after),
+            forward,
+            reverse,
+        })
+    }
+
+    pub fn apply(&self, source: &str, direction: PatchDirection) -> Result<String, ApplyError> {
+        let (expected, splices) = match direction {
+            PatchDirection::Forward => (&self.before_sha256, &self.forward),
+            PatchDirection::Reverse => (&self.after_sha256, &self.reverse),
+        };
+        if &source_digest(source) != expected {
+            return Err(ApplyError::HistoryMismatch);
+        }
+        merge(
+            source,
+            splices.iter().cloned().enumerate().collect::<Vec<_>>(),
+        )
+        .map(|(next, _)| next)
+    }
+}
+
+fn coalesce_splices(splices: Vec<Splice>) -> Vec<Splice> {
+    let mut coalesced: Vec<Splice> = Vec::with_capacity(splices.len());
+    for splice in splices {
+        if let Some(previous) = coalesced.last_mut() {
+            if previous.end == splice.start {
+                previous.end = splice.end;
+                previous.text.push_str(&splice.text);
+                continue;
+            }
+        }
+        coalesced.push(splice);
+    }
+    coalesced
+}
+
+fn source_digest(source: &str) -> [u8; 32] {
+    Sha256::digest(source.as_bytes()).into()
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ApplyOutcome {
     pub revision: u64,
@@ -159,6 +255,7 @@ pub struct PendingApply {
     splices: Vec<Splice>,
     changed: bool,
     kind: PendingKind,
+    patch: Option<SourcePatch>,
 }
 
 impl PendingApply {
@@ -172,6 +269,10 @@ impl PendingApply {
 
     pub fn splices(&self) -> &[Splice] {
         &self.splices
+    }
+
+    pub fn patch(&self) -> Option<&SourcePatch> {
+        self.patch.as_ref()
     }
 }
 
@@ -264,6 +365,7 @@ pub enum ApplyError {
     },
     NothingToUndo,
     NothingToRedo,
+    HistoryMismatch,
 }
 
 impl fmt::Display for ApplyError {
@@ -1379,6 +1481,42 @@ fn merge(
     Ok((out, splices))
 }
 
+fn include_splices(source: &str, includes: &[String]) -> Vec<Splice> {
+    let mut missing: Vec<&str> = includes
+        .iter()
+        .map(String::as_str)
+        .filter(|path| {
+            !source.lines().any(|line| {
+                let line = line.trim();
+                line == format!("#include \"{path}\"") || line == format!("#include <{path}>")
+            })
+        })
+        .collect();
+    missing.sort_unstable();
+    missing.dedup();
+    if missing.is_empty() {
+        return Vec::new();
+    }
+    let mut at = 0;
+    let mut offset = 0;
+    for line in source.split_inclusive('\n') {
+        offset += line.len();
+        if line.trim_start().starts_with("#include") {
+            at = offset;
+        }
+    }
+    let mut text = if at > 0 && !source[..at].ends_with('\n') {
+        "\n".to_string()
+    } else {
+        String::new()
+    };
+    text.push_str(&missing
+        .into_iter()
+        .map(|path| format!("#include \"{path}\"\n"))
+        .collect::<String>());
+    vec![Splice::insert(at, text)]
+}
+
 impl DocumentSession {
     pub fn apply(&mut self, transaction: Transaction) -> Result<ApplyOutcome, ApplyError> {
         let pending = self.preview(transaction)?;
@@ -1386,6 +1524,14 @@ impl DocumentSession {
     }
 
     pub fn preview(&self, transaction: Transaction) -> Result<PendingApply, ApplyError> {
+        self.preview_with_includes(transaction, &[])
+    }
+
+    pub fn preview_with_includes(
+        &self,
+        transaction: Transaction,
+        includes: &[String],
+    ) -> Result<PendingApply, ApplyError> {
         if transaction.version != SCHEMA_VERSION {
             return Err(ApplyError::SchemaMismatch {
                 expected: SCHEMA_VERSION,
@@ -1409,6 +1555,10 @@ impl DocumentSession {
         for (index, command) in transaction.commands.iter().enumerate() {
             splices.extend(planner.plan(command)?.into_iter().map(|s| (index, s)));
         }
+        let include_index = transaction.commands.len();
+        splices.extend(include_splices(&self.source, includes).into_iter().map(|splice| {
+            (include_index, splice)
+        }));
         let (next, splices) = merge(&self.source, splices)?;
         if next == self.source {
             return Ok(PendingApply {
@@ -1417,6 +1567,7 @@ impl DocumentSession {
                 splices,
                 changed: false,
                 kind: PendingKind::Edit,
+                patch: None,
             });
         }
 
@@ -1427,29 +1578,60 @@ impl DocumentSession {
             return Err(ApplyError::ProducesParseError);
         }
 
+        let patch = SourcePatch::new(&self.source, &next, splices.clone())?;
         Ok(PendingApply {
             source: next,
             tree,
             splices,
             changed: true,
             kind: PendingKind::Edit,
+            patch: Some(patch),
+        })
+    }
+
+    pub fn preview_source(&self, source: String) -> Result<PendingApply, ApplyError> {
+        if source == self.source {
+            return Ok(PendingApply {
+                source,
+                tree: self.tree.clone(),
+                splices: Vec::new(),
+                changed: false,
+                kind: PendingKind::Edit,
+                patch: None,
+            });
+        }
+        let tree = parse_source(&source).map_err(|cause| ApplyError::Reparse {
+            detail: cause.to_string(),
+        })?;
+        if tree.root_node().has_error() {
+            return Err(ApplyError::ProducesParseError);
+        }
+        Ok(PendingApply {
+            source,
+            tree,
+            splices: Vec::new(),
+            changed: true,
+            kind: PendingKind::Edit,
+            patch: None,
         })
     }
 
     pub fn preview_undo(&self) -> Result<PendingApply, ApplyError> {
-        self.pending_snapshot(
-            self.undo.last(),
-            PendingKind::Undo,
-            ApplyError::NothingToUndo,
-        )
+        let patch = self
+            .history
+            .undo()
+            .ok_or(ApplyError::NothingToUndo)?
+            .clone();
+        self.pending_history(patch, PatchDirection::Reverse, PendingKind::Undo)
     }
 
     pub fn preview_redo(&self) -> Result<PendingApply, ApplyError> {
-        self.pending_snapshot(
-            self.redo.last(),
-            PendingKind::Redo,
-            ApplyError::NothingToRedo,
-        )
+        let patch = self
+            .history
+            .redo()
+            .ok_or(ApplyError::NothingToRedo)?
+            .clone();
+        self.pending_history(patch, PatchDirection::Forward, PendingKind::Redo)
     }
 
     pub fn commit(&mut self, pending: PendingApply) -> ApplyOutcome {
@@ -1459,23 +1641,35 @@ impl DocumentSession {
                 splices: pending.splices,
             };
         }
-        let previous = std::mem::replace(&mut self.source, pending.source);
+        self.source = pending.source;
         self.tree = pending.tree;
         self.revision += 1;
         match pending.kind {
             PendingKind::Edit => {
-                self.undo.push(previous);
-                self.redo.clear();
+                if let Some(patch) = pending.patch {
+                    self.history.push(patch);
+                }
             }
-            PendingKind::Undo => {
-                self.undo.pop();
-                self.redo.push(previous);
-            }
-            PendingKind::Redo => {
-                self.redo.pop();
-                self.undo.push(previous);
-            }
+            PendingKind::Undo => self.history.commit_undo(),
+            PendingKind::Redo => self.history.commit_redo(),
         }
+        ApplyOutcome {
+            revision: self.revision,
+            splices: pending.splices,
+        }
+    }
+
+    pub fn commit_untracked(&mut self, pending: PendingApply) -> ApplyOutcome {
+        if !pending.changed {
+            return ApplyOutcome {
+                revision: self.revision,
+                splices: pending.splices,
+            };
+        }
+        self.source = pending.source;
+        self.tree = pending.tree;
+        self.revision += 1;
+        self.history.clear();
         ApplyOutcome {
             revision: self.revision,
             splices: pending.splices,
@@ -1492,29 +1686,22 @@ impl DocumentSession {
         Ok(self.commit(pending).revision)
     }
 
-    fn pending_snapshot(
+    fn pending_history(
         &self,
-        snapshot: Option<&String>,
+        patch: SourcePatch,
+        direction: PatchDirection,
         kind: PendingKind,
-        missing: ApplyError,
     ) -> Result<PendingApply, ApplyError> {
-        let source = snapshot.ok_or(missing)?.clone();
-        let tree = parse_source(&source).map_err(|cause| ApplyError::Reparse {
-            detail: cause.to_string(),
-        })?;
-        Ok(PendingApply {
-            source,
-            tree,
-            splices: Vec::new(),
-            changed: true,
-            kind,
-        })
+        let source = patch.apply(&self.source, direction)?;
+        let mut pending = self.preview_source(source)?;
+        pending.kind = kind;
+        pending.patch = Some(patch);
+        Ok(pending)
     }
 
     pub fn reload(&mut self, text: impl Into<String>) -> Result<(u64, bool), ApplyError> {
         self.swap_source(text.into())?;
-        self.undo.clear();
-        self.redo.clear();
+        self.history.clear();
         Ok((self.revision, self.has_errors()))
     }
 

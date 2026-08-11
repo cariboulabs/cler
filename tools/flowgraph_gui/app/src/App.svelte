@@ -44,6 +44,7 @@
     inTauri,
     loadFixture,
     loadPalette,
+    moveNodes,
     onArtifactStatusChange,
     onExternalChange,
     onTaskEnd,
@@ -60,6 +61,7 @@
     spansOf,
     stopTarget,
     undoDocument,
+    type NodeMove,
     type TargetInfo,
     type TaskStarted,
     type TaskKind
@@ -552,6 +554,48 @@
     storeLayout(key);
   }
 
+  function movedNodes(
+    key: string,
+    current: { id: string; position: EdgePoint }[]
+  ): NodeMove[] {
+    loadLayout(key);
+    const stored = positionsByView.get(key);
+    if (!stored) return [];
+    return current.flatMap((node) => {
+      const before = stored.get(node.id);
+      const after = { x: node.position.x, y: node.position.y };
+      if (!before || (before.x === after.x && before.y === after.y)) return [];
+      return [{ node: node.id, from: { ...before }, to: after }];
+    });
+  }
+
+  function applyNodeMoves(key: string, moves: NodeMove[], direction: 'from' | 'to'): void {
+    loadLayout(key);
+    const positions = new Map(positionsByView.get(key) ?? []);
+    for (const movement of moves) positions.set(movement.node, { ...movement[direction] });
+    positionsByView.set(key, positions);
+    if (key === viewKey) {
+      nodes = nodes.map((node) => {
+        const position = positions.get(node.id);
+        return position ? { ...node, position: { ...position } } : node;
+      });
+    }
+  }
+
+  async function finishNodeDrag(
+    key: string,
+    current: { id: string; position: EdgePoint }[]
+  ): Promise<void> {
+    const moves = movedNodes(key, current);
+    rememberPositions(key, current);
+    if (!editable || moves.length === 0) return;
+    const outcome = await run((path) => moveNodes(path, cacheViewKey(key), moves));
+    if (!outcome.ok) {
+      applyNodeMoves(key, moves, 'from');
+      storeLayout(key);
+    }
+  }
+
   function restorePositions(key: string, current: BlockNodeType[]): BlockNodeType[] {
     loadLayout(key);
     const positions = positionsByView.get(key);
@@ -642,8 +686,32 @@
     const path = doc.path;
     const cached = structuredClone(flowCache);
     cacheTimer = setTimeout(() => {
+      cacheTimer = undefined;
       void queued(path, () => saveCache(path, cached)).catch(() => undefined);
     }, 120);
+  }
+
+  function cancelCacheWrite(): void {
+    if (cacheTimer) clearTimeout(cacheTimer);
+    cacheTimer = undefined;
+  }
+
+  function syncPositionCache(value: unknown): void {
+    const stored = cacheOf(value);
+    const views = { ...flowCache.views };
+    for (const [id, cached] of Object.entries(stored.views)) {
+      if (!cached.positions) continue;
+      const positions = new Map<string, EdgePoint>();
+      for (const [node, point] of Object.entries(cached.positions)) {
+        if (Number.isFinite(point.x) && Number.isFinite(point.y)) positions.set(node, point);
+      }
+      const key = `${doc.path}#${id}`;
+      positionsByView.set(key, positions);
+      loadedViews.add(key);
+      views[id] = { ...views[id], positions: Object.fromEntries(positions) };
+    }
+    flowCache = { ...flowCache, views };
+    if (viewKey) nodes = restorePositions(viewKey, nodes);
   }
 
   function clampContext() {
@@ -936,6 +1004,17 @@
   function run(action: (path: string) => Promise<DocumentState>): Promise<Outcome> {
     const path = doc.path;
     return queued(path, () => attempt(action, adopt));
+  }
+
+  function runHistory(action: (path: string) => Promise<DocumentState>): Promise<Outcome> {
+    cancelCacheWrite();
+    const path = doc.path;
+    return queued(path, () =>
+      attempt(action, (next) => {
+        syncPositionCache(next.cache);
+        adopt(next);
+      })
+    );
   }
 
   async function resync(message: string) {
@@ -1426,7 +1505,7 @@
           proOptions={{ hideAttribution: true }}
           ondrop={onDrop}
           ondragover={onDragOver}
-          onnodedragstop={({ nodes: moved }) => rememberPositions(viewKey, moved)}
+          onnodedragstop={({ nodes: moved }) => void finishNodeDrag(viewKey, moved)}
           onmoveend={(_event, viewport) => rememberViewport(viewKey, viewport)}
           onnodeclick={({ node }) => selectNode(node.id)}
           onedgeclick={({ edge }) => selectEdge(edge.id)}
@@ -1476,8 +1555,8 @@
             onbuild={() => void task('build', buildTarget)}
             onrun={() => void toggleRun()}
             onsave={() => void save()}
-            onundo={() => void run(undoDocument)}
-            onredo={() => void run(redoDocument)}
+            onundo={() => void runHistory(undoDocument)}
+            onredo={() => void runHistory(redoDocument)}
             onopen={() => void openFile()}
             ontoggleleft={() => (leftOpen = !leftOpen)}
             ontoggleright={() => (rightOpen = !rightOpen)}

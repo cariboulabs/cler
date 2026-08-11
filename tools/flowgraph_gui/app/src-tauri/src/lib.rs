@@ -82,6 +82,16 @@ fn preview_commands(
 }
 
 #[tauri::command]
+fn move_nodes(
+    path: String,
+    view: String,
+    moves: Vec<document::NodeMove>,
+    docs: State<'_, Documents>,
+) -> Result<DocumentState, String> {
+    document::move_nodes(&docs, &path, view, moves)
+}
+
+#[tauri::command]
 fn undo(path: String, docs: State<'_, Documents>) -> Result<DocumentState, String> {
     document::undo(&docs, &path)
 }
@@ -326,6 +336,7 @@ pub fn run() {
             close_document,
             apply_commands,
             preview_commands,
+            move_nodes,
             undo,
             redo,
             save_document,

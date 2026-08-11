@@ -67,6 +67,11 @@
   const anchor = $derived(hits[0]?.start ?? siteAnchor?.start ?? null);
   const tall = $derived(dragged ?? height);
   const failing = $derived(diagnostics.filter((entry) => entry.severity === 'error').length);
+  const diagnosticText = $derived(
+    diagnostics
+      .flatMap((entry) => [`${place(entry)}: ${entry.message}`, ...entry.notes])
+      .join('\n')
+  );
 
   $effect(() => {
     const wanted = open;
@@ -153,6 +158,15 @@
     const at = Number(piece.dataset.at);
     if (Number.isFinite(at)) onpick(at);
   }
+
+  async function copyDiagnostics() {
+    if (diagnosticText.length === 0) return;
+    try {
+      await navigator.clipboard.writeText(diagnosticText);
+    } catch {
+      // Clipboard access can be unavailable in a browser-only session.
+    }
+  }
 </script>
 
 <section
@@ -228,6 +242,11 @@
 
   {#if tab === 'diagnostics'}
     <div class="panel" data-testid="diagnostics-list">
+      {#if diagnostics.length > 0}
+        <button class="copy" data-testid="copy-diagnostics" onclick={() => void copyDiagnostics()}>
+          Copy diagnostics
+        </button>
+      {/if}
       {#each diagnostics as entry (entry.id)}
         <button data-diagnostic={entry.id} onclick={() => ondiagnostic(entry)}>
           <span class="dot {entry.severity}"></span>
@@ -396,6 +415,14 @@
   .panel button:hover {
     background: var(--bg-2);
     border-color: transparent;
+  }
+  .panel .copy {
+    align-self: flex-end;
+    width: auto;
+    margin-bottom: var(--sp-1);
+    border-color: var(--border);
+    color: var(--muted);
+    font-size: 11px;
   }
   .dot {
     flex: none;

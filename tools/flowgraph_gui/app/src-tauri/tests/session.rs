@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use cler_flowgraph_gui::assistant;
-use cler_flowgraph_gui::document::{self, Documents};
+use cler_flowgraph_gui::document::{self, Documents, NodeMove, Point};
 use serde_json::{json, Value};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -480,4 +480,134 @@ fn a_file_no_command_could_edit_never_reaches_the_model_with_a_tool() {
             .contains(assistant::TOOL_NAME),
         "a withheld tool must not reach the request body"
     );
+}
+
+fn movement(node: &str, from: (f64, f64), to: (f64, f64)) -> NodeMove {
+    NodeMove {
+        node: node.to_string(),
+        from: Point {
+            x: from.0,
+            y: from.1,
+        },
+        to: Point { x: to.0, y: to.1 },
+    }
+}
+
+#[test]
+fn source_and_position_actions_share_one_chronological_history() {
+    let path = temp_copy("hello_world.cpp");
+    let original = text(&path);
+    let docs = Documents::default();
+    let p = as_str(&path);
+    document::open(&docs, p).expect("open");
+    document::store_cache(
+        &docs,
+        p,
+        json!({
+            "views": {
+                "main": {
+                    "positions": {
+                        "source1": { "x": 10.0, "y": 20.0 },
+                        "source2": { "x": 30.0, "y": 40.0 }
+                    }
+                }
+            }
+        }),
+    )
+    .expect("initial positions");
+
+    let edited =
+        document::apply(&docs, p, 0, set_param("source1", 1, "4.25f")).expect("source action");
+    let moved = document::move_nodes(
+        &docs,
+        p,
+        "main".to_string(),
+        vec![
+            movement("source1", (10.0, 20.0), (110.0, 120.0)),
+            movement("source2", (30.0, 40.0), (130.0, 140.0)),
+        ],
+    )
+    .expect("position action");
+    assert_eq!(moved.revision, edited.revision);
+    assert!(moved.dirty);
+    assert_eq!(
+        moved.cache["views"]["main"]["positions"]["source1"]["x"],
+        110.0
+    );
+
+    let position_undone = document::undo(&docs, p).expect("undo grouped movement");
+    assert_eq!(position_undone.revision, edited.revision);
+    assert!(position_undone.source.contains("4.25f"));
+    assert_eq!(
+        position_undone.cache["views"]["main"]["positions"]["source1"]["x"],
+        10.0
+    );
+    assert_eq!(
+        position_undone.cache["views"]["main"]["positions"]["source2"]["x"],
+        30.0
+    );
+
+    let source_undone = document::undo(&docs, p).expect("undo source edit");
+    assert_eq!(source_undone.source, original);
+    assert!(!source_undone.dirty);
+    let source_redone = document::redo(&docs, p).expect("redo source edit");
+    assert!(source_redone.source.contains("4.25f"));
+    let position_redone = document::redo(&docs, p).expect("redo grouped movement");
+    assert_eq!(position_redone.revision, source_redone.revision);
+    assert_eq!(
+        position_redone.cache["views"]["main"]["positions"]["source2"]["x"],
+        130.0
+    );
+}
+
+#[test]
+fn a_position_action_after_undo_discards_the_redo_branch() {
+    let path = temp_copy("hello_world.cpp");
+    let docs = Documents::default();
+    let p = as_str(&path);
+    document::open(&docs, p).expect("open");
+    document::move_nodes(
+        &docs,
+        p,
+        "main".to_string(),
+        vec![movement("source1", (0.0, 0.0), (10.0, 10.0))],
+    )
+    .expect("move");
+    let undone = document::undo(&docs, p).expect("undo");
+    assert!(undone.can_redo);
+    let branched = document::move_nodes(
+        &docs,
+        p,
+        "main".to_string(),
+        vec![movement("source2", (0.0, 0.0), (20.0, 20.0))],
+    )
+    .expect("branch");
+    assert!(!branched.can_redo);
+    assert!(document::redo(&docs, p)
+        .expect_err("redo was discarded")
+        .contains("nothing_to_redo"));
+}
+
+#[test]
+fn disk_drift_allows_position_undo_before_refusing_source_undo() {
+    let path = temp_copy("hello_world.cpp");
+    let docs = Documents::default();
+    let p = as_str(&path);
+    document::open(&docs, p).expect("open");
+    document::apply(&docs, p, 0, set_param("source1", 1, "4.25f")).expect("source action");
+    document::move_nodes(
+        &docs,
+        p,
+        "main".to_string(),
+        vec![movement("source1", (0.0, 0.0), (10.0, 10.0))],
+    )
+    .expect("position action");
+
+    std::fs::write(&path, "external\n").expect("external edit");
+    assert!(document::note_disk_event(&docs, &path));
+    let undone = document::undo(&docs, p).expect("position undo");
+    assert!(undone.can_undo);
+    assert!(document::undo(&docs, p)
+        .expect_err("source undo must refuse disk drift")
+        .contains("changed on disk"));
 }

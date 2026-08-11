@@ -4,6 +4,7 @@ import { lineOfOffset, type Span } from '../src/lib/schema';
 import {
   anchor,
   boot,
+  calls,
   CASE,
   centre,
   commands,
@@ -29,6 +30,44 @@ import {
 } from './ui';
 
 useBrowser();
+
+describe('position history', () => {
+  it(
+    'groups a completed drag and replays it through shared undo and redo',
+    async () => {
+      const page = await boot();
+      const selector = '.svelte-flow__node[data-id="adder"]';
+      const node = page.locator(selector);
+      const before = await node.boundingBox();
+      if (!before) throw new Error('adder has no box');
+      const start = await centre(page, `${selector} header`);
+      await page.mouse.move(start.x, start.y);
+      await page.mouse.down();
+      await page.mouse.move(start.x + 160, start.y + 90, { steps: 12 });
+      await page.mouse.up();
+
+      await expect.poll(async () => (await calls(page)).includes('move_nodes')).toBe(true);
+      const moved = await node.boundingBox();
+      if (!moved) throw new Error('moved adder has no box');
+      expect(Math.abs(moved.x - before.x)).toBeGreaterThan(100);
+      expect(Math.abs(moved.y - before.y)).toBeGreaterThan(50);
+
+      await page.keyboard.press('Control+z');
+      await expect.poll(async () => (await node.boundingBox())?.x).toBeCloseTo(before.x, 0);
+      await expect.poll(async () => (await node.boundingBox())?.y).toBeCloseTo(before.y, 0);
+      await page.keyboard.press('Control+Shift+z');
+      await expect.poll(async () => (await node.boundingBox())?.x).toBeCloseTo(moved.x, 0);
+      await expect.poll(async () => (await node.boundingBox())?.y).toBeCloseTo(moved.y, 0);
+      expect((await calls(page)).filter((call) => ['move_nodes', 'undo', 'redo'].includes(call))).toEqual([
+        'move_nodes',
+        'undo',
+        'redo'
+      ]);
+      await page.close();
+    },
+    CASE
+  );
+});
 
 
 /* ================================================================ palette */

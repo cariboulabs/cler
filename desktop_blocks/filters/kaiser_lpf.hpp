@@ -17,9 +17,9 @@ struct KaiserLPFBlock : public cler::BlockBase {
     //   transition_bw    : Transition bandwidth in Hz (e.g., 20e3 for 20 kHz)
     //   attenuation_db   : Stopband attenuation in dB (default: 60)
     KaiserLPFBlock(const char* name,
-                   double sample_rate,
-                   double cutoff_freq,
-                   double transition_bw,
+                   double sample_rate = 1.0e6,
+                   double cutoff_freq = 100.0e3,
+                   double transition_bw = 20.0e3,
                    double attenuation_db = 60.0,
                    size_t buffer_size = 0)
         : cler::BlockBase(name),
