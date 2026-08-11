@@ -16,6 +16,9 @@
 #include <cstring>
 
 struct SourceHackRFBlock : public cler::BlockBase {
+    static constexpr size_t USB_TRANSFER_SAMPLES = 131072;
+    static constexpr size_t DEFAULT_RING_SAMPLES = 4 * USB_TRANSFER_SAMPLES;
+
     SourceHackRFBlock(const char* name,
                       uint64_t freq_hz,
                       uint32_t samp_rate_hz,
@@ -24,7 +27,7 @@ struct SourceHackRFBlock : public cler::BlockBase {
                       bool amp_enable = false, // Enable RX amp (adds ~14dB)
                       size_t buffer_size = 0)
         : cler::BlockBase(name),
-          _iq(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size),
+          _iq(buffer_size == 0 ? DEFAULT_RING_SAMPLES : buffer_size),
           _freq_hz(freq_hz),
           _samp_rate_hz(samp_rate_hz),
           _lna_gain_db(lna_gain_db),
