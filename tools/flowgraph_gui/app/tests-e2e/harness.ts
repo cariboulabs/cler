@@ -196,7 +196,7 @@ export const test = base.extend<Cler>({
           ).__CLER_E2E__.answerDialog(answer),
         path
       );
-      await page.locator('aside.sidebar button.primary').click();
+      await page.getByTestId('open').click();
       const shown = page.locator('aside.sidebar .path');
       await expect(shown).toHaveAttribute('title', resolve(path), { timeout: 30_000 });
       await expect(page.locator('.svelte-flow__node').first()).toBeVisible({ timeout: 30_000 });

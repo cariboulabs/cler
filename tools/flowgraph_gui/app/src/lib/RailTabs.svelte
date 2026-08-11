@@ -1,5 +1,5 @@
 <script lang="ts">
-  export type RailTab = 'inspector' | 'assistant';
+  export type RailTab = 'inspector' | 'library' | 'assistant';
 
   type Props = { tab: RailTab; ontab: (next: RailTab) => void };
 
@@ -7,6 +7,7 @@
 
   const TABS: [RailTab, string, string][] = [
     ['inspector', 'Inspector', 'Block parameters and ports  ]'],
+    ['library', 'Library', 'Search and place blocks'],
     ['assistant', 'Assistant', 'Ask about this flowgraph  Ctrl+J']
   ];
 </script>

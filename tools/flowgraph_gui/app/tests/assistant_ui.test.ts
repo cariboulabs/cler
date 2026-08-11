@@ -322,7 +322,7 @@ describe('the assistant shares the inspector rail', () => {
       await page.click('[data-testid="rail-tab-assistant"]');
       expect(await page.locator(MESSAGE).count()).toBe(2);
 
-      await page.click('aside.sidebar button.primary');
+      await page.click('[data-testid="open"]');
       await expect.poll(() => page.locator(MESSAGE).count()).toBe(0);
       expect(await page.locator('[data-testid="assistant-empty"]').count()).toBe(1);
       await page.close();

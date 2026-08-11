@@ -113,6 +113,10 @@ function installFake(setup: Setup) {
         found.value = textOf(command);
         continue;
       }
+      if (command.command === 'disconnect') {
+        site.edges.splice(command.edge as number, 1);
+        continue;
+      }
       const block = site.blocks.find((candidate) => candidate.var === command.block);
       if (!block) throw new Error(`no block ${String(command.block)}`);
       let before = '';
@@ -637,6 +641,81 @@ describe('A. view state survives an ordinary edit', () => {
     },
     CASE
   );
+
+  it(
+    'A6 keeps the mount, positions and viewport while an edge is deleted',
+    async () => {
+      const page = await boot();
+      await page.click('[data-testid="zoom-in"]');
+      await page.waitForTimeout(300);
+      await page.evaluate(() => {
+        document.querySelector('.svelte-flow')?.setAttribute('data-mount-probe', 'stable');
+      });
+      const viewport = () =>
+        page.evaluate(
+          () =>
+            (document.querySelector('.svelte-flow__viewport') as HTMLElement | null)?.style
+              .transform ?? 'none'
+        );
+      const beforeViewport = await viewport();
+      const beforePositions = await positions(page);
+
+      await page
+        .locator(
+          '.svelte-flow__edge[data-id^="source1->adder"] .svelte-flow__edge-interaction'
+        )
+        .click({ button: 'right' });
+      await page.click('[data-testid="menu-disconnect"]');
+      await expect.poll(() => applyCount(page)).toBe(1);
+      await page.waitForTimeout(500);
+
+      expect(await viewport()).toBe(beforeViewport);
+      expect(await positions(page)).toEqual(beforePositions);
+      expect(
+        await page.evaluate(
+          () => document.querySelector('.svelte-flow')?.getAttribute('data-mount-probe')
+        )
+      ).toBe('stable');
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'A7 restores positions and viewport after switching away from a site',
+    async () => {
+      const page = await boot({ model: uhdModel() });
+      const spectrum = page.locator('.svelte-flow__node[data-id="spectrum"]');
+      const box = await spectrum.boundingBox();
+      if (!box) throw new Error('spectrum has no bounds');
+      await page.mouse.move(box.x + box.width / 2, box.y + 8);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + 140, box.y + 148, { steps: 12 });
+      await page.mouse.up();
+      await page.click('[data-testid="zoom-in"]');
+      await page.waitForTimeout(400);
+
+      const moved = (await positions(page)).spectrum;
+      const viewport = () =>
+        page.evaluate(
+          () =>
+            (document.querySelector('.svelte-flow__viewport') as HTMLElement | null)?.style
+              .transform ?? 'none'
+        );
+      const movedViewport = await viewport();
+
+      await page.selectOption('[data-testid="site-select"]', { index: 1 });
+      await page.waitForSelector('.svelte-flow__node[data-id="chirp"]');
+      await page.selectOption('[data-testid="site-select"]', { index: 0 });
+      await page.waitForSelector('.svelte-flow__node[data-id="usrp_source"]');
+      await page.waitForTimeout(400);
+
+      expect((await positions(page)).spectrum).toBe(moved);
+      expect(await viewport()).toBe(movedViewport);
+      await page.close();
+    },
+    CASE
+  );
 });
 
 /* ================================================= 2. draft / error leakage */
@@ -711,7 +790,7 @@ describe('B. no state survives the block it belongs to', () => {
         (next) => (window as unknown as FakeWindow).__fake.setPath(next),
         OTHER_PATH
       );
-      await page.click('button.primary');
+      await page.click('[data-testid="open"]');
       await page.waitForSelector(`.path[title="${OTHER_PATH}"]`);
       await select(page, 'source1');
       expect(await page.locator('[data-error="source1.ctor.1"]').count()).toBe(0);
@@ -1507,7 +1586,7 @@ describe('G. fixture mode never reaches for a backend', () => {
 
       await page.click('.svelte-flow__node[data-id="fanout"]');
       await page.waitForSelector('.inspector input');
-      await page.click('button.primary');
+      await page.click('[data-testid="open"]');
       await page.locator('[data-testid="undo"]').click({ force: true });
       await page.locator('[data-testid="redo"]').click({ force: true });
       await page.selectOption('.sidebar select >> nth=0', { index: 1 });

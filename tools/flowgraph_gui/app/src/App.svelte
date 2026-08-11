@@ -4,10 +4,11 @@
     MiniMap,
     SvelteFlow,
     type EdgeTypes,
-    type NodeTypes
+    type NodeTypes,
+    type Viewport
   } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import Actions, {
     type Alert,
     type EdgeInfo,
@@ -147,7 +148,6 @@
   const FIT_GAP = 4;
   const LEFT_PANEL = 'cler.panel.left';
   const RIGHT_PANEL = 'cler.panel.right';
-  const BLOCKS_PANEL = 'cler.panel.blocks';
   const DRAWER_PANEL = 'cler.panel.drawer';
   const DRAWER_HEIGHT = 'cler.panel.drawer.height';
   const DEFAULT_DRAWER_HEIGHT = 260;
@@ -182,12 +182,12 @@
   let viewKey = $state('');
   let leftOpen = $state(storedOpen(LEFT_PANEL, true));
   let rightOpen = $state(storedOpen(RIGHT_PANEL, false));
-  let blocksOpen = $state(storedOpen(BLOCKS_PANEL, true));
   let drawerOpen = $state(storedOpen(DRAWER_PANEL, false));
   let drawerHeight = $state(storedHeight());
   let stashed = $state.raw<[boolean, boolean, boolean] | null>(null);
   let failure = $state<string | null>(null);
   let drawer = $state<typeof CodeDrawer | null>(null);
+  let actions = $state<Actions | null>(null);
   let inspector = $state<Inspector | null>(null);
   let adder = $state<AddBlock | null>(null);
   let specs = $state.raw<BlockSpec[]>([]);
@@ -211,6 +211,8 @@
   let opening = 0;
   let alerted = 0;
   let pinned = new Map<string, EdgePoint>();
+  const positionsByView = new Map<string, Map<string, EdgePoint>>();
+  const viewportsByView = new Map<string, Viewport>();
 
   const editable = $derived(desktop && opened !== null);
   const site = $derived<Site | undefined>(doc.model.sites[siteIndex]);
@@ -291,7 +293,6 @@
 
   $effect(() => storeOpen(LEFT_PANEL, leftOpen));
   $effect(() => storeOpen(RIGHT_PANEL, rightOpen));
-  $effect(() => storeOpen(BLOCKS_PANEL, blocksOpen));
   $effect(() => storeOpen(DRAWER_PANEL, drawerOpen));
   $effect(() => localStorage.setItem(DRAWER_HEIGHT, String(drawerHeight)));
 
@@ -400,20 +401,51 @@
       const merged = mergeProjection(untrack(() => ({ nodes, edges })), fresh, pinned);
       nodes = merged.nodes;
       edges = merged.edges;
+      rememberPositions(key, merged.nodes);
       return;
     }
     let stale = false;
     pinned = new Map();
-    layout(fresh).then((laid) => {
+    layout(fresh).then(async (laid) => {
       if (stale) return;
-      nodes = laid.nodes;
+      nodes = restorePositions(key, laid.nodes);
       edges = laid.edges;
+      rememberPositions(key, nodes);
       viewKey = key;
+      await tick();
+      if (stale) return;
+      void actions?.showView(viewportsByView.get(key) ?? null);
     });
     return () => {
       stale = true;
     };
   });
+
+  function rememberPositions(
+    key: string,
+    current: { id: string; position: EdgePoint }[]
+  ): void {
+    if (!key) return;
+    const positions = positionsByView.get(key) ?? new Map<string, EdgePoint>();
+    for (const node of current) {
+      positions.set(node.id, { x: node.position.x, y: node.position.y });
+    }
+    positionsByView.set(key, positions);
+  }
+
+  function restorePositions(key: string, current: BlockNodeType[]): BlockNodeType[] {
+    const positions = positionsByView.get(key);
+    if (!positions) return current;
+    return current.map((node) => {
+      const position = positions.get(node.id);
+      return position ? { ...node, position: { x: position.x, y: position.y } } : node;
+    });
+  }
+
+  function rememberViewport(key: string, viewport: Viewport): void {
+    if (!key) return;
+    viewportsByView.set(key, { x: viewport.x, y: viewport.y, zoom: viewport.zoom });
+  }
 
   function clampContext() {
     const count = doc.model.sites.length;
@@ -934,6 +966,7 @@
     pinned.set(varName, at);
     const outcome = await submit(addBlockCommand(siteIndex, spec, form));
     if (outcome.ok) {
+      rightTab = 'inspector';
       selectNode(varName);
       return null;
     }
@@ -1043,8 +1076,6 @@
     </div>
 
     <div class="body">
-      <button class="primary" onclick={openFile}>Open file…</button>
-
       <section>
         <h2>File</h2>
         <div class="path" title={doc.path}>{doc.path.split('/').pop() ?? doc.path}</div>
@@ -1061,23 +1092,13 @@
       {#if doc.model.sites.length > 1}
         <section>
           <h2>Site</h2>
-          <select bind:value={siteIndex}>
+          <select data-testid="site-select" bind:value={siteIndex}>
             {#each doc.model.sites as candidate, i (viewIds[i] ?? i)}
               <option value={i}>{siteLabel(candidate)}</option>
             {/each}
           </select>
         </section>
       {/if}
-
-      <Palette
-        specs={shownSpecs}
-        documentPath={doc.path}
-        enabled={editable}
-        note={viewerNote}
-        open={blocksOpen}
-        ontoggle={() => (blocksOpen = !blocksOpen)}
-        onpick={placeSpec}
-      />
 
       {#if site}
         <section>
@@ -1145,14 +1166,12 @@
     {/if}
 
     <div class="canvas" data-canvas tabindex="-1">
-      {#key viewKey}
-        <SvelteFlow
+      <SvelteFlow
           bind:nodes
           bind:edges
           {nodeTypes}
           {edgeTypes}
           colorMode="dark"
-          fitView
           fitViewOptions={{ padding: fitPadding }}
           nodesConnectable={editable}
           elementsSelectable={true}
@@ -1161,6 +1180,8 @@
           proOptions={{ hideAttribution: true }}
           ondrop={onDrop}
           ondragover={onDragOver}
+          onnodedragstop={({ nodes: moved }) => rememberPositions(viewKey, moved)}
+          onmoveend={(_event, viewport) => rememberViewport(viewKey, viewport)}
           onnodeclick={({ node }) => selectNode(node.id)}
           onedgeclick={({ edge }) => selectEdge(edge.id)}
           onpaneclick={clearSelection}
@@ -1178,6 +1199,7 @@
         >
           <Background bgColor="var(--bg-0)" patternColor="var(--border)" gap={18} size={2} />
           <Actions
+            bind:this={actions}
             canUndo={doc.canUndo}
             canRedo={doc.canRedo}
             canOpenEditor={editable}
@@ -1226,8 +1248,7 @@
           {#if nodes.length >= MINIMAP_MIN}
             <MiniMap bgColor="var(--bg-1)" maskColor="var(--scrim)" nodeColor="var(--border-hi)" />
           {/if}
-        </SvelteFlow>
-      {/key}
+      </SvelteFlow>
 
       {#if empty}
         <div class="empty" data-testid="empty-state">
@@ -1331,6 +1352,16 @@
       onaccept={(id) => void acceptProposal(id)}
       onreject={rejectProposal}
       onreplan={(id) => void replanProposal(id)}
+    />
+  {:else if rightTab === 'library'}
+    <Palette
+      specs={shownSpecs}
+      documentPath={doc.path}
+      enabled={editable}
+      open={rightOpen}
+      ontoggle={() => (rightOpen = !rightOpen)}
+      ontab={pickRailTab}
+      onpick={placeSpec}
     />
   {:else}
     <Inspector

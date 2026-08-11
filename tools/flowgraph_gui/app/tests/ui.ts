@@ -503,7 +503,6 @@ export async function boot(options: BootOptions = {}): Promise<Page> {
   }
   await page.waitForSelector(`.path[title="${FAKE_PATH}"]`);
   await page.waitForSelector('.svelte-flow__node');
-  await page.waitForSelector('[data-testid="palette"] .entry');
   return page;
 }
 
@@ -584,6 +583,19 @@ export async function dragBlock(page: Page, name: string, at: { x: number; y: nu
   await page
     .locator(`[data-block="${name}"]`)
     .dragTo(page.locator('.svelte-flow__pane'), { targetPosition: at });
+}
+
+export async function openLibrary(page: Page) {
+  const tab = page.locator('[data-testid="rail-tab-library"]');
+  if (!(await tab.isVisible())) {
+    await page
+      .locator(
+        '[data-testid="toggle-right"], [data-testid="toggle-library"], [data-testid="toggle-assistant"]'
+      )
+      .click();
+  }
+  await tab.click();
+  await page.waitForSelector('[data-testid="palette"] .entry');
 }
 
 export async function openMenu(page: Page, selector: string, position?: { x: number; y: number }) {

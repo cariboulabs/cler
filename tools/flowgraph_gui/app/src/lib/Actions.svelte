@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useSvelteFlow } from '@xyflow/svelte';
+  import { useSvelteFlow, type Viewport } from '@xyflow/svelte';
 
   import type { Problem } from './project';
 
@@ -123,7 +123,6 @@
 
   const ZOOM_MS = 150;
   const FIT_MS = 200;
-  const RAIL_MS = 200;
   const SAVED_MS = 1500;
   const ALERT_MS = 4000;
   const MENU_WIDTH = 200;
@@ -154,6 +153,12 @@
     j: 'assistant',
     '\\': 'chrome'
   };
+
+  export function showView(viewport: Viewport | null): Promise<boolean> {
+    return viewport
+      ? flow.setViewport(viewport, { duration: 0 })
+      : flow.fitView({ padding: fitPadding, duration: 0 });
+  }
   const ICONS: Record<string, string[]> = {
     check: ['M2.5 8.6 6 12.1 13.5 3.9'],
     build: ['M8 1.8 14 5v6l-6 3.2L2 11V5Z', 'M2 5l6 3.2L14 5', 'M8 8.2v6.4'],
@@ -185,23 +190,8 @@
   const listed = $derived<Problem[]>([...compiled, ...problems]);
   const failing = $derived(listed.some((problem) => problem.severity === 'error'));
 
-  let rails: string | null = null;
-
   $effect(() => {
     if (alert) flash(alert.text, alert.tone === 'error', ALERT_MS, alert.action ?? null);
-  });
-
-  $effect(() => {
-    const shape = `${leftOpen}/${rightOpen}`;
-    if (shape === rails) return;
-    const first = rails === null;
-    rails = shape;
-    if (first) return;
-    const timer = setTimeout(
-      () => void flow.fitView({ padding: fitPadding, duration: FIT_MS }),
-      RAIL_MS
-    );
-    return () => clearTimeout(timer);
   });
 
   const actions = $derived<Action[]>([

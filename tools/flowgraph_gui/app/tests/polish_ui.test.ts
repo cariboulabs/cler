@@ -6,6 +6,7 @@ import {
   centre,
   handle,
   modelOf,
+  openLibrary,
   settledZoom,
   shot,
   styleOf,
@@ -42,6 +43,7 @@ describe('the empty-state card carries the honest reason', () => {
       expect(await page.locator('[data-testid="demo-chip"]').count()).toBe(1);
       expect(await page.locator('[data-testid="palette-notice"]').count()).toBe(0);
       expect(await page.locator('[data-testid="viewer-note"]').count()).toBe(0);
+      expect(await page.locator('aside.sidebar button.primary').count()).toBe(0);
       await shot(page, 'first-run-empty-state');
 
       await page.selectOption('[data-testid="example-select"]', 'plots');
@@ -146,17 +148,24 @@ describe('the chrome gets out of the way', () => {
   );
 
   it(
-    'refits once a rail transition has settled, so collapsing buys zoom',
+    'keeps the viewport fixed while the floating rails open and close',
     async () => {
       const page = await boot();
-      const docked = await settledZoom(page);
+      await page.click('[data-testid="zoom-in"]');
+      await page.waitForTimeout(300);
+      const viewport = () =>
+        page.evaluate(
+          () =>
+            (document.querySelector('.svelte-flow__viewport') as HTMLElement | null)?.style
+              .transform ?? 'none'
+        );
+      const before = await viewport();
 
       await page.click('[data-testid="toggle-left"]');
-      await expect.poll(() => zoomOf(page), { timeout: 4000 }).toBeGreaterThan(docked);
-      const oneRail = await settledZoom(page);
-
       await page.click('[data-testid="toggle-right"]');
-      await expect.poll(() => zoomOf(page), { timeout: 4000 }).toBeGreaterThan(oneRail);
+      await page.waitForTimeout(500);
+
+      expect(await viewport()).toBe(before);
       await page.close();
     },
     CASE
@@ -377,7 +386,7 @@ describe('the cheap repaints', () => {
     'drops the palette category column when every block shares one',
     async () => {
       const page = await viewer('?example=hello_world');
-      await page.waitForSelector('[data-testid="palette"] .entry');
+      await openLibrary(page);
       expect(await page.locator('[data-testid="palette"] .cat').count()).toBe(0);
       expect(await page.locator('[data-testid="palette"] .row').first().textContent()).not.toContain(
         '?'

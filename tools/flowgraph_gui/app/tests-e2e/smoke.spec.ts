@@ -188,6 +188,53 @@ test('d) wiring a third fanout output is one transaction', async ({
   await expect(page.locator('.svelte-flow__edge')).toHaveCount(4);
 });
 
+test('d2) moving a block survives disconnecting an edge', async ({
+  page,
+  work,
+  openFile,
+  node
+}) => {
+  const file = work.copy('hello_world.cpp');
+
+  await page.goto('/');
+  await openFile(file);
+
+  const adder = node('adder');
+  const transform = () => adder.evaluate((element) => element.style.transform);
+  const before = await transform();
+  const box = await adder.boundingBox();
+  if (!box) throw new Error('adder has no bounds');
+  await page.mouse.move(box.x + box.width / 2, box.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 180, box.y + 168, { steps: 12 });
+  await page.mouse.up();
+  await expect.poll(transform).not.toBe(before);
+
+  const moved = await transform();
+  const viewport = page.locator('.svelte-flow__viewport');
+  const viewportTransform = () => viewport.evaluate((element) => element.style.transform);
+  const movedViewport = await viewportTransform();
+  await page.evaluate(() => {
+    document.querySelector('.svelte-flow')?.setAttribute('data-mount-probe', 'stable');
+  });
+
+  const edge = page.locator(
+    '.svelte-flow__edge[data-id^="source1->adder"] .svelte-flow__edge-interaction'
+  );
+  await edge.click();
+  await page.keyboard.press('Delete');
+  await expect(edge).toHaveCount(0);
+  await expect.poll(() => work.bytes(file), { timeout: 20_000 }).not.toContain('&adder.in[0]');
+
+  expect(await transform()).toBe(moved);
+  expect(await viewportTransform()).toBe(movedViewport);
+  expect(
+    await page.evaluate(
+      () => document.querySelector('.svelte-flow')?.getAttribute('data-mount-probe')
+    )
+  ).toBe('stable');
+});
+
 test('e) an external edit blocks editing until reload', async ({
   page,
   work,
@@ -269,6 +316,8 @@ test('g) a new block reaches disk with its template and every constructor argume
   await page.goto('/');
   await openFile(file);
 
+  await page.getByTestId('toggle-right').click();
+  await page.getByTestId('rail-tab-library').click();
   await page.getByTestId('palette-search').fill('SourceCW');
   await page.locator('[data-block="SourceCWBlock"] .row').dblclick();
   const node = page.locator('.svelte-flow__node[data-id="source_c_w"]');
@@ -277,19 +326,21 @@ test('g) a new block reaches disk with its template and every constructor argume
   await expect(page.getByTestId('run')).toBeDisabled();
   await shot('required-args');
 
-  for (const [field, value] of [
-    ['source_c_w.template.0', 'float'],
-    ['source_c_w.ctor.1', '1.0f'],
-    ['source_c_w.ctor.2', '2.0f'],
-    ['source_c_w.ctor.3', '1000']
+  for (const [field, value, written] of [
+    ['source_c_w.template.0', 'float', 'SourceCWBlock<float> source_c_w'],
+    ['source_c_w.ctor.1', '1.0f', 'source_c_w("source_c_w", 1.0f'],
+    ['source_c_w.ctor.2', '2.0f', 'source_c_w("source_c_w", 1.0f, 2.0f'],
+    [
+      'source_c_w.ctor.3',
+      '1000',
+      'SourceCWBlock<float> source_c_w("source_c_w", 1.0f, 2.0f, 1000);'
+    ]
   ]) {
     const input = page.locator(`input[data-field="${field}"]`);
     await input.fill(value);
     await input.press('Enter');
+    await expect.poll(() => work.bytes(file), { timeout: 20_000 }).toContain(written);
   }
 
-  await expect
-    .poll(() => work.bytes(file), { timeout: 20_000 })
-    .toContain('SourceCWBlock<float> source_c_w("source_c_w", 1.0f, 2.0f, 1000);');
   await expect(node.locator('.block')).not.toHaveAttribute('data-invalid', 'true');
 });

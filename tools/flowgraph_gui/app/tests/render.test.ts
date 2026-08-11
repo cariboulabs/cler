@@ -844,7 +844,7 @@ describe('retractable panels', () => {
   );
 
   it(
-    'refits the graph after a toggle instead of leaving it off centre',
+    'does not move the graph when floating rails are toggled',
     async () => {
       const fitted = await settledViewport(editor);
       await editor.click('[data-testid="zoom-in"]');
@@ -853,16 +853,15 @@ describe('retractable panels', () => {
       await editor.mouse.move(760, 460, { steps: 8 });
       await editor.mouse.up();
       await editor.waitForTimeout(400);
-      expect(await settledViewport(editor)).not.toBe(fitted);
+      const moved = await settledViewport(editor);
+      expect(moved).not.toBe(fitted);
 
       await editor.click('[data-testid="toggle-left"]');
       await settled('.sidebar', RAIL_WIDTH);
       await editor.click('[data-testid="toggle-right"]');
       await settled('.inspector', RAIL_WIDTH);
-
-      await expect
-        .poll(async () => scaleOf(await viewportTransform(editor)), { timeout: 4000 })
-        .toBeGreaterThan(scaleOf(fitted));
+      await editor.waitForTimeout(500);
+      expect(await viewportTransform(editor)).toBe(moved);
     },
     CASE_TIMEOUT
   );

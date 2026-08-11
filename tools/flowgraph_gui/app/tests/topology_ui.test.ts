@@ -14,6 +14,7 @@ import {
   highlighted,
   menuIds,
   modelOf,
+  openLibrary,
   openMenu,
   paneOrigin,
   sent,
@@ -37,6 +38,11 @@ describe('the palette lists what the crate found', () => {
     'renders every spec with its category, ports and may_block chip, and searches them',
     async () => {
       const page = await boot();
+      await openLibrary(page);
+      expect(await page.locator('[data-testid="rail-tabs"] button').count()).toBe(3);
+      expect(await page.getAttribute('[data-testid="rail-tab-library"]', 'aria-selected')).toBe(
+        'true'
+      );
       const entries = page.locator('[data-testid="palette"] .entry');
       expect(await entries.count()).toBe(specs.length);
       expect(await page.textContent('[data-testid="palette"] [data-block="GainBlock"]')).toContain(
@@ -67,6 +73,7 @@ describe('the palette lists what the crate found', () => {
     'lists the blocks defined in the open translation unit',
     async () => {
       const page = await boot({ fixture: 'mass_spring_damper' });
+      await openLibrary(page);
       await page.fill('[data-testid="palette-search"]', 'plant');
       await expect.poll(() => page.locator('[data-block="PlantBlock"]').count()).toBe(1);
       await page.close();
@@ -78,7 +85,7 @@ describe('the palette lists what the crate found', () => {
     'falls back to the example blocks and refuses to drag in the browser',
     async () => {
       const page = await viewer('?example=hello_world');
-      await page.waitForSelector('[data-testid="palette"] .entry');
+      await openLibrary(page);
       expect(await page.locator('[data-testid="palette"] .entry').count()).toBe(4);
       expect(await page.getAttribute('[data-testid="demo-chip"]', 'title')).toContain(
         'example mode'
@@ -97,6 +104,7 @@ describe('adding a block declares it unwired', () => {
     'drops from the palette immediately and stays invalid until required fields are filled',
     async () => {
       const page = await boot();
+      await openLibrary(page);
       await page.fill('[data-testid="palette-search"]', 'gain');
       await dragBlock(page, 'GainBlock', { x: 620, y: 620 });
 
@@ -135,6 +143,7 @@ describe('adding a block declares it unwired', () => {
     'keeps the dropped node where it was dropped',
     async () => {
       const page = await boot();
+      await openLibrary(page);
       await page.fill('[data-testid="palette-search"]', 'gain');
       await dragBlock(page, 'GainBlock', { x: 700, y: 660 });
 
@@ -166,6 +175,7 @@ describe('adding a block declares it unwired', () => {
       const page = await boot({
         refusal: JSON.stringify({ error: 'duplicate_variable', var_name: 'gain' })
       });
+      await openLibrary(page);
       await page.fill('[data-testid="palette-search"]', 'gain');
       await dragBlock(page, 'GainBlock', { x: 620, y: 620 });
       await page.waitForSelector('[data-testid="add-block"]');
@@ -602,6 +612,7 @@ describe('every topology gesture round-trips through undo', () => {
       const wires = () => page.locator('.svelte-flow__edge').count();
       const before = { nodes: await nodes(), wires: await wires() };
 
+      await openLibrary(page);
       await page.fill('[data-testid="palette-search"]', 'gain');
       await dragBlock(page, 'GainBlock', { x: 620, y: 640 });
       await page.locator('.svelte-flow__node[data-id="gain"]').waitFor();

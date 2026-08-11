@@ -2,7 +2,19 @@ import { describe, expect, it } from 'vitest';
 import type { Page } from 'playwright';
 import { fixtures, fixtureSources } from '../src/fixtures';
 import { lineOfOffset } from '../src/lib/schema';
-import { boot, BUILDABLE, calls, CASE, emit, FAKE_PATH, highlighted, shot, useBrowser, viewer } from './ui';
+import {
+  boot,
+  BUILDABLE,
+  calls,
+  CASE,
+  emit,
+  FAKE_PATH,
+  highlighted,
+  openLibrary,
+  shot,
+  useBrowser,
+  viewer
+} from './ui';
 
 useBrowser();
 
@@ -214,6 +226,7 @@ describe('build and run follow what find_target reports', () => {
     'ignores the shortcuts while a field has focus',
     async () => {
       const page = await boot({ target: BUILDABLE });
+      await openLibrary(page);
       await page.click('[data-testid="palette-search"]');
 
       await page.keyboard.press('F7');
