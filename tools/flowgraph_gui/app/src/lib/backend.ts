@@ -177,8 +177,8 @@ export function buildTarget(path: string): Promise<TaskStarted> {
   return invoker('build_target', { path }) as Promise<TaskStarted>;
 }
 
-export function runTarget(path: string): Promise<TaskStarted> {
-  return invoker('run_target', { path }) as Promise<TaskStarted>;
+export function runTarget(path: string, args: string[] = []): Promise<TaskStarted> {
+  return invoker('run_target', { path, args }) as Promise<TaskStarted>;
 }
 
 export function stopTarget(path: string): Promise<void> {

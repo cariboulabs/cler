@@ -282,7 +282,7 @@ pub fn build_draft(
     )
 }
 
-pub fn start(jobs: &Jobs, path: &str, emit: Emit) -> Result<Started, String> {
+pub fn start(jobs: &Jobs, path: &str, args: &[String], emit: Emit) -> Result<Started, String> {
     let found = find_target(path)?;
     usable(&found)?;
     let binary = PathBuf::from(found.binary.unwrap_or_default());
@@ -290,6 +290,7 @@ pub fn start(jobs: &Jobs, path: &str, emit: Emit) -> Result<Started, String> {
         return Err(format!("{} is not built yet", binary.display()));
     }
     let mut command = Command::new(&binary);
+    command.args(args);
     if let Some(dir) = binary.parent() {
         command.current_dir(dir);
     }
@@ -312,6 +313,7 @@ pub fn start_draft(
     jobs: &Jobs,
     path: &str,
     draft: &DraftState,
+    args: &[String],
     emit: Emit,
 ) -> Result<Started, String> {
     let target = canonical(path)?;
@@ -330,6 +332,7 @@ pub fn start_draft(
     };
     let binary = PathBuf::from(artifact_path);
     let mut command = Command::new(&binary);
+    command.args(args);
     if let Some(dir) = binary.parent() {
         command.current_dir(dir);
     }

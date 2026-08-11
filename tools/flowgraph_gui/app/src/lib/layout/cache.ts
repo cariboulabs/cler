@@ -20,6 +20,7 @@ export type UiCache = {
     drawer?: boolean;
     drawerHeight?: number;
     rightTab?: RailTabName;
+    runArgs?: string;
     [key: string]: unknown;
   };
   [key: string]: unknown;

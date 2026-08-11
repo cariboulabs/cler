@@ -177,12 +177,19 @@ fn build_target(
 #[tauri::command]
 fn run_target(
     path: String,
+    args: Option<Vec<String>>,
     app: AppHandle,
     docs: State<'_, Documents>,
     jobs: State<'_, Jobs>,
 ) -> Result<Started, String> {
     let draft = document::draft_state(&docs, &path)?;
-    build::start_draft(jobs.inner(), &path, &draft, emitter(app))
+    build::start_draft(
+        jobs.inner(),
+        &path,
+        &draft,
+        &args.unwrap_or_default(),
+        emitter(app),
+    )
 }
 
 #[tauri::command]

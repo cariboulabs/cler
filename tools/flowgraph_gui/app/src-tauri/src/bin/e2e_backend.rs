@@ -223,10 +223,21 @@ fn dispatch(
                 emitter(events),
             )
         })),
-        "run_target" => outcome(
-            document::draft_state(docs, &path)
-                .and_then(|draft| build::start_draft(jobs, &path, &draft, emitter(events))),
-        ),
+        "run_target" => {
+            let run_args: Vec<String> = args
+                .get("args")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            outcome(document::draft_state(docs, &path).and_then(|draft| {
+                build::start_draft(jobs, &path, &draft, &run_args, emitter(events))
+            }))
+        }
         "stop_target" => outcome(build::stop(jobs, &path)),
         _ => Reply::Loud(format!("unknown command: {cmd}")),
     }

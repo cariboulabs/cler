@@ -415,7 +415,7 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
         ArtifactStatus::NeedsBuild { .. }
     ));
     let (run_seen, run_emit) = recorder();
-    build::start_draft(&jobs, as_str(&source), &ready, run_emit).expect("draft run starts");
+    build::start_draft(&jobs, as_str(&source), &ready, &[], run_emit).expect("draft run starts");
     assert_eq!(await_event(&run_seen, "run-finished")["code"], 7);
 
     write(&header, "#define EXIT_CODE 8\n");
@@ -452,7 +452,7 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
     let mut stale = draft_state(&draft, ready.artifacts.clone());
     stale.requirements = ready.requirements.clone();
     let (_, refused_emit) = recorder();
-    let refusal = build::start_draft(&jobs, as_str(&source), &stale, refused_emit)
+    let refusal = build::start_draft(&jobs, as_str(&source), &stale, &[], refused_emit)
         .expect_err("a stale draft cannot run");
     assert!(refusal.contains("build the current draft"), "{refusal}");
 
@@ -506,7 +506,7 @@ fn stop_target_interrupts_the_running_child() {
 
     let jobs = Jobs::default();
     let (seen, emit) = recorder();
-    build::start(&jobs, as_str(&source), emit).expect("run starts");
+    build::start(&jobs, as_str(&source), &[], emit).expect("run starts");
     assert_eq!(await_event(&seen, "run-output")["line"].as_str(), Some("awake"));
 
     let started = Instant::now();
@@ -533,13 +533,13 @@ fn an_old_waiter_cannot_remove_a_newer_job_for_the_same_target() {
 
     let jobs = Jobs::default();
     let (first_seen, first_emit) = recorder();
-    let first = build::start(&jobs, as_str(&source), first_emit).expect("first starts");
+    let first = build::start(&jobs, as_str(&source), &[], first_emit).expect("first starts");
     assert_eq!(await_event(&first_seen, "run-output")["jobId"], first.job_id);
 
     write(&binary, "#!/bin/sh\necho second\nexec sleep 30\n");
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     let (second_seen, second_emit) = recorder();
-    let second = build::start(&jobs, as_str(&source), second_emit).expect("second starts");
+    let second = build::start(&jobs, as_str(&source), &[], second_emit).expect("second starts");
     assert!(second.job_id > first.job_id);
     assert_eq!(
         await_event(&second_seen, "run-output")["jobId"],
@@ -565,4 +565,28 @@ fn a_subdirectory_without_its_own_cmakelists_builds_into_the_parent_dir() {
         found.binary.as_deref(),
         Some(as_str(&root.join("build/desktop_examples/spike")))
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn run_forwards_the_given_arguments_to_the_binary() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = repo("run-args");
+    let source = root.join("desktop_examples/echoer.cpp");
+    write(&source, "int main() { return 0; }\n");
+    write(&root.join("build/CMakeCache.txt"), "configured\n");
+    let binary = root.join("build/desktop_examples/echoer");
+    write(&binary, "#!/bin/sh\necho \"$@\"\n");
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    let jobs = Jobs::default();
+    let (seen, emit) = recorder();
+    let args = ["-s".to_string(), "hackrf".to_string(), "-f".to_string(), "100e6".to_string()];
+    build::start(&jobs, as_str(&source), &args, emit).expect("run starts");
+    assert_eq!(
+        await_event(&seen, "run-output")["line"].as_str(),
+        Some("-s hackrf -f 100e6")
+    );
+    await_event(&seen, "run-finished");
 }

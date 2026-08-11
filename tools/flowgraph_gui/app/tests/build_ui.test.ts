@@ -5,6 +5,8 @@ import { lineOfOffset } from '../src/lib/schema';
 import {
   boot,
   BUILDABLE,
+  type FakeTarget,
+  type FakeWindow,
   calls,
   CASE,
   emit,
@@ -311,6 +313,29 @@ describe('build and run follow what find_target reports', () => {
       await page.keyboard.press('F7');
       await page.waitForTimeout(200);
       expect(await page.locator('[data-testid="drawer-tabs"]').count()).toBe(0);
+      await page.close();
+    },
+    CASE
+  );
+});
+
+describe('run arguments', () => {
+  it(
+    'forwards the run-args field as argv on run',
+    async () => {
+      const READY: FakeTarget = {
+        ...BUILDABLE,
+        artifact: { state: 'ready', artifactPath: '/tmp/fake/build/desktop_examples/hello_world' }
+      };
+      const page = await boot({ target: READY });
+      const input = page.locator('[data-testid="run-args"]');
+      await input.fill('-s hackrf -f 100e6');
+      await input.press('Enter');
+
+      await page.click('[data-testid="run"]');
+      await expect.poll(() => ran(page, 'run_target')).toBe(1);
+      const runs = await page.evaluate(() => (window as unknown as FakeWindow).__fake.runs);
+      expect(runs).toEqual([['-s', 'hackrf', '-f', '100e6']]);
       await page.close();
     },
     CASE

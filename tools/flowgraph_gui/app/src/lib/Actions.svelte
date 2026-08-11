@@ -50,6 +50,8 @@
     compiled: Problem[];
     tasks: Tasks;
     running: boolean;
+    runArgs: string;
+    onrunargs: (value: string) => void;
     edgeAt: (id: string) => EdgeInfo | null;
     oncheck: () => void;
     onbuild: () => void;
@@ -104,6 +106,8 @@
     compiled,
     tasks,
     running,
+    runArgs,
+    onrunargs,
     edgeAt,
     oncheck,
     onbuild,
@@ -520,6 +524,18 @@
     {#if action.id === 'open' || action.id === 'zoom-out'}
       <span class="sep"></span>
     {/if}
+    {#if action.id === 'run'}
+      <input
+        class="runargs"
+        data-testid="run-args"
+        type="text"
+        placeholder="run args"
+        title="command-line arguments passed to the binary on Run"
+        value={runArgs}
+        disabled={!tasks.run.enabled && !running}
+        onchange={(event) => onrunargs(event.currentTarget.value)}
+      />
+    {/if}
     <span class="action-slot">
       <button
         class="icon"
@@ -831,6 +847,20 @@
     border-radius: var(--radius-sm);
     font-size: 11px;
     color: var(--muted);
+  }
+  .runargs {
+    flex: none;
+    width: 150px;
+    padding: var(--sp-0) var(--sp-1);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono, monospace);
+    font-size: 11px;
+    color: var(--fg);
+  }
+  .runargs:disabled {
+    opacity: 0.5;
   }
   .problems.clear:disabled {
     border-color: color-mix(in srgb, var(--ok) 55%, var(--border));

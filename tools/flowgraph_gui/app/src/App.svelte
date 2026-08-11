@@ -215,6 +215,7 @@
   let running = $state(false);
   let targetRefresh = $state(0);
   let rightTab = $state<RailTab>('inspector');
+  let runArgs = $state('');
   let keyStatus = $state.raw<AssistantStatus | null>(null);
   let chat = $state.raw<Message[]>([]);
   let pendingReply = $state<number | null>(null);
@@ -568,7 +569,8 @@
         right: rightOpen,
         drawer: drawerOpen,
         drawerHeight,
-        rightTab
+        rightTab,
+        runArgs
       }
     };
     flowCache = next;
@@ -639,6 +641,7 @@
       ) {
         rightTab = panels.rightTab;
       }
+      runArgs = typeof panels.runArgs === 'string' ? panels.runArgs : '';
       const cachedSite = siteViewIds(next.model.sites).indexOf(flowCache.activeView ?? '');
       siteIndex = cachedSite >= 0 ? cachedSite : 0;
       selected = null;
@@ -1128,7 +1131,8 @@
 
   async function toggleRun() {
     if (!running) {
-      await task('run', runTarget);
+      const args = runArgs.trim().split(/\s+/).filter(Boolean);
+      await task('run', (path) => runTarget(path, args));
       return;
     }
     try {
@@ -1422,6 +1426,11 @@
             {compiled}
             {tasks}
             {running}
+            {runArgs}
+            onrunargs={(value) => {
+              runArgs = value;
+              storePanels();
+            }}
             edgeAt={edgeInfo}
             oncheck={() => void task('check', checkDocument)}
             onbuild={() => void task('build', buildTarget)}

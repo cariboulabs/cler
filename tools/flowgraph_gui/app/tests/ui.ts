@@ -58,6 +58,7 @@ type Setup = {
 type Fake = {
   log: Command[][];
   calls: string[];
+  runs: unknown[];
   asks: Ask[];
   peeks: Peek[];
   bases: number[];
@@ -108,6 +109,7 @@ function installFake(setup: Setup) {
   const redone: HistoryAction[] = [];
   const log: unknown[][] = [];
   const calls: string[] = [];
+  const runs: unknown[] = [];
   const asks: unknown[] = [];
   const peeks: unknown[] = [];
   const bases: number[] = [];
@@ -373,6 +375,7 @@ function installFake(setup: Setup) {
       return null;
     }
     calls.push(command);
+    if (command === 'run_target') runs.push(args.args);
     if (command === 'assistant_status') return setup.assistant;
     if (command === 'assistant_stop') return null;
     if (command === 'assistant_ask') {
@@ -470,6 +473,7 @@ function installFake(setup: Setup) {
   scope.__fake = {
     log,
     calls,
+    runs,
     asks,
     peeks,
     bases,
