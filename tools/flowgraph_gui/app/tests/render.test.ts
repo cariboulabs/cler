@@ -586,12 +586,14 @@ describe('top bar, context menu and shortcuts', () => {
       );
       expect(titles).toEqual([
         'Open file (Ctrl+O)',
-        'Undo (Ctrl+Z)',
-        'Redo (Ctrl+Shift+Z)',
+        null,
+        null,
         'Zoom out (Ctrl+-)',
         'Zoom in (Ctrl+=)',
         'Fit view (Ctrl+0)'
       ]);
+      expect(await editor.textContent('[data-testid="undo-tooltip"]')).toBe('nothing to undo');
+      expect(await editor.textContent('[data-testid="redo-tooltip"]')).toBe('nothing to redo');
       for (const id of ['drawer', 'assistant', 'chrome']) {
         expect(await editor.locator(`[data-testid="${id}"]`).count()).toBe(0);
       }

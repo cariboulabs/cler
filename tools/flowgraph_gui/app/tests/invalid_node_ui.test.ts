@@ -40,7 +40,10 @@ describe('invalid block nodes', () => {
       const page = await boot({ model, target: BUILDABLE });
       const run = page.locator('[data-testid="run"]');
       expect(await run.isDisabled()).toBe(true);
-      expect(await run.getAttribute('title')).toContain('1 block missing required fields');
+      await run.hover();
+      expect(await page.locator('[data-testid="run-tooltip"]').textContent()).toContain(
+        '1 block missing required fields'
+      );
 
       await page.click('.svelte-flow__node[data-id="source1"]');
       await page.fill('input[data-field="source1.template.0"]', 'float');
@@ -48,9 +51,36 @@ describe('invalid block nodes', () => {
       await page.fill('input[data-field="source1.ctor.2"]', '20.0f');
       await page.press('input[data-field="source1.ctor.2"]', 'Enter');
 
-      await expect.poll(() => run.getAttribute('title')).toContain('save the draft');
+      await expect
+        .poll(() => page.locator('[data-testid="run-tooltip"]').textContent())
+        .toContain('save the draft');
       await page.click('[data-testid="save"]');
       await expect.poll(() => run.isDisabled()).toBe(false);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'explains why Check is blocked after a CWSource2 frequency edit',
+    async () => {
+      const page = await boot({ target: BUILDABLE });
+      const check = page.locator('[data-testid="check"]');
+      await expect.poll(() => check.isDisabled()).toBe(false);
+
+      await page.click('.svelte-flow__node[data-id="source2"]');
+      const frequency = page.locator('input[data-field="source2.ctor.2"]');
+      await frequency.fill('25.0f');
+      await frequency.press('Enter');
+
+      await expect.poll(() => check.isDisabled()).toBe(true);
+      await check.hover();
+      const tooltip = page.locator('[data-testid="check-tooltip"]');
+      expect(await tooltip.isVisible()).toBe(true);
+      expect(await tooltip.textContent()).toContain('save the draft');
+
+      await page.click('[data-testid="save"]');
+      await expect.poll(() => check.isDisabled()).toBe(false);
       await page.close();
     },
     CASE

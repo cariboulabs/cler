@@ -238,8 +238,22 @@
       hint: saveNote,
       run: onsave
     },
-    { id: 'undo', label: 'Undo', shortcut: 'Ctrl+Z', enabled: canUndo, run: onundo },
-    { id: 'redo', label: 'Redo', shortcut: 'Ctrl+Shift+Z', enabled: canRedo, run: onredo },
+    {
+      id: 'undo',
+      label: 'Undo',
+      shortcut: 'Ctrl+Z',
+      enabled: canUndo,
+      hint: 'nothing to undo',
+      run: onundo
+    },
+    {
+      id: 'redo',
+      label: 'Redo',
+      shortcut: 'Ctrl+Shift+Z',
+      enabled: canRedo,
+      hint: 'nothing to redo',
+      run: onredo
+    },
     {
       id: 'zoom-out',
       label: 'Zoom out',
@@ -506,33 +520,42 @@
     {#if action.id === 'open' || action.id === 'zoom-out'}
       <span class="sep"></span>
     {/if}
-    <button
-      class="icon"
-      class:live={action.id === 'run' && running}
-      data-testid={action.id}
-      aria-label={action.label}
-      title={action.enabled
-        ? `${action.label} (${action.shortcut})`
-        : (action.hint ?? `${action.label} (${action.shortcut})`)}
-      disabled={!action.enabled}
-      onclick={() => act(action)}
-    >
-      <svg
-        viewBox="0 0 16 16"
-        width="16"
-        height="16"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.4"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
+    <span class="action-slot">
+      <button
+        class="icon"
+        class:live={action.id === 'run' && running}
+        data-testid={action.id}
+        aria-label={action.label}
+        aria-describedby={!action.enabled ? `${action.id}-tooltip` : undefined}
+        title={action.enabled ? `${action.label} (${action.shortcut})` : undefined}
+        disabled={!action.enabled}
+        onclick={() => act(action)}
       >
-        {#each ICONS[action.id === 'run' && running ? 'stop' : action.id] ?? [] as d (d)}
-          <path {d} />
-        {/each}
-      </svg>
-    </button>
+        <svg
+          viewBox="0 0 16 16"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          {#each ICONS[action.id === 'run' && running ? 'stop' : action.id] ?? [] as d (d)}
+            <path {d} />
+          {/each}
+        </svg>
+      </button>
+      {#if !action.enabled}
+        <span
+          class="blocked-tip"
+          id="{action.id}-tooltip"
+          data-testid="{action.id}-tooltip"
+          role="tooltip">{action.hint ?? `${action.label} is unavailable`}</span
+        >
+      {/if}
+    </span>
   {/each}
 </div>
 
@@ -684,6 +707,35 @@
     height: 18px;
     background: var(--border);
     margin: 0 var(--sp-1);
+  }
+  .action-slot {
+    position: relative;
+    display: flex;
+    flex: none;
+  }
+  .blocked-tip {
+    position: absolute;
+    top: calc(100% + var(--sp-2));
+    right: 0;
+    z-index: 1;
+    width: max-content;
+    max-width: 280px;
+    padding: var(--sp-1) var(--sp-2);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-sm);
+    background: var(--bg-2);
+    box-shadow: var(--shadow);
+    color: var(--fg);
+    font-size: 11px;
+    line-height: 1.35;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 100ms ease;
+  }
+  .action-slot:hover .blocked-tip {
+    opacity: 1;
+    visibility: visible;
   }
   .icon {
     flex: none;
