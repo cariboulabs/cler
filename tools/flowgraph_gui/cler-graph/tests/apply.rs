@@ -742,7 +742,7 @@ const PROPERTY_FILES: [&str; 8] = [
     "mass_spring_damper.cpp",
     "polyphase_channelizer.cpp",
     "fm_receiver.cpp",
-    "spike.cpp",
+    "spike/spike.cpp",
     "uhd_device.cpp",
 ];
 
@@ -1255,7 +1255,7 @@ fn percentile(sorted: &[Duration], fraction: f64) -> Duration {
 
 #[test]
 fn spike_round_trip_stays_under_the_latency_gate() {
-    let mut session = session("spike.cpp");
+    let mut session = session("spike/spike.cpp");
     let mut samples = Vec::new();
     for round in 0..120u64 {
         let base = session.revision();
@@ -1280,7 +1280,7 @@ fn spike_round_trip_stays_under_the_latency_gate() {
     let p50 = percentile(&samples, 0.50);
     let p95 = percentile(&samples, 0.95);
     println!(
-        "spike.cpp round trip over {} iterations: p50 {:.2} ms, p95 {:.2} ms, max {:.2} ms",
+        "spike/spike.cpp round trip over {} iterations: p50 {:.2} ms, p95 {:.2} ms, max {:.2} ms",
         samples.len(),
         p50.as_secs_f64() * 1e3,
         p95.as_secs_f64() * 1e3,
@@ -1411,20 +1411,20 @@ fn a_preview_reports_the_splices_it_would_write_without_committing() {
 
 #[test]
 fn a_partially_read_only_site_still_edits_its_editable_blocks() {
-    let mut session = session("spike.cpp");
+    let mut session = session("adsb_receiver.cpp");
     let outcome = session
         .apply(transaction(
             0,
             vec![Command::SetParam {
                 site: 0,
-                block: "power".to_string(),
-                ctor_arg_index: 1,
-                new_text: "-90.0f".to_string(),
+                block: "decoder".to_string(),
+                ctor_arg_index: 0,
+                new_text: "\"Decoder\"".to_string(),
             }],
         ))
         .expect("editable block in a partially read-only site applies");
     assert_eq!(outcome.revision, 1);
-    assert!(session.source().contains("-90.0f"));
+    assert!(session.source().contains("\"Decoder\""));
 
     let refused = session
         .apply(transaction(
@@ -1436,6 +1436,6 @@ fn a_partially_read_only_site_still_edits_its_editable_blocks() {
                 new_text: "\"X\"".to_string(),
             }],
         ))
-        .expect_err("the undeclared block refuses edits");
+        .expect_err("the optional-emplace block refuses edits");
     assert!(matches!(refused, ApplyError::NotEditable { .. }));
 }

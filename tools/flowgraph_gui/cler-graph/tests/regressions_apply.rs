@@ -804,7 +804,10 @@ fn seeded(tag: &str, name: &str, contents: &str) -> (PathBuf, PathBuf) {
 #[test]
 fn s5_the_reported_digest_is_the_sha256sum_of_the_bytes() {
     let dir = scratch("digest");
-    for name in ["hello_world.cpp", "frequency_shift.cpp", "spike.cpp"] {
+    for name in ["hello_world.cpp", "frequency_shift.cpp", "spike/spike.cpp"] {
+        if let Some(parent) = Path::new(name).parent() {
+            std::fs::create_dir_all(dir.join(parent)).expect("seed dir");
+        }
         std::fs::write(dir.join(name), source(name)).expect("seed");
         assert_eq!(
             reported_sha256(&dir, name),
@@ -1235,6 +1238,19 @@ fn s13_diff_applies_for_every_corpus_file() {
     let mut files: Vec<PathBuf> = std::fs::read_dir(CORPUS)
         .expect("corpus")
         .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .flat_map(|path| {
+            if path.is_dir() {
+                std::fs::read_dir(&path)
+                    .map(|nested| {
+                        nested
+                            .filter_map(|entry| entry.ok().map(|e| e.path()))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            } else {
+                vec![path]
+            }
+        })
         .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("cpp"))
         .collect();
     files.sort();
