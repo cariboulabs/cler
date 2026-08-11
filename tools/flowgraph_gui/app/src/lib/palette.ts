@@ -40,6 +40,14 @@ export type BlockSpec = {
   output_count: PortCount;
 };
 
+export type LibraryGroup = {
+  name: string;
+  path: string;
+  groups: LibraryGroup[];
+  specs: BlockSpec[];
+  count: number;
+};
+
 export const DRAG_TYPE = 'application/cler-block';
 
 export type Authority =
@@ -185,10 +193,47 @@ export function blockIsValid(block: Block, spec: BlockSpec | undefined): boolean
   return spec === undefined || missingRequiredFields(block, spec).length === 0;
 }
 
+export function libraryPathOf(spec: BlockSpec, documentPath: string): string[] {
+  if (spec.origin === documentPath) return ['this file'];
+  const parts = spec.origin.split(/[\\/]/).filter(Boolean);
+  const root = parts.lastIndexOf('desktop_blocks');
+  if (root !== -1) {
+    const path = parts.slice(root + 1, -1);
+    return path.length > 0 ? path : ['desktop_blocks'];
+  }
+  return [parts[parts.length - 2] ?? 'blocks'];
+}
+
 export function categoryOf(spec: BlockSpec, documentPath: string): string {
-  if (spec.origin === documentPath) return 'this file';
-  const parts = spec.origin.split(/[\\/]/);
-  return parts[parts.length - 2] ?? 'blocks';
+  return libraryPathOf(spec, documentPath).join('/');
+}
+
+export function libraryGroups(specs: BlockSpec[], documentPath: string): LibraryGroup[] {
+  const root: LibraryGroup = { name: '', path: '', groups: [], specs: [], count: 0 };
+  for (const spec of specs) {
+    let parent = root;
+    let path = '';
+    for (const name of libraryPathOf(spec, documentPath)) {
+      path = path.length === 0 ? name : `${path}/${name}`;
+      let group = parent.groups.find((candidate) => candidate.name === name);
+      if (!group) {
+        group = { name, path, groups: [], specs: [], count: 0 };
+        parent.groups.push(group);
+      }
+      parent = group;
+    }
+    parent.specs.push(spec);
+  }
+
+  const finish = (group: LibraryGroup): number => {
+    group.groups.sort((left, right) => left.name.localeCompare(right.name, 'en'));
+    group.specs.sort((left, right) => left.name.localeCompare(right.name, 'en'));
+    group.count =
+      group.specs.length + group.groups.reduce((total, child) => total + finish(child), 0);
+    return group.count;
+  };
+  finish(root);
+  return root.groups;
 }
 
 function countLabel(count: PortCount, ports: SpecPort[]): string {

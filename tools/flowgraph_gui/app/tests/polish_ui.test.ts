@@ -383,11 +383,11 @@ describe('the cheap repaints', () => {
   );
 
   it(
-    'drops the palette category column when every block shares one',
+    'groups fixture-only blocks under the open translation unit',
     async () => {
       const page = await viewer('?example=hello_world');
       await openLibrary(page);
-      expect(await page.locator('[data-testid="palette"] .cat').count()).toBe(0);
+      expect(await page.locator('[data-library-path="this file"]').count()).toBe(1);
       expect(await page.locator('[data-testid="palette"] .row').first().textContent()).not.toContain(
         '?'
       );

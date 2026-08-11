@@ -1,12 +1,13 @@
 <script lang="ts">
   import RailTabs, { type RailTab } from './RailTabs.svelte';
   import {
-    categoryOf,
     ctorSignature,
     DRAG_TYPE,
+    libraryGroups,
     portsSummary,
     searchSpecs,
-    type BlockSpec
+    type BlockSpec,
+    type LibraryGroup
   } from './palette';
 
   type Props = {
@@ -22,12 +23,21 @@
   const { specs, documentPath, enabled, open, ontoggle, ontab, onpick }: Props = $props();
 
   let query = $state('');
+  let closed = $state.raw(new Set<string>());
 
   const entries = $derived(searchSpecs(specs, query, documentPath));
-  const categories = $derived(
-    new Set(entries.map((spec) => categoryOf(spec, documentPath)))
-  );
-  const showCategory = $derived(categories.size > 1);
+  const groups = $derived(libraryGroups(entries, documentPath));
+
+  function groupOpen(group: LibraryGroup): boolean {
+    return query.trim().length > 0 || !closed.has(group.path);
+  }
+
+  function toggleGroup(path: string): void {
+    const next = new Set(closed);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    closed = next;
+  }
 
   function startDrag(event: DragEvent, spec: BlockSpec) {
     if (!enabled || !event.dataTransfer) return;
@@ -35,6 +45,50 @@
     event.dataTransfer.effectAllowed = 'copy';
   }
 </script>
+
+{#snippet block(spec: BlockSpec)}
+  <li
+    class="entry"
+    class:locked={!enabled}
+    data-block={spec.name}
+    draggable={enabled}
+    ondragstart={(event) => startDrag(event, spec)}
+  >
+    <button class="row" title={ctorSignature(spec)} ondblclick={() => enabled && onpick(spec)}>
+      <span class="name">{spec.name}</span>
+      {#if portsSummary(spec)}
+        <span class="ports">{portsSummary(spec)}</span>
+      {/if}
+      {#if spec.may_block}
+        <span class="chip" title="this block may block its worker">may_block</span>
+      {/if}
+    </button>
+  </li>
+{/snippet}
+
+{#snippet folder(group: LibraryGroup)}
+  <li class="folder" data-library-path={group.path}>
+    <button
+      class="folder-row"
+      aria-expanded={groupOpen(group)}
+      onclick={() => toggleGroup(group.path)}
+    >
+      <span class="caret">{groupOpen(group) ? '▾' : '▸'}</span>
+      <span class="folder-name">{group.name}</span>
+      <span class="folder-count">{group.count}</span>
+    </button>
+    {#if groupOpen(group)}
+      <ul class="folder-body">
+        {#each group.groups as child (child.path)}
+          {@render folder(child)}
+        {/each}
+        {#each group.specs as spec (spec.origin + spec.name)}
+          {@render block(spec)}
+        {/each}
+      </ul>
+    {/if}
+  </li>
+{/snippet}
 
 <aside class="library" class:collapsed={!open} data-testid="palette">
   <div class="head">
@@ -72,28 +126,9 @@
       data-testid="palette-search"
       bind:value={query}
     />
-    <ul>
-      {#each entries as spec (spec.origin + spec.name)}
-        <li
-          class="entry"
-          class:locked={!enabled}
-          data-block={spec.name}
-          draggable={enabled}
-          ondragstart={(event) => startDrag(event, spec)}
-        >
-          <button class="row" title={ctorSignature(spec)} ondblclick={() => enabled && onpick(spec)}>
-            <span class="name">{spec.name}</span>
-            {#if showCategory}
-              <span class="cat">{categoryOf(spec, documentPath)}</span>
-            {/if}
-            {#if portsSummary(spec)}
-              <span class="ports">{portsSummary(spec)}</span>
-            {/if}
-            {#if spec.may_block}
-              <span class="chip" title="this block may block its worker">may_block</span>
-            {/if}
-          </button>
-        </li>
+    <ul class="tree">
+      {#each groups as group (group.path)}
+        {@render folder(group)}
       {:else}
         <li class="muted">nothing matches “{query}”</li>
       {/each}
@@ -189,16 +224,48 @@
     outline: none;
     border-color: var(--accent-hi);
   }
-  ul {
+  .tree,
+  .folder-body {
+    list-style: none;
+  }
+  .tree {
     margin: var(--sp-2) 0 0;
     padding: 0;
-    list-style: none;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+  }
+  .folder-body {
+    margin: 0;
+    padding: 0 0 0 var(--sp-2);
+  }
+  .folder-row {
     display: flex;
-    flex-direction: column;
-    gap: 0;
+    align-items: center;
+    width: 100%;
+    padding: var(--sp-0) var(--sp-1);
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+    text-align: left;
+  }
+  .folder-row:hover {
+    background: var(--bg-2);
+    border-color: transparent;
+  }
+  .caret {
+    flex: none;
+    width: 12px;
+  }
+  .folder-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .folder-count {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
   }
   .entry {
     border-left: 2px solid transparent;
@@ -231,11 +298,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .cat {
-    flex: none;
-    font-size: 11px;
-    color: var(--muted);
   }
   .ports {
     flex: none;

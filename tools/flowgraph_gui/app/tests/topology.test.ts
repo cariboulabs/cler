@@ -14,6 +14,8 @@ import {
   blockIsValid,
   initialBlockArguments,
   isRequiredArgumentPlaceholder,
+  libraryGroups,
+  libraryPathOf,
   missingRequiredFields,
   REQUIRED_ARGUMENT_PLACEHOLDER,
   portsSummary,
@@ -81,6 +83,24 @@ describe('the palette reads the crate specs', () => {
     expect(categoryOf(spec('FanoutBlock'), '/tmp/x.cpp')).toBe('utils');
     const local = spec('PlantBlock');
     expect(categoryOf(local, local.origin)).toBe('this file');
+    expect(
+      libraryPathOf(
+        { ...local, origin: 'desktop_blocks/adsb/coastlines_map/coastline.hpp' },
+        local.origin
+      )
+    ).toEqual(['adsb', 'coastlines_map']);
+  });
+
+  it('builds the library tree directly from block origin paths', () => {
+    const nested = {
+      ...spec('GainBlock'),
+      name: 'CoastlineBlock',
+      origin: 'desktop_blocks/adsb/coastlines_map/coastline.hpp'
+    };
+    const groups = libraryGroups([spec('SourceCWBlock'), nested], '/tmp/x.cpp');
+    expect(groups.map((group) => group.name)).toEqual(['adsb', 'sources']);
+    expect(groups[0]?.groups.map((group) => group.name)).toEqual(['coastlines_map']);
+    expect(groups[0]?.groups[0]?.specs.map((entry) => entry.name)).toEqual(['CoastlineBlock']);
   });
 
   it('searches by name, category, synonym and sample type', () => {

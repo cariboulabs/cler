@@ -35,7 +35,7 @@ useBrowser();
 
 describe('the palette lists what the crate found', () => {
   it(
-    'renders every spec with its category, ports and may_block chip, and searches them',
+    'renders the discovered directory tree with ports and may_block chips, and searches it',
     async () => {
       const page = await boot();
       await openLibrary(page);
@@ -45,13 +45,18 @@ describe('the palette lists what the crate found', () => {
       );
       const entries = page.locator('[data-testid="palette"] .entry');
       expect(await entries.count()).toBe(specs.length);
-      expect(await page.textContent('[data-testid="palette"] [data-block="GainBlock"]')).toContain(
-        'math'
-      );
+      expect(
+        await page.locator('[data-library-path="math"] [data-block="GainBlock"]').count()
+      ).toBe(1);
       expect(await page.textContent('[data-testid="palette"] [data-block="AddBlock"]')).toContain(
         'n in · 1 out'
       );
       expect(await page.locator('[data-testid="palette"] .chip').count()).toBeGreaterThan(0);
+
+      await page.click('[data-library-path="math"] > .folder-row');
+      expect(await page.locator('[data-block="GainBlock"]').count()).toBe(0);
+      await page.click('[data-library-path="math"] > .folder-row');
+      expect(await page.locator('[data-block="GainBlock"]').count()).toBe(1);
 
       await page.fill('[data-testid="palette-search"]', 'fanout');
       await expect.poll(() => entries.count()).toBe(1);
