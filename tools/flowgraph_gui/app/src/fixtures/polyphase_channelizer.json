@@ -1,0 +1,1040 @@
+{
+  "sha256": "be739eeb3175d38268191d86022ef4734998084713422143a17d51aeb959b993",
+  "version": "0.3.0",
+  "file": "desktop_examples/polyphase_channelizer.cpp",
+  "has_errors": false,
+  "errors": [],
+  "sites": [
+    {
+      "function": "main",
+      "call_offset": 3971,
+      "span": {
+        "start": 3971,
+        "end": 4907
+      },
+      "flowgraph_var": "flowgraph",
+      "blocks": [
+        {
+          "var": "cw_source0",
+          "type_text": "CustomSourceBlock",
+          "type_name": "CustomSourceBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"CW Source 0\"",
+              "span": {
+                "start": 2835,
+                "end": 2848
+              }
+            },
+            {
+              "text": "1*1.0f",
+              "span": {
+                "start": 2850,
+                "end": 2856
+              }
+            },
+            {
+              "text": "0.01f",
+              "span": {
+                "start": 2858,
+                "end": 2863
+              }
+            },
+            {
+              "text": "ch0_freq",
+              "span": {
+                "start": 2865,
+                "end": 2873
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 2875,
+                "end": 2878
+              }
+            }
+          ],
+          "display_name": "CW Source 0",
+          "in_graph": true,
+          "span": {
+            "start": 2806,
+            "end": 2880
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "cw_source1",
+          "type_text": "CustomSourceBlock",
+          "type_name": "CustomSourceBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"CW Source 1\"",
+              "span": {
+                "start": 2914,
+                "end": 2927
+              }
+            },
+            {
+              "text": "1*10.0f",
+              "span": {
+                "start": 2929,
+                "end": 2936
+              }
+            },
+            {
+              "text": "0.01f",
+              "span": {
+                "start": 2938,
+                "end": 2943
+              }
+            },
+            {
+              "text": "ch1_freq",
+              "span": {
+                "start": 2945,
+                "end": 2953
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 2955,
+                "end": 2958
+              }
+            }
+          ],
+          "display_name": "CW Source 1",
+          "in_graph": true,
+          "span": {
+            "start": 2885,
+            "end": 2960
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "cw_source2",
+          "type_text": "CustomSourceBlock",
+          "type_name": "CustomSourceBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"CW Source 2\"",
+              "span": {
+                "start": 2994,
+                "end": 3007
+              }
+            },
+            {
+              "text": "1*100.0f",
+              "span": {
+                "start": 3009,
+                "end": 3017
+              }
+            },
+            {
+              "text": "0.01f",
+              "span": {
+                "start": 3019,
+                "end": 3024
+              }
+            },
+            {
+              "text": "ch2_freq",
+              "span": {
+                "start": 3026,
+                "end": 3034
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 3036,
+                "end": 3039
+              }
+            }
+          ],
+          "display_name": "CW Source 2",
+          "in_graph": true,
+          "span": {
+            "start": 2965,
+            "end": 3041
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "cw_source3",
+          "type_text": "CustomSourceBlock",
+          "type_name": "CustomSourceBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"CW Source 3\"",
+              "span": {
+                "start": 3075,
+                "end": 3088
+              }
+            },
+            {
+              "text": "1*1000.0f",
+              "span": {
+                "start": 3090,
+                "end": 3099
+              }
+            },
+            {
+              "text": "0.01f",
+              "span": {
+                "start": 3101,
+                "end": 3106
+              }
+            },
+            {
+              "text": "ch3_freq",
+              "span": {
+                "start": 3109,
+                "end": 3117
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 3119,
+                "end": 3122
+              }
+            }
+          ],
+          "display_name": "CW Source 3",
+          "in_graph": true,
+          "span": {
+            "start": 3046,
+            "end": 3124
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "cw_source4",
+          "type_text": "CustomSourceBlock",
+          "type_name": "CustomSourceBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"CW Source 4\"",
+              "span": {
+                "start": 3158,
+                "end": 3171
+              }
+            },
+            {
+              "text": "1*10000.0f",
+              "span": {
+                "start": 3173,
+                "end": 3183
+              }
+            },
+            {
+              "text": "0.01f",
+              "span": {
+                "start": 3185,
+                "end": 3190
+              }
+            },
+            {
+              "text": "ch4_freq",
+              "span": {
+                "start": 3193,
+                "end": 3201
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 3203,
+                "end": 3206
+              }
+            }
+          ],
+          "display_name": "CW Source 4",
+          "in_graph": true,
+          "span": {
+            "start": 3129,
+            "end": 3208
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "adder",
+          "type_text": "AddBlock<std::complex<float>, NUM_CHANNELS>",
+          "type_name": "AddBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 3224,
+                "end": 3243
+              }
+            },
+            {
+              "text": "NUM_CHANNELS",
+              "resolved": "5",
+              "span": {
+                "start": 3245,
+                "end": 3257
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"Adder\"",
+              "span": {
+                "start": 3265,
+                "end": 3272
+              }
+            }
+          ],
+          "display_name": "Adder",
+          "in_graph": true,
+          "span": {
+            "start": 3215,
+            "end": 3274
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "throughput",
+          "type_text": "ThroughputBlock<std::complex<float>>",
+          "type_name": "ThroughputBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 3296,
+                "end": 3315
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"Throughput\"",
+              "span": {
+                "start": 3328,
+                "end": 3340
+              }
+            }
+          ],
+          "display_name": "Throughput",
+          "in_graph": true,
+          "span": {
+            "start": 3280,
+            "end": 3342
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "channelizer",
+          "type_text": "PolyphaseChannelizerBlock<NUM_CHANNELS, 3>",
+          "type_name": "PolyphaseChannelizerBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "NUM_CHANNELS",
+              "resolved": "5",
+              "span": {
+                "start": 3374,
+                "end": 3386
+              }
+            },
+            {
+              "text": "3",
+              "resolved": "3",
+              "span": {
+                "start": 3388,
+                "end": 3389
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"Polyphase Channelizer\"",
+              "span": {
+                "start": 3412,
+                "end": 3435
+              }
+            },
+            {
+              "text": "80.0f",
+              "span": {
+                "start": 3445,
+                "end": 3450
+              }
+            }
+          ],
+          "display_name": "Polyphase Channelizer",
+          "in_graph": true,
+          "span": {
+            "start": 3348,
+            "end": 3479
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "plot_polyphase_cspectrum",
+          "type_text": "PlotCSpectrumBlock",
+          "type_name": "PlotCSpectrumBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"Plot Channelizer Spectrum\"",
+              "span": {
+                "start": 3538,
+                "end": 3565
+              }
+            },
+            {
+              "text": "{\"pfch 0\", \"pfch 1\", \"pfch 2\", \"pfch 3\", \"pfch 4\"}",
+              "span": {
+                "start": 3575,
+                "end": 3625
+              }
+            },
+            {
+              "text": "static_cast<size_t>(channel_BW)",
+              "span": {
+                "start": 3635,
+                "end": 3666
+              }
+            },
+            {
+              "text": "1024",
+              "span": {
+                "start": 3676,
+                "end": 3680
+              }
+            },
+            {
+              "text": "SpectralWindow::BlackmanHarris",
+              "span": {
+                "start": 3690,
+                "end": 3720
+              }
+            }
+          ],
+          "display_name": "Plot Channelizer Spectrum",
+          "in_graph": true,
+          "span": {
+            "start": 3485,
+            "end": 3727
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "plot_input_cspectrum",
+          "type_text": "PlotCSpectrumBlock",
+          "type_name": "PlotCSpectrumBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"Plot Input Spectrum\"",
+              "span": {
+                "start": 3782,
+                "end": 3803
+              }
+            },
+            {
+              "text": "{\"source 0\", \"source 1\", \"source 2\", \"source 3\", \"source 4\"}",
+              "span": {
+                "start": 3813,
+                "end": 3873
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 3883,
+                "end": 3886
+              }
+            },
+            {
+              "text": "1024",
+              "span": {
+                "start": 3896,
+                "end": 3900
+              }
+            },
+            {
+              "text": "SpectralWindow::BlackmanHarris",
+              "span": {
+                "start": 3910,
+                "end": 3940
+              }
+            }
+          ],
+          "display_name": "Plot Input Spectrum",
+          "in_graph": true,
+          "span": {
+            "start": 3733,
+            "end": 3947
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "runners": [
+        {
+          "index": 0,
+          "block": "cw_source0",
+          "block_expr": "&cw_source0",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 4009,
+            "end": 4082
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 1,
+          "block": "cw_source1",
+          "block_expr": "&cw_source1",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 4092,
+            "end": 4165
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 2,
+          "block": "cw_source2",
+          "block_expr": "&cw_source2",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 4175,
+            "end": 4248
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 3,
+          "block": "cw_source3",
+          "block_expr": "&cw_source3",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 4258,
+            "end": 4331
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 4,
+          "block": "cw_source4",
+          "block_expr": "&cw_source4",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 4341,
+            "end": 4414
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 5,
+          "block": "adder",
+          "block_expr": "&adder",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 4424,
+            "end": 4465
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 6,
+          "block": "throughput",
+          "block_expr": "&throughput",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 4475,
+            "end": 4522
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 7,
+          "block": "channelizer",
+          "block_expr": "&channelizer",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 4532,
+            "end": 4797
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 8,
+          "block": "plot_polyphase_cspectrum",
+          "block_expr": "&plot_polyphase_cspectrum",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 4807,
+            "end": 4851
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 9,
+          "block": "plot_input_cspectrum",
+          "block_expr": "&plot_input_cspectrum",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 4861,
+            "end": 4901
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "edges": [
+        {
+          "from": "cw_source0",
+          "to": "adder",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 0,
+          "arg_index": 1,
+          "text": "&adder.in[0]",
+          "span": {
+            "start": 4040,
+            "end": 4052
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "cw_source0",
+          "to": "plot_input_cspectrum",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 0,
+          "arg_index": 2,
+          "text": "&plot_input_cspectrum.in[0]",
+          "span": {
+            "start": 4054,
+            "end": 4081
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "cw_source1",
+          "to": "adder",
+          "port": {
+            "name": "in",
+            "index": 1,
+            "kind": "indexed_field"
+          },
+          "runner_index": 1,
+          "arg_index": 1,
+          "text": "&adder.in[1]",
+          "span": {
+            "start": 4123,
+            "end": 4135
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "cw_source1",
+          "to": "plot_input_cspectrum",
+          "port": {
+            "name": "in",
+            "index": 1,
+            "kind": "indexed_field"
+          },
+          "runner_index": 1,
+          "arg_index": 2,
+          "text": "&plot_input_cspectrum.in[1]",
+          "span": {
+            "start": 4137,
+            "end": 4164
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "cw_source2",
+          "to": "adder",
+          "port": {
+            "name": "in",
+            "index": 2,
+            "kind": "indexed_field"
+          },
+          "runner_index": 2,
+          "arg_index": 1,
+          "text": "&adder.in[2]",
+          "span": {
+            "start": 4206,
+            "end": 4218
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "cw_source2",
+          "to": "plot_input_cspectrum",
+          "port": {
+            "name": "in",
+            "index": 2,
+            "kind": "indexed_field"
+          },
+          "runner_index": 2,
+          "arg_index": 2,
+          "text": "&plot_input_cspectrum.in[2]",
+          "span": {
+            "start": 4220,
+            "end": 4247
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "cw_source3",
+          "to": "adder",
+          "port": {
+            "name": "in",
+            "index": 3,
+            "kind": "indexed_field"
+          },
+          "runner_index": 3,
+          "arg_index": 1,
+          "text": "&adder.in[3]",
+          "span": {
+            "start": 4289,
+            "end": 4301
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "cw_source3",
+          "to": "plot_input_cspectrum",
+          "port": {
+            "name": "in",
+            "index": 3,
+            "kind": "indexed_field"
+          },
+          "runner_index": 3,
+          "arg_index": 2,
+          "text": "&plot_input_cspectrum.in[3]",
+          "span": {
+            "start": 4303,
+            "end": 4330
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "cw_source4",
+          "to": "adder",
+          "port": {
+            "name": "in",
+            "index": 4,
+            "kind": "indexed_field"
+          },
+          "runner_index": 4,
+          "arg_index": 1,
+          "text": "&adder.in[4]",
+          "span": {
+            "start": 4372,
+            "end": 4384
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "cw_source4",
+          "to": "plot_input_cspectrum",
+          "port": {
+            "name": "in",
+            "index": 4,
+            "kind": "indexed_field"
+          },
+          "runner_index": 4,
+          "arg_index": 2,
+          "text": "&plot_input_cspectrum.in[4]",
+          "span": {
+            "start": 4386,
+            "end": 4413
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "adder",
+          "to": "throughput",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 5,
+          "arg_index": 1,
+          "text": "&throughput.in",
+          "span": {
+            "start": 4450,
+            "end": 4464
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "throughput",
+          "to": "channelizer",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 6,
+          "arg_index": 1,
+          "text": "&channelizer.in",
+          "span": {
+            "start": 4506,
+            "end": 4521
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "channelizer",
+          "to": "plot_polyphase_cspectrum",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 7,
+          "arg_index": 1,
+          "text": "&plot_polyphase_cspectrum.in[0]",
+          "span": {
+            "start": 4576,
+            "end": 4607
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
+        },
+        {
+          "from": "channelizer",
+          "to": "plot_polyphase_cspectrum",
+          "port": {
+            "name": "in",
+            "index": 1,
+            "kind": "indexed_field"
+          },
+          "runner_index": 7,
+          "arg_index": 2,
+          "text": "&plot_polyphase_cspectrum.in[1]",
+          "span": {
+            "start": 4621,
+            "end": 4652
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
+        },
+        {
+          "from": "channelizer",
+          "to": "plot_polyphase_cspectrum",
+          "port": {
+            "name": "in",
+            "index": 2,
+            "kind": "indexed_field"
+          },
+          "runner_index": 7,
+          "arg_index": 3,
+          "text": "&plot_polyphase_cspectrum.in[2]",
+          "span": {
+            "start": 4666,
+            "end": 4697
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
+        },
+        {
+          "from": "channelizer",
+          "to": "plot_polyphase_cspectrum",
+          "port": {
+            "name": "in",
+            "index": 3,
+            "kind": "indexed_field"
+          },
+          "runner_index": 7,
+          "arg_index": 4,
+          "text": "&plot_polyphase_cspectrum.in[3]",
+          "span": {
+            "start": 4711,
+            "end": 4742
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
+        },
+        {
+          "from": "channelizer",
+          "to": "plot_polyphase_cspectrum",
+          "port": {
+            "name": "in",
+            "index": 4,
+            "kind": "indexed_field"
+          },
+          "runner_index": 7,
+          "arg_index": 5,
+          "text": "&plot_polyphase_cspectrum.in[4]",
+          "span": {
+            "start": 4756,
+            "end": 4787
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
+        }
+      ],
+      "config": {
+        "var": "config",
+        "source": "variable",
+        "assignments": [
+          {
+            "path": "scheduler",
+            "value": "cler::SchedulerType::FixedThreadPool",
+            "span": {
+              "start": 4948,
+              "end": 5003
+            },
+            "value_span": {
+              "start": 4967,
+              "end": 5003
+            },
+            "editable": true,
+            "read_only_reason": null
+          },
+          {
+            "path": "collect_detailed_stats",
+            "value": "true",
+            "span": {
+              "start": 5009,
+              "end": 5045
+            },
+            "value_span": {
+              "start": 5041,
+              "end": 5045
+            },
+            "editable": true,
+            "read_only_reason": null
+          }
+        ],
+        "run_call_span": {
+          "start": 5051,
+          "end": 5072
+        },
+        "editable": true,
+        "read_only_reason": null
+      },
+      "unresolved": [],
+      "editable": true,
+      "read_only_reason": null
+    }
+  ]
+}

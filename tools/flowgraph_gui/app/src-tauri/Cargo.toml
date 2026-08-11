@@ -1,0 +1,32 @@
+[package]
+name = "cler-flowgraph-gui"
+default-run = "cler-flowgraph-gui"
+version = "0.1.0"
+description = "cler flowgraph viewer"
+edition = "2021"
+
+[lib]
+name = "cler_flowgraph_gui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cler-flowgraph-gui"
+path = "src/main.rs"
+
+[[bin]]
+name = "e2e_backend"
+path = "src/bin/e2e_backend.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+cler-graph = { path = "../../cler-graph" }
+libc = "0.2"
+notify = "8"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"

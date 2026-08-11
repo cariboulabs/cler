@@ -60,6 +60,15 @@ make -j"$(nproc --ignore=1)"
 cmake -DCMAKE_BUILD_TYPE=Debug ..   # debug symbols
 ```
 
+### Resource safety (mandatory)
+
+- Before starting a build or test suite, check for existing compiler/test jobs
+  and current CPU and memory pressure.
+- Choose parallelism conservatively for the available machine and leave enough
+  headroom for the system to remain responsive. Avoid overlapping
+  resource-intensive builds or test suites.
+- Read-only work, code editing, and lightweight checks may proceed concurrently.
+
 Examples land in `build/desktop_examples/` (`hello_world`, `flowgraph`,
 `polyphase_channelizer`, `streamlined`, `udp`, ...).
 
@@ -688,6 +697,15 @@ cd tools && uv pip install -e .
 cler-validate desktop_examples/*.cpp     # missing runners, bad connections
 cler-viz file.cpp -o output.svg
 ```
+
+### Flowgraph GUI product constraint
+
+The GUI may place existing blocks discovered from the block library, but it
+must not offer a wizard or menu action for defining a new block type. New block
+types are authored directly in C++ and then discovered by the palette.
+
+The flowgraph GUI uses Svelte 5. Keep components on the runes API (`$state`,
+`$derived`, `$effect`, `$props`) and do not introduce Svelte 4 reactive syntax.
 
 ## 11. Code Style (mandatory)
 

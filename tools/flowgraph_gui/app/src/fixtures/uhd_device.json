@@ -1,0 +1,1297 @@
+{
+  "sha256": "9886be66d8bf98dc58022b823feae54dc1a6d033adc0d2faa063c24419c84320",
+  "version": "0.3.0",
+  "file": "desktop_examples/uhd_device.cpp",
+  "has_errors": false,
+  "errors": [],
+  "sites": [
+    {
+      "function": "mode_rx",
+      "call_offset": 5824,
+      "span": {
+        "start": 5824,
+        "end": 6063
+      },
+      "flowgraph_var": "flowgraph",
+      "blocks": [
+        {
+          "var": "usrp_source",
+          "type_text": "SourceUHDBlock<std::complex<float>>",
+          "type_name": "SourceUHDBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 5311,
+                "end": 5330
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"USRP\"",
+              "span": {
+                "start": 5344,
+                "end": 5350
+              }
+            },
+            {
+              "text": "args.freq",
+              "span": {
+                "start": 5352,
+                "end": 5361
+              }
+            },
+            {
+              "text": "args.rate",
+              "span": {
+                "start": 5371,
+                "end": 5380
+              }
+            },
+            {
+              "text": "args.device_address",
+              "span": {
+                "start": 5382,
+                "end": 5401
+              }
+            },
+            {
+              "text": "args.gain",
+              "span": {
+                "start": 5403,
+                "end": 5412
+              }
+            },
+            {
+              "text": "1",
+              "span": {
+                "start": 5414,
+                "end": 5415
+              }
+            }
+          ],
+          "display_name": "USRP",
+          "in_graph": true,
+          "span": {
+            "start": 5296,
+            "end": 5434
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "spectrum",
+          "type_text": "PlotCSpectrumBlock",
+          "type_name": "PlotCSpectrumBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"USRP Spectrum\"",
+              "span": {
+                "start": 5531,
+                "end": 5546
+              }
+            },
+            {
+              "text": "{\"I/Q\"}",
+              "span": {
+                "start": 5548,
+                "end": 5555
+              }
+            },
+            {
+              "text": "args.rate",
+              "span": {
+                "start": 5557,
+                "end": 5566
+              }
+            },
+            {
+              "text": "args.fft",
+              "span": {
+                "start": 5568,
+                "end": 5576
+              }
+            }
+          ],
+          "display_name": "USRP Spectrum",
+          "in_graph": true,
+          "span": {
+            "start": 5503,
+            "end": 5578
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "spectrogram",
+          "type_text": "PlotCSpectrogramBlock",
+          "type_name": "PlotCSpectrogramBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"Spectrogram\"",
+              "span": {
+                "start": 5617,
+                "end": 5630
+              }
+            },
+            {
+              "text": "{\"usrp_signal\"}",
+              "span": {
+                "start": 5632,
+                "end": 5647
+              }
+            },
+            {
+              "text": "args.rate",
+              "span": {
+                "start": 5649,
+                "end": 5658
+              }
+            },
+            {
+              "text": "args.fft",
+              "span": {
+                "start": 5660,
+                "end": 5668
+              }
+            },
+            {
+              "text": "4000",
+              "span": {
+                "start": 5670,
+                "end": 5674
+              }
+            }
+          ],
+          "display_name": "Spectrogram",
+          "in_graph": true,
+          "span": {
+            "start": 5583,
+            "end": 5676
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "fanout",
+          "type_text": "FanoutBlock<std::complex<float>>",
+          "type_name": "FanoutBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 5693,
+                "end": 5712
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"Fanout\"",
+              "span": {
+                "start": 5721,
+                "end": 5729
+              }
+            },
+            {
+              "text": "2",
+              "span": {
+                "start": 5731,
+                "end": 5732
+              }
+            }
+          ],
+          "display_name": "Fanout",
+          "in_graph": true,
+          "span": {
+            "start": 5681,
+            "end": 5734
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "runners": [
+        {
+          "index": 0,
+          "block": "usrp_source",
+          "block_expr": "&usrp_source",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 5862,
+            "end": 5905
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 1,
+          "block": "fanout",
+          "block_expr": "&fanout",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 5915,
+            "end": 5978
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 2,
+          "block": "spectrum",
+          "block_expr": "&spectrum",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 5988,
+            "end": 6016
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 3,
+          "block": "spectrogram",
+          "block_expr": "&spectrogram",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 6026,
+            "end": 6057
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "edges": [
+        {
+          "from": "usrp_source",
+          "to": "fanout",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 0,
+          "arg_index": 1,
+          "text": "&fanout.in",
+          "span": {
+            "start": 5894,
+            "end": 5904
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
+        },
+        {
+          "from": "fanout",
+          "to": "spectrum",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 1,
+          "arg_index": 1,
+          "text": "&spectrum.in[0]",
+          "span": {
+            "start": 5942,
+            "end": 5957
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
+        },
+        {
+          "from": "fanout",
+          "to": "spectrogram",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 1,
+          "arg_index": 2,
+          "text": "&spectrogram.in[0]",
+          "span": {
+            "start": 5959,
+            "end": 5977
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
+        }
+      ],
+      "config": null,
+      "unresolved": [],
+      "editable": true,
+      "read_only_reason": null
+    },
+    {
+      "function": "mode_tx_chirp",
+      "call_offset": 7346,
+      "span": {
+        "start": 7346,
+        "end": 7575
+      },
+      "flowgraph_var": "flowgraph",
+      "blocks": [
+        {
+          "var": "usrp_sink",
+          "type_text": "SinkUHDBlock<std::complex<float>>",
+          "type_name": "SinkUHDBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 6577,
+                "end": 6596
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"USRP_TX\"",
+              "span": {
+                "start": 6608,
+                "end": 6617
+              }
+            },
+            {
+              "text": "args.device_address",
+              "span": {
+                "start": 6627,
+                "end": 6646
+              }
+            },
+            {
+              "text": "1",
+              "span": {
+                "start": 6648,
+                "end": 6649
+              }
+            },
+            {
+              "text": "0",
+              "span": {
+                "start": 6668,
+                "end": 6669
+              }
+            },
+            {
+              "text": "\"sc16\"",
+              "span": {
+                "start": 6682,
+                "end": 6688
+              }
+            },
+            {
+              "text": "&config",
+              "span": {
+                "start": 6690,
+                "end": 6697
+              }
+            }
+          ],
+          "display_name": "USRP_TX",
+          "in_graph": true,
+          "span": {
+            "start": 6564,
+            "end": 6699
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "chirp",
+          "type_text": "SourceChirpBlock<std::complex<float>>",
+          "type_name": "SourceChirpBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 6785,
+                "end": 6804
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"Chirp\"",
+              "span": {
+                "start": 6812,
+                "end": 6819
+              }
+            },
+            {
+              "text": "args.amp",
+              "span": {
+                "start": 6870,
+                "end": 6878
+              }
+            },
+            {
+              "text": "-500e3f",
+              "span": {
+                "start": 6929,
+                "end": 6936
+              }
+            },
+            {
+              "text": "500e3f",
+              "span": {
+                "start": 6987,
+                "end": 6993
+              }
+            },
+            {
+              "text": "args.rate",
+              "span": {
+                "start": 7044,
+                "end": 7053
+              }
+            },
+            {
+              "text": "args.chirp_duration_s",
+              "span": {
+                "start": 7104,
+                "end": 7125
+              }
+            }
+          ],
+          "display_name": "Chirp",
+          "in_graph": true,
+          "span": {
+            "start": 6768,
+            "end": 7127
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "fanout",
+          "type_text": "FanoutBlock<std::complex<float>>",
+          "type_name": "FanoutBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 7144,
+                "end": 7163
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"Fanout\"",
+              "span": {
+                "start": 7172,
+                "end": 7180
+              }
+            },
+            {
+              "text": "2",
+              "span": {
+                "start": 7182,
+                "end": 7183
+              }
+            }
+          ],
+          "display_name": "Fanout",
+          "in_graph": true,
+          "span": {
+            "start": 7132,
+            "end": 7185
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "spectrum",
+          "type_text": "PlotCSpectrumBlock",
+          "type_name": "PlotCSpectrumBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"TX Spectrum\"",
+              "span": {
+                "start": 7218,
+                "end": 7231
+              }
+            },
+            {
+              "text": "{\"Chirp\"}",
+              "span": {
+                "start": 7233,
+                "end": 7242
+              }
+            },
+            {
+              "text": "args.rate",
+              "span": {
+                "start": 7244,
+                "end": 7253
+              }
+            },
+            {
+              "text": "2048",
+              "span": {
+                "start": 7255,
+                "end": 7259
+              }
+            }
+          ],
+          "display_name": "TX Spectrum",
+          "in_graph": true,
+          "span": {
+            "start": 7190,
+            "end": 7261
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "runners": [
+        {
+          "index": 0,
+          "block": "chirp",
+          "block_expr": "&chirp",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 7384,
+            "end": 7421
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 1,
+          "block": "fanout",
+          "block_expr": "&fanout",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 7431,
+            "end": 7492
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 2,
+          "block": "spectrum",
+          "block_expr": "&spectrum",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 7502,
+            "end": 7530
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 3,
+          "block": "usrp_sink",
+          "block_expr": "&usrp_sink",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 7540,
+            "end": 7569
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "edges": [
+        {
+          "from": "chirp",
+          "to": "fanout",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 0,
+          "arg_index": 1,
+          "text": "&fanout.in",
+          "span": {
+            "start": 7410,
+            "end": 7420
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "fanout",
+          "to": "spectrum",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 1,
+          "arg_index": 1,
+          "text": "&spectrum.in[0]",
+          "span": {
+            "start": 7458,
+            "end": 7473
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
+        },
+        {
+          "from": "fanout",
+          "to": "usrp_sink",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 1,
+          "arg_index": 2,
+          "text": "&usrp_sink.in[0]",
+          "span": {
+            "start": 7475,
+            "end": 7491
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
+        }
+      ],
+      "config": null,
+      "unresolved": [],
+      "editable": true,
+      "read_only_reason": null
+    },
+    {
+      "function": "mode_tx_cw",
+      "call_offset": 8585,
+      "span": {
+        "start": 8585,
+        "end": 8811
+      },
+      "flowgraph_var": "flowgraph",
+      "blocks": [
+        {
+          "var": "usrp_sink",
+          "type_text": "SinkUHDBlock<std::complex<float>>",
+          "type_name": "SinkUHDBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 8089,
+                "end": 8108
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"USRP_TX\"",
+              "span": {
+                "start": 8120,
+                "end": 8129
+              }
+            },
+            {
+              "text": "args.device_address",
+              "span": {
+                "start": 8139,
+                "end": 8158
+              }
+            },
+            {
+              "text": "1",
+              "span": {
+                "start": 8160,
+                "end": 8161
+              }
+            },
+            {
+              "text": "0",
+              "span": {
+                "start": 8180,
+                "end": 8181
+              }
+            },
+            {
+              "text": "\"sc16\"",
+              "span": {
+                "start": 8194,
+                "end": 8200
+              }
+            },
+            {
+              "text": "&config",
+              "span": {
+                "start": 8202,
+                "end": 8209
+              }
+            }
+          ],
+          "display_name": "USRP_TX",
+          "in_graph": true,
+          "span": {
+            "start": 8076,
+            "end": 8211
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "cw",
+          "type_text": "SourceCWBlock<std::complex<float>>",
+          "type_name": "SourceCWBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 8297,
+                "end": 8316
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"CW\"",
+              "span": {
+                "start": 8321,
+                "end": 8325
+              }
+            },
+            {
+              "text": "args.amp",
+              "span": {
+                "start": 8327,
+                "end": 8335
+              }
+            },
+            {
+              "text": "args.cw_offset",
+              "span": {
+                "start": 8337,
+                "end": 8351
+              }
+            },
+            {
+              "text": "args.rate",
+              "span": {
+                "start": 8353,
+                "end": 8362
+              }
+            }
+          ],
+          "display_name": "CW",
+          "in_graph": true,
+          "span": {
+            "start": 8283,
+            "end": 8364
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "fanout",
+          "type_text": "FanoutBlock<std::complex<float>>",
+          "type_name": "FanoutBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 8381,
+                "end": 8400
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"Fanout\"",
+              "span": {
+                "start": 8409,
+                "end": 8417
+              }
+            },
+            {
+              "text": "2",
+              "span": {
+                "start": 8419,
+                "end": 8420
+              }
+            }
+          ],
+          "display_name": "Fanout",
+          "in_graph": true,
+          "span": {
+            "start": 8369,
+            "end": 8422
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "spectrum",
+          "type_text": "PlotCSpectrumBlock",
+          "type_name": "PlotCSpectrumBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"TX Spectrum\"",
+              "span": {
+                "start": 8455,
+                "end": 8468
+              }
+            },
+            {
+              "text": "{\"CW Tone\"}",
+              "span": {
+                "start": 8470,
+                "end": 8481
+              }
+            },
+            {
+              "text": "args.rate",
+              "span": {
+                "start": 8483,
+                "end": 8492
+              }
+            },
+            {
+              "text": "2048",
+              "span": {
+                "start": 8494,
+                "end": 8498
+              }
+            }
+          ],
+          "display_name": "TX Spectrum",
+          "in_graph": true,
+          "span": {
+            "start": 8427,
+            "end": 8500
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "runners": [
+        {
+          "index": 0,
+          "block": "cw",
+          "block_expr": "&cw",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 8623,
+            "end": 8657
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 1,
+          "block": "fanout",
+          "block_expr": "&fanout",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 8667,
+            "end": 8728
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 2,
+          "block": "spectrum",
+          "block_expr": "&spectrum",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 8738,
+            "end": 8766
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 3,
+          "block": "usrp_sink",
+          "block_expr": "&usrp_sink",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 8776,
+            "end": 8805
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "edges": [
+        {
+          "from": "cw",
+          "to": "fanout",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 0,
+          "arg_index": 1,
+          "text": "&fanout.in",
+          "span": {
+            "start": 8646,
+            "end": 8656
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        },
+        {
+          "from": "fanout",
+          "to": "spectrum",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 1,
+          "arg_index": 1,
+          "text": "&spectrum.in[0]",
+          "span": {
+            "start": 8694,
+            "end": 8709
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
+        },
+        {
+          "from": "fanout",
+          "to": "usrp_sink",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 1,
+          "arg_index": 2,
+          "text": "&usrp_sink.in[0]",
+          "span": {
+            "start": 8711,
+            "end": 8727
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": null,
+          "type_conflict": false
+        }
+      ],
+      "config": null,
+      "unresolved": [],
+      "editable": true,
+      "read_only_reason": null
+    },
+    {
+      "function": "mode_zero_span",
+      "call_offset": 9846,
+      "span": {
+        "start": 9846,
+        "end": 10044
+      },
+      "flowgraph_var": "flowgraph",
+      "blocks": [
+        {
+          "var": "usrp_source",
+          "type_text": "SourceUHDBlock<std::complex<float>>",
+          "type_name": "SourceUHDBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 9270,
+                "end": 9289
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"USRP\"",
+              "span": {
+                "start": 9303,
+                "end": 9309
+              }
+            },
+            {
+              "text": "args.freq",
+              "span": {
+                "start": 9311,
+                "end": 9320
+              }
+            },
+            {
+              "text": "args.rate",
+              "span": {
+                "start": 9330,
+                "end": 9339
+              }
+            },
+            {
+              "text": "args.device_address",
+              "span": {
+                "start": 9341,
+                "end": 9360
+              }
+            },
+            {
+              "text": "args.gain",
+              "span": {
+                "start": 9362,
+                "end": 9371
+              }
+            },
+            {
+              "text": "1",
+              "span": {
+                "start": 9373,
+                "end": 9374
+              }
+            }
+          ],
+          "display_name": "USRP",
+          "in_graph": true,
+          "span": {
+            "start": 9255,
+            "end": 9376
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "power_detector",
+          "type_text": "PowerDetectorBlock<std::complex<float>>",
+          "type_name": "PowerDetectorBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 9474,
+                "end": 9493
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"PowerDetector\"",
+              "span": {
+                "start": 9510,
+                "end": 9525
+              }
+            },
+            {
+              "text": "-80.0f",
+              "span": {
+                "start": 9527,
+                "end": 9533
+              }
+            }
+          ],
+          "display_name": "PowerDetector",
+          "in_graph": true,
+          "span": {
+            "start": 9455,
+            "end": 9535
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "power_plot",
+          "type_text": "PlotTimeSeriesBlock",
+          "type_name": "PlotTimeSeriesBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"Power vs Time\"",
+              "span": {
+                "start": 9572,
+                "end": 9587
+              }
+            },
+            {
+              "text": "{\"Power (dB)\"}",
+              "span": {
+                "start": 9624,
+                "end": 9638
+              }
+            },
+            {
+              "text": "args.rate",
+              "span": {
+                "start": 9675,
+                "end": 9684
+              }
+            },
+            {
+              "text": "5.0f",
+              "span": {
+                "start": 9721,
+                "end": 9725
+              }
+            }
+          ],
+          "display_name": "Power vs Time",
+          "in_graph": true,
+          "span": {
+            "start": 9541,
+            "end": 9727
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "runners": [
+        {
+          "index": 0,
+          "block": "usrp_source",
+          "block_expr": "&usrp_source",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 9884,
+            "end": 9935
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 1,
+          "block": "power_detector",
+          "block_expr": "&power_detector",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 9945,
+            "end": 9998
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 2,
+          "block": "power_plot",
+          "block_expr": "&power_plot",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 10008,
+            "end": 10038
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "edges": [
+        {
+          "from": "usrp_source",
+          "to": "power_detector",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 0,
+          "arg_index": 1,
+          "text": "&power_detector.in",
+          "span": {
+            "start": 9916,
+            "end": 9934
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": null,
+          "source_type": null,
+          "type_conflict": false
+        },
+        {
+          "from": "power_detector",
+          "to": "power_plot",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 1,
+          "arg_index": 1,
+          "text": "&power_plot.in[0]",
+          "span": {
+            "start": 9980,
+            "end": 9997
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "float",
+          "source_type": null,
+          "type_conflict": false
+        }
+      ],
+      "config": null,
+      "unresolved": [],
+      "editable": true,
+      "read_only_reason": null
+    }
+  ]
+}

@@ -167,16 +167,22 @@ Bottom line: If you're juggling multiple data streams or your requirements keep 
 
 CLER includes tools to help visualize and understand your flowgraphs:
 
-## Flowgraph Visualization
+## Flowgraph GUI
 
-The `cler-mermaid` tool generates interactive Mermaid diagrams from your C++ flowgraph code:
+The desktop workbench opens C++ flowgraphs directly and provides visual editing,
+validation, build, and run controls:
 
 ```bash
-# Install the VSCode extension
-cd tools/mermaid/vscode-extension
-./install.sh
+cd tools/flowgraph_gui/app
+npm install
+npm run tauri dev
+```
 
-# Or use the CLI tool directly
+## Flowgraph Diagram CLI
+
+The standalone `cler-mermaid` tool generates Mermaid diagrams from C++ flowgraph code:
+
+```bash
 tools/mermaid/build/cler-mermaid my_flowgraph.cpp -o diagram
 ```
 
@@ -203,9 +209,8 @@ We need to address the current situation where small mistakes can lead to pages 
    - Are there any missing or misconfigured connections?
    - ...
 
-    Additionally, we could develop a VS Code extension to automate watch files and squiggle errors.
-
-Initial implementation exists in `tools/mermaid/` — includes both CLI tool and VSCode extension.
+The parser and validation tooling now lives in `tools/flowgraph_gui/cler-graph`,
+with diagnostics exposed through the desktop workbench.
 
 * <ins>GUI FrontEnd:</ins> </br>
 This is more of a nice to have, but if we are already creating a reflection tool for Flowgraph validation, we could also create an interactive FlowGraph generator.

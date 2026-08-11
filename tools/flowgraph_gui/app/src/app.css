@@ -1,0 +1,259 @@
+/* Design tokens shared with rflock (host/rflock/STYLE.md): Caribou-branded dark
+   surfaces. Components read token names only, never a raw color. */
+:root {
+  color-scheme: dark;
+
+  --accent: #b81828;
+  --accent-hi: #d11f33;
+  --accent-fg: #ffffff;
+  --ok: #2e8b57;
+  --warn: #b8770a;
+  --danger: #c0202e;
+
+  --glow: 0 0 8px;
+  --radius: 8px;
+  --radius-sm: 5px;
+  --radius-xs: 3px;
+
+  --sp-0: 2px;
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --bar-h: 40px;
+  --font: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+
+  --bg-0: #0e1116;
+  --bg-1: #161b22;
+  --bg-2: #1e242d;
+  --border: #2a323d;
+  --border-hi: #3a444f;
+  --fg: #e6edf3;
+  --muted: #8b98a9;
+  --faint: #6b7787;
+
+  --danger-fg: #e66767;
+  --danger-bg: #37181c;
+  --danger-border: #6e2a30;
+  --warn-bg: #332b18;
+  --warn-border: #6b551f;
+
+  /* Categorical sample-type ramp, CVD-validated against --bg-1 (rflock --chart-1..6). */
+  --type-1: #3987e5;
+  --type-2: #199e70;
+  --type-3: #c98500;
+  --type-4: #00a3b4;
+  --type-5: #9085e9;
+  --type-6: #e66767;
+
+  --glass: color-mix(in srgb, var(--bg-1) 78%, transparent);
+  --shadow: 0 8px 30px #0008;
+  --scrim: color-mix(in srgb, var(--bg-0) 72%, transparent);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-0);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-hi);
+  outline-offset: 2px;
+}
+
+button {
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 100ms,
+    border-color 100ms;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-1));
+}
+
+button:disabled {
+  color: var(--danger-fg);
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  cursor: not-allowed;
+}
+
+button.primary {
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hi);
+  border-color: var(--accent-hi);
+}
+
+select {
+  width: 100%;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-1);
+  font: inherit;
+}
+
+select:hover {
+  border-color: var(--border-hi);
+}
+
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+#app .svelte-flow {
+  z-index: auto;
+}
+
+.svelte-flow {
+  --xy-background-color: var(--bg-0);
+  --xy-node-color: var(--fg);
+  --xy-node-background-color: var(--bg-1);
+  --xy-node-border: 1px solid var(--border);
+  --xy-minimap-background-color: var(--bg-1);
+  --xy-minimap-mask-background-color: var(--scrim);
+  --xy-connectionline-stroke: var(--accent-hi);
+  --xy-connectionline-stroke-width: 2.4;
+}
+
+.svelte-flow__edge.cler-edge .svelte-flow__edge-path {
+  stroke: var(--edge-color, var(--muted));
+  stroke-width: 1.8;
+}
+
+.svelte-flow__edge.cler-edge-readonly .svelte-flow__edge-path {
+  stroke: var(--faint);
+  stroke-dasharray: 5 3;
+}
+
+.svelte-flow__edge.cler-edge-conflict .svelte-flow__edge-path {
+  stroke: var(--danger);
+  stroke-width: 2.4;
+  stroke-dasharray: 5 3;
+}
+
+.svelte-flow__edge.cler-edge-dim {
+  opacity: 0.4;
+}
+
+.svelte-flow__edge.cler-edge-lift .svelte-flow__edge-path {
+  stroke-width: 2.8;
+}
+
+.svelte-flow__edges:has(.svelte-flow__edge:hover) .svelte-flow__edge:not(:hover) {
+  opacity: 0.4;
+}
+
+.svelte-flow__edge.cler-edge:hover .svelte-flow__edge-path {
+  stroke: var(--accent-hi);
+  stroke-width: 3;
+}
+
+.svelte-flow__edge.selected .svelte-flow__edge-path {
+  stroke: var(--accent-hi);
+  stroke-width: 2.6;
+  stroke-dasharray: none;
+}
+
+.svelte-flow__handle {
+  width: 7px;
+  height: 7px;
+  background: var(--muted);
+  border: 1px solid var(--bg-1);
+  transition:
+    scale 150ms ease,
+    background 150ms ease;
+}
+
+.svelte-flow__node:hover .svelte-flow__handle {
+  scale: 1.6;
+  background: var(--accent-hi);
+}
+
+.svelte-flow__handle.connectingto {
+  background: var(--accent-hi);
+  box-shadow: var(--glow) var(--accent);
+}
+
+.svelte-flow__node .block {
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.block.unwired {
+  border-style: dashed;
+  border-color: var(--faint);
+  background: repeating-linear-gradient(
+    135deg,
+    var(--bg-1),
+    var(--bg-1) 8px,
+    var(--bg-2) 8px,
+    var(--bg-2) 16px
+  );
+  color: var(--muted);
+}
+
+.block.readonly {
+  border-color: var(--faint);
+}
+
+.svelte-flow__node:hover .block {
+  border-color: var(--border-hi);
+  box-shadow: var(--shadow);
+}
+
+.svelte-flow__node.selected .block {
+  border-color: var(--accent-hi);
+  box-shadow: var(--glow) color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.svelte-flow__minimap {
+  margin-right: calc(var(--rail-right, 0px) + var(--sp-3));
+  margin-bottom: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .svelte-flow__handle,
+  .svelte-flow__node .block {
+    transition: none;
+  }
+}
