@@ -33,10 +33,13 @@
   type Props = {
     canUndo: boolean;
     canRedo: boolean;
+    canSave: boolean;
     canOpenEditor: boolean;
     canEdit: boolean;
+    dirty: boolean;
     demo: boolean;
     editNote: string;
+    saveNote: string;
     alert: Alert | null;
     leftOpen: boolean;
     rightOpen: boolean;
@@ -51,6 +54,7 @@
     oncheck: () => void;
     onbuild: () => void;
     onrun: () => void;
+    onsave: () => void;
     onundo: () => void;
     onredo: () => void;
     onopen: () => void;
@@ -83,10 +87,13 @@
   const {
     canUndo,
     canRedo,
+    canSave,
     canOpenEditor,
     canEdit,
+    dirty,
     demo,
     editNote,
+    saveNote,
     alert,
     leftOpen,
     rightOpen,
@@ -101,6 +108,7 @@
     oncheck,
     onbuild,
     onrun,
+    onsave,
     onundo,
     onredo,
     onopen,
@@ -123,16 +131,16 @@
 
   const ZOOM_MS = 150;
   const FIT_MS = 200;
-  const SAVED_MS = 1500;
   const ALERT_MS = 4000;
   const MENU_WIDTH = 200;
   const MENU_HEIGHT = 260;
-  const MENU_IDS = ['check', 'build', 'run', 'undo', 'redo', 'fit'];
+  const MENU_IDS = ['check', 'build', 'run', 'save', 'undo', 'redo', 'fit'];
   const TOOLBAR_IDS = [
     'check',
     'build',
     'run',
     'open',
+    'save',
     'undo',
     'redo',
     'zoom-out',
@@ -142,6 +150,7 @@
   const CTRL_KEYS: Record<string, string> = {
     y: 'redo',
     o: 'open',
+    s: 'save',
     b: 'build',
     r: 'run',
     '=': 'zoom-in',
@@ -165,6 +174,7 @@
     run: ['M5.5 3.4 12.5 8l-7 4.6Z'],
     stop: ['M4.6 4.6h6.8v6.8H4.6Z'],
     open: ['M2 12.6V4.4a.9.9 0 0 1 .9-.9h3.1l1.3 1.6h5.8a.9.9 0 0 1 .9.9v6.6a.9.9 0 0 1-.9.9H2.9a.9.9 0 0 1-.9-.9Z'],
+    save: ['M3 2h8.5L14 4.5V14H2V2Z', 'M5 2v4h6V2', 'M5 10h6v4H5Z'],
     undo: ['M2.8 6.8h7.4a3.4 3.4 0 1 1 0 6.8H6.4', 'M5.4 4.2 2.8 6.8l2.6 2.6'],
     redo: ['M13.2 6.8H5.8a3.4 3.4 0 1 0 0 6.8H9.6', 'M10.6 4.2 13.2 6.8l-2.6 2.6'],
     'zoom-out': ['M7 2.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Z', 'M10.4 10.4 14 14', 'M4.9 7h4.2'],
@@ -220,6 +230,14 @@
       run: onrun
     },
     { id: 'open', label: 'Open file', shortcut: 'Ctrl+O', enabled: true, run: onopen },
+    {
+      id: 'save',
+      label: 'Save',
+      shortcut: 'Ctrl+S',
+      enabled: canSave,
+      hint: saveNote,
+      run: onsave
+    },
     { id: 'undo', label: 'Undo', shortcut: 'Ctrl+Z', enabled: canUndo, run: onundo },
     { id: 'redo', label: 'Redo', shortcut: 'Ctrl+Shift+Z', enabled: canRedo, run: onredo },
     {
@@ -376,14 +394,6 @@
     action.run();
   }
 
-  function flashSaved() {
-    if (!canEdit) {
-      flash(editNote, false, ALERT_MS);
-      return;
-    }
-    flash('saved automatically', false, SAVED_MS);
-  }
-
   function isTyping(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false;
     return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
@@ -409,7 +419,9 @@
     const ctrl = event.ctrlKey || event.metaKey;
     const key = event.key.toLowerCase();
     if (ctrl && key === 's') {
-      flashSaved();
+      const save = byId('save');
+      if (save?.enabled) act(save);
+      else flash(save?.hint ?? editNote, false, ALERT_MS);
       event.preventDefault();
       return;
     }
@@ -465,6 +477,9 @@
   <span class="wordmark">cler</span>
   {#if demo}
     <span class="demo" data-testid="demo-chip" title={editNote}>demo</span>
+  {/if}
+  {#if dirty}
+    <span class="draft" data-testid="draft-chip">draft</span>
   {/if}
   <span class="tagline">flowgraph editor</span>
   <span class="grow"></span>
@@ -642,6 +657,18 @@
     text-transform: uppercase;
     color: var(--muted);
     cursor: help;
+  }
+  .draft {
+    flex: none;
+    padding: 0 var(--sp-1);
+    border: 1px solid var(--warn-border);
+    border-radius: var(--radius-xs);
+    background: var(--warn-bg);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg);
   }
   .tagline {
     font-size: 11px;

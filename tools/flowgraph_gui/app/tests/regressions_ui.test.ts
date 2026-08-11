@@ -53,6 +53,7 @@ function installFake(setup: Setup) {
     model: setup.model,
     canUndo: false,
     canRedo: false,
+    dirty: false,
     externalChange: false
   };
   const undone: string[] = [];
@@ -139,6 +140,7 @@ function installFake(setup: Setup) {
     state.revision += 1;
     state.canUndo = undone.length > 0;
     state.canRedo = redone.length > 0;
+    state.dirty = true;
   }
 
   function step(from: string[], to: string[]) {
@@ -147,6 +149,7 @@ function installFake(setup: Setup) {
       to.push(JSON.stringify(state.model));
       state.model = JSON.parse(previous) as FileModel;
       state.revision += 1;
+      state.dirty = true;
     }
     state.canUndo = undone.length > 0;
     state.canRedo = redone.length > 0;
@@ -178,7 +181,9 @@ function installFake(setup: Setup) {
     } else {
       if (command === 'undo') step(undone, redone);
       if (command === 'redo') step(redone, undone);
+      if (command === 'save_document') state.dirty = false;
       if (command === 'reload_document') {
+        state.dirty = false;
         state.externalChange = false;
         state.canUndo = false;
         state.canRedo = false;
@@ -716,6 +721,41 @@ describe('A. view state survives an ordinary edit', () => {
     },
     CASE
   );
+
+  it(
+    'A8 restores positions and viewport after reloading the application',
+    async () => {
+      const page = await boot({ model: uhdModel() });
+      const spectrum = page.locator('.svelte-flow__node[data-id="spectrum"]');
+      const box = await spectrum.boundingBox();
+      if (!box) throw new Error('spectrum has no bounds');
+      await page.mouse.move(box.x + box.width / 2, box.y + 8);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + 130, box.y + 138, { steps: 12 });
+      await page.mouse.up();
+      await page.click('[data-testid="zoom-in"]');
+      await page.waitForTimeout(400);
+
+      const moved = (await positions(page)).spectrum;
+      const viewport = () =>
+        page.evaluate(
+          () =>
+            (document.querySelector('.svelte-flow__viewport') as HTMLElement | null)?.style
+              .transform ?? 'none'
+        );
+      const movedViewport = await viewport();
+
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForSelector(`.path[title="${FAKE_PATH}"]`);
+      await page.waitForSelector('.svelte-flow__node[data-id="spectrum"]');
+      await page.waitForTimeout(500);
+
+      expect((await positions(page)).spectrum).toBe(moved);
+      expect(await viewport()).toBe(movedViewport);
+      await page.close();
+    },
+    CASE
+  );
 });
 
 /* ================================================= 2. draft / error leakage */
@@ -1110,7 +1150,15 @@ describe('D. a newer model is never replaced by an older one', () => {
           args: Record<string, unknown>
         ): Promise<unknown> => {
           if (name !== 'undo') return real(name, args);
-          return { path: '/tmp/fake/hello_world.cpp', revision: 1, model: stale, canUndo: false, canRedo: true, externalChange: false };
+          return {
+            path: '/tmp/fake/hello_world.cpp',
+            revision: 1,
+            model: stale,
+            canUndo: false,
+            canRedo: true,
+            dirty: false,
+            externalChange: false
+          };
         };
       });
 

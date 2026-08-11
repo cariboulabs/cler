@@ -100,25 +100,26 @@ fn poison(docs: &Arc<Documents>) {
 }
 
 #[test]
-fn a_failed_write_leaves_the_session_exactly_where_disk_is() {
+fn a_failed_save_leaves_the_draft_and_disk_distinct() {
     let path = temp_copy("hello_world.cpp");
     let original = text(&path);
     let docs = Documents::default();
 
-    let opened = document::open(&docs, as_str(&path)).expect("open");
-    assert_eq!(opened.revision, 0);
+    document::open(&docs, as_str(&path)).expect("open");
 
     chmod(&path, 0o444);
-    let refusal = document::apply(&docs, as_str(&path), 0, set_param("source1", 1, "4.25f"))
-        .expect_err("the write cannot succeed on a read-only file");
+    let drafted = document::apply(&docs, as_str(&path), 0, set_param("source1", 1, "4.25f"))
+        .expect("the draft does not write the source");
+    let refusal = document::save(&docs, as_str(&path))
+        .expect_err("saving a read-only file is refused");
     assert!(refusal.contains("cannot write"), "{refusal}");
     assert_eq!(text(&path), original);
 
     let after = state_of(&docs, &path);
-    assert_eq!(after.revision, 0, "the session did not advance");
-    assert!(!after.can_undo, "there is nothing to undo");
-    assert_eq!(after.model.sha256, opened.model.sha256);
-    assert_eq!(after.model.sha256, digest(&original));
+    assert_eq!(after.revision, drafted.revision, "save adds no revision");
+    assert!(after.can_undo);
+    assert!(after.dirty);
+    assert_ne!(after.model.sha256, digest(&original));
     assert_eq!(
         siblings(&path),
         vec!["hello_world.cpp"],
@@ -129,31 +130,35 @@ fn a_failed_write_leaves_the_session_exactly_where_disk_is() {
 }
 
 #[test]
-fn an_edit_reported_as_failed_never_lands_with_the_next_edit() {
+fn a_failed_save_preserves_the_draft_for_the_next_edit() {
     let path = temp_copy("hello_world.cpp");
     let docs = Documents::default();
     document::open(&docs, as_str(&path)).expect("open");
 
     chmod(&path, 0o444);
-    document::apply(&docs, as_str(&path), 0, set_param("source1", 1, "111.0f"))
-        .expect_err("write refused");
+    let first = document::apply(&docs, as_str(&path), 0, set_param("source1", 1, "111.0f"))
+        .expect("draft");
+    document::save(&docs, as_str(&path)).expect_err("save refused");
     assert!(!text(&path).contains("111.0f"));
 
     chmod(&path, 0o644);
-    let ok = document::apply(&docs, as_str(&path), 0, set_param("source2", 1, "222.0f"))
-        .expect("second edit succeeds against the unchanged base revision");
-    assert_eq!(ok.revision, 1);
+    let ok = document::apply(
+        &docs,
+        as_str(&path),
+        first.revision,
+        set_param("source2", 1, "222.0f"),
+    )
+    .expect("second edit extends the draft");
+    assert_eq!(ok.revision, 2);
+    document::save(&docs, as_str(&path)).expect("save both edits");
 
     let on_disk = text(&path);
     assert!(on_disk.contains("222.0f"), "the requested edit");
-    assert!(
-        !on_disk.contains("111.0f"),
-        "the edit the user was told had failed stays gone: {on_disk}"
-    );
+    assert!(on_disk.contains("111.0f"), "the earlier draft survives: {on_disk}");
 }
 
 #[test]
-fn close_after_a_failed_write_loses_nothing() {
+fn close_after_a_failed_save_discards_only_the_draft() {
     let path = temp_copy("hello_world.cpp");
     let original = text(&path);
     let docs = Documents::default();
@@ -161,7 +166,8 @@ fn close_after_a_failed_write_loses_nothing() {
 
     chmod(&path, 0o444);
     document::apply(&docs, as_str(&path), 0, set_param("source1", 1, "9.75f"))
-        .expect_err("refused");
+        .expect("draft");
+    document::save(&docs, as_str(&path)).expect_err("save refused");
     chmod(&path, 0o644);
 
     document::close(&docs, as_str(&path));
@@ -172,7 +178,7 @@ fn close_after_a_failed_write_loses_nothing() {
 }
 
 #[test]
-fn a_read_only_directory_fails_every_save_without_advancing_the_session() {
+fn a_read_only_directory_refuses_save_without_losing_the_draft() {
     let path = temp_copy("hello_world.cpp");
     let original = text(&path);
     let dir = path.parent().expect("parent").to_path_buf();
@@ -180,21 +186,30 @@ fn a_read_only_directory_fails_every_save_without_advancing_the_session() {
     document::open(&docs, as_str(&path)).expect("open");
 
     chmod(&dir, 0o555);
+    let mut revision = 0;
     for value in ["1.5f", "2.5f", "3.5f"] {
-        let refusal = document::apply(&docs, as_str(&path), 0, set_param("source1", 1, value))
-            .expect_err("every write fails");
+        let drafted = document::apply(
+            &docs,
+            as_str(&path),
+            revision,
+            set_param("source1", 1, value),
+        )
+        .expect("draft");
+        revision = drafted.revision;
+        let refusal = document::save(&docs, as_str(&path)).expect_err("every save fails");
         assert!(refusal.contains("cannot write"), "{refusal}");
     }
     chmod(&dir, 0o755);
 
     assert_eq!(text(&path), original, "disk never moves");
     let state = state_of(&docs, &path);
-    assert_eq!(state.revision, 0, "no phantom revisions");
-    assert!(!state.can_undo);
+    assert_eq!(state.revision, revision, "save adds no phantom revisions");
+    assert!(state.can_undo);
+    assert!(state.dirty);
     assert!(state.model.model.sites[0]
         .blocks
         .iter()
-        .all(|b| b.ctor_args.iter().all(|a| a.text != "3.5f")));
+        .any(|b| b.ctor_args.iter().any(|a| a.text == "3.5f")));
     assert_eq!(siblings(&path), vec!["hello_world.cpp"]);
 }
 
@@ -211,7 +226,8 @@ fn a_symlinked_temp_sibling_cannot_redirect_the_write() {
     std::os::unix::fs::symlink(&victim, &planted).expect("plant a symlink at the old temp name");
 
     document::apply(&docs, as_str(&path), 0, set_param("source1", 1, "6.5f"))
-        .expect("the write succeeds");
+        .expect("draft");
+    document::save(&docs, as_str(&path)).expect("the save succeeds");
 
     assert_eq!(
         text(&victim),
@@ -326,7 +342,7 @@ fn the_history_flags_track_the_session_through_interleavings() {
 }
 
 #[test]
-fn undo_after_a_failed_write_undoes_the_bytes_the_user_last_saw() {
+fn undo_after_a_failed_save_returns_to_the_last_saved_bytes() {
     let path = temp_copy("hello_world.cpp");
     let original = text(&path);
     let docs = Documents::default();
@@ -335,24 +351,32 @@ fn undo_after_a_failed_write_undoes_the_bytes_the_user_last_saw() {
 
     let good = document::apply(&docs, p, 0, set_param("source1", 1, "5.0f")).expect("v1");
     assert_eq!(good.revision, 1);
+    document::save(&docs, p).expect("save v1");
     let v1 = text(&path);
 
     chmod(&path, 0o444);
     document::apply(&docs, p, good.revision, set_param("source2", 1, "50.0f"))
-        .expect_err("refused");
+        .expect("draft v2");
+    document::save(&docs, p).expect_err("save refused");
     chmod(&path, 0o644);
 
     let state = state_of(&docs, &path);
     assert!(state.can_undo);
-    assert!(!state.can_redo, "a failed write offers no phantom redo");
-    assert_eq!(state.model.sha256, digest(&v1));
+    assert!(!state.can_redo);
+    assert!(state.dirty);
+    assert!(state.source.contains("50.0f"));
 
     let undone = document::undo(&docs, p).expect("undo");
-    assert_eq!(text(&path), original, "one undo, and we are back at v0");
-    assert!(!undone.can_undo);
-    assert!(undone.can_redo);
-    document::redo(&docs, p).expect("redo");
     assert_eq!(text(&path), v1);
+    assert_eq!(undone.source, v1);
+    assert!(!undone.dirty);
+    assert!(undone.can_undo);
+    assert!(undone.can_redo);
+    let redone = document::redo(&docs, p).expect("redo");
+    assert_eq!(text(&path), v1);
+    assert!(redone.dirty);
+    assert!(redone.source.contains("50.0f"));
+    assert!(!original.contains("5.0f"));
 }
 
 #[test]
@@ -363,6 +387,7 @@ fn a_reload_that_changes_nothing_keeps_the_undo_history() {
     document::open(&docs, p).expect("open");
     document::apply(&docs, p, 0, set_param("source1", 1, "2.0f")).expect("apply");
     let second = document::apply(&docs, p, 1, set_param("source2", 1, "3.0f")).expect("apply");
+    document::save(&docs, p).expect("save");
     let before = text(&path);
 
     let reloaded = document::reload(&docs, p).expect("reload of identical bytes");

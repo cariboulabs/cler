@@ -42,7 +42,7 @@ test('j) the assistant asks for a key before it can cost anything', async ({
   });
 });
 
-test('k) an accepted proposal is checked by the validator, then written to the file', async ({
+test('k) an accepted proposal is checked, drafted, then saved to the file', async ({
   page,
   work,
   openFile,
@@ -76,10 +76,13 @@ test('k) an accepted proposal is checked by the validator, then written to the f
     await shot('assistant-proposal');
   });
 
-  await test.step('accept writes the bytes and the card records the revision', async () => {
+  await test.step('accept drafts the bytes and the card records the revision', async () => {
     await page.getByTestId('proposal-accept').click();
     await expect(page.getByTestId('proposal-applied')).toContainText('revision 1');
 
+    expect(work.bytes(opened)).toBe(original);
+    await expect(page.getByTestId('draft-chip')).toBeVisible();
+    await page.getByTestId('save').click();
     await expect
       .poll(() => work.bytes(opened), { timeout: 20_000 })
       .toContain('SourceCWBlock<float> source1("Chirp"');
@@ -90,6 +93,8 @@ test('k) an accepted proposal is checked by the validator, then written to the f
 
   await test.step('the whole proposal is one undo step', async () => {
     await page.getByTestId('undo').click();
+    expect(work.bytes(opened)).not.toBe(original);
+    await page.getByTestId('save').click();
     await expect.poll(() => work.bytes(opened), { timeout: 20_000 }).toBe(original);
     await expect(page.getByTestId('undo')).toBeDisabled();
     await expect(page.getByTestId('assistant-proposal')).toBeVisible();

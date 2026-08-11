@@ -196,13 +196,23 @@ fn dispatch(
         }
         "undo" => outcome(document::undo(docs, &path)),
         "redo" => outcome(document::redo(docs, &path)),
+        "save_document" => outcome(document::save(docs, &path)),
         "reload_document" => outcome(document::reload(docs, &path)),
         "parse_file" => outcome(document::parse_file(docs, &path)),
         "palette" => outcome(document::palette(docs, &path)),
-        "check_document" => outcome(build::check(jobs, &path, emitter(events))),
+        "check_document" => outcome(
+            document::require_saved(docs, &path)
+                .and_then(|()| build::check(jobs, &path, emitter(events))),
+        ),
         "find_target" => outcome(build::find_target(&path)),
-        "build_target" => outcome(build::build(jobs, &path, emitter(events))),
-        "run_target" => outcome(build::start(jobs, &path, emitter(events))),
+        "build_target" => outcome(
+            document::require_saved(docs, &path)
+                .and_then(|()| build::build(jobs, &path, emitter(events))),
+        ),
+        "run_target" => outcome(
+            document::require_saved(docs, &path)
+                .and_then(|()| build::start(jobs, &path, emitter(events))),
+        ),
         "stop_target" => outcome(build::stop(jobs, &path)),
         _ => Reply::Loud(format!("unknown command: {cmd}")),
     }

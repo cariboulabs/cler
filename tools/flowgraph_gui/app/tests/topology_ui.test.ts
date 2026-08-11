@@ -44,19 +44,24 @@ describe('the palette lists what the crate found', () => {
         'true'
       );
       const entries = page.locator('[data-testid="palette"] .entry');
-      expect(await entries.count()).toBe(specs.length);
+      expect(await entries.count()).toBe(0);
+      expect(
+        await page.getAttribute('[data-library-path="math"] > .folder-row', 'aria-expanded')
+      ).toBe('false');
+
+      await page.click('[data-library-path="math"] > .folder-row');
       expect(
         await page.locator('[data-library-path="math"] [data-block="GainBlock"]').count()
       ).toBe(1);
       expect(await page.textContent('[data-testid="palette"] [data-block="AddBlock"]')).toContain(
         'n in · 1 out'
       );
+
+      await page.click('[data-library-path="sources"] > .folder-row');
       expect(await page.locator('[data-testid="palette"] .chip').count()).toBeGreaterThan(0);
 
       await page.click('[data-library-path="math"] > .folder-row');
       expect(await page.locator('[data-block="GainBlock"]').count()).toBe(0);
-      await page.click('[data-library-path="math"] > .folder-row');
-      expect(await page.locator('[data-block="GainBlock"]').count()).toBe(1);
 
       await page.fill('[data-testid="palette-search"]', 'fanout');
       await expect.poll(() => entries.count()).toBe(1);
@@ -91,6 +96,7 @@ describe('the palette lists what the crate found', () => {
     async () => {
       const page = await viewer('?example=hello_world');
       await openLibrary(page);
+      await page.click('[data-library-path="this file"] > .folder-row');
       expect(await page.locator('[data-testid="palette"] .entry').count()).toBe(4);
       expect(await page.getAttribute('[data-testid="demo-chip"]', 'title')).toContain(
         'example mode'
@@ -555,6 +561,7 @@ describe('each right-click target has its own menu', () => {
         'menu-check',
         'menu-build',
         'menu-run',
+        'menu-save',
         'menu-undo',
         'menu-redo',
         'menu-fit'

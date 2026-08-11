@@ -54,6 +54,7 @@
     redoDocument,
     reloadDocument,
     runTarget,
+    saveDocument,
     spansOf,
     stopTarget,
     undoDocument,
@@ -135,6 +136,7 @@
   const viewerNote = desktop ? NOTE_DESKTOP : NOTE_BROWSER;
   const DISK_DRIFT = 'changed on disk';
   const DISK_NOTE = 'this file changed on disk — reload before building or running';
+  const DRAFT_NOTE = 'save the draft before checking, building, or running';
   const NO_SITE = 'no flowgraph site found in this file';
   const DROP_HINT = 'dropped — release on an input port to connect';
   const NO_SHELL = 'the assistant runs on your machine — open the desktop shell to use it';
@@ -150,6 +152,7 @@
   const RIGHT_PANEL = 'cler.panel.right';
   const DRAWER_PANEL = 'cler.panel.drawer';
   const DRAWER_HEIGHT = 'cler.panel.drawer.height';
+  const LAYOUT_PREFIX = 'cler.layout.';
   const DEFAULT_DRAWER_HEIGHT = 260;
   const OUTPUT_LINES = 2000;
   const MIN_DRAWER_HEIGHT = 90;
@@ -213,6 +216,7 @@
   let pinned = new Map<string, EdgePoint>();
   const positionsByView = new Map<string, Map<string, EdgePoint>>();
   const viewportsByView = new Map<string, Viewport>();
+  const loadedViews = new Set<string>();
 
   const editable = $derived(desktop && opened !== null);
   const site = $derived<Site | undefined>(doc.model.sites[siteIndex]);
@@ -273,21 +277,32 @@
   const blocked = $derived<string | null>(
     !editable ? viewerNote : needsReload ? DISK_NOTE : null
   );
+  const taskBlocked = $derived(blocked ?? (doc.dirty ? DRAFT_NOTE : null));
   const tasks = $derived<Tasks>({
     check: {
-      enabled: blocked === null && targetError === null && busy === null,
-      hint: blocked ?? targetError ?? 'syntax-check this file with g++ (F7)'
+      enabled: taskBlocked === null && targetError === null && busy === null,
+      hint: taskBlocked ?? targetError ?? 'syntax-check this file with g++ (F7)'
     },
     build: {
-      enabled: blocked === null && busy === null && target?.available === true,
-      hint: blocked ?? target?.reason ?? targetError ?? 'build this example with cmake (Ctrl+B)'
+      enabled: taskBlocked === null && busy === null && target?.available === true,
+      hint:
+        taskBlocked ?? target?.reason ?? targetError ?? 'build this example with cmake (Ctrl+B)'
     },
     run: {
       enabled:
-        blocked === null &&
-        (running || (incompleteNote === null && busy === null && target?.available === true)),
+        running ||
+        (taskBlocked === null &&
+          incompleteNote === null &&
+          busy === null &&
+          target?.available === true),
       hint:
-        blocked ?? incompleteNote ?? target?.reason ?? targetError ?? 'run the built example (Ctrl+R)'
+        running
+          ? 'stop the running example (Ctrl+R)'
+          : taskBlocked ??
+            incompleteNote ??
+            target?.reason ??
+            targetError ??
+            'run the built example (Ctrl+R)'
     }
   });
 
@@ -401,7 +416,7 @@
       const merged = mergeProjection(untrack(() => ({ nodes, edges })), fresh, pinned);
       nodes = merged.nodes;
       edges = merged.edges;
-      rememberPositions(key, merged.nodes);
+      rememberPositions(key, merged.nodes, true);
       return;
     }
     let stale = false;
@@ -410,7 +425,7 @@
       if (stale) return;
       nodes = restorePositions(key, laid.nodes);
       edges = laid.edges;
-      rememberPositions(key, nodes);
+      rememberPositions(key, nodes, true);
       viewKey = key;
       await tick();
       if (stale) return;
@@ -423,17 +438,23 @@
 
   function rememberPositions(
     key: string,
-    current: { id: string; position: EdgePoint }[]
+    current: { id: string; position: EdgePoint }[],
+    complete = false
   ): void {
     if (!key) return;
-    const positions = positionsByView.get(key) ?? new Map<string, EdgePoint>();
+    loadLayout(key);
+    const positions = complete
+      ? new Map<string, EdgePoint>()
+      : (positionsByView.get(key) ?? new Map<string, EdgePoint>());
     for (const node of current) {
       positions.set(node.id, { x: node.position.x, y: node.position.y });
     }
     positionsByView.set(key, positions);
+    storeLayout(key);
   }
 
   function restorePositions(key: string, current: BlockNodeType[]): BlockNodeType[] {
+    loadLayout(key);
     const positions = positionsByView.get(key);
     if (!positions) return current;
     return current.map((node) => {
@@ -444,7 +465,42 @@
 
   function rememberViewport(key: string, viewport: Viewport): void {
     if (!key) return;
+    loadLayout(key);
     viewportsByView.set(key, { x: viewport.x, y: viewport.y, zoom: viewport.zoom });
+    storeLayout(key);
+  }
+
+  function loadLayout(key: string): void {
+    if (loadedViews.has(key)) return;
+    loadedViews.add(key);
+    try {
+      const stored = JSON.parse(localStorage.getItem(LAYOUT_PREFIX + key) ?? '{}') as {
+        positions?: Record<string, EdgePoint>;
+        viewport?: Viewport;
+      };
+      const positions = new Map<string, EdgePoint>();
+      for (const [id, point] of Object.entries(stored.positions ?? {})) {
+        if (Number.isFinite(point.x) && Number.isFinite(point.y)) positions.set(id, point);
+      }
+      if (positions.size > 0) positionsByView.set(key, positions);
+      const viewport = stored.viewport;
+      if (
+        viewport &&
+        Number.isFinite(viewport.x) &&
+        Number.isFinite(viewport.y) &&
+        Number.isFinite(viewport.zoom)
+      ) {
+        viewportsByView.set(key, viewport);
+      }
+    } catch {
+      localStorage.removeItem(LAYOUT_PREFIX + key);
+    }
+  }
+
+  function storeLayout(key: string): void {
+    const positions = Object.fromEntries(positionsByView.get(key) ?? []);
+    const viewport = viewportsByView.get(key) ?? null;
+    localStorage.setItem(LAYOUT_PREFIX + key, JSON.stringify({ positions, viewport }));
   }
 
   function clampContext() {
@@ -725,6 +781,12 @@
   async function reload() {
     const outcome = await attempt(reloadDocument, (next) => install(next, false));
     if (!outcome.ok) changedOnDisk = true;
+  }
+
+  async function save() {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    const outcome = await run(saveDocument);
+    if (outcome.ok) hint('saved to source');
   }
 
   function discardOnReload() {
@@ -1202,10 +1264,19 @@
             bind:this={actions}
             canUndo={doc.canUndo}
             canRedo={doc.canRedo}
+            canSave={editable && !needsReload}
             canOpenEditor={editable}
             canEdit={editable}
+            dirty={doc.dirty}
             demo={!editable}
             editNote={viewerNote}
+            saveNote={!editable
+              ? viewerNote
+              : needsReload
+                ? 'reload the external change before saving'
+                : doc.dirty
+                  ? 'write the draft to the source file (Ctrl+S)'
+                  : 'save the current document (Ctrl+S)'}
             {alert}
             {leftOpen}
             {rightOpen}
@@ -1220,6 +1291,7 @@
             oncheck={() => void task('check', checkDocument)}
             onbuild={() => void task('build', buildTarget)}
             onrun={() => void toggleRun()}
+            onsave={() => void save()}
             onundo={() => void run(undoDocument)}
             onredo={() => void run(redoDocument)}
             onopen={() => void openFile()}

@@ -40,6 +40,7 @@ function installFake(setup: Setup) {
     source: setup.source,
     canUndo: false,
     canRedo: false,
+    dirty: false,
     externalChange: false
   };
   const calls: { name: string; args: Record<string, unknown> }[] = [];
@@ -97,6 +98,7 @@ function installFake(setup: Setup) {
     }
     state.revision += 1;
     state.canUndo = true;
+    state.dirty = true;
   }
 
   async function invoke(command: string, args: Record<string, unknown>): Promise<unknown> {
@@ -104,7 +106,11 @@ function installFake(setup: Setup) {
     if (command === 'plugin:dialog|open') return state.path;
     calls.push({ name: command, args });
     if (command === 'apply_commands') apply(args.commands as Record<string, unknown>[]);
-    if (command === 'reload_document') state.externalChange = false;
+    if (command === 'save_document') state.dirty = false;
+    if (command === 'reload_document') {
+      state.dirty = false;
+      state.externalChange = false;
+    }
     if (command === 'open_in_editor') return null;
     if (command === 'close_document') return null;
     return snapshot();
@@ -569,6 +575,7 @@ describe('the node context menu reaches the code', () => {
         'menu-check',
         'menu-build',
         'menu-run',
+        'menu-save',
         'menu-undo',
         'menu-redo',
         'menu-fit'

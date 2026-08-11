@@ -114,7 +114,7 @@ test('a) picking an example inside the desktop shell opens its editable source',
   expect(await calls('apply_commands')).toEqual([]);
 });
 
-test('b+c) editing a real file writes the bytes and undo restores them', async ({
+test('b+c) edits stay drafted until Save and undo can be saved too', async ({
   page,
   work,
   openFile,
@@ -135,23 +135,31 @@ test('b+c) editing a real file writes the bytes and undo restores them', async (
     await field.fill('4242');
     await field.press('Enter');
 
-    await expect
-      .poll(() => work.bytes(file), { timeout: 20_000 })
-      .toContain('ThrottleBlock<float> throttle("Throttle", 4242)');
+    expect(work.bytes(file)).toBe(original);
     await expect.poll(() => revision(page)).toBe(1);
+    await expect(page.getByTestId('draft-chip')).toBeVisible();
+    await expect(page.getByTestId('check')).toBeDisabled();
 
     await page.getByTestId('drawer-toggle').click();
     await expect(page.getByTestId('drawer-revision')).toHaveText('rev 1');
     await expect(page.getByTestId('drawer-body')).toContainText('"Throttle", 4242');
+    await page.getByTestId('save').click();
+    await expect
+      .poll(() => work.bytes(file), { timeout: 20_000 })
+      .toContain('ThrottleBlock<float> throttle("Throttle", 4242)');
+    await expect(page.getByTestId('draft-chip')).toHaveCount(0);
     await shot('edited');
   });
 
-  await test.step('undo restores the bytes byte for byte', async () => {
+  await test.step('undo creates a draft and Save restores the bytes byte for byte', async () => {
     await page.getByTestId('undo').click();
-    await expect.poll(() => work.bytes(file), { timeout: 20_000 }).toBe(original);
+    expect(work.bytes(file)).not.toBe(original);
     await expect(page.getByTestId('undo')).toBeDisabled();
     await expect(page.getByTestId('redo')).toBeEnabled();
     await expect(page.getByTestId('drawer-body')).toContainText('"Throttle", SPS');
+    await expect(page.getByTestId('draft-chip')).toBeVisible();
+    await page.getByTestId('save').click();
+    await expect.poll(() => work.bytes(file), { timeout: 20_000 }).toBe(original);
     await shot('undone');
   });
 });
@@ -175,6 +183,8 @@ test('d) wiring a third fanout output is one transaction', async ({
 
   await dragWire('fanout', 'sink_c', 'in');
 
+  await expect(page.getByTestId('draft-chip')).toBeVisible();
+  await page.getByTestId('save').click();
   await expect.poll(() => work.bytes(file), { timeout: 20_000 }).toContain('&sink_c.in');
   await shot('after-wire');
 
@@ -224,6 +234,7 @@ test('d2) moving a block survives disconnecting an edge', async ({
   await edge.click();
   await page.keyboard.press('Delete');
   await expect(edge).toHaveCount(0);
+  await page.getByTestId('save').click();
   await expect.poll(() => work.bytes(file), { timeout: 20_000 }).not.toContain('&adder.in[0]');
 
   expect(await transform()).toBe(moved);
@@ -250,6 +261,7 @@ test('e) an external edit blocks editing until reload', async ({
   const field = page.locator('input[data-field="throttle.ctor.1"]');
   await field.fill('777');
   await field.press('Enter');
+  await page.getByTestId('save').click();
   await expect.poll(() => work.bytes(file), { timeout: 20_000 }).toContain('"Throttle", 777');
   await expect(page.getByTestId('undo')).toBeEnabled();
 
@@ -274,6 +286,7 @@ test('e) an external edit blocks editing until reload', async ({
   const fresh = page.locator('input[data-field="throttle.ctor.1"]');
   await fresh.fill('999');
   await fresh.press('Enter');
+  await page.getByTestId('save').click();
   await expect.poll(() => work.bytes(file), { timeout: 20_000 }).toContain('"Throttle", 999');
   expect(work.bytes(file)).toContain('Edited Behind The App');
 });
@@ -305,13 +318,14 @@ test('f) deleting a block referenced outside the graph is refused', async ({
   expect(work.bytes(file)).toBe(original);
 });
 
-test('g) a new block reaches disk with its template and every constructor argument', async ({
+test('g) a new block reaches disk only after its required arguments are saved', async ({
   page,
   work,
   openFile,
   shot
 }) => {
   const file = work.copy('hello_world.cpp');
+  const original = work.bytes(file);
 
   await page.goto('/');
   await openFile(file);
@@ -326,21 +340,22 @@ test('g) a new block reaches disk with its template and every constructor argume
   await expect(page.getByTestId('run')).toBeDisabled();
   await shot('required-args');
 
-  for (const [field, value, written] of [
-    ['source_c_w.template.0', 'float', 'SourceCWBlock<float> source_c_w'],
-    ['source_c_w.ctor.1', '1.0f', 'source_c_w("source_c_w", 1.0f'],
-    ['source_c_w.ctor.2', '2.0f', 'source_c_w("source_c_w", 1.0f, 2.0f'],
-    [
-      'source_c_w.ctor.3',
-      '1000',
-      'SourceCWBlock<float> source_c_w("source_c_w", 1.0f, 2.0f, 1000);'
-    ]
+  for (const [field, value, missing] of [
+    ['source_c_w.template.0', 'float', 'T'],
+    ['source_c_w.ctor.1', '1.0f', 'amplitude'],
+    ['source_c_w.ctor.2', '2.0f', 'frequency_hz'],
+    ['source_c_w.ctor.3', '1000', 'sps']
   ]) {
     const input = page.locator(`input[data-field="${field}"]`);
     await input.fill(value);
     await input.press('Enter');
-    await expect.poll(() => work.bytes(file), { timeout: 20_000 }).toContain(written);
+    await expect(node.locator('.block')).not.toHaveAttribute('title', new RegExp(`\\b${missing}\\b`));
+    expect(work.bytes(file)).toBe(original);
   }
 
   await expect(node.locator('.block')).not.toHaveAttribute('data-invalid', 'true');
+  await page.getByTestId('save').click();
+  await expect
+    .poll(() => work.bytes(file), { timeout: 20_000 })
+    .toContain('SourceCWBlock<float> source_c_w("source_c_w", 1.0f, 2.0f, 1000);');
 });

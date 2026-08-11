@@ -80,6 +80,7 @@ function installFake(setup: Setup) {
     source: setup.source,
     canUndo: false,
     canRedo: false,
+    dirty: false,
     externalChange: false
   };
   const palette = setup.specs.map((spec) => structuredClone(spec));
@@ -301,6 +302,7 @@ function installFake(setup: Setup) {
     state.revision += 1;
     state.canUndo = undone.length > 0;
     state.canRedo = redone.length > 0;
+    state.dirty = true;
   }
 
   function step(from: string[], to: string[]) {
@@ -311,6 +313,7 @@ function installFake(setup: Setup) {
       state.model = restored.model;
       state.source = restored.source;
       state.revision += 1;
+      state.dirty = true;
     }
     state.canUndo = undone.length > 0;
     state.canRedo = redone.length > 0;
@@ -363,6 +366,7 @@ function installFake(setup: Setup) {
     }
     if (command === 'undo') step(undone, redone);
     if (command === 'redo') step(redone, undone);
+    if (command === 'save_document') state.dirty = false;
     if (command === 'close_document') return null;
     if (command === 'open_in_editor') return null;
     return snapshot();
@@ -595,7 +599,7 @@ export async function openLibrary(page: Page) {
       .click();
   }
   await tab.click();
-  await page.waitForSelector('[data-testid="palette"] .entry');
+  await page.waitForSelector('[data-testid="palette"] .folder');
 }
 
 export async function openMenu(page: Page, selector: string, position?: { x: number; y: number }) {

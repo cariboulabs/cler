@@ -94,7 +94,13 @@ fn disconnect(edge: usize) -> Value {
 }
 
 fn apply(docs: &Documents, path: &Path, revision: u64, commands: Vec<Value>) -> DocumentState {
-    document::apply(docs, as_str(path), revision, commands).expect("transaction applies")
+    document::apply(docs, as_str(path), revision, commands).expect("transaction applies");
+    document::save(docs, as_str(path)).expect("save transaction")
+}
+
+fn undo(docs: &Documents, path: &Path) -> DocumentState {
+    document::undo(docs, as_str(path)).expect("undo");
+    document::save(docs, as_str(path)).expect("save undo")
 }
 
 #[cfg(unix)]
@@ -168,7 +174,7 @@ fn add_block_declares_without_wiring_it() {
         "a declared block does not enter the runner list"
     );
 
-    document::undo(&docs, as_str(&path)).expect("undo");
+    undo(&docs, &path);
     assert!(!text(&path).contains("GainBlock<float> gain"));
 }
 
@@ -241,7 +247,7 @@ fn the_fanout_output_copatch_is_one_atomic_transaction() {
     let after = serde_json::to_value(&grown.model).expect("model");
     assert_eq!(block(&after, "fanout")["ctor_args"][1]["text"], json!("3"));
 
-    document::undo(&docs, as_str(&path)).expect("undo");
+    undo(&docs, &path);
     assert_eq!(text(&path), staged, "one undo reverses the whole gesture");
 }
 
@@ -278,7 +284,7 @@ fn the_template_arity_copatch_grows_addblock() {
     assert!(source.contains("AddBlock<float, 3> adder(\"Adder\");"), "{source}");
     assert!(source.contains("cler::BlockRunner(&source2, &adder.in[2])"), "{source}");
 
-    document::undo(&docs, as_str(&path)).expect("undo");
+    undo(&docs, &path);
     assert_eq!(text(&path), staged);
 }
 
@@ -310,7 +316,7 @@ fn a_reconnect_is_one_transaction_of_disconnect_then_connect() {
     assert!(source.contains("cler::BlockRunner(&source1, &adder.in[1])"), "{source}");
     assert!(!source.contains("&adder.in[0]"), "{source}");
 
-    document::undo(&docs, as_str(&path)).expect("undo");
+    undo(&docs, &path);
     assert_eq!(text(&path), staged);
 }
 
@@ -335,7 +341,7 @@ fn remove_from_graph_keeps_the_declaration_and_unwires_the_block() {
         "nothing references it any more, so it renders unwired"
     );
 
-    document::undo(&docs, as_str(&path)).expect("undo");
+    undo(&docs, &path);
     assert!(text(&path).contains("cler::BlockRunner(&source1"));
 }
 
@@ -403,7 +409,7 @@ fn delete_block_removes_a_block_nothing_else_mentions() {
         .iter()
         .all(|entry| entry["var"] != "source2"));
 
-    document::undo(&docs, as_str(&path)).expect("undo");
+    undo(&docs, &path);
     assert!(text(&path).contains("source2"));
 }
 

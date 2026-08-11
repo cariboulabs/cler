@@ -67,6 +67,10 @@ export function redoDocument(path: string): Promise<DocumentState> {
   return documentCall('redo', { path });
 }
 
+export function saveDocument(path: string): Promise<DocumentState> {
+  return documentCall('save_document', { path });
+}
+
 export function applyCommands(
   path: string,
   commands: Command[],
@@ -105,6 +109,7 @@ export function loadFixture(name: string): DocumentState {
     source,
     canUndo: false,
     canRedo: false,
+    dirty: false,
     externalChange: false
   };
 }

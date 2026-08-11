@@ -95,6 +95,7 @@ export type DocumentState = {
   source: string;
   canUndo: boolean;
   canRedo: boolean;
+  dirty: boolean;
   externalChange: boolean;
 };
 

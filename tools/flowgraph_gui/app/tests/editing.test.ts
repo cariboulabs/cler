@@ -7,6 +7,7 @@ import {
   describeApplyError,
   redoDocument,
   reloadDocument,
+  saveDocument,
   setInvoker,
   undoDocument
 } from '../src/lib/backend';
@@ -72,6 +73,7 @@ function documentState(next: FileModel): DocumentState {
     source: '',
     canUndo: true,
     canRedo: false,
+    dirty: false,
     externalChange: false
   };
 }
@@ -110,7 +112,7 @@ function editor(target: Field) {
 
 const APP = readFileSync(fileURLToPath(new URL('../src/App.svelte', import.meta.url)), 'utf8');
 
-const MUTATORS = ['applyCommands', 'undoDocument', 'redoDocument', 'reloadDocument'];
+const MUTATORS = ['applyCommands', 'undoDocument', 'redoDocument', 'saveDocument', 'reloadDocument'];
 
 function bodyOf(source: string, header: string): string {
   const start = source.indexOf(header);
@@ -389,15 +391,21 @@ describe('ipc payloads', () => {
     expect(state.revision).toBe(7);
   });
 
-  it('uses the contract command names for history and reload', async () => {
+  it('uses the contract command names for history, save and reload', async () => {
     const next = model('hello_world');
     const calls = record(() => documentState(next));
 
     await undoDocument('/tmp/a.cpp');
     await redoDocument('/tmp/a.cpp');
+    await saveDocument('/tmp/a.cpp');
     await reloadDocument('/tmp/a.cpp');
 
-    expect(calls.map((call) => call.command)).toEqual(['undo', 'redo', 'reload_document']);
+    expect(calls.map((call) => call.command)).toEqual([
+      'undo',
+      'redo',
+      'save_document',
+      'reload_document'
+    ]);
     for (const call of calls) expect(Object.keys(call.args)).toEqual(['path']);
   });
 });

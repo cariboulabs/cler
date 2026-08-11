@@ -55,7 +55,7 @@ fn set_param(block: &str, index: usize, new_text: &str) -> Vec<Value> {
 }
 
 #[test]
-fn apply_writes_the_file_and_undo_restores_the_bytes() {
+fn edits_stay_in_the_working_copy_until_save() {
     let path = temp_copy("hello_world.cpp");
     let original = text(&path);
     let docs = Documents::default();
@@ -64,6 +64,7 @@ fn apply_writes_the_file_and_undo_restores_the_bytes() {
     assert_eq!(opened.revision, 0);
     assert!(!opened.can_undo);
     assert!(!opened.can_redo);
+    assert!(!opened.dirty);
     assert!(!opened.external_change);
     assert_eq!(
         opened.path,
@@ -79,22 +80,33 @@ fn apply_writes_the_file_and_undo_restores_the_bytes() {
     assert_eq!(applied.revision, 1);
     assert!(applied.can_undo);
     assert!(!applied.can_redo);
+    assert!(applied.dirty);
     assert_ne!(applied.model.sha256, opened.model.sha256);
 
-    let written = text(&path);
-    assert_ne!(written, original);
-    assert!(written.contains("4.25f"));
+    let working = document::working_path(&docs, as_str(&path)).expect("working copy");
+    let drafted = text(&working);
+    assert_eq!(text(&path), original);
+    assert!(drafted.contains("4.25f"));
+    assert!(working.starts_with(std::env::temp_dir()));
 
     let undone = document::undo(&docs, as_str(&path)).expect("undo");
     assert!(!undone.can_undo);
     assert!(undone.can_redo);
+    assert!(!undone.dirty);
     assert_eq!(text(&path), original);
+    assert_eq!(text(&working), original);
     assert_eq!(undone.model.sha256, opened.model.sha256);
 
     let redone = document::redo(&docs, as_str(&path)).expect("redo");
     assert!(redone.can_undo);
     assert!(!redone.can_redo);
-    assert_eq!(text(&path), written);
+    assert!(redone.dirty);
+    assert_eq!(text(&path), original);
+    assert_eq!(text(&working), drafted);
+
+    let saved = document::save(&docs, as_str(&path)).expect("save");
+    assert!(!saved.dirty);
+    assert_eq!(text(&path), drafted);
 }
 
 #[test]
@@ -103,6 +115,7 @@ fn a_self_write_is_not_an_external_change() {
     let docs = Documents::default();
     document::open(&docs, as_str(&path)).expect("open");
     document::apply(&docs, as_str(&path), 0, set_param("source1", 1, "7.5f")).expect("apply");
+    document::save(&docs, as_str(&path)).expect("save");
 
     assert!(!document::note_disk_event(
         &docs,
@@ -185,10 +198,29 @@ fn close_drops_the_session() {
     let path = temp_copy("hello_world.cpp");
     let docs = Documents::default();
     document::open(&docs, as_str(&path)).expect("open");
+    let working = document::working_path(&docs, as_str(&path)).expect("working copy");
+    assert!(working.exists());
     document::close(&docs, as_str(&path));
+    assert!(!working.exists());
 
     let missing = document::undo(&docs, as_str(&path)).expect_err("the session is gone");
     assert!(missing.contains("no open document"), "{missing}");
+}
+
+#[test]
+fn dirty_documents_must_be_saved_before_tasks_run() {
+    let path = temp_copy("hello_world.cpp");
+    let docs = Documents::default();
+    document::open(&docs, as_str(&path)).expect("open");
+    document::require_saved(&docs, as_str(&path)).expect("clean document");
+
+    document::apply(&docs, as_str(&path), 0, set_param("source1", 1, "6.25f"))
+        .expect("apply");
+    let refusal = document::require_saved(&docs, as_str(&path)).expect_err("dirty draft");
+    assert!(refusal.contains("save the draft"), "{refusal}");
+
+    document::save(&docs, as_str(&path)).expect("save");
+    document::require_saved(&docs, as_str(&path)).expect("saved document");
 }
 
 #[test]
@@ -204,7 +236,9 @@ fn every_state_carries_the_session_source() {
         .expect("set_param applies");
     assert_ne!(applied.source, original);
     assert!(applied.source.contains("4.25f"));
-    assert_eq!(applied.source, text(&path));
+    assert_eq!(text(&path), original);
+    let working = document::working_path(&docs, as_str(&path)).expect("working copy");
+    assert_eq!(applied.source, text(&working));
 
     let undone = document::undo(&docs, as_str(&path)).expect("undo");
     assert_eq!(undone.source, original);
@@ -225,6 +259,7 @@ fn the_serialised_state_names_the_source_beside_the_model() {
     assert_eq!(value["source"].as_str(), Some(text(&path).as_str()));
     assert!(value["model"]["sites"].is_array());
     assert!(value["canUndo"].is_boolean());
+    assert_eq!(value["dirty"], false);
 }
 
 #[test]

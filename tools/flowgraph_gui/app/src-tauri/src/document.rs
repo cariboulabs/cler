@@ -22,9 +22,20 @@ const DIFF_CONTEXT: usize = 3;
 pub struct Document {
     session: DocumentSession,
     spelling: String,
-    written: String,
+    saved: String,
+    working: PathBuf,
+    working_dir: PathBuf,
     external_change: bool,
     palette: Vec<BlockSpec>,
+}
+
+impl Drop for Document {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.working_dir).ok();
+        if let Some(root) = self.working_dir.parent() {
+            std::fs::remove_dir(root).ok();
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -45,6 +56,7 @@ pub struct DocumentState {
     pub source: String,
     pub can_undo: bool,
     pub can_redo: bool,
+    pub dirty: bool,
     pub external_change: bool,
 }
 
@@ -141,7 +153,7 @@ pub fn apply(
         })
         .map_err(|cause| cause.to_string())?;
     if pending.changes() {
-        persist(doc, &target, pending.source())?;
+        write_working(doc, pending.source())?;
     }
     doc.session.commit(pending);
     Ok(snapshot(&target, doc))
@@ -272,18 +284,48 @@ pub fn redo(docs: &Documents, path: &str) -> Result<DocumentState, String> {
     step(docs, path, Step::Redo)
 }
 
+pub fn save(docs: &Documents, path: &str) -> Result<DocumentState, String> {
+    let mut map = lock(docs);
+    let (target, doc) = document(&mut map, path)?;
+    refuse_external(doc, &target)?;
+    if doc.session.source() != doc.saved {
+        let source = doc.session.source().to_string();
+        persist(doc, &target, &source)?;
+    }
+    Ok(snapshot(&target, doc))
+}
+
 pub fn reload(docs: &Documents, path: &str) -> Result<DocumentState, String> {
     let mut map = lock(docs);
     let (target, doc) = document(&mut map, path)?;
     let text = read(&target)?;
     if text != doc.session.source() {
+        write_working(doc, &text)?;
         doc.session
             .reload(text.clone())
             .map_err(|cause| cause.to_string())?;
     }
-    doc.written = text;
+    doc.saved = text;
     doc.external_change = false;
     Ok(snapshot(&target, doc))
+}
+
+pub fn working_path(docs: &Documents, path: &str) -> Result<PathBuf, String> {
+    let map = lock(docs);
+    let key = resolve(&map, path).ok_or_else(|| format!("no open document for {path}"))?;
+    map.get(&key)
+        .map(|doc| doc.working.clone())
+        .ok_or_else(|| format!("no open document for {path}"))
+}
+
+pub fn require_saved(docs: &Documents, path: &str) -> Result<(), String> {
+    let mut map = lock(docs);
+    let (target, doc) = document(&mut map, path)?;
+    refuse_external(doc, &target)?;
+    if doc.session.source() != doc.saved {
+        return Err("save the draft before checking, building, or running".to_string());
+    }
+    Ok(())
 }
 
 pub fn parse_file(docs: &Documents, path: &str) -> Result<String, String> {
@@ -336,18 +378,21 @@ fn step(docs: &Documents, path: &str, step: Step) -> Result<DocumentState, Strin
         Step::Redo => doc.session.preview_redo(),
     }
     .map_err(|cause| cause.to_string())?;
-    persist(doc, &target, pending.source())?;
+    write_working(doc, pending.source())?;
     doc.session.commit(pending);
     Ok(snapshot(&target, doc))
 }
 
 fn fresh(target: &Path, spelling: &str) -> Result<Document, String> {
     let session = DocumentSession::open(target).map_err(|cause| cause.to_string())?;
-    let written = session.source().to_string();
+    let saved = session.source().to_string();
+    let (working_dir, working) = create_working(target, &saved)?;
     Ok(Document {
         session,
         spelling: spelling.to_string(),
-        written,
+        saved,
+        working,
+        working_dir,
         external_change: false,
         palette: nearby_palette(target),
     })
@@ -398,6 +443,7 @@ fn snapshot(target: &Path, doc: &Document) -> DocumentState {
         source: doc.session.source().to_string(),
         can_undo: doc.session.can_undo(),
         can_redo: doc.session.can_redo(),
+        dirty: doc.session.source() != doc.saved,
         external_change: doc.external_change,
     }
 }
@@ -413,13 +459,13 @@ fn model_of(session: &DocumentSession, palette: &[BlockSpec]) -> DocumentModel {
 
 fn revalidate(doc: &mut Document, target: &Path) {
     doc.external_change =
-        !matches!(std::fs::read(target), Ok(bytes) if bytes == doc.written.as_bytes());
+        !matches!(std::fs::read(target), Ok(bytes) if bytes == doc.saved.as_bytes());
 }
 
 fn refuse_external(doc: &mut Document, target: &Path) -> Result<(), String> {
     let bytes = std::fs::read(target)
         .map_err(|cause| format!("cannot read {}: {cause}", target.display()))?;
-    if bytes == doc.written.as_bytes() {
+    if bytes == doc.saved.as_bytes() {
         return Ok(());
     }
     doc.external_change = true;
@@ -434,9 +480,9 @@ fn drifted(target: &Path) -> String {
 }
 
 fn persist(doc: &mut Document, target: &Path, contents: &str) -> Result<(), String> {
-    match write_atomic(target, contents, &doc.written) {
+    match write_atomic(target, contents, &doc.saved) {
         Ok(()) => {
-            doc.written = contents.to_string();
+            doc.saved = contents.to_string();
             doc.external_change = false;
             Ok(())
         }
@@ -446,6 +492,31 @@ fn persist(doc: &mut Document, target: &Path, contents: &str) -> Result<(), Stri
         }
         Err(WriteFailure::Io(cause)) => Err(format!("cannot write {}: {cause}", target.display())),
     }
+}
+
+fn create_working(target: &Path, contents: &str) -> Result<(PathBuf, PathBuf), String> {
+    let root = std::env::temp_dir().join(format!("cler-flowgraph-gui-{}", std::process::id()));
+    std::fs::create_dir_all(&root)
+        .map_err(|cause| format!("cannot create {}: {cause}", root.display()))?;
+    let token = RandomState::new().build_hasher().finish();
+    let dir = root.join(format!("{token:016x}"));
+    std::fs::create_dir(&dir)
+        .map_err(|cause| format!("cannot create {}: {cause}", dir.display()))?;
+    let name = target
+        .file_name()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("document.cpp"));
+    let working = dir.join(name);
+    if let Err(cause) = std::fs::write(&working, contents) {
+        std::fs::remove_dir(&dir).ok();
+        return Err(format!("cannot write {}: {cause}", working.display()));
+    }
+    Ok((dir, working))
+}
+
+fn write_working(doc: &Document, contents: &str) -> Result<(), String> {
+    std::fs::write(&doc.working, contents)
+        .map_err(|cause| format!("cannot write {}: {cause}", doc.working.display()))
 }
 
 fn read(target: &Path) -> Result<String, String> {

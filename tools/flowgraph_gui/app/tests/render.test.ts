@@ -144,6 +144,7 @@ function installFakeBackend(setup: FakeSetup) {
     model: setup.model,
     canUndo: false,
     canRedo: false,
+    dirty: false,
     externalChange: false
   };
   const undone: string[] = [];
@@ -195,6 +196,7 @@ function installFakeBackend(setup: FakeSetup) {
     state.revision += 1;
     state.canUndo = undone.length > 0;
     state.canRedo = redone.length > 0;
+    state.dirty = true;
   }
 
   function step(from: string[], to: string[]) {
@@ -203,6 +205,7 @@ function installFakeBackend(setup: FakeSetup) {
       to.push(JSON.stringify(state.model));
       state.model = JSON.parse(previous) as FileModel;
       state.revision += 1;
+      state.dirty = true;
     }
     state.canUndo = undone.length > 0;
     state.canRedo = redone.length > 0;
@@ -226,7 +229,9 @@ function installFakeBackend(setup: FakeSetup) {
     }
     if (command === 'undo') step(undone, redone);
     if (command === 'redo') step(redone, undone);
+    if (command === 'save_document') state.dirty = false;
     if (command === 'reload_document') {
+      state.dirty = false;
       state.externalChange = false;
       state.canUndo = false;
       state.canRedo = false;
@@ -664,15 +669,15 @@ describe('top bar, context menu and shortcuts', () => {
   );
 
   it(
-    'answers Ctrl+S with an autosave notice and no backend call',
+    'sends Ctrl+S through the document save command',
     async () => {
       const before = await calls();
       await editor.keyboard.press('Control+s');
 
       const toast = editor.locator('[data-testid="note-toast"]');
       await toast.waitFor();
-      expect(await toast.textContent()).toContain('saved automatically');
-      expect(await calls()).toEqual(before);
+      expect(await toast.textContent()).toContain('saved to source');
+      expect(await calls()).toEqual([...before, 'save_document']);
 
       await expect.poll(() => toast.count(), { timeout: 5000 }).toBe(0);
     },

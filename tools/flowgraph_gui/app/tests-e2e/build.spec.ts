@@ -18,6 +18,9 @@ test('h) F7 checks the real file, blames the right block, and comes back clean',
     await node('source1').click();
     await field.fill('1.0ff');
     await field.press('Enter');
+    expect(work.bytes(file)).not.toContain('1.0ff');
+    await expect(page.getByTestId('check')).toBeDisabled();
+    await page.getByTestId('save').click();
     await expect.poll(() => work.bytes(file), { timeout: 20_000 }).toContain('1.0ff');
     await field.blur();
 
@@ -40,6 +43,7 @@ test('h) F7 checks the real file, blames the right block, and comes back clean',
   await test.step('fix it and check again', async () => {
     await field.fill('1.0f');
     await field.press('Enter');
+    await page.getByTestId('save').click();
     await expect.poll(() => work.bytes(file), { timeout: 20_000 }).toContain('"CWSource", 1.0f,');
     await field.blur();
 

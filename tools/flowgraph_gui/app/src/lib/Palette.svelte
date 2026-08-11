@@ -23,20 +23,20 @@
   const { specs, documentPath, enabled, open, ontoggle, ontab, onpick }: Props = $props();
 
   let query = $state('');
-  let closed = $state.raw(new Set<string>());
+  let expanded = $state.raw(new Set<string>());
 
   const entries = $derived(searchSpecs(specs, query, documentPath));
   const groups = $derived(libraryGroups(entries, documentPath));
 
   function groupOpen(group: LibraryGroup): boolean {
-    return query.trim().length > 0 || !closed.has(group.path);
+    return query.trim().length > 0 || expanded.has(group.path);
   }
 
   function toggleGroup(path: string): void {
-    const next = new Set(closed);
+    const next = new Set(expanded);
     if (next.has(path)) next.delete(path);
     else next.add(path);
-    closed = next;
+    expanded = next;
   }
 
   function startDrag(event: DragEvent, spec: BlockSpec) {

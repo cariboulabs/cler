@@ -340,7 +340,6 @@ describe('the cheap repaints', () => {
       const toast = page.locator('[data-testid="note-toast"]');
       await toast.waitFor();
       expect(await toast.textContent()).toContain('read-only viewer');
-      expect(await toast.textContent()).not.toContain('saved automatically');
       await page.close();
     },
     CASE
@@ -388,6 +387,7 @@ describe('the cheap repaints', () => {
       const page = await viewer('?example=hello_world');
       await openLibrary(page);
       expect(await page.locator('[data-library-path="this file"]').count()).toBe(1);
+      await page.click('[data-library-path="this file"] > .folder-row');
       expect(await page.locator('[data-testid="palette"] .row').first().textContent()).not.toContain(
         '?'
       );

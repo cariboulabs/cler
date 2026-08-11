@@ -90,6 +90,11 @@ fn redo(path: String, docs: State<'_, Documents>) -> Result<DocumentState, Strin
 }
 
 #[tauri::command]
+fn save_document(path: String, docs: State<'_, Documents>) -> Result<DocumentState, String> {
+    document::save(&docs, &path)
+}
+
+#[tauri::command]
 fn reload_document(path: String, docs: State<'_, Documents>) -> Result<DocumentState, String> {
     document::reload(&docs, &path)
 }
@@ -111,7 +116,13 @@ fn emitter(app: AppHandle) -> Emit {
 }
 
 #[tauri::command]
-fn check_document(path: String, app: AppHandle, jobs: State<'_, Jobs>) -> Result<(), String> {
+fn check_document(
+    path: String,
+    app: AppHandle,
+    docs: State<'_, Documents>,
+    jobs: State<'_, Jobs>,
+) -> Result<(), String> {
+    document::require_saved(&docs, &path)?;
     build::check(jobs.inner(), &path, emitter(app))
 }
 
@@ -121,12 +132,24 @@ fn find_target(path: String) -> Result<Target, String> {
 }
 
 #[tauri::command]
-fn build_target(path: String, app: AppHandle, jobs: State<'_, Jobs>) -> Result<(), String> {
+fn build_target(
+    path: String,
+    app: AppHandle,
+    docs: State<'_, Documents>,
+    jobs: State<'_, Jobs>,
+) -> Result<(), String> {
+    document::require_saved(&docs, &path)?;
     build::build(jobs.inner(), &path, emitter(app))
 }
 
 #[tauri::command]
-fn run_target(path: String, app: AppHandle, jobs: State<'_, Jobs>) -> Result<(), String> {
+fn run_target(
+    path: String,
+    app: AppHandle,
+    docs: State<'_, Documents>,
+    jobs: State<'_, Jobs>,
+) -> Result<(), String> {
+    document::require_saved(&docs, &path)?;
     build::start(jobs.inner(), &path, emitter(app))
 }
 
@@ -283,6 +306,7 @@ pub fn run() {
             preview_commands,
             undo,
             redo,
+            save_document,
             reload_document,
             parse_file,
             palette,

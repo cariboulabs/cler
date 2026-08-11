@@ -48,6 +48,8 @@ describe('invalid block nodes', () => {
       await page.fill('input[data-field="source1.ctor.2"]', '20.0f');
       await page.press('input[data-field="source1.ctor.2"]', 'Enter');
 
+      await expect.poll(() => run.getAttribute('title')).toContain('save the draft');
+      await page.click('[data-testid="save"]');
       await expect.poll(() => run.isDisabled()).toBe(false);
       await page.close();
     },
