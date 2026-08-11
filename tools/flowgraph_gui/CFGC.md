@@ -18,7 +18,20 @@ private temporary directory beside the draft source and shadow build.
     "views": {},
     "panels": {}
   },
-  "build": {}
+  "build": {
+    "version": 1,
+    "artifacts": {
+      "cmake:desktop_examples/hello_world.cpp:hello_world": {
+        "inputKey": {
+          "inputs": { "draft": "..." },
+          "recipeSha256": "..."
+        },
+        "producer": "cmake",
+        "artifactPath": "/tmp/.../build/desktop_examples/hello_world",
+        "completedUnixMs": 0
+      }
+    }
+  }
 }
 ```
 
@@ -26,6 +39,13 @@ The top-level sections are independent namespaces. Readers must ignore unknown
 members, and writers updating one namespace must preserve unknown members and
 the other namespaces. Additive changes keep the current version. Increment
 `version` only when an existing field changes meaning or representation.
+
+`build.artifacts` is a named provenance catalog, not a single build flag. Each
+producer records the inputs and recipe that created an artifact. Input names are
+additive so future producers can include generated code, headers, toolchains, or
+other dependencies without changing the UI contract. Run is allowed only when
+the backend finds a matching record and executable; the frontend only presents
+that backend-derived state.
 
 The draft is reusable only while `document.savedSha256` matches the source file.
 If it does not match, the source file becomes the new baseline while reusable UI

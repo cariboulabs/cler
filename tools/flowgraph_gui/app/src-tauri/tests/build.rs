@@ -4,7 +4,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use cler_flowgraph_gui::build::{self, Emit, Jobs};
+use cler_flowgraph_gui::document::DraftState;
+use cler_flowgraph_gui::provenance::{ArtifactCatalog, ArtifactRecord, ArtifactStatus};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -26,6 +29,16 @@ fn write(target: &Path, text: &str) {
         std::fs::create_dir_all(parent).expect("parent directory");
     }
     std::fs::write(target, text).expect("write");
+}
+
+fn draft_state(path: &Path, artifacts: ArtifactCatalog) -> DraftState {
+    let bytes = std::fs::read(path).expect("draft source");
+    DraftState {
+        path: path.to_path_buf(),
+        workspace: path.parent().expect("draft workspace").to_path_buf(),
+        sha256: format!("{:x}", Sha256::digest(bytes)),
+        artifacts,
+    }
 }
 
 fn repo(tag: &str) -> PathBuf {
@@ -264,18 +277,78 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
     let workspace = temp_dir("draft-workspace");
     let draft = workspace.join("hello_world.cpp");
     write(&draft, "int main() { return 7; }\n");
+    let state = draft_state(&draft, ArtifactCatalog::default());
+    let recorded: Arc<Mutex<Option<(String, ArtifactRecord)>>> = Arc::new(Mutex::new(None));
+    let captured = recorded.clone();
     let jobs = Jobs::default();
     let (seen, emit) = recorder();
-    build::build_draft(&jobs, as_str(&source), &draft, emit).expect("draft build starts");
+    build::build_draft(
+        &jobs,
+        as_str(&source),
+        &state,
+        Arc::new(move |name, record| {
+            *captured.lock().unwrap_or_else(PoisonError::into_inner) = Some((name, record));
+            Ok(())
+        }),
+        emit,
+    )
+    .expect("draft build starts");
     assert_eq!(await_event(&seen, "build-finished")["code"], 0);
     assert_eq!(
         std::fs::read_to_string(&source).expect("source"),
         "int main() { return 0; }\n"
     );
 
+    let (name, artifact) = recorded
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+        .expect("artifact record");
+    let mut artifacts = ArtifactCatalog::default();
+    artifacts.put(name, artifact).expect("catalog accepts artifact");
+    let ready = draft_state(&draft, artifacts);
     let (run_seen, run_emit) = recorder();
-    build::start_draft(&jobs, as_str(&source), &draft, run_emit).expect("draft run starts");
+    build::start_draft(&jobs, as_str(&source), &ready, run_emit).expect("draft run starts");
     assert_eq!(await_event(&run_seen, "run-finished")["code"], 7);
+
+    write(&draft, "int main() { return 9; }\n");
+    let stale = draft_state(&draft, ready.artifacts.clone());
+    let (_, refused_emit) = recorder();
+    let refusal = build::start_draft(&jobs, as_str(&source), &stale, refused_emit)
+        .expect_err("a stale draft cannot run");
+    assert!(refusal.contains("build the current draft"), "{refusal}");
+
+    write(&draft, "int main() { return 7; }\n");
+    let restored = draft_state(&draft, ready.artifacts.clone());
+    assert!(matches!(
+        build::find_draft_target(as_str(&source), &restored)
+            .expect("restored target")
+            .artifact,
+        ArtifactStatus::Ready { .. }
+    ));
+
+    let cache = root.join("build/CMakeCache.txt");
+    let configured = std::fs::read_to_string(&cache).expect("configured cache");
+    write(
+        &cache,
+        &format!("CMAKE_BUILD_TYPE:STRING=Changed\n{configured}"),
+    );
+    assert!(matches!(
+        build::find_draft_target(as_str(&source), &restored)
+            .expect("changed recipe")
+            .artifact,
+        ArtifactStatus::NeedsBuild { .. }
+    ));
+    write(&cache, &configured);
+
+    let found = build::find_draft_target(as_str(&source), &restored).expect("ready target");
+    std::fs::remove_file(found.binary.expect("binary")).expect("remove artifact");
+    assert!(matches!(
+        build::find_draft_target(as_str(&source), &restored)
+            .expect("missing target")
+            .artifact,
+        ArtifactStatus::NeedsBuild { .. }
+    ));
 }
 
 #[cfg(unix)]
@@ -303,4 +376,37 @@ fn stop_target_interrupts_the_running_child() {
 
     let missing = build::stop(&jobs, as_str(&source)).expect_err("nothing left to stop");
     assert!(missing.contains("nothing is running"), "{missing}");
+}
+
+#[cfg(unix)]
+#[test]
+fn an_old_waiter_cannot_remove_a_newer_job_for_the_same_target() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = repo("replace-run");
+    let source = root.join("desktop_examples/sleeper.cpp");
+    write(&source, "int main() { return 0; }\n");
+    write(&root.join("build/CMakeCache.txt"), "configured\n");
+    let binary = root.join("build/desktop_examples/sleeper");
+    write(&binary, "#!/bin/sh\necho first\nexec sleep 30\n");
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    let jobs = Jobs::default();
+    let (first_seen, first_emit) = recorder();
+    let first = build::start(&jobs, as_str(&source), first_emit).expect("first starts");
+    assert_eq!(await_event(&first_seen, "run-output")["jobId"], first.job_id);
+
+    write(&binary, "#!/bin/sh\necho second\nexec sleep 30\n");
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let (second_seen, second_emit) = recorder();
+    let second = build::start(&jobs, as_str(&source), second_emit).expect("second starts");
+    assert!(second.job_id > first.job_id);
+    assert_eq!(
+        await_event(&second_seen, "run-output")["jobId"],
+        second.job_id
+    );
+
+    std::thread::sleep(Duration::from_millis(100));
+    build::stop(&jobs, as_str(&source)).expect("newer job remains owned");
+    await_event(&second_seen, "run-finished");
 }

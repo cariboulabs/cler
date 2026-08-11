@@ -1,28 +1,46 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
-use crate::document::canonical;
+use crate::document::{canonical, DraftState};
+use crate::provenance::{ArtifactRecord, ArtifactStatus, InputKey};
 
 pub type Emit = Arc<dyn Fn(&str, Value) + Send + Sync>;
+pub type RecordArtifact = Arc<dyn Fn(String, ArtifactRecord) -> Result<(), String> + Send + Sync>;
+
+struct Running {
+    id: u64,
+    child: Child,
+}
+
+#[derive(Default)]
+struct JobBook {
+    running: HashMap<String, Running>,
+}
 
 #[derive(Default, Clone)]
-pub struct Jobs(Arc<Mutex<HashMap<String, Child>>>);
+pub struct Jobs(Arc<Mutex<JobBook>>);
+
+type Completion = (String, ArtifactRecord, RecordArtifact);
 
 const MARKER: &str = "include/cler.hpp";
 const EXAMPLES: &str = "desktop_examples";
 const STANDARD: &str = "-std=c++17";
 const GRACE: Duration = Duration::from_secs(3);
+const PRODUCER: &str = "cmake";
+static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Target {
     pub available: bool,
@@ -30,6 +48,14 @@ pub struct Target {
     pub name: String,
     pub build_dir: Option<String>,
     pub binary: Option<String>,
+    pub artifact: ArtifactStatus,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Started {
+    pub job_id: u64,
+    pub input_key: InputKey,
 }
 
 pub fn repo_root(target: &Path) -> Option<PathBuf> {
@@ -39,12 +65,12 @@ pub fn repo_root(target: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-pub fn check(jobs: &Jobs, path: &str, emit: Emit) -> Result<(), String> {
+pub fn check(jobs: &Jobs, path: &str, emit: Emit) -> Result<Started, String> {
     let source = canonical(path)?;
     check_draft(jobs, path, &source, emit)
 }
 
-pub fn check_draft(jobs: &Jobs, path: &str, draft: &Path, emit: Emit) -> Result<(), String> {
+pub fn check_draft(jobs: &Jobs, path: &str, draft: &Path, emit: Emit) -> Result<Started, String> {
     let target = canonical(path)?;
     let draft = draft
         .canonicalize()
@@ -59,6 +85,7 @@ pub fn check_draft(jobs: &Jobs, path: &str, draft: &Path, emit: Emit) -> Result<
         command.arg(format!("-I{}", dir.display()));
     }
     command.arg(&draft).current_dir(&root);
+    let input_key = check_input(&draft)?;
     spawn_mapped(
         jobs,
         "check",
@@ -66,6 +93,8 @@ pub fn check_draft(jobs: &Jobs, path: &str, draft: &Path, emit: Emit) -> Result<
         command,
         emit,
         Some((draft.display().to_string(), target.display().to_string())),
+        input_key,
+        None,
     )
 }
 
@@ -103,31 +132,101 @@ pub fn find_target(path: &str) -> Result<Target, String> {
         name,
         build_dir: Some(dir.display().to_string()),
         binary: Some(binary.display().to_string()),
+        artifact: ArtifactStatus::NeedsBuild {
+            reason: "build the current draft before running".to_string(),
+        },
     })
 }
 
-pub fn build(jobs: &Jobs, path: &str, emit: Emit) -> Result<(), String> {
+pub fn find_draft_target(path: &str, draft: &DraftState) -> Result<Target, String> {
+    let target = canonical(path)?;
+    let mut found = find_target(path)?;
+    if !found.available {
+        return Ok(found);
+    }
+    let (_, _, binary) = draft_tree(&target, &draft.workspace)?;
+    let name = artifact_name(&target, &found)?;
+    let input_key = build_input(&target, &found, &draft.sha256)?;
+    let reason = "build the current draft before running".to_string();
+    found.binary = Some(binary.display().to_string());
+    found.artifact = match draft.artifacts.get(&name) {
+        Some(record)
+            if record.input_key == input_key
+                && record.artifact_path == binary.display().to_string() =>
+        {
+            if binary.is_file() {
+                ArtifactStatus::Ready {
+                    artifact_path: binary.display().to_string(),
+                }
+            } else {
+                ArtifactStatus::NeedsBuild {
+                    reason: "the built artifact is missing; build the current draft again"
+                        .to_string(),
+                }
+            }
+        }
+        _ => ArtifactStatus::NeedsBuild { reason },
+    };
+    Ok(found)
+}
+
+pub fn build(jobs: &Jobs, path: &str, emit: Emit) -> Result<Started, String> {
     let found = find_target(path)?;
     let dir = usable(&found)?;
     let mut command = Command::new("cmake");
     command.args(["--build", dir, "--target", &found.name, "--parallel"]);
     command.arg(cores().to_string());
-    spawn(jobs, "build", &canonical(path)?, command, emit)
+    let input_key = InputKey {
+        inputs: BTreeMap::new(),
+        recipe_sha256: hash_text(&format!("source-build:{}:{}", dir, found.name)),
+    };
+    spawn(
+        jobs,
+        "build",
+        &canonical(path)?,
+        command,
+        emit,
+        input_key,
+        None,
+    )
 }
 
-pub fn build_draft(jobs: &Jobs, path: &str, draft: &Path, emit: Emit) -> Result<(), String> {
+pub fn build_draft(
+    jobs: &Jobs,
+    path: &str,
+    draft: &DraftState,
+    record: RecordArtifact,
+    emit: Emit,
+) -> Result<Started, String> {
     let target = canonical(path)?;
     let found = find_target(path)?;
     usable(&found)?;
-    let (source_dir, build_dir, _) = draft_tree(&target, draft)?;
-    prepare_overlay(&target, draft, &source_dir)?;
+    let (source_dir, build_dir, binary) = draft_tree(&target, &draft.workspace)?;
+    prepare_overlay(&target, &draft.path, &source_dir)?;
     let script = draft_runner(&found, &source_dir, &build_dir)?;
     let mut command = Command::new("cmake");
     command.arg("-P").arg(script);
-    spawn(jobs, "build", &target, command, emit)
+    let name = artifact_name(&target, &found)?;
+    let input_key = build_input(&target, &found, &draft.sha256)?;
+    let completed = ArtifactRecord {
+        input_key: input_key.clone(),
+        producer: PRODUCER.to_string(),
+        artifact_path: binary.display().to_string(),
+        completed_unix_ms: 0,
+        extra: Default::default(),
+    };
+    spawn(
+        jobs,
+        "build",
+        &target,
+        command,
+        emit,
+        input_key,
+        Some((name, completed, record)),
+    )
 }
 
-pub fn start(jobs: &Jobs, path: &str, emit: Emit) -> Result<(), String> {
+pub fn start(jobs: &Jobs, path: &str, emit: Emit) -> Result<Started, String> {
     let found = find_target(path)?;
     usable(&found)?;
     let binary = PathBuf::from(found.binary.unwrap_or_default());
@@ -138,38 +237,62 @@ pub fn start(jobs: &Jobs, path: &str, emit: Emit) -> Result<(), String> {
     if let Some(dir) = binary.parent() {
         command.current_dir(dir);
     }
-    spawn(jobs, "run", &canonical(path)?, command, emit)
+    let input_key = InputKey {
+        inputs: BTreeMap::new(),
+        recipe_sha256: hash_text(&binary.display().to_string()),
+    };
+    spawn(
+        jobs,
+        "run",
+        &canonical(path)?,
+        command,
+        emit,
+        input_key,
+        None,
+    )
 }
 
-pub fn start_draft(jobs: &Jobs, path: &str, draft: &Path, emit: Emit) -> Result<(), String> {
+pub fn start_draft(
+    jobs: &Jobs,
+    path: &str,
+    draft: &DraftState,
+    emit: Emit,
+) -> Result<Started, String> {
     let target = canonical(path)?;
-    let found = find_target(path)?;
+    let found = find_draft_target(path, draft)?;
     usable(&found)?;
-    let (_, _, binary) = draft_tree(&target, draft)?;
-    if !binary.is_file() {
-        return Err(format!(
-            "{} is not built yet; build the temporary draft first",
-            binary.display()
-        ));
-    }
+    let ArtifactStatus::Ready { artifact_path } = &found.artifact else {
+        let reason = match found.artifact {
+            ArtifactStatus::Unavailable { ref reason }
+            | ArtifactStatus::NeedsBuild { ref reason } => reason.clone(),
+            ArtifactStatus::Ready { .. } => unreachable!(),
+        };
+        return Err(reason);
+    };
+    let binary = PathBuf::from(artifact_path);
     let mut command = Command::new(&binary);
     if let Some(dir) = binary.parent() {
         command.current_dir(dir);
     }
-    spawn(jobs, "run", &target, command, emit)
+    let input_key = build_input(&target, &found, &draft.sha256)?;
+    spawn(jobs, "run", &target, command, emit, input_key, None)
 }
 
 pub fn stop(jobs: &Jobs, path: &str) -> Result<(), String> {
     let target = canonical(path)?;
     let key = key("run", &target);
-    let Some(pid) = held(jobs).get(&key).map(Child::id) else {
+    let Some((id, pid)) = held(jobs)
+        .running
+        .get(&key)
+        .map(|running| (running.id, running.child.id()))
+    else {
         return Err(format!("nothing is running for {}", target.display()));
     };
     interrupt(pid);
     let jobs = jobs.clone();
     thread::spawn(move || {
         thread::sleep(GRACE);
-        discard(&jobs, &key);
+        discard_job(&jobs, &key, id);
     });
     Ok(())
 }
@@ -187,11 +310,74 @@ fn usable(found: &Target) -> Result<&str, String> {
 fn refused(name: String, reason: String) -> Target {
     Target {
         available: false,
-        reason: Some(reason),
+        reason: Some(reason.clone()),
         name,
         build_dir: None,
         binary: None,
+        artifact: ArtifactStatus::Unavailable { reason },
     }
+}
+
+fn artifact_name(target: &Path, found: &Target) -> Result<String, String> {
+    let root = repo_root(target).ok_or_else(|| outside(target))?;
+    let relative = target.strip_prefix(root).map_err(|_| outside(target))?;
+    Ok(format!("{PRODUCER}:{}:{}", relative.display(), found.name))
+}
+
+fn build_input(target: &Path, found: &Target, draft_sha256: &str) -> Result<InputKey, String> {
+    let root = repo_root(target).ok_or_else(|| outside(target))?;
+    let relative = target.strip_prefix(&root).map_err(|_| outside(target))?;
+    let configured = found.build_dir.as_deref().unwrap_or_default();
+    let cache = Path::new(configured).join("CMakeCache.txt");
+    let recipe = json!({
+        "producer": PRODUCER,
+        "target": found.name,
+        "source": relative.display().to_string(),
+        "configuredBuild": configured,
+        "buildType": cache_value(&cache, "CMAKE_BUILD_TYPE"),
+        "compiler": cache_value(&cache, "CMAKE_CXX_COMPILER"),
+        "generator": cache_value(&cache, "CMAKE_GENERATOR"),
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+    });
+    let mut inputs = BTreeMap::new();
+    inputs.insert("draft".to_string(), draft_sha256.to_string());
+    Ok(InputKey {
+        inputs,
+        recipe_sha256: hash_text(&recipe.to_string()),
+    })
+}
+
+fn check_input(draft: &Path) -> Result<InputKey, String> {
+    let bytes = std::fs::read(draft)
+        .map_err(|cause| format!("cannot read {}: {cause}", draft.display()))?;
+    let mut inputs = BTreeMap::new();
+    inputs.insert("draft".to_string(), hash_bytes(&bytes));
+    Ok(InputKey {
+        inputs,
+        recipe_sha256: hash_text(&format!(
+            "g++:{STANDARD}:{}:{}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        )),
+    })
+}
+
+fn hash_text(text: &str) -> String {
+    hash_bytes(text.as_bytes())
+}
+
+fn hash_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn completed_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 fn outside(target: &Path) -> String {
@@ -205,12 +391,9 @@ fn cores() -> usize {
     thread::available_parallelism().map_or(2, |count| count.get().saturating_sub(1).clamp(1, 8))
 }
 
-fn draft_tree(target: &Path, draft: &Path) -> Result<(PathBuf, PathBuf, PathBuf), String> {
+fn draft_tree(target: &Path, workspace: &Path) -> Result<(PathBuf, PathBuf, PathBuf), String> {
     let root = repo_root(target).ok_or_else(|| outside(target))?;
     let relative = target.strip_prefix(&root).map_err(|_| outside(target))?;
-    let workspace = draft
-        .parent()
-        .ok_or_else(|| format!("{} has no working directory", draft.display()))?;
     let source_dir = workspace.join("source");
     let build_dir = workspace.join("build");
     let name = target
@@ -246,7 +429,7 @@ fn mirror_layer(real: &Path, overlay: &Path, relative: &Path, draft: &Path) -> R
         let destination = overlay.join(&name);
         if name == wanted {
             if tail.as_os_str().is_empty() {
-                ensure_link(draft, &destination)?;
+                replace_link(draft, &destination)?;
             } else {
                 mirror_layer(&entry.path(), &destination, &tail, draft)?;
             }
@@ -266,8 +449,23 @@ fn ensure_link(target: &Path, link: &Path) -> Result<(), String> {
         .map_err(|cause| format!("cannot link {}: {cause}", link.display()))
 }
 
+#[cfg(unix)]
+fn replace_link(target: &Path, link: &Path) -> Result<(), String> {
+    if std::fs::symlink_metadata(link).is_ok() {
+        std::fs::remove_file(link)
+            .map_err(|cause| format!("cannot replace {}: {cause}", link.display()))?;
+    }
+    std::os::unix::fs::symlink(target, link)
+        .map_err(|cause| format!("cannot link {}: {cause}", link.display()))
+}
+
 #[cfg(not(unix))]
 fn ensure_link(_target: &Path, _link: &Path) -> Result<(), String> {
+    Err("temporary draft builds require a Unix-compatible filesystem".to_string())
+}
+
+#[cfg(not(unix))]
+fn replace_link(_target: &Path, _link: &Path) -> Result<(), String> {
     Err("temporary draft builds require a Unix-compatible filesystem".to_string())
 }
 
@@ -404,15 +602,30 @@ fn key(kind: &str, target: &Path) -> String {
     format!("{kind}:{}", target.display())
 }
 
-fn held(jobs: &Jobs) -> MutexGuard<'_, HashMap<String, Child>> {
+fn held(jobs: &Jobs) -> MutexGuard<'_, JobBook> {
     jobs.0.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn discard(jobs: &Jobs, key: &str) {
-    let taken = held(jobs).remove(key);
-    if let Some(mut child) = taken {
-        child.kill().ok();
-        child.wait().ok();
+    let taken = held(jobs).running.remove(key);
+    if let Some(mut running) = taken {
+        running.child.kill().ok();
+        running.child.wait().ok();
+    }
+}
+
+fn discard_job(jobs: &Jobs, key: &str, id: u64) {
+    let taken = {
+        let mut book = held(jobs);
+        book.running
+            .get(key)
+            .is_some_and(|running| running.id == id)
+            .then(|| book.running.remove(key))
+            .flatten()
+    };
+    if let Some(mut running) = taken {
+        running.child.kill().ok();
+        running.child.wait().ok();
     }
 }
 
@@ -422,6 +635,8 @@ fn pump<R: Read + Send + 'static>(
     event: String,
     path: String,
     rewrite: Option<(String, String)>,
+    job_id: u64,
+    input_key: InputKey,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         for line in BufReader::new(source).lines().map_while(Result::ok) {
@@ -429,7 +644,15 @@ fn pump<R: Read + Send + 'static>(
                 .as_ref()
                 .map(|(from, to)| line.replace(from, to))
                 .unwrap_or(line);
-            emit(&event, json!({ "path": path, "line": line }));
+            emit(
+                &event,
+                json!({
+                    "path": path,
+                    "line": line,
+                    "jobId": job_id,
+                    "inputKey": input_key,
+                }),
+            );
         }
     })
 }
@@ -440,8 +663,12 @@ fn spawn(
     target: &Path,
     command: Command,
     emit: Emit,
-) -> Result<(), String> {
-    spawn_mapped(jobs, kind, target, command, emit, None)
+    input_key: InputKey,
+    completion: Option<Completion>,
+) -> Result<Started, String> {
+    spawn_mapped(
+        jobs, kind, target, command, emit, None, input_key, completion,
+    )
 }
 
 fn spawn_mapped(
@@ -451,7 +678,10 @@ fn spawn_mapped(
     mut command: Command,
     emit: Emit,
     rewrite: Option<(String, String)>,
-) -> Result<(), String> {
+    input_key: InputKey,
+    completion: Option<Completion>,
+) -> Result<Started, String> {
+    let job_id = NEXT_JOB.fetch_add(1, Ordering::Relaxed);
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -465,7 +695,9 @@ fn spawn_mapped(
     let event = format!("{kind}-output");
 
     discard(jobs, &key);
-    held(jobs).insert(key.clone(), child);
+    held(jobs)
+        .running
+        .insert(key.clone(), Running { id: job_id, child });
 
     let pumps = vec![
         out.map(|pipe| {
@@ -475,23 +707,71 @@ fn spawn_mapped(
                 event.clone(),
                 path.clone(),
                 rewrite.clone(),
+                job_id,
+                input_key.clone(),
             )
         }),
-        err.map(|pipe| pump(pipe, emit.clone(), event, path.clone(), rewrite)),
+        err.map(|pipe| {
+            pump(
+                pipe,
+                emit.clone(),
+                event.clone(),
+                path.clone(),
+                rewrite,
+                job_id,
+                input_key.clone(),
+            )
+        }),
     ];
     let jobs = jobs.clone();
     let finished = format!("{kind}-finished");
+    let started = Started {
+        job_id,
+        input_key: input_key.clone(),
+    };
     thread::spawn(move || {
         for handle in pumps.into_iter().flatten() {
             handle.join().ok();
         }
-        let taken = held(&jobs).remove(&key);
-        let code = taken
-            .and_then(|mut child| child.wait().ok())
+        let taken = {
+            let mut book = held(&jobs);
+            book.running
+                .get(&key)
+                .is_some_and(|running| running.id == job_id)
+                .then(|| book.running.remove(&key))
+                .flatten()
+        };
+        let mut code = taken
+            .and_then(|mut running| running.child.wait().ok())
             .and_then(|status| status.code());
-        emit(&finished, json!({ "path": path, "code": code }));
+        if code == Some(0) {
+            if let Some((name, mut artifact, record)) = completion {
+                artifact.completed_unix_ms = completed_unix_ms();
+                if let Err(cause) = record(name, artifact) {
+                    emit(
+                        &event,
+                        json!({
+                            "path": path,
+                            "line": format!("cannot record built artifact: {cause}"),
+                            "jobId": job_id,
+                            "inputKey": input_key,
+                        }),
+                    );
+                    code = Some(1);
+                }
+            }
+        }
+        emit(
+            &finished,
+            json!({
+                "path": path,
+                "code": code,
+                "jobId": job_id,
+                "inputKey": input_key,
+            }),
+        );
     });
-    Ok(())
+    Ok(started)
 }
 
 #[cfg(unix)]

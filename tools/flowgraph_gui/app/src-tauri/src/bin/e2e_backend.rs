@@ -4,8 +4,9 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use cler_flowgraph_gui::assistant;
-use cler_flowgraph_gui::build::{self, Emit, Jobs};
+use cler_flowgraph_gui::build::{self, Emit, Jobs, RecordArtifact};
 use cler_flowgraph_gui::document::{self, Documents};
+use cler_flowgraph_gui::provenance::ArtifactRecord;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -206,17 +207,25 @@ fn dispatch(
         "parse_file" => outcome(document::parse_file(docs, &path)),
         "palette" => outcome(document::palette(docs, &path)),
         "check_document" => outcome(
-            document::working_path(docs, &path)
-                .and_then(|working| build::check_draft(jobs, &path, &working, emitter(events))),
+            document::snapshot_draft(docs, &path)
+                .and_then(|draft| build::check_draft(jobs, &path, &draft.path, emitter(events))),
         ),
-        "find_target" => outcome(build::find_target(&path)),
-        "build_target" => outcome(
-            document::working_path(docs, &path)
-                .and_then(|working| build::build_draft(jobs, &path, &working, emitter(events))),
+        "find_target" => outcome(
+            document::draft_state(docs, &path)
+                .and_then(|draft| build::find_draft_target(&path, &draft)),
         ),
+        "build_target" => outcome(document::snapshot_draft(docs, &path).and_then(|draft| {
+            build::build_draft(
+                jobs,
+                &path,
+                &draft,
+                artifact_recorder(docs, path.clone()),
+                emitter(events),
+            )
+        })),
         "run_target" => outcome(
-            document::working_path(docs, &path)
-                .and_then(|working| build::start_draft(jobs, &path, &working, emitter(events))),
+            document::draft_state(docs, &path)
+                .and_then(|draft| build::start_draft(jobs, &path, &draft, emitter(events))),
         ),
         "stop_target" => outcome(build::stop(jobs, &path)),
         _ => Reply::Loud(format!("unknown command: {cmd}")),
@@ -230,6 +239,13 @@ fn emitter(events: &Events) -> Emit {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(json!({ "event": event, "payload": payload }));
+    })
+}
+
+fn artifact_recorder(docs: &Shared, path: String) -> RecordArtifact {
+    let docs = docs.clone();
+    Arc::new(move |name: String, record: ArtifactRecord| {
+        document::record_artifact(&docs, &path, name, record)
     })
 }
 

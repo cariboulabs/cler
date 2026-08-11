@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+use crate::provenance::{ArtifactCatalog, ArtifactRecord};
+
 pub type Documents = Mutex<HashMap<PathBuf, Document>>;
 
 const PALETTE_DIR: &str = "desktop_blocks";
@@ -20,6 +22,14 @@ const REPOSITORY_MARKER: &str = "include/cler.hpp";
 const DIFF_CONTEXT: usize = 3;
 const CACHE_FORMAT: &str = "cler-flowgraph-cache";
 const CACHE_VERSION: u32 = 1;
+
+#[derive(Clone, Debug)]
+pub struct DraftState {
+    pub path: PathBuf,
+    pub workspace: PathBuf,
+    pub sha256: String,
+    pub artifacts: ArtifactCatalog,
+}
 
 pub struct Document {
     session: DocumentSession,
@@ -350,6 +360,78 @@ pub fn working_path(docs: &Documents, path: &str) -> Result<PathBuf, String> {
     map.get(&key)
         .map(|doc| doc.working.clone())
         .ok_or_else(|| format!("no open document for {path}"))
+}
+
+pub fn draft_state(docs: &Documents, path: &str) -> Result<DraftState, String> {
+    let map = lock(docs);
+    let key = resolve(&map, path).ok_or_else(|| format!("no open document for {path}"))?;
+    let doc = map
+        .get(&key)
+        .ok_or_else(|| format!("no open document for {path}"))?;
+    let workspace = doc
+        .working
+        .parent()
+        .ok_or_else(|| format!("{} has no working directory", doc.working.display()))?
+        .to_path_buf();
+    Ok(DraftState {
+        path: doc.working.clone(),
+        workspace,
+        sha256: digest(doc.session.source()),
+        artifacts: ArtifactCatalog::read(&doc.cache.build),
+    })
+}
+
+pub fn snapshot_draft(docs: &Documents, path: &str) -> Result<DraftState, String> {
+    let map = lock(docs);
+    let key = resolve(&map, path).ok_or_else(|| format!("no open document for {path}"))?;
+    let doc = map
+        .get(&key)
+        .ok_or_else(|| format!("no open document for {path}"))?;
+    let source = doc.session.source();
+    let sha256 = digest(source);
+    let snapshots = doc
+        .working
+        .parent()
+        .ok_or_else(|| format!("{} has no working directory", doc.working.display()))?
+        .join("snapshots");
+    private_dir(&snapshots)?;
+    let extension = doc
+        .working
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("cpp");
+    let snapshot = snapshots.join(format!("{sha256}.{extension}"));
+    let current = matches!(std::fs::read_to_string(&snapshot), Ok(ref text) if text == source);
+    if !current {
+        let staged = snapshots.join(format!("{sha256}.{extension}.next"));
+        std::fs::write(&staged, source)
+            .map_err(|cause| format!("cannot write {}: {cause}", staged.display()))?;
+        std::fs::rename(&staged, &snapshot)
+            .map_err(|cause| format!("cannot replace {}: {cause}", snapshot.display()))?;
+    }
+    Ok(DraftState {
+        path: snapshot,
+        workspace: snapshots
+            .parent()
+            .ok_or_else(|| format!("{} has no workspace", snapshots.display()))?
+            .to_path_buf(),
+        sha256,
+        artifacts: ArtifactCatalog::read(&doc.cache.build),
+    })
+}
+
+pub fn record_artifact(
+    docs: &Documents,
+    path: &str,
+    name: String,
+    record: ArtifactRecord,
+) -> Result<(), String> {
+    let mut map = lock(docs);
+    let (_, doc) = document(&mut map, path)?;
+    let mut catalog = ArtifactCatalog::read(&doc.cache.build);
+    catalog.put(name, record)?;
+    doc.cache.build = serde_json::to_value(catalog).map_err(|cause| cause.to_string())?;
+    write_cache(&doc.cache_path, &doc.cache)
 }
 
 pub fn store_cache(docs: &Documents, path: &str, ui: Value) -> Result<(), String> {

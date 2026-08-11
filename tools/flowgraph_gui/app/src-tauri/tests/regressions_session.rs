@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use cler_flowgraph_gui::document::{self, DocumentState, Documents};
-use serde_json::{json, Value};
+use cler_flowgraph_gui::provenance::{ArtifactRecord, InputKey};
+use serde_json::{json, Map, Value};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -97,6 +99,88 @@ fn poison(docs: &Arc<Documents>) {
     })
     .join();
     std::panic::set_hook(previous);
+}
+
+fn artifact(sha256: &str, path: &str) -> ArtifactRecord {
+    ArtifactRecord {
+        input_key: InputKey {
+            inputs: BTreeMap::from([("draft".to_string(), sha256.to_string())]),
+            recipe_sha256: "recipe".to_string(),
+        },
+        producer: "test".to_string(),
+        artifact_path: path.to_string(),
+        completed_unix_ms: 1,
+        extra: Map::new(),
+    }
+}
+
+#[test]
+fn artifact_provenance_survives_reopen_and_preserves_future_cache_fields() {
+    let path = temp_copy("hello_world.cpp");
+    let docs = Documents::default();
+    let p = as_str(&path);
+    document::open(&docs, p).expect("open");
+    let draft = document::snapshot_draft(&docs, p).expect("snapshot");
+    document::record_artifact(
+        &docs,
+        p,
+        "cmake:first".to_string(),
+        artifact(&draft.sha256, "/tmp/first"),
+    )
+    .expect("record first artifact");
+
+    let workspace = draft
+        .path
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace");
+    let cache = workspace.join("hello_world.cfgc");
+    document::close(&docs, p);
+    let mut cached: Value = serde_json::from_str(&text(&cache)).expect("cache json");
+    cached["build"]["futureField"] = json!({ "kept": true });
+    std::fs::write(
+        &cache,
+        serde_json::to_string_pretty(&cached).expect("cache text"),
+    )
+    .expect("seed future field");
+
+    document::open(&docs, p).expect("reopen");
+    document::record_artifact(
+        &docs,
+        p,
+        "codegen:second".to_string(),
+        artifact(&draft.sha256, "/tmp/second"),
+    )
+    .expect("record second artifact");
+
+    let state = document::draft_state(&docs, p).expect("draft state");
+    assert!(state.artifacts.get("cmake:first").is_some());
+    assert!(state.artifacts.get("codegen:second").is_some());
+    let updated: Value = serde_json::from_str(&text(&cache)).expect("updated cache");
+    assert_eq!(updated["build"]["futureField"]["kept"], true);
+}
+
+#[test]
+fn a_build_snapshot_stays_immutable_while_the_draft_changes() {
+    let path = temp_copy("hello_world.cpp");
+    let docs = Documents::default();
+    let p = as_str(&path);
+    let opened = document::open(&docs, p).expect("open");
+    let before = document::snapshot_draft(&docs, p).expect("first snapshot");
+
+    document::apply(
+        &docs,
+        p,
+        opened.revision,
+        set_param("source1", 1, "8.0f"),
+    )
+    .expect("edit draft");
+    let after = document::snapshot_draft(&docs, p).expect("second snapshot");
+
+    assert_ne!(before.sha256, after.sha256);
+    assert_ne!(before.path, after.path);
+    assert_eq!(digest(&text(&before.path)), before.sha256);
+    assert_eq!(digest(&text(&after.path)), after.sha256);
 }
 
 #[test]

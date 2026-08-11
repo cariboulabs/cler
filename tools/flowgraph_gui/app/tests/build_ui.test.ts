@@ -197,16 +197,22 @@ describe('build and run follow what find_target reports', () => {
   );
 
   it(
-    'builds with Ctrl+B and toggles the child with Ctrl+R',
+    'requires a successful build of the current draft before running',
     async () => {
       const page = await boot({ target: BUILDABLE });
+      const run = page.locator('[data-testid="run"]');
       await expect.poll(() => page.locator('[data-testid="build"]').isDisabled()).toBe(false);
+      expect(await run.isDisabled()).toBe(true);
+      expect(await page.textContent('[data-testid="run-tooltip"]')).toContain(
+        'build the current draft'
+      );
 
       await page.keyboard.press('Control+b');
       await expect.poll(() => ran(page, 'build_target')).toBe(1);
       await emit(page, 'build-output', { path: FAKE_PATH, line: '[100%] Built target hello_world' });
       await emit(page, 'build-finished', { path: FAKE_PATH, code: 0 });
       await page.waitForSelector('[data-testid="output-body"]');
+      await expect.poll(() => run.isDisabled()).toBe(false);
       expect(await page.textContent('[data-testid="output-body"]')).toContain('Built target');
 
       await page.keyboard.press('Control+r');
@@ -227,6 +233,18 @@ describe('build and run follow what find_target reports', () => {
       expect(await page.textContent('[data-testid="output-body"]')).toContain(
         'run finished (exit signal)'
       );
+
+      await page.click('[data-testid="drawer-close"]');
+      await page.click('.svelte-flow__node[data-id="source1"]');
+      await page.fill('input[data-field="source1.ctor.1"]', '2.0f');
+      await page.press('input[data-field="source1.ctor.1"]', 'Enter');
+      await expect.poll(() => run.isDisabled()).toBe(true);
+      expect(await page.textContent('[data-testid="run-tooltip"]')).toContain(
+        'build the current draft'
+      );
+      await page.keyboard.press('Control+r');
+      await page.waitForTimeout(200);
+      expect(await ran(page, 'run_target')).toBe(1);
       await page.close();
     },
     CASE
@@ -260,6 +278,14 @@ describe('build and run follow what find_target reports', () => {
       await page.waitForSelector('[data-testid="context-menu"]');
       expect(await page.locator('[data-testid="menu-check"]').isDisabled()).toBe(false);
       expect(await page.locator('[data-testid="menu-build"]').isDisabled()).toBe(false);
+      expect(await page.locator('[data-testid="menu-run"]').isDisabled()).toBe(true);
+      await page.keyboard.press('Control+b');
+      await expect.poll(() => ran(page, 'build_target')).toBe(1);
+      await emit(page, 'build-finished', { path: FAKE_PATH, code: 0 });
+      await expect.poll(() => page.locator('[data-testid="run"]').isDisabled()).toBe(false);
+
+      await page.locator('.svelte-flow__pane').click({ button: 'right', position: { x: 40, y: 40 } });
+      await page.waitForSelector('[data-testid="context-menu"]');
       await page.click('[data-testid="menu-run"]');
       await expect.poll(() => ran(page, 'run_target')).toBe(1);
       await page.close();

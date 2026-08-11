@@ -127,9 +127,18 @@ export const TASKS = ['check', 'build', 'run'] as const;
 
 export type TaskKind = (typeof TASKS)[number];
 
-export type TaskLine = { path: string; line: string };
+export type InputKey = { inputs: Record<string, string>; recipeSha256: string };
 
-export type TaskEnd = { path: string; code: number | null };
+export type TaskStarted = { jobId: number; inputKey: InputKey };
+
+export type TaskLine = TaskStarted & { path: string; line: string };
+
+export type TaskEnd = TaskStarted & { path: string; code: number | null };
+
+export type ArtifactStatus =
+  | { state: 'unavailable'; reason: string }
+  | { state: 'needs_build'; reason: string }
+  | { state: 'ready'; artifactPath: string };
 
 export type TargetInfo = {
   available: boolean;
@@ -137,22 +146,23 @@ export type TargetInfo = {
   name: string;
   buildDir: string | null;
   binary: string | null;
+  artifact: ArtifactStatus;
 };
 
-export function checkDocument(path: string): Promise<void> {
-  return invoker('check_document', { path }) as Promise<void>;
+export function checkDocument(path: string): Promise<TaskStarted> {
+  return invoker('check_document', { path }) as Promise<TaskStarted>;
 }
 
 export function findTarget(path: string): Promise<TargetInfo> {
   return invoker('find_target', { path }) as Promise<TargetInfo>;
 }
 
-export function buildTarget(path: string): Promise<void> {
-  return invoker('build_target', { path }) as Promise<void>;
+export function buildTarget(path: string): Promise<TaskStarted> {
+  return invoker('build_target', { path }) as Promise<TaskStarted>;
 }
 
-export function runTarget(path: string): Promise<void> {
-  return invoker('run_target', { path }) as Promise<void>;
+export function runTarget(path: string): Promise<TaskStarted> {
+  return invoker('run_target', { path }) as Promise<TaskStarted>;
 }
 
 export function stopTarget(path: string): Promise<void> {

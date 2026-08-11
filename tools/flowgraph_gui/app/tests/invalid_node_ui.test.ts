@@ -51,7 +51,10 @@ describe('invalid block nodes', () => {
       await page.fill('input[data-field="source1.ctor.2"]', '20.0f');
       await page.press('input[data-field="source1.ctor.2"]', 'Enter');
 
-      await expect.poll(() => run.isDisabled()).toBe(false);
+      await expect.poll(() => run.isDisabled()).toBe(true);
+      expect(await page.locator('[data-testid="run-tooltip"]').textContent()).toContain(
+        'build the current draft'
+      );
       await page.close();
     },
     CASE

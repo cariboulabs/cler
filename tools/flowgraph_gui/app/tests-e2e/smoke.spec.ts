@@ -142,7 +142,9 @@ test('b+c) edits stay drafted until Save and undo can be saved too', async ({
     await expect(page.getByTestId('check')).toBeEnabled();
     await expect(page.getByTestId('check')).toHaveAttribute('title', /temporary draft/);
 
-    await page.getByTestId('drawer-toggle').click();
+    if (!(await page.getByTestId('drawer-revision').isVisible())) {
+      await page.getByTestId('drawer-toggle').click();
+    }
     await expect(page.getByTestId('drawer-revision')).toHaveText('rev 1');
     await expect(page.getByTestId('drawer-body')).toContainText('"Throttle", 4242');
     await page.getByTestId('save').click();
@@ -332,7 +334,9 @@ test('g) a new block reaches disk only after its required arguments are saved', 
   await page.goto('/');
   await openFile(file);
 
-  await page.getByTestId('toggle-right').click();
+  if (!(await page.getByTestId('rail-tab-library').isVisible())) {
+    await page.getByTestId('toggle-right').click();
+  }
   await page.getByTestId('rail-tab-library').click();
   await page.getByTestId('palette-search').fill('SourceCW');
   await page.locator('[data-block="SourceCWBlock"] .row').dblclick();

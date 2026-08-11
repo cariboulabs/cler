@@ -20,6 +20,10 @@ export type FakeTarget = {
   name: string;
   buildDir: string | null;
   binary: string | null;
+  artifact:
+    | { state: 'unavailable'; reason: string }
+    | { state: 'needs_build'; reason: string }
+    | { state: 'ready'; artifactPath: string };
 };
 
 export type FakeAssistant = { available: boolean; model: string; reason: string | null };
@@ -94,6 +98,9 @@ function installFake(setup: Setup) {
   const bases: number[] = [];
   const callbacks = new Map<number, (message: unknown) => void>();
   const listeners: { event: string; handler: number }[] = [];
+  let target = structuredClone(setup.target);
+  let nextJob = 1;
+  const jobs = new Map<string, { jobId: number; inputKey: object }>();
   let refusal: unknown = setup.refusal;
   let nextCallback = 1;
   let gate: { waited: Promise<void>; open: () => void } | null = null;
@@ -350,11 +357,18 @@ function installFake(setup: Setup) {
     if (command === 'open_document' && setup.openError !== null) throw setup.openError;
     if (command === 'palette') return JSON.parse(JSON.stringify(palette));
     if (command === 'find_target') {
-      if (setup.target === null) throw 'that file is not inside a cler repository';
-      return setup.target;
+      if (target === null) throw 'that file is not inside a cler repository';
+      return target;
     }
     if (['check_document', 'build_target', 'run_target', 'stop_target'].includes(command)) {
-      return null;
+      if (command === 'stop_target') return null;
+      const kind = command.split('_')[0];
+      const started = {
+        jobId: nextJob++,
+        inputKey: { inputs: { draft: String(state.revision) }, recipeSha256: 'fake' }
+      };
+      jobs.set(kind, started);
+      return started;
     }
     if (command === 'apply_commands') {
       const commands = args.commands as Loose[];
@@ -367,6 +381,12 @@ function installFake(setup: Setup) {
         throw thrown;
       }
       apply(commands);
+      if (target?.available) {
+        target.artifact = {
+          state: 'needs_build',
+          reason: 'build the current draft before running'
+        };
+      }
       return snapshot();
     }
     if (command === 'undo') step(undone, redone);
@@ -410,9 +430,26 @@ function installFake(setup: Setup) {
       gate = null;
     },
     emit: (event: string, payload: unknown) => {
+      const kind = event.split('-')[0] ?? '';
+      const started = jobs.get(kind);
+      const enriched = {
+        ...(payload as Record<string, unknown>),
+        jobId: (payload as Record<string, unknown>).jobId ?? started?.jobId ?? 0,
+        inputKey:
+          (payload as Record<string, unknown>).inputKey ?? started?.inputKey ?? {
+            inputs: {},
+            recipeSha256: 'fake'
+          }
+      };
+      if (event === 'build-finished' && enriched.code === 0 && target?.available) {
+        target.artifact = {
+          state: 'ready',
+          artifactPath: target.binary ?? '/tmp/fake/build/hello_world'
+        };
+      }
       for (const entry of listeners) {
         if (entry.event !== event) continue;
-        callbacks.get(entry.handler)?.({ event, id: entry.handler, payload });
+        callbacks.get(entry.handler)?.({ event, id: entry.handler, payload: enriched });
       }
     }
   };
@@ -471,7 +508,11 @@ export const NO_TARGET: FakeTarget = {
   reason: 'only files under desktop_examples/ have a cmake target',
   name: 'hello_world',
   buildDir: null,
-  binary: null
+  binary: null,
+  artifact: {
+    state: 'unavailable',
+    reason: 'only files under desktop_examples/ have a cmake target'
+  }
 };
 
 export const BUILDABLE: FakeTarget = {
@@ -479,7 +520,8 @@ export const BUILDABLE: FakeTarget = {
   reason: null,
   name: 'hello_world',
   buildDir: '/tmp/fake/build',
-  binary: '/tmp/fake/build/desktop_examples/hello_world'
+  binary: '/tmp/fake/build/desktop_examples/hello_world',
+  artifact: { state: 'needs_build', reason: 'build the current draft before running' }
 };
 
 export function openInspector(): void {

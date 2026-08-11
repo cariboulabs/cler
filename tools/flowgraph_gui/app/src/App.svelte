@@ -60,6 +60,7 @@
     stopTarget,
     undoDocument,
     type TargetInfo,
+    type TaskStarted,
     type TaskKind
   } from './lib/backend';
   import {
@@ -206,6 +207,10 @@
     return Number.isFinite(stored) && stored >= MIN_DRAWER_HEIGHT ? stored : DEFAULT_DRAWER_HEIGHT;
   }
 
+  function targetKey(path: string, sha256: string | undefined, refresh: number): string {
+    return `${path}:${sha256 ?? ''}:${refresh}`;
+  }
+
   const startFixture = initialFixture();
 
   let fixtureName = $state(startFixture);
@@ -240,6 +245,7 @@
   let output = $state.raw<string[]>([]);
   let busy = $state<TaskKind | null>(null);
   let running = $state(false);
+  let targetRefresh = $state(0);
   let rightTab = $state<RailTab>('inspector');
   let keyStatus = $state.raw<AssistantStatus | null>(null);
   let chat = $state.raw<Message[]>([]);
@@ -254,6 +260,8 @@
   const positionsByView = new Map<string, Map<string, EdgePoint>>();
   const viewportsByView = new Map<string, Viewport>();
   const loadedViews = new Set<string>();
+  const activeJobs = new Map<TaskKind, number>();
+  const latestJobs = new Map<TaskKind, number>();
 
   const editable = $derived(desktop && opened !== null);
   const site = $derived<Site | undefined>(doc.model.sites[siteIndex]);
@@ -321,7 +329,11 @@
     },
     build: {
       enabled: blocked === null && busy === null && target?.available === true,
-      hint: blocked ?? target?.reason ?? targetError ?? 'build the temporary draft (Ctrl+B)'
+      hint:
+        blocked ??
+        target?.reason ??
+        targetError ??
+        (target === null ? 'finding the build target' : 'build the temporary draft (Ctrl+B)')
     },
     run: {
       enabled:
@@ -329,6 +341,7 @@
         (blocked === null &&
           incompleteNote === null &&
           busy === null &&
+          target?.artifact?.state === 'ready' &&
           target?.available === true),
       hint:
         running
@@ -337,7 +350,11 @@
             incompleteNote ??
             target?.reason ??
             targetError ??
-            'run the built example (Ctrl+R)'
+            (target === null
+              ? 'checking whether the current draft is built'
+              : target.artifact?.state === 'needs_build'
+                ? target.artifact.reason
+                : 'run the built example (Ctrl+R)')
     }
   });
 
@@ -392,20 +409,23 @@
 
   $effect(() => {
     const path = doc.path;
+    const requestKey = targetKey(path, doc.model.sha256, targetRefresh);
     if (!editable) {
       target = null;
       targetError = null;
       return;
     }
+    target = null;
+    targetError = null;
     let stale = false;
     void findTarget(path).then(
       (found) => {
-        if (stale) return;
+        if (stale || requestKey !== targetKey(doc.path, doc.model.sha256, targetRefresh)) return;
         target = found;
         targetError = null;
       },
       (error: unknown) => {
-        if (stale) return;
+        if (stale || requestKey !== targetKey(doc.path, doc.model.sha256, targetRefresh)) return;
         target = null;
         targetError = describeApplyError(error);
       }
@@ -419,13 +439,20 @@
     if (!editable) return;
     const streams = onTaskLine((kind, payload) => {
       if (payload.path !== doc.path) return;
+      if (!acceptTask(kind, payload.jobId)) return;
       output = [...output, payload.line].slice(-OUTPUT_LINES);
       if (kind !== 'run') diagLines = [...diagLines, payload.line];
     });
     const ends = onTaskEnd((kind, payload) => {
       if (payload.path !== doc.path) return;
+      if (!acceptTask(kind, payload.jobId)) return;
+      latestJobs.set(kind, payload.jobId);
+      activeJobs.delete(kind);
       if (kind === 'run') running = false;
-      else busy = null;
+      else {
+        busy = null;
+        if (kind === 'build') targetRefresh += 1;
+      }
       output = [...output, `— ${kind} finished (exit ${payload.code ?? 'signal'})`];
     });
     return () => {
@@ -671,6 +698,9 @@
     output = [];
     busy = null;
     running = false;
+    for (const [kind, jobId] of activeJobs) latestJobs.set(kind, jobId);
+    activeJobs.clear();
+    targetRefresh += 1;
     status = '';
   }
 
@@ -1100,7 +1130,17 @@
     tab = 'code';
   }
 
-  async function task(kind: TaskKind, action: (path: string) => Promise<void>) {
+  function acceptTask(kind: TaskKind, jobId: number): boolean {
+    if (kind === 'run' ? !running : busy !== kind) return false;
+    const active = activeJobs.get(kind);
+    if (active !== undefined) return active === jobId;
+    if (jobId <= (latestJobs.get(kind) ?? 0)) return false;
+    activeJobs.set(kind, jobId);
+    latestJobs.set(kind, jobId);
+    return true;
+  }
+
+  async function task(kind: TaskKind, action: (path: string) => Promise<TaskStarted>) {
     output = [];
     if (kind !== 'run') diagLines = [];
     if (kind === 'run') running = true;
@@ -1108,8 +1148,13 @@
     tab = kind === 'check' ? 'diagnostics' : 'output';
     drawerOpen = true;
     try {
-      await action(doc.path);
+      const started = await action(doc.path);
+      if (kind === 'run' ? running : busy === kind) {
+        activeJobs.set(kind, started.jobId);
+        latestJobs.set(kind, started.jobId);
+      }
     } catch (error) {
+      activeJobs.delete(kind);
       if (kind === 'run') running = false;
       else busy = null;
       announce(describeApplyError(error));

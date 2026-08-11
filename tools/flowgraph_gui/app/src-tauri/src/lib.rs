@@ -1,6 +1,7 @@
 pub mod assistant;
 pub mod build;
 pub mod document;
+pub mod provenance;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -8,7 +9,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use assistant::{Status, Talks, Turn};
-use build::{Emit, Jobs, Target};
+use build::{Emit, Jobs, RecordArtifact, Started, Target};
 use cler_graph::BlockSpec;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -16,6 +17,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use document::{DocumentState, Documents, Preview};
+use provenance::ArtifactRecord;
 
 const EXTERNAL_CHANGE_EVENT: &str = "document-changed-externally";
 
@@ -120,20 +122,30 @@ fn emitter(app: AppHandle) -> Emit {
     })
 }
 
+fn artifact_recorder(app: AppHandle, path: String) -> RecordArtifact {
+    Arc::new(move |name: String, record: ArtifactRecord| {
+        let docs = app
+            .try_state::<Documents>()
+            .ok_or_else(|| "document store is unavailable".to_string())?;
+        document::record_artifact(&docs, &path, name, record)
+    })
+}
+
 #[tauri::command]
 fn check_document(
     path: String,
     app: AppHandle,
     docs: State<'_, Documents>,
     jobs: State<'_, Jobs>,
-) -> Result<(), String> {
-    let working = document::working_path(&docs, &path)?;
-    build::check_draft(jobs.inner(), &path, &working, emitter(app))
+) -> Result<Started, String> {
+    let draft = document::snapshot_draft(&docs, &path)?;
+    build::check_draft(jobs.inner(), &path, &draft.path, emitter(app))
 }
 
 #[tauri::command]
-fn find_target(path: String) -> Result<Target, String> {
-    build::find_target(&path)
+fn find_target(path: String, docs: State<'_, Documents>) -> Result<Target, String> {
+    let draft = document::draft_state(&docs, &path)?;
+    build::find_draft_target(&path, &draft)
 }
 
 #[tauri::command]
@@ -142,9 +154,10 @@ fn build_target(
     app: AppHandle,
     docs: State<'_, Documents>,
     jobs: State<'_, Jobs>,
-) -> Result<(), String> {
-    let working = document::working_path(&docs, &path)?;
-    build::build_draft(jobs.inner(), &path, &working, emitter(app))
+) -> Result<Started, String> {
+    let draft = document::snapshot_draft(&docs, &path)?;
+    let record = artifact_recorder(app.clone(), path.clone());
+    build::build_draft(jobs.inner(), &path, &draft, record, emitter(app))
 }
 
 #[tauri::command]
@@ -153,9 +166,9 @@ fn run_target(
     app: AppHandle,
     docs: State<'_, Documents>,
     jobs: State<'_, Jobs>,
-) -> Result<(), String> {
-    let working = document::working_path(&docs, &path)?;
-    build::start_draft(jobs.inner(), &path, &working, emitter(app))
+) -> Result<Started, String> {
+    let draft = document::draft_state(&docs, &path)?;
+    build::start_draft(jobs.inner(), &path, &draft, emitter(app))
 }
 
 #[tauri::command]
