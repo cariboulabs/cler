@@ -1040,7 +1040,7 @@ describe('typed edges on the canvas', () => {
     async () => {
       await show('spike');
       const painted = await strokes();
-      expect(painted['usrp->fanout.in[]#0']).toBe(await token('--type-1'));
+      expect(painted['source->fanout.in[]#0']).toBe(await token('--type-1'));
       expect(painted['fanout->power.in[]#0']).toBe(await token('--muted'));
       expect(painted['power->trigger.in[]#0']).toBe(await token('--type-2'));
     },

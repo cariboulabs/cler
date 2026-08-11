@@ -154,7 +154,13 @@ fn spike_resolves_the_trig_alias() {
     assert!(trigger.editable);
     assert_eq!(site.blocks.len(), 7);
     assert_eq!(site.edges.len(), 6);
-    assert!(site.editable);
+
+    // run_app is a template; `source` is constructed in main() and passed in.
+    let source = site.block("source").expect("source block");
+    assert!(!source.editable);
+    assert_eq!(source.read_only_reason, Some(Reason::UndeclaredBlock));
+    assert!(!site.editable);
+    assert_eq!(site.read_only_reason, Some(Reason::SiteHasReadOnlyElements));
 }
 
 #[test]
