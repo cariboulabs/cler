@@ -1,5 +1,5 @@
 import ELK, { type ElkExtendedEdge, type ElkNode } from 'elkjs/lib/elk.bundled.js';
-import type { EdgePoint, Projection } from './project';
+import type { EdgePoint, Projection } from '../project';
 
 const elk = new ELK();
 

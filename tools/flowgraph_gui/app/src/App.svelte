@@ -56,7 +56,6 @@
     redoDocument,
     reloadDocument,
     runTarget,
-    saveCache,
     saveDocument,
     spansOf,
     stopTarget,
@@ -72,6 +71,8 @@
     placeDiagnostics,
     type Placed
   } from './lib/diagnostics';
+  import * as layoutCache from './lib/layout/cache';
+  import { cacheOf, type UiCache } from './lib/layout/cache';
   import { layout } from './lib/layout';
   import {
     addBlockCommand,
@@ -156,45 +157,9 @@
   const RIGHT_PANEL = 'cler.panel.right';
   const DRAWER_PANEL = 'cler.panel.drawer';
   const DRAWER_HEIGHT = 'cler.panel.drawer.height';
-  const LAYOUT_PREFIX = 'cler.layout.';
   const DEFAULT_DRAWER_HEIGHT = 260;
   const OUTPUT_LINES = 2000;
   const MIN_DRAWER_HEIGHT = 90;
-
-  type CachedView = {
-    positions?: Record<string, EdgePoint>;
-    viewport?: Viewport | null;
-    [key: string]: unknown;
-  };
-
-  type UiCache = {
-    version: number;
-    activeView: string | null;
-    views: Record<string, CachedView>;
-    panels: {
-      left?: boolean;
-      right?: boolean;
-      drawer?: boolean;
-      drawerHeight?: number;
-      rightTab?: RailTab;
-      [key: string]: unknown;
-    };
-    [key: string]: unknown;
-  };
-
-  function cacheOf(value: unknown): UiCache {
-    const stored = value && typeof value === 'object' ? structuredClone(value) : {};
-    const record = stored as Record<string, unknown>;
-    const views = record.views && typeof record.views === 'object' ? record.views : {};
-    const panels = record.panels && typeof record.panels === 'object' ? record.panels : {};
-    return {
-      ...record,
-      version: typeof record.version === 'number' ? record.version : 1,
-      activeView: typeof record.activeView === 'string' ? record.activeView : null,
-      views: views as Record<string, CachedView>,
-      panels: panels as UiCache['panels']
-    };
-  }
 
   function storedOpen(key: string, fallback: boolean): boolean {
     const stored = localStorage.getItem(key);
@@ -259,10 +224,6 @@
   let alerted = 0;
   let pinned = new Map<string, EdgePoint>();
   let flowCache = $state.raw<UiCache>(cacheOf({}));
-  let cacheTimer: ReturnType<typeof setTimeout> | undefined;
-  const positionsByView = new Map<string, Map<string, EdgePoint>>();
-  const viewportsByView = new Map<string, Viewport>();
-  const loadedViews = new Set<string>();
   const activeJobs = new Map<TaskKind, number>();
   const latestJobs = new Map<TaskKind, number>();
 
@@ -530,50 +491,31 @@
       viewKey = key;
       await tick();
       if (stale) return;
-      void actions?.showView(viewportsByView.get(key) ?? null);
+      void actions?.showView(layoutCache.viewportOf(key));
     });
     return () => {
       stale = true;
     };
   });
 
+  function cacheEnv(): layoutCache.CacheEnv {
+    return { editable, path: doc.path, flowCache, setFlowCache: (next) => (flowCache = next) };
+  }
+
   function rememberPositions(
     key: string,
     current: { id: string; position: EdgePoint }[],
     complete = false
   ): void {
-    if (!key) return;
-    loadLayout(key);
-    const positions = complete
-      ? new Map<string, EdgePoint>()
-      : (positionsByView.get(key) ?? new Map<string, EdgePoint>());
-    for (const node of current) {
-      positions.set(node.id, { x: node.position.x, y: node.position.y });
-    }
-    positionsByView.set(key, positions);
-    storeLayout(key);
+    layoutCache.rememberPositions(cacheEnv(), key, current, complete);
   }
 
-  function movedNodes(
-    key: string,
-    current: { id: string; position: EdgePoint }[]
-  ): NodeMove[] {
-    loadLayout(key);
-    const stored = positionsByView.get(key);
-    if (!stored) return [];
-    return current.flatMap((node) => {
-      const before = stored.get(node.id);
-      const after = { x: node.position.x, y: node.position.y };
-      if (!before || (before.x === after.x && before.y === after.y)) return [];
-      return [{ node: node.id, from: { ...before }, to: after }];
-    });
+  function movedNodes(key: string, current: { id: string; position: EdgePoint }[]): NodeMove[] {
+    return layoutCache.movedNodes(cacheEnv(), key, current);
   }
 
   function applyNodeMoves(key: string, moves: NodeMove[], direction: 'from' | 'to'): void {
-    loadLayout(key);
-    const positions = new Map(positionsByView.get(key) ?? []);
-    for (const movement of moves) positions.set(movement.node, { ...movement[direction] });
-    positionsByView.set(key, positions);
+    const positions = layoutCache.applyNodeMoves(cacheEnv(), key, moves, direction);
     if (key === viewKey) {
       nodes = nodes.map((node) => {
         const position = positions.get(node.id);
@@ -597,76 +539,28 @@
   }
 
   function restorePositions(key: string, current: BlockNodeType[]): BlockNodeType[] {
-    loadLayout(key);
-    const positions = positionsByView.get(key);
-    if (!positions) return current;
-    return current.map((node) => {
-      const position = positions.get(node.id);
-      return position ? { ...node, position: { x: position.x, y: position.y } } : node;
-    });
+    return layoutCache.restorePositions(cacheEnv(), key, current);
   }
 
   function rememberViewport(key: string, viewport: Viewport): void {
-    if (!key) return;
-    loadLayout(key);
-    viewportsByView.set(key, { x: viewport.x, y: viewport.y, zoom: viewport.zoom });
-    storeLayout(key);
+    layoutCache.rememberViewport(cacheEnv(), key, viewport);
   }
 
   function loadLayout(key: string): void {
-    if (loadedViews.has(key)) return;
-    loadedViews.add(key);
-    try {
-      const stored = (editable
-        ? flowCache.views[cacheViewKey(key)]
-        : JSON.parse(localStorage.getItem(LAYOUT_PREFIX + key) ?? '{}')) as {
-        positions?: Record<string, EdgePoint>;
-        viewport?: Viewport;
-      } | undefined;
-      const positions = new Map<string, EdgePoint>();
-      for (const [id, point] of Object.entries(stored?.positions ?? {})) {
-        if (Number.isFinite(point.x) && Number.isFinite(point.y)) positions.set(id, point);
-      }
-      if (positions.size > 0) positionsByView.set(key, positions);
-      const viewport = stored?.viewport;
-      if (
-        viewport &&
-        Number.isFinite(viewport.x) &&
-        Number.isFinite(viewport.y) &&
-        Number.isFinite(viewport.zoom)
-      ) {
-        viewportsByView.set(key, viewport);
-      }
-    } catch {
-      localStorage.removeItem(LAYOUT_PREFIX + key);
-    }
+    layoutCache.loadLayout(cacheEnv(), key);
   }
 
   function storeLayout(key: string): void {
-    const positions = Object.fromEntries(positionsByView.get(key) ?? []);
-    const viewport = viewportsByView.get(key) ?? null;
-    if (!editable) {
-      localStorage.setItem(LAYOUT_PREFIX + key, JSON.stringify({ positions, viewport }));
-      return;
-    }
-    const id = cacheViewKey(key);
-    flowCache = {
-      ...flowCache,
-      views: {
-        ...flowCache.views,
-        [id]: { ...flowCache.views[id], positions, viewport }
-      }
-    };
-    persistCache();
+    layoutCache.storeLayout(cacheEnv(), key);
   }
 
   function cacheViewKey(key: string): string {
-    return key.startsWith(`${doc.path}#`) ? key.slice(doc.path.length + 1) : key;
+    return layoutCache.cacheViewKey(doc.path, key);
   }
 
   function storePanels(): void {
     if (!editable) return;
-    flowCache = {
+    const next: layoutCache.UiCache = {
       ...flowCache,
       panels: {
         ...flowCache.panels,
@@ -677,40 +571,20 @@
         rightTab
       }
     };
-    persistCache();
+    flowCache = next;
+    layoutCache.persistCache(cacheEnv(), next);
   }
 
   function persistCache(): void {
-    if (!editable) return;
-    if (cacheTimer) clearTimeout(cacheTimer);
-    const path = doc.path;
-    const cached = structuredClone(flowCache);
-    cacheTimer = setTimeout(() => {
-      cacheTimer = undefined;
-      void queued(path, () => saveCache(path, cached)).catch(() => undefined);
-    }, 120);
+    layoutCache.persistCache(cacheEnv());
   }
 
   function cancelCacheWrite(): void {
-    if (cacheTimer) clearTimeout(cacheTimer);
-    cacheTimer = undefined;
+    layoutCache.cancelCacheWrite();
   }
 
   function syncPositionCache(value: unknown): void {
-    const stored = cacheOf(value);
-    const views = { ...flowCache.views };
-    for (const [id, cached] of Object.entries(stored.views)) {
-      if (!cached.positions) continue;
-      const positions = new Map<string, EdgePoint>();
-      for (const [node, point] of Object.entries(cached.positions)) {
-        if (Number.isFinite(point.x) && Number.isFinite(point.y)) positions.set(node, point);
-      }
-      const key = `${doc.path}#${id}`;
-      positionsByView.set(key, positions);
-      loadedViews.add(key);
-      views[id] = { ...views[id], positions: Object.fromEntries(positions) };
-    }
-    flowCache = { ...flowCache, views };
+    flowCache = layoutCache.syncPositionCache(cacheEnv(), value);
     if (viewKey) nodes = restorePositions(viewKey, nodes);
   }
 
@@ -746,9 +620,7 @@
     void refreshPalette(next.path);
     if (fresh) {
       flowCache = cacheOf(next.cache);
-      positionsByView.clear();
-      viewportsByView.clear();
-      loadedViews.clear();
+      layoutCache.resetViewCache();
       const panels = flowCache.panels;
       if (typeof panels.left === 'boolean') leftOpen = panels.left;
       if (typeof panels.right === 'boolean') rightOpen = panels.right;
