@@ -44,6 +44,7 @@
     inTauri,
     loadFixture,
     loadPalette,
+    onArtifactStatusChange,
     onExternalChange,
     onTaskEnd,
     onTaskLine,
@@ -328,12 +329,20 @@
       hint: blocked ?? targetError ?? 'syntax-check the temporary draft with g++ (F7)'
     },
     build: {
-      enabled: blocked === null && busy === null && target?.available === true,
+      enabled:
+        blocked === null &&
+        busy === null &&
+        target?.available === true &&
+        target.artifact?.state !== 'building',
       hint:
         blocked ??
         target?.reason ??
         targetError ??
-        (target === null ? 'finding the build target' : 'build the temporary draft (Ctrl+B)')
+        (target === null
+          ? 'finding the build target'
+          : target.artifact?.state === 'building'
+            ? `a build is already running for this document (job ${target.artifact.jobId})`
+            : 'build the temporary draft (Ctrl+B)')
     },
     run: {
       enabled:
@@ -352,9 +361,11 @@
             targetError ??
             (target === null
               ? 'checking whether the current draft is built'
-              : target.artifact?.state === 'needs_build'
-                ? target.artifact.reason
-                : 'run the built example (Ctrl+R)')
+              : target.artifact?.state === 'building'
+                ? `a build is already running for this document (job ${target.artifact.jobId})`
+                : target.artifact?.state === 'needs_build'
+                  ? target.artifact.reason
+                  : 'run the built example (Ctrl+R)')
     }
   });
 
@@ -455,8 +466,11 @@
       }
       output = [...output, `— ${kind} finished (exit ${payload.code ?? 'signal'})`];
     });
+    const artifactChanges = onArtifactStatusChange((path) => {
+      if (path === doc.path) targetRefresh += 1;
+    });
     return () => {
-      void Promise.all([streams, ends]).then((pending) => {
+      void Promise.all([streams, ends, artifactChanges]).then((pending) => {
         for (const unlisten of pending.flat()) unlisten();
       });
     };

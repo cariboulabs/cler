@@ -8,6 +8,7 @@ import type { Command, DocumentState } from './schema';
 export type Invoker = (command: string, args: Record<string, unknown>) => Promise<unknown>;
 
 const EXTERNAL_CHANGE_EVENT = 'document-changed-externally';
+const ARTIFACT_STATUS_EVENT = 'artifact-status-changed';
 
 let invoker: Invoker = (command, args) => invoke(command, args);
 
@@ -102,6 +103,10 @@ export function onExternalChange(handler: (path: string) => void): Promise<Unlis
   return listen<{ path: string }>(EXTERNAL_CHANGE_EVENT, (event) => handler(event.payload.path));
 }
 
+export function onArtifactStatusChange(handler: (path: string) => void): Promise<UnlistenFn> {
+  return listen<{ path: string }>(ARTIFACT_STATUS_EVENT, (event) => handler(event.payload.path));
+}
+
 export function loadFixture(name: string): DocumentState {
   const model = fixtures[name];
   const source = fixtureSources[name];
@@ -138,6 +143,7 @@ export type TaskEnd = TaskStarted & { path: string; code: number | null };
 export type ArtifactStatus =
   | { state: 'unavailable'; reason: string }
   | { state: 'needs_build'; reason: string }
+  | { state: 'building'; jobId: number }
   | { state: 'ready'; artifactPath: string };
 
 export type TargetInfo = {

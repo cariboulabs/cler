@@ -368,6 +368,17 @@ function installFake(setup: Setup) {
         inputKey: { inputs: { draft: String(state.revision) }, recipeSha256: 'fake' }
       };
       jobs.set(kind, started);
+      if (command === 'build_target' && target?.available) {
+        target.artifact = { state: 'building', jobId: started.jobId };
+        for (const entry of listeners) {
+          if (entry.event !== 'artifact-status-changed') continue;
+          callbacks.get(entry.handler)?.({
+            event: entry.event,
+            id: entry.handler,
+            payload: { path: state.path }
+          });
+        }
+      }
       return started;
     }
     if (command === 'apply_commands') {

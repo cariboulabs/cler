@@ -4,6 +4,7 @@ use std::hash::{BuildHasher, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, SystemTime};
 
 use cler_graph::{
     extract_specs, palette_specs, BlockSpec, Command, DocumentSession, FileModel, Splice,
@@ -22,6 +23,8 @@ const REPOSITORY_MARKER: &str = "include/cler.hpp";
 const DIFF_CONTEXT: usize = 3;
 const CACHE_FORMAT: &str = "cler-flowgraph-cache";
 const CACHE_VERSION: u32 = 1;
+const SNAPSHOT_LIMIT: usize = 16;
+const SNAPSHOT_MIN_AGE: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Clone, Debug)]
 pub struct DraftState {
@@ -409,6 +412,7 @@ pub fn snapshot_draft(docs: &Documents, path: &str) -> Result<DraftState, String
         std::fs::rename(&staged, &snapshot)
             .map_err(|cause| format!("cannot replace {}: {cause}", snapshot.display()))?;
     }
+    prune_snapshots(&snapshots, &snapshot);
     Ok(DraftState {
         path: snapshot,
         workspace: snapshots
@@ -429,6 +433,7 @@ pub fn record_artifact(
     let mut map = lock(docs);
     let (_, doc) = document(&mut map, path)?;
     let mut catalog = ArtifactCatalog::read(&doc.cache.build);
+    catalog.prune_missing();
     catalog.put(name, record)?;
     doc.cache.build = serde_json::to_value(catalog).map_err(|cause| cause.to_string())?;
     write_cache(&doc.cache_path, &doc.cache)
@@ -506,6 +511,10 @@ fn fresh(target: &Path, spelling: &str) -> Result<Document, String> {
     }
     cache.document.source_path = target.display().to_string();
     cache.document.saved_sha256 = digest(&saved);
+    let mut artifacts = ArtifactCatalog::read(&cache.build);
+    if artifacts.prune_missing() {
+        cache.build = serde_json::to_value(artifacts).map_err(|cause| cause.to_string())?;
+    }
     write_cache(&cache_path, &cache)?;
     Ok(Document {
         session,
@@ -697,6 +706,46 @@ fn private_dir(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn prune_snapshots(dir: &Path, current: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let snapshots: Vec<(SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = path.file_name()?.to_str()?;
+            let digest = name.split('.').next()?;
+            if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return None;
+            }
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((modified, path))
+        })
+        .collect();
+    let now = SystemTime::now();
+    for path in expired_snapshots(snapshots, current, now) {
+        std::fs::remove_file(path).ok();
+    }
+}
+
+fn expired_snapshots(
+    mut snapshots: Vec<(SystemTime, PathBuf)>,
+    current: &Path,
+    now: SystemTime,
+) -> Vec<PathBuf> {
+    snapshots.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    snapshots
+        .into_iter()
+        .skip(SNAPSHOT_LIMIT)
+        .filter(|(modified, path)| {
+            path != current
+                && now.duration_since(*modified).unwrap_or_default() >= SNAPSHOT_MIN_AGE
+        })
+        .map(|(_, path)| path)
+        .collect()
+}
+
 #[cfg(unix)]
 fn user_scope() -> u32 {
     unsafe { libc::geteuid() }
@@ -779,3 +828,26 @@ fn inherit_owner(original: &std::fs::Metadata, temp: &std::fs::File) {
 
 #[cfg(not(unix))]
 fn inherit_owner(_original: &std::fs::Metadata, _temp: &std::fs::File) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_cleanup_keeps_recent_and_current_inputs() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10_000);
+        let old = now - SNAPSHOT_MIN_AGE - Duration::from_secs(1);
+        let recent = now - Duration::from_secs(1);
+        let current = PathBuf::from("17.cpp");
+        let mut snapshots = (0..SNAPSHOT_LIMIT)
+            .map(|index| (recent, PathBuf::from(format!("{index}.cpp"))))
+            .collect::<Vec<_>>();
+        snapshots.push((old, current.clone()));
+        snapshots.push((old, PathBuf::from("18.cpp")));
+        snapshots.push((recent, PathBuf::from("19.cpp")));
+
+        let removed = expired_snapshots(snapshots, &current, now);
+
+        assert_eq!(removed, vec![PathBuf::from("18.cpp")]);
+    }
+}

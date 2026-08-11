@@ -209,6 +209,10 @@ describe('build and run follow what find_target reports', () => {
 
       await page.keyboard.press('Control+b');
       await expect.poll(() => ran(page, 'build_target')).toBe(1);
+      await expect
+        .poll(() => page.textContent('[data-testid="run-tooltip"]'))
+        .toContain('build is already running');
+      expect(await page.locator('[data-testid="build"]').isDisabled()).toBe(true);
       await emit(page, 'build-output', { path: FAKE_PATH, line: '[100%] Built target hello_world' });
       await emit(page, 'build-finished', { path: FAKE_PATH, code: 0 });
       await page.waitForSelector('[data-testid="output-body"]');

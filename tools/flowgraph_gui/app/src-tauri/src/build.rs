@@ -17,6 +17,8 @@ use crate::provenance::{ArtifactRecord, ArtifactStatus, InputKey};
 
 pub type Emit = Arc<dyn Fn(&str, Value) + Send + Sync>;
 pub type RecordArtifact = Arc<dyn Fn(String, ArtifactRecord) -> Result<(), String> + Send + Sync>;
+pub type FinalizeArtifact =
+    Arc<dyn Fn(ArtifactRecord) -> Result<ArtifactRecord, String> + Send + Sync>;
 
 struct Running {
     id: u64,
@@ -31,13 +33,22 @@ struct JobBook {
 #[derive(Default, Clone)]
 pub struct Jobs(Arc<Mutex<JobBook>>);
 
-type Completion = (String, ArtifactRecord, RecordArtifact);
+struct Completion {
+    name: String,
+    artifact: ArtifactRecord,
+    finalize: FinalizeArtifact,
+    record: RecordArtifact,
+}
 
 const MARKER: &str = "include/cler.hpp";
 const EXAMPLES: &str = "desktop_examples";
 const STANDARD: &str = "-std=c++17";
 const GRACE: Duration = Duration::from_secs(3);
 const PRODUCER: &str = "cmake";
+const DRAFT_INPUT: &str = "draft";
+const CMAKE_INPUT: &str = "cmake";
+const REPO_DEPENDENCY: &str = "dependency:repo:";
+const EXTERNAL_DEPENDENCY: &str = "dependency:absolute:";
 static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, Serialize)]
@@ -138,7 +149,7 @@ pub fn find_target(path: &str) -> Result<Target, String> {
     })
 }
 
-pub fn find_draft_target(path: &str, draft: &DraftState) -> Result<Target, String> {
+pub fn find_draft_target(jobs: &Jobs, path: &str, draft: &DraftState) -> Result<Target, String> {
     let target = canonical(path)?;
     let mut found = find_target(path)?;
     if !found.available {
@@ -149,9 +160,13 @@ pub fn find_draft_target(path: &str, draft: &DraftState) -> Result<Target, Strin
     let input_key = build_input(&target, &found, &draft.sha256)?;
     let reason = "build the current draft before running".to_string();
     found.binary = Some(binary.display().to_string());
+    if let Some(job_id) = running_job(jobs, "build", &target) {
+        found.artifact = ArtifactStatus::Building { job_id };
+        return Ok(found);
+    }
     found.artifact = match draft.artifacts.get(&name) {
         Some(record)
-            if record.input_key == input_key
+            if input_matches(&target, &input_key, &record.input_key)
                 && record.artifact_path == binary.display().to_string() =>
         {
             if binary.is_file() {
@@ -171,6 +186,8 @@ pub fn find_draft_target(path: &str, draft: &DraftState) -> Result<Target, Strin
 }
 
 pub fn build(jobs: &Jobs, path: &str, emit: Emit) -> Result<Started, String> {
+    let target = canonical(path)?;
+    refuse_parallel_build(jobs, &target)?;
     let found = find_target(path)?;
     let dir = usable(&found)?;
     let mut command = Command::new("cmake");
@@ -183,7 +200,7 @@ pub fn build(jobs: &Jobs, path: &str, emit: Emit) -> Result<Started, String> {
     spawn(
         jobs,
         "build",
-        &canonical(path)?,
+        &target,
         command,
         emit,
         input_key,
@@ -199,6 +216,7 @@ pub fn build_draft(
     emit: Emit,
 ) -> Result<Started, String> {
     let target = canonical(path)?;
+    refuse_parallel_build(jobs, &target)?;
     let found = find_target(path)?;
     usable(&found)?;
     let (source_dir, build_dir, binary) = draft_tree(&target, &draft.workspace)?;
@@ -208,6 +226,7 @@ pub fn build_draft(
     command.arg("-P").arg(script);
     let name = artifact_name(&target, &found)?;
     let input_key = build_input(&target, &found, &draft.sha256)?;
+    let started = SystemTime::now();
     let completed = ArtifactRecord {
         input_key: input_key.clone(),
         producer: PRODUCER.to_string(),
@@ -215,6 +234,18 @@ pub fn build_draft(
         completed_unix_ms: 0,
         extra: Default::default(),
     };
+    let dependency_target = target.clone();
+    let dependency_source = source_dir.clone();
+    let dependency_build = build_dir.clone();
+    let finalize: FinalizeArtifact = Arc::new(move |artifact| {
+        finalize_build_artifact(
+            artifact,
+            &dependency_target,
+            &dependency_source,
+            &dependency_build,
+            started,
+        )
+    });
     spawn(
         jobs,
         "build",
@@ -222,7 +253,12 @@ pub fn build_draft(
         command,
         emit,
         input_key,
-        Some((name, completed, record)),
+        Some(Completion {
+            name,
+            artifact: completed,
+            finalize,
+            record,
+        }),
     )
 }
 
@@ -259,12 +295,15 @@ pub fn start_draft(
     emit: Emit,
 ) -> Result<Started, String> {
     let target = canonical(path)?;
-    let found = find_draft_target(path, draft)?;
+    let found = find_draft_target(jobs, path, draft)?;
     usable(&found)?;
     let ArtifactStatus::Ready { artifact_path } = &found.artifact else {
         let reason = match found.artifact {
             ArtifactStatus::Unavailable { ref reason }
             | ArtifactStatus::NeedsBuild { ref reason } => reason.clone(),
+            ArtifactStatus::Building { .. } => {
+                "a build is already running for this document".to_string()
+            }
             ArtifactStatus::Ready { .. } => unreachable!(),
         };
         return Err(reason);
@@ -341,18 +380,285 @@ fn build_input(target: &Path, found: &Target, draft_sha256: &str) -> Result<Inpu
         "arch": std::env::consts::ARCH,
     });
     let mut inputs = BTreeMap::new();
-    inputs.insert("draft".to_string(), draft_sha256.to_string());
+    inputs.insert(DRAFT_INPUT.to_string(), draft_sha256.to_string());
+    inputs.insert(CMAKE_INPUT.to_string(), project_config_digest(&root)?);
     Ok(InputKey {
         inputs,
         recipe_sha256: hash_text(&recipe.to_string()),
     })
 }
 
+fn input_matches(target: &Path, current: &InputKey, recorded: &InputKey) -> bool {
+    if current.recipe_sha256 != recorded.recipe_sha256
+        || current
+            .inputs
+            .iter()
+            .any(|(name, expected)| recorded.inputs.get(name) != Some(expected))
+    {
+        return false;
+    }
+    recorded.inputs.iter().all(|(name, expected)| {
+        let actual = match name.as_str() {
+            DRAFT_INPUT | CMAKE_INPUT => current.inputs.get(name).cloned(),
+            _ => dependency_path(target, name)
+                .and_then(|path| std::fs::read(path).ok())
+                .map(|bytes| hash_bytes(&bytes)),
+        };
+        actual.as_deref() == Some(expected)
+    })
+}
+
+fn dependency_path(target: &Path, name: &str) -> Option<PathBuf> {
+    if let Some(relative) = name.strip_prefix(REPO_DEPENDENCY) {
+        return repo_root(target).map(|root| root.join(relative));
+    }
+    name.strip_prefix(EXTERNAL_DEPENDENCY).map(PathBuf::from)
+}
+
+fn project_config_digest(root: &Path) -> Result<String, String> {
+    let mut files = Vec::new();
+    collect_project_configs(root, root, &mut files)?;
+    files.sort();
+    let mut digest = Sha256::new();
+    for file in files {
+        let relative = file.strip_prefix(root).unwrap_or(&file);
+        let bytes = std::fs::read(&file)
+            .map_err(|cause| format!("cannot read {}: {cause}", file.display()))?;
+        digest.update(relative.as_os_str().as_encoded_bytes());
+        digest.update([0]);
+        digest.update(&bytes);
+        digest.update([0]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn collect_project_configs(
+    root: &Path,
+    dir: &Path,
+    found: &mut Vec<PathBuf>,
+) -> Result<(), String> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|cause| format!("cannot read {}: {cause}", dir.display()))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|cause| format!("cannot inspect {}: {cause}", path.display()))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            if !skip_config_dir(root, &path) {
+                collect_project_configs(root, &path, found)?;
+            }
+            continue;
+        }
+        let name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
+        if name == "CMakeLists.txt" || path.extension() == Some(OsStr::new("cmake")) {
+            found.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn skip_config_dir(root: &Path, path: &Path) -> bool {
+    let name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
+    matches!(name, ".git" | "node_modules" | "target" | "dist" | ".cache")
+        || (path != root && path.join("CMakeCache.txt").is_file())
+}
+
+fn finalize_build_artifact(
+    mut artifact: ArtifactRecord,
+    target: &Path,
+    source_dir: &Path,
+    build_dir: &Path,
+    started: SystemTime,
+) -> Result<ArtifactRecord, String> {
+    let root = repo_root(target).ok_or_else(|| outside(target))?;
+    let expected_config = artifact
+        .input_key
+        .inputs
+        .get(CMAKE_INPUT)
+        .ok_or_else(|| "build input is missing its CMake fingerprint".to_string())?;
+    if &project_config_digest(&root)? != expected_config {
+        return Err(
+            "CMake inputs changed while the artifact was building; build again".to_string(),
+        );
+    }
+    let dependencies = dependency_inputs(target, source_dir, build_dir, started)?;
+    artifact.input_key.inputs.extend(dependencies);
+    Ok(artifact)
+}
+
+fn dependency_inputs(
+    target: &Path,
+    source_dir: &Path,
+    build_dir: &Path,
+    started: SystemTime,
+) -> Result<BTreeMap<String, String>, String> {
+    let root = repo_root(target).ok_or_else(|| outside(target))?;
+    let relative_target = target.strip_prefix(&root).map_err(|_| outside(target))?;
+    let mut depfiles = Vec::new();
+    collect_depfiles(build_dir, &mut depfiles)?;
+    if depfiles.is_empty() {
+        return Err("the build produced no compiler dependency files; artifact freshness cannot be verified".to_string());
+    }
+    let mut inputs = BTreeMap::new();
+    for depfile in depfiles {
+        let text = std::fs::read_to_string(&depfile)
+            .map_err(|cause| format!("cannot read {}: {cause}", depfile.display()))?;
+        for dependency in depfile_dependencies(&text) {
+            let Some(path) = locate_dependency(&dependency, &depfile, source_dir, build_dir, &root)
+            else {
+                continue;
+            };
+            let Some((name, actual)) = dependency_name(&path, source_dir, build_dir, &root) else {
+                continue;
+            };
+            if name == format!("{REPO_DEPENDENCY}{}", relative_target.display()) {
+                continue;
+            }
+            if !path.starts_with(build_dir)
+                && std::fs::metadata(&actual)
+                    .and_then(|metadata| metadata.modified())
+                    .is_ok_and(|modified| modified > started)
+            {
+                return Err(format!(
+                    "{} changed while the artifact was building; build again",
+                    actual.display()
+                ));
+            }
+            let bytes = std::fs::read(&actual)
+                .map_err(|cause| format!("cannot read {}: {cause}", actual.display()))?;
+            inputs.insert(name, hash_bytes(&bytes));
+        }
+    }
+    Ok(inputs)
+}
+
+fn collect_depfiles(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|cause| format!("cannot read {}: {cause}", dir.display()))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|cause| format!("cannot inspect {}: {cause}", path.display()))?;
+        if file_type.is_dir() {
+            collect_depfiles(&path, found)?;
+        } else if file_type.is_file() && path.extension() == Some(OsStr::new("d")) {
+            found.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn depfile_dependencies(text: &str) -> Vec<String> {
+    let flattened = text.replace("\\\r\n", " ").replace("\\\n", " ");
+    let Some(split) = unescaped_colon(&flattened) else {
+        return Vec::new();
+    };
+    make_words(&flattened[split + 1..])
+}
+
+fn unescaped_colon(text: &str) -> Option<usize> {
+    let mut escaped = false;
+    for (index, byte) in text.bytes().enumerate() {
+        if byte == b':' && !escaped {
+            return Some(index);
+        }
+        escaped = byte == b'\\' && !escaped;
+        if byte != b'\\' {
+            escaped = false;
+        }
+    }
+    None
+}
+
+fn make_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut escaped = false;
+    for character in text.chars() {
+        if escaped {
+            word.push(character);
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character.is_whitespace() {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+        } else {
+            word.push(character);
+        }
+    }
+    if escaped {
+        word.push('\\');
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
+fn locate_dependency(
+    dependency: &str,
+    depfile: &Path,
+    source_dir: &Path,
+    build_dir: &Path,
+    root: &Path,
+) -> Option<PathBuf> {
+    let path = PathBuf::from(dependency);
+    if path.is_absolute() && path.exists() {
+        return Some(path);
+    }
+    let parent = depfile.parent().unwrap_or(build_dir);
+    [
+        parent.join(&path),
+        build_dir.join(&path),
+        source_dir.join(&path),
+        root.join(&path),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.exists())
+}
+
+fn dependency_name(
+    path: &Path,
+    source_dir: &Path,
+    build_dir: &Path,
+    root: &Path,
+) -> Option<(String, PathBuf)> {
+    if let Ok(relative) = path.strip_prefix(source_dir) {
+        let actual = root.join(relative);
+        return Some((
+            format!("{REPO_DEPENDENCY}{}", relative.display()),
+            actual,
+        ));
+    }
+    let actual = path.canonicalize().ok()?;
+    if let Ok(relative) = actual.strip_prefix(root) {
+        return Some((
+            format!("{REPO_DEPENDENCY}{}", relative.display()),
+            actual,
+        ));
+    }
+    if actual.starts_with(build_dir) || actual.components().any(|part| part.as_os_str() == "_deps")
+    {
+        return Some((
+            format!("{EXTERNAL_DEPENDENCY}{}", actual.display()),
+            actual,
+        ));
+    }
+    None
+}
+
 fn check_input(draft: &Path) -> Result<InputKey, String> {
     let bytes = std::fs::read(draft)
         .map_err(|cause| format!("cannot read {}: {cause}", draft.display()))?;
     let mut inputs = BTreeMap::new();
-    inputs.insert("draft".to_string(), hash_bytes(&bytes));
+    inputs.insert(DRAFT_INPUT.to_string(), hash_bytes(&bytes));
     Ok(InputKey {
         inputs,
         recipe_sha256: hash_text(&format!(
@@ -606,6 +912,27 @@ fn held(jobs: &Jobs) -> MutexGuard<'_, JobBook> {
     jobs.0.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+fn running_job(jobs: &Jobs, kind: &str, target: &Path) -> Option<u64> {
+    held(jobs)
+        .running
+        .get(&key(kind, target))
+        .map(|running| running.id)
+}
+
+fn refuse_parallel_build(jobs: &Jobs, target: &Path) -> Result<(), String> {
+    let existing = held(jobs)
+        .running
+        .get(&key("build", target))
+        .map(|running| running.id);
+    match existing {
+        Some(id) => Err(format!(
+            "build job {id} is already running for {}",
+            target.display()
+        )),
+        None => Ok(()),
+    }
+}
+
 fn discard(jobs: &Jobs, key: &str) {
     let taken = held(jobs).running.remove(key);
     if let Some(mut running) = taken {
@@ -693,11 +1020,37 @@ fn spawn_mapped(
     let key = key(kind, target);
     let path = target.display().to_string();
     let event = format!("{kind}-output");
+    let is_build = kind == "build";
 
-    discard(jobs, &key);
-    held(jobs)
-        .running
-        .insert(key.clone(), Running { id: job_id, child });
+    if is_build {
+        let mut book = held(jobs);
+        if let Some(existing) = book.running.get(&key) {
+            let existing_id = existing.id;
+            drop(book);
+            child.kill().ok();
+            child.wait().ok();
+            return Err(format!("build job {existing_id} is already running for {path}"));
+        }
+        book.running.insert(
+            key.clone(),
+            Running {
+                id: job_id,
+                child,
+            },
+        );
+    } else {
+        discard(jobs, &key);
+        held(jobs).running.insert(
+            key.clone(),
+            Running {
+                id: job_id,
+                child,
+            },
+        );
+    }
+    if is_build {
+        emit("artifact-status-changed", json!({ "path": path }));
+    }
 
     let pumps = vec![
         out.map(|pipe| {
@@ -745,9 +1098,12 @@ fn spawn_mapped(
             .and_then(|mut running| running.child.wait().ok())
             .and_then(|status| status.code());
         if code == Some(0) {
-            if let Some((name, mut artifact, record)) = completion {
+            if let Some(completion) = completion {
+                let mut artifact = completion.artifact;
                 artifact.completed_unix_ms = completed_unix_ms();
-                if let Err(cause) = record(name, artifact) {
+                let recorded = (completion.finalize)(artifact)
+                    .and_then(|artifact| (completion.record)(completion.name, artifact));
+                if let Err(cause) = recorded {
                     emit(
                         &event,
                         json!({
@@ -760,6 +1116,9 @@ fn spawn_mapped(
                     code = Some(1);
                 }
             }
+        }
+        if is_build {
+            emit("artifact-status-changed", json!({ "path": path }));
         }
         emit(
             &finished,

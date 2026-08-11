@@ -264,8 +264,12 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
     );
     write(
         &root.join("desktop_examples/CMakeLists.txt"),
-        "add_executable(hello_world hello_world.cpp)\n",
+        "add_executable(hello_world hello_world.cpp)\n\
+         target_include_directories(hello_world PRIVATE ${CMAKE_SOURCE_DIR}/include)\n\
+         add_custom_command(TARGET hello_world PRE_BUILD COMMAND ${CMAKE_COMMAND} -E sleep 1)\n",
     );
+    let header = root.join("include/config.hpp");
+    write(&header, "#define EXIT_CODE 7\n");
     let source = root.join("desktop_examples/hello_world.cpp");
     write(&source, "int main() { return 0; }\n");
     let configured = std::process::Command::new("cmake")
@@ -276,13 +280,14 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
 
     let workspace = temp_dir("draft-workspace");
     let draft = workspace.join("hello_world.cpp");
-    write(&draft, "int main() { return 7; }\n");
+    let draft_source = "#include \"config.hpp\"\nint main() { return EXIT_CODE; }\n";
+    write(&draft, draft_source);
     let state = draft_state(&draft, ArtifactCatalog::default());
     let recorded: Arc<Mutex<Option<(String, ArtifactRecord)>>> = Arc::new(Mutex::new(None));
     let captured = recorded.clone();
     let jobs = Jobs::default();
     let (seen, emit) = recorder();
-    build::build_draft(
+    let started = build::build_draft(
         &jobs,
         as_str(&source),
         &state,
@@ -293,7 +298,46 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
         emit,
     )
     .expect("draft build starts");
+    assert!(matches!(
+        build::find_draft_target(&jobs, as_str(&source), &state)
+            .expect("building target")
+            .artifact,
+        ArtifactStatus::Building { .. }
+    ));
+    let changed_draft = workspace.join("changed.cpp");
+    write(&changed_draft, "int main() { return 9; }\n");
+    assert!(matches!(
+        build::find_draft_target(
+            &jobs,
+            as_str(&source),
+            &draft_state(&changed_draft, ArtifactCatalog::default()),
+        )
+        .expect("changed draft while building")
+        .artifact,
+        ArtifactStatus::Building { .. }
+    ));
+    let (_, duplicate_emit) = recorder();
+    let refusal = build::build_draft(
+        &jobs,
+        as_str(&source),
+        &state,
+        Arc::new(|_, _| Ok(())),
+        duplicate_emit,
+    )
+    .expect_err("a second window cannot replace the active build");
+    assert!(
+        refusal.contains(&format!("build job {}", started.job_id)),
+        "{refusal}"
+    );
     assert_eq!(await_event(&seen, "build-finished")["code"], 0);
+    assert_eq!(
+        seen.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(event, _)| event == "artifact-status-changed")
+            .count(),
+        2
+    );
     assert_eq!(
         std::fs::read_to_string(&source).expect("source"),
         "int main() { return 0; }\n"
@@ -304,12 +348,55 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
         .unwrap_or_else(PoisonError::into_inner)
         .clone()
         .expect("artifact record");
+    assert!(
+        artifact
+            .input_key
+            .inputs
+            .contains_key("dependency:repo:include/config.hpp"),
+        "compiler dependencies are recorded"
+    );
+    let mut legacy = artifact.clone();
+    legacy.input_key.inputs.remove("cmake");
+    let mut legacy_artifacts = ArtifactCatalog::default();
+    legacy_artifacts
+        .put(name.clone(), legacy)
+        .expect("legacy catalog accepts artifact");
+    assert!(matches!(
+        build::find_draft_target(
+            &jobs,
+            as_str(&source),
+            &draft_state(&draft, legacy_artifacts),
+        )
+        .expect("legacy artifact")
+        .artifact,
+        ArtifactStatus::NeedsBuild { .. }
+    ));
     let mut artifacts = ArtifactCatalog::default();
     artifacts.put(name, artifact).expect("catalog accepts artifact");
     let ready = draft_state(&draft, artifacts);
     let (run_seen, run_emit) = recorder();
     build::start_draft(&jobs, as_str(&source), &ready, run_emit).expect("draft run starts");
     assert_eq!(await_event(&run_seen, "run-finished")["code"], 7);
+
+    write(&header, "#define EXIT_CODE 8\n");
+    assert!(matches!(
+        build::find_draft_target(&jobs, as_str(&source), &ready)
+            .expect("changed dependency")
+            .artifact,
+        ArtifactStatus::NeedsBuild { .. }
+    ));
+    write(&header, "#define EXIT_CODE 7\n");
+
+    let cmake_lists = root.join("desktop_examples/CMakeLists.txt");
+    let cmake_source = std::fs::read_to_string(&cmake_lists).expect("CMake source");
+    write(&cmake_lists, &format!("{cmake_source}# changed\n"));
+    assert!(matches!(
+        build::find_draft_target(&jobs, as_str(&source), &ready)
+            .expect("changed CMake input")
+            .artifact,
+        ArtifactStatus::NeedsBuild { .. }
+    ));
+    write(&cmake_lists, &cmake_source);
 
     write(&draft, "int main() { return 9; }\n");
     let stale = draft_state(&draft, ready.artifacts.clone());
@@ -318,10 +405,10 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
         .expect_err("a stale draft cannot run");
     assert!(refusal.contains("build the current draft"), "{refusal}");
 
-    write(&draft, "int main() { return 7; }\n");
+    write(&draft, draft_source);
     let restored = draft_state(&draft, ready.artifacts.clone());
     assert!(matches!(
-        build::find_draft_target(as_str(&source), &restored)
+        build::find_draft_target(&jobs, as_str(&source), &restored)
             .expect("restored target")
             .artifact,
         ArtifactStatus::Ready { .. }
@@ -334,17 +421,18 @@ fn a_draft_build_and_run_leave_the_repository_source_untouched() {
         &format!("CMAKE_BUILD_TYPE:STRING=Changed\n{configured}"),
     );
     assert!(matches!(
-        build::find_draft_target(as_str(&source), &restored)
+        build::find_draft_target(&jobs, as_str(&source), &restored)
             .expect("changed recipe")
             .artifact,
         ArtifactStatus::NeedsBuild { .. }
     ));
     write(&cache, &configured);
 
-    let found = build::find_draft_target(as_str(&source), &restored).expect("ready target");
+    let found =
+        build::find_draft_target(&jobs, as_str(&source), &restored).expect("ready target");
     std::fs::remove_file(found.binary.expect("binary")).expect("remove artifact");
     assert!(matches!(
-        build::find_draft_target(as_str(&source), &restored)
+        build::find_draft_target(&jobs, as_str(&source), &restored)
             .expect("missing target")
             .artifact,
         ArtifactStatus::NeedsBuild { .. }

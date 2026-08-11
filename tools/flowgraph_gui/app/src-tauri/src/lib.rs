@@ -143,9 +143,13 @@ fn check_document(
 }
 
 #[tauri::command]
-fn find_target(path: String, docs: State<'_, Documents>) -> Result<Target, String> {
+fn find_target(
+    path: String,
+    docs: State<'_, Documents>,
+    jobs: State<'_, Jobs>,
+) -> Result<Target, String> {
     let draft = document::draft_state(&docs, &path)?;
-    build::find_draft_target(&path, &draft)
+    build::find_draft_target(jobs.inner(), &path, &draft)
 }
 
 #[tauri::command]

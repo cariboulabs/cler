@@ -121,19 +121,23 @@ fn artifact_provenance_survives_reopen_and_preserves_future_cache_fields() {
     let p = as_str(&path);
     document::open(&docs, p).expect("open");
     let draft = document::snapshot_draft(&docs, p).expect("snapshot");
-    document::record_artifact(
-        &docs,
-        p,
-        "cmake:first".to_string(),
-        artifact(&draft.sha256, "/tmp/first"),
-    )
-    .expect("record first artifact");
-
     let workspace = draft
         .path
         .parent()
         .and_then(Path::parent)
         .expect("workspace");
+    let first = workspace.join("first-artifact");
+    let second = workspace.join("second-artifact");
+    std::fs::write(&first, "first").expect("first artifact");
+    std::fs::write(&second, "second").expect("second artifact");
+    document::record_artifact(
+        &docs,
+        p,
+        "cmake:first".to_string(),
+        artifact(&draft.sha256, as_str(&first)),
+    )
+    .expect("record first artifact");
+
     let cache = workspace.join("hello_world.cfgc");
     document::close(&docs, p);
     let mut cached: Value = serde_json::from_str(&text(&cache)).expect("cache json");
@@ -149,7 +153,7 @@ fn artifact_provenance_survives_reopen_and_preserves_future_cache_fields() {
         &docs,
         p,
         "codegen:second".to_string(),
-        artifact(&draft.sha256, "/tmp/second"),
+        artifact(&draft.sha256, as_str(&second)),
     )
     .expect("record second artifact");
 

@@ -23,7 +23,11 @@ private temporary directory beside the draft source and shadow build.
     "artifacts": {
       "cmake:desktop_examples/hello_world.cpp:hello_world": {
         "inputKey": {
-          "inputs": { "draft": "..." },
+          "inputs": {
+            "draft": "...",
+            "cmake": "...",
+            "dependency:repo:include/cler.hpp": "..."
+          },
           "recipeSha256": "..."
         },
         "producer": "cmake",
@@ -45,12 +49,16 @@ producer records the inputs and recipe that created an artifact. Input names are
 additive so future producers can include generated code, headers, toolchains, or
 other dependencies without changing the UI contract. Run is allowed only when
 the backend finds a matching record and executable; the frontend only presents
-that backend-derived state.
+that backend-derived state. CMake artifacts include compiler-discovered project
+dependencies and project CMake files. Active builds are runtime state shared by
+all windows and are not persisted.
 
 The draft is reusable only while `document.savedSha256` matches the source file.
 If it does not match, the source file becomes the new baseline while reusable UI
 state remains cached. Temporary-directory cleanup may remove the entire cache at
-any time.
+any time. The app also prunes missing artifact records and keeps a bounded recent
+snapshot set; recent snapshots receive an age grace period so cleanup cannot
+invalidate an active compiler.
 
 The JSON state is platform-neutral. Cached build artifacts are local to the
 host toolchain and are recreated as needed on Linux, macOS, or Windows through

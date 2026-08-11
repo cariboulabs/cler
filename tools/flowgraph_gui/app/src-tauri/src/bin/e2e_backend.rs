@@ -212,7 +212,7 @@ fn dispatch(
         ),
         "find_target" => outcome(
             document::draft_state(docs, &path)
-                .and_then(|draft| build::find_draft_target(&path, &draft)),
+                .and_then(|draft| build::find_draft_target(jobs, &path, &draft)),
         ),
         "build_target" => outcome(document::snapshot_draft(docs, &path).and_then(|draft| {
             build::build_draft(
