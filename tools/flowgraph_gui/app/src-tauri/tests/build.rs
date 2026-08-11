@@ -45,6 +45,7 @@ fn draft_state(path: &Path, artifacts: ArtifactCatalog) -> DraftState {
 fn repo(tag: &str) -> PathBuf {
     let root = temp_dir(tag);
     write(&root.join("include/cler.hpp"), "#pragma once\n");
+    write(&root.join("desktop_examples/CMakeLists.txt"), "\n");
     root
 }
 
@@ -149,6 +150,7 @@ fn find_target_follows_the_example_subdirectory_into_the_build_tree() {
     let root = repo("subdir");
     let source = root.join("desktop_examples/ezgmsk/mod_demod_simulation.cpp");
     write(&source, "int main() { return 0; }\n");
+    write(&root.join("desktop_examples/ezgmsk/CMakeLists.txt"), "\n");
     write(&root.join("build/CMakeCache.txt"), "configured\n");
 
     let found = build::find_target(as_str(&source)).expect("target");
@@ -547,4 +549,20 @@ fn an_old_waiter_cannot_remove_a_newer_job_for_the_same_target() {
     std::thread::sleep(Duration::from_millis(100));
     build::stop(&jobs, as_str(&source)).expect("newer job remains owned");
     await_event(&second_seen, "run-finished");
+}
+
+#[test]
+fn a_subdirectory_without_its_own_cmakelists_builds_into_the_parent_dir() {
+    let root = repo("spike-subdir");
+    let source = root.join("desktop_examples/spike/spike.cpp");
+    write(&source, "int main() { return 0; }\n");
+    write(&root.join("build/CMakeCache.txt"), "configured\n");
+
+    let found = build::find_target(as_str(&source)).expect("target");
+    assert!(found.available);
+    assert_eq!(found.name, "spike");
+    assert_eq!(
+        found.binary.as_deref(),
+        Some(as_str(&root.join("build/desktop_examples/spike")))
+    );
 }

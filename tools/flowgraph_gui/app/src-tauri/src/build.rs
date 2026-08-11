@@ -111,6 +111,14 @@ pub fn check_draft(jobs: &Jobs, path: &str, draft: &Path, emit: Emit) -> Result<
     )
 }
 
+fn cmake_target_dir<'a>(root: &Path, source_dir: &'a Path) -> &'a Path {
+    let mut dir = source_dir;
+    while !dir.as_os_str().is_empty() && !root.join(dir).join("CMakeLists.txt").is_file() {
+        dir = dir.parent().unwrap_or_else(|| Path::new(""));
+    }
+    dir
+}
+
 pub fn find_target(path: &str) -> Result<Target, String> {
     let file = canonical(path)?;
     let name = file
@@ -138,7 +146,7 @@ pub fn find_target(path: &str) -> Result<Target, String> {
             ),
         ));
     };
-    let binary = dir.join(relative).join(&name);
+    let binary = dir.join(cmake_target_dir(&root, relative)).join(&name);
     Ok(Target {
         available: true,
         reason: None,
@@ -759,8 +767,9 @@ fn draft_tree(target: &Path, workspace: &Path) -> Result<(PathBuf, PathBuf, Path
         .file_stem()
         .and_then(OsStr::to_str)
         .unwrap_or_default();
+    let source_parent = relative.parent().unwrap_or_else(|| Path::new(""));
     let binary = build_dir
-        .join(relative.parent().unwrap_or_else(|| Path::new("")))
+        .join(cmake_target_dir(&root, source_parent))
         .join(name);
     Ok((source_dir, build_dir, binary))
 }
@@ -1242,3 +1251,25 @@ fn interrupt(pid: u32) {
 
 #[cfg(not(unix))]
 fn interrupt(_pid: u32) {}
+
+#[cfg(test)]
+mod tests {
+    use super::cmake_target_dir;
+    use std::path::Path;
+
+    #[test]
+    fn a_source_in_a_subdirectory_maps_to_the_defining_cmakelists_dir() {
+        let root = std::env::temp_dir().join(format!("cler_cmake_dir_{}", std::process::id()));
+        std::fs::create_dir_all(root.join("desktop_examples/spike")).expect("layout");
+        std::fs::write(root.join("desktop_examples/CMakeLists.txt"), "").expect("marker");
+        assert_eq!(
+            cmake_target_dir(&root, Path::new("desktop_examples/spike")),
+            Path::new("desktop_examples")
+        );
+        assert_eq!(
+            cmake_target_dir(&root, Path::new("desktop_examples")),
+            Path::new("desktop_examples")
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+}
