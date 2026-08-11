@@ -1408,3 +1408,34 @@ fn a_preview_reports_the_splices_it_would_write_without_committing() {
     assert_eq!(session.source(), before, "preview committed nothing");
     assert_eq!(session.revision(), 0);
 }
+
+#[test]
+fn a_partially_read_only_site_still_edits_its_editable_blocks() {
+    let mut session = session("spike.cpp");
+    let outcome = session
+        .apply(transaction(
+            0,
+            vec![Command::SetParam {
+                site: 0,
+                block: "power".to_string(),
+                ctor_arg_index: 1,
+                new_text: "-90.0f".to_string(),
+            }],
+        ))
+        .expect("editable block in a partially read-only site applies");
+    assert_eq!(outcome.revision, 1);
+    assert!(session.source().contains("-90.0f"));
+
+    let refused = session
+        .apply(transaction(
+            1,
+            vec![Command::SetParam {
+                site: 0,
+                block: "source".to_string(),
+                ctor_arg_index: 0,
+                new_text: "\"X\"".to_string(),
+            }],
+        ))
+        .expect_err("the undeclared block refuses edits");
+    assert!(matches!(refused, ApplyError::NotEditable { .. }));
+}
