@@ -1,7 +1,6 @@
 <script lang="ts">
   import {
     Background,
-    Controls,
     MiniMap,
     SvelteFlow,
     type EdgeTypes,
@@ -9,7 +8,7 @@
   } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
   import { untrack } from 'svelte';
-  import Actions, { type Alert, type EdgeInfo } from './lib/Actions.svelte';
+  import Actions, { type Alert, type EdgeInfo, type FitPadding } from './lib/Actions.svelte';
   import AddBlock from './lib/AddBlock.svelte';
   import BlockNode from './lib/BlockNode.svelte';
   import Inspector from './lib/Inspector.svelte';
@@ -85,9 +84,13 @@
   const nodeTypes: NodeTypes = { block: BlockNode as unknown as NodeTypes[string] };
   const edgeTypes: EdgeTypes = { routed: RoutedEdge as unknown as EdgeTypes[string] };
 
-  function initialFixture(): string {
+  const requestedFixture = (() => {
     const search = new URLSearchParams(window.location.search);
-    const requested = search.get('example') ?? search.get('fixture');
+    return search.get('example') ?? search.get('fixture');
+  })();
+
+  function initialFixture(): string {
+    const requested = requestedFixture;
     return requested && fixtureNames.includes(requested) ? requested : 'hello_world';
   }
 
@@ -96,6 +99,15 @@
   const NOTE_DESKTOP = 'example mode — read-only viewer — use Open file… to edit the real file';
   const viewerNote = desktop ? NOTE_DESKTOP : NOTE_BROWSER;
   const DISK_DRIFT = 'changed on disk';
+  const NO_SITE = 'no flowgraph site found in this file';
+  const DROP_HINT = 'dropped — release on an input port to connect';
+  const RAIL_WIDTH = 44;
+  const SIDEBAR_WIDTH = 280;
+  const INSPECTOR_WIDTH = 320;
+  const MINIMAP_MIN = 12;
+  const BAR_HEIGHT = 40;
+  const INSET = 12;
+  const FIT_GAP = 4;
   const LEFT_PANEL = 'cler.panel.left';
   const RIGHT_PANEL = 'cler.panel.right';
   const BLOCKS_PANEL = 'cler.panel.blocks';
@@ -131,10 +143,13 @@
   let status = $state('');
   let viewKey = $state('');
   let leftOpen = $state(storedOpen(LEFT_PANEL, true));
-  let rightOpen = $state(storedOpen(RIGHT_PANEL, true));
+  let rightOpen = $state(storedOpen(RIGHT_PANEL, false));
   let blocksOpen = $state(storedOpen(BLOCKS_PANEL, true));
   let drawerOpen = $state(storedOpen(DRAWER_PANEL, false));
   let drawerHeight = $state(storedHeight());
+  let stashed = $state.raw<[boolean, boolean, boolean] | null>(null);
+  let dismissed = $state(requestedFixture !== null);
+  let failure = $state<string | null>(null);
   let drawer = $state<typeof CodeDrawer | null>(null);
   let inspector = $state<Inspector | null>(null);
   let adder = $state<AddBlock | null>(null);
@@ -161,6 +176,21 @@
     notes.map((note) => ({ span: note.span, reason: note.reason }))
   );
   const anchors = $derived<Span[]>(anchorSpans(doc.model.sites));
+  const siteAnchor = $derived<Span | null>(anchors[siteIndex] ?? null);
+  const emptyState = $derived.by(() => {
+    if (failure !== null) return { title: 'that file did not open', reason: failure };
+    if (doc.model.sites.length === 0) return { title: 'nothing to show yet', reason: NO_SITE };
+    return { title: 'this is a bundled example', reason: viewerNote };
+  });
+  const empty = $derived(
+    failure !== null || doc.model.sites.length === 0 || (!editable && !dismissed)
+  );
+  const fitPadding = $derived<FitPadding>({
+    top: `${BAR_HEIGHT + INSET + FIT_GAP}px`,
+    right: `${(rightOpen ? INSPECTOR_WIDTH : RAIL_WIDTH) + INSET + FIT_GAP}px`,
+    bottom: `${INSET + FIT_GAP}px`,
+    left: `${(leftOpen ? SIDEBAR_WIDTH : RAIL_WIDTH) + INSET + FIT_GAP}px`
+  });
   const shownSpecs = $derived(editable ? specs : specsFromSites(doc.model.sites, doc.path));
   const problems = $derived<Problem[]>(problemsOf(site));
   const declared = $derived(site ? site.blocks.map((block) => block.var) : []);
@@ -199,7 +229,7 @@
       viewKey = '';
       return;
     }
-    const fresh = projectSite(current, specs, editable);
+    const fresh = projectSite(current, specs, editable, selected);
     if (untrack(() => viewKey) === key) {
       const merged = mergeProjection(untrack(() => ({ nodes, edges })), fresh, pinned);
       nodes = merged.nodes;
@@ -255,7 +285,7 @@
     }
     clampContext();
     inspector?.discardDrafts();
-    status = next.model.sites.length === 0 ? 'no flowgraph site found in this file' : '';
+    status = '';
   }
 
   function reset(next: DocumentState) {
@@ -265,7 +295,31 @@
   function announce(message: string) {
     status = message;
     alerted += 1;
-    alert = { text: message, at: alerted };
+    alert = { text: message, at: alerted, tone: 'error' };
+  }
+
+  function hint(message: string) {
+    alerted += 1;
+    alert = { text: message, at: alerted, tone: 'note' };
+  }
+
+  function toggleChrome() {
+    const previous = stashed;
+    if (previous) {
+      leftOpen = previous[0];
+      rightOpen = previous[1];
+      drawerOpen = previous[2];
+      stashed = null;
+      return;
+    }
+    if (!leftOpen && !rightOpen && !drawerOpen) {
+      leftOpen = true;
+      return;
+    }
+    stashed = [leftOpen, rightOpen, drawerOpen];
+    leftOpen = false;
+    rightOpen = false;
+    drawerOpen = false;
   }
 
   async function attempt(
@@ -358,16 +412,21 @@
       const previous = opened;
       const next = await openDocument(path);
       opened = path;
+      failure = null;
+      dismissed = true;
       if (previous && previous !== path) void closeDocument(previous).catch(() => undefined);
       reset(next);
     } catch (error) {
-      announce(describeApplyError(error));
+      failure = describeApplyError(error);
+      announce(failure);
     }
   }
 
   function openFixture() {
     const previous = opened;
     opened = null;
+    failure = null;
+    dismissed = true;
     if (previous) void closeDocument(previous).catch(() => undefined);
     reset(loadFixture(fixtureName));
   }
@@ -559,6 +618,10 @@
     }
   }
 
+  function readable(text: string): string {
+    return text.replace(/_/g, ' ');
+  }
+
   function pickInCode(offset: number) {
     const target = targetAt(doc.model.sites, offset);
     if (!target) return;
@@ -568,7 +631,12 @@
 
 </script>
 
-<div class="shell">
+<div
+  class="shell"
+  style="--rail-left: {leftOpen ? SIDEBAR_WIDTH : RAIL_WIDTH}px; --rail-right: {rightOpen
+    ? INSPECTOR_WIDTH
+    : RAIL_WIDTH}px"
+>
   <aside class="sidebar" class:collapsed={!leftOpen}>
     <div class="head">
       <h1>Document</h1>
@@ -587,7 +655,7 @@
 
       <section>
         <h2>File</h2>
-        <div class="path" title={doc.path}>{doc.path}</div>
+        <div class="path" title={doc.path}>{doc.path.split('/').pop() ?? doc.path}</div>
         <dl>
           <dt>sites</dt>
           <dd>{doc.model.sites.length}</dd>
@@ -613,7 +681,6 @@
         specs={shownSpecs}
         documentPath={doc.path}
         enabled={editable}
-        notice={viewerNote}
         open={blocksOpen}
         ontoggle={() => (blocksOpen = !blocksOpen)}
         onpick={(spec) => adder?.openAt(window.innerWidth / 2, window.innerHeight / 2, spec)}
@@ -637,29 +704,35 @@
         </section>
       {/if}
 
-      <section>
-        <h2>Read-only ({notes.length})</h2>
-        {#if notes.length === 0}
-          <p class="muted">everything in this site is editable</p>
-        {:else}
-          <ul class="notes">
-            {#each notes as note (note.element + note.reason)}
-              <li>
-                <span class="el">{note.element}</span><span class="reason">{note.reason}</span>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
+      {#if site}
+        <section>
+          <h2>Read-only ({notes.length})</h2>
+          {#if notes.length === 0}
+            <p class="muted">everything in this site is editable</p>
+          {:else}
+            <ul class="notes">
+              {#each notes as note (note.element + note.reason)}
+                <li>
+                  <span class="el">{note.element}</span><span class="reason"
+                    >{readable(note.reason)}</span
+                  >
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </section>
+      {/if}
 
-      <section class="spacer">
-        <h2 data-testid="examples-head">{desktop ? 'Examples (viewer)' : 'Example'}</h2>
-        <select data-testid="example-select" bind:value={fixtureName} onchange={openFixture}>
-          {#each fixtureNames as name (name)}
-            <option value={name}>{name}</option>
-          {/each}
-        </select>
-      </section>
+      {#if !opened}
+        <section>
+          <h2 data-testid="examples-head">{desktop ? 'Examples (viewer)' : 'Example'}</h2>
+          <select data-testid="example-select" bind:value={fixtureName} onchange={openFixture}>
+            {#each fixtureNames as name (name)}
+              <option value={name}>{name}</option>
+            {/each}
+          </select>
+        </section>
+      {/if}
 
       {#if status}
         <p class="status" data-testid="status">{status}</p>
@@ -689,17 +762,20 @@
           {edgeTypes}
           colorMode="dark"
           fitView
-          fitViewOptions={{ padding: 0.15 }}
+          fitViewOptions={{ padding: fitPadding }}
           nodesConnectable={editable}
           elementsSelectable={true}
           deleteKey={null}
           minZoom={0.1}
-          proOptions={{ hideAttribution: false }}
+          proOptions={{ hideAttribution: true }}
           ondrop={onDrop}
           ondragover={onDragOver}
           onnodeclick={({ node }) => selectNode(node.id)}
           onedgeclick={({ edge }) => selectEdge(edge.id)}
           onpaneclick={clearSelection}
+          onconnectend={(_event, state) => {
+            if (!state.toHandle) hint(DROP_HINT);
+          }}
           onbeforeconnect={(connection) => {
             wire(connection);
             return null;
@@ -715,8 +791,12 @@
             canRedo={doc.canRedo}
             canOpenEditor={editable}
             canEdit={editable}
+            demo={!editable}
             editNote={viewerNote}
             {alert}
+            {leftOpen}
+            {rightOpen}
+            {fitPadding}
             selectedNode={selected}
             {selectedEdge}
             {problems}
@@ -727,6 +807,7 @@
             ontoggleleft={() => (leftOpen = !leftOpen)}
             ontoggleright={() => (rightOpen = !rightOpen)}
             ontoggledrawer={() => (drawerOpen = !drawerOpen)}
+            ontogglechrome={toggleChrome}
             onviewsource={viewSource}
             oncopydeclaration={(block) => void copyDeclaration(block)}
             onopeneditor={(block) => void openEditor(block)}
@@ -743,11 +824,36 @@
             taken={declared}
             onadd={addBlock}
           />
-          <Controls showLock={false} />
           <TypeLegend entries={legend} />
-          <MiniMap bgColor="var(--bg-1)" maskColor="var(--scrim)" nodeColor="var(--border-hi)" />
+          {#if nodes.length >= MINIMAP_MIN}
+            <MiniMap bgColor="var(--bg-1)" maskColor="var(--scrim)" nodeColor="var(--border-hi)" />
+          {/if}
         </SvelteFlow>
       {/key}
+
+      {#if empty}
+        <div class="empty" data-testid="empty-state">
+          <h2>{emptyState.title}</h2>
+          <p data-testid="empty-reason">{emptyState.reason}</p>
+          <div class="choices">
+            <button class="primary" data-testid="empty-open" onclick={openFile}
+              >Open a .cpp file (Ctrl+O)</button
+            >
+            <label class="browse">
+              Browse examples
+              <select
+                data-testid="empty-examples"
+                bind:value={fixtureName}
+                onchange={openFixture}
+              >
+                {#each fixtureNames as name (name)}
+                  <option value={name}>{name}</option>
+                {/each}
+              </select>
+            </label>
+          </div>
+        </div>
+      {/if}
 
       {#if refusal}
         <div class="dialog" role="dialog" aria-modal="true" data-testid="delete-refusal">
@@ -783,6 +889,7 @@
           {hits}
           {marks}
           {anchors}
+          {siteAnchor}
           height={drawerHeight}
           onpick={pickInCode}
           ontoggle={() => (drawerOpen = !drawerOpen)}
@@ -800,7 +907,6 @@
     {selected}
     spec={selectedSpec}
     enabled={editable}
-    notice={viewerNote}
     {submit}
     open={rightOpen}
     ontoggle={() => (rightOpen = !rightOpen)}
@@ -809,21 +915,25 @@
 
 <style>
   .shell {
-    display: flex;
+    position: relative;
     height: 100%;
   }
   .sidebar {
-    flex: none;
-    width: 280px;
-    background: var(--bg-1);
-    border-right: 1px solid var(--border);
+    position: absolute;
+    z-index: 8;
+    top: calc(var(--bar-h) + var(--sp-3));
+    left: var(--sp-3);
+    bottom: var(--sp-3);
+    width: var(--rail-left);
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
     overflow: hidden;
     display: flex;
     flex-direction: column;
     transition: width 150ms ease;
-  }
-  .sidebar.collapsed {
-    width: 44px;
   }
   .head {
     display: flex;
@@ -832,7 +942,7 @@
     padding: var(--sp-3);
   }
   .collapsed .head {
-    padding: var(--sp-2) 9px;
+    padding: var(--sp-2);
   }
   h1 {
     margin: 0;
@@ -849,8 +959,8 @@
     margin-left: auto;
     flex: none;
     width: 26px;
-    padding: 2px 0;
-    font-size: 15px;
+    padding: var(--sp-0) 0;
+    font-size: 14px;
     line-height: 1.1;
     color: var(--muted);
   }
@@ -891,7 +1001,7 @@
   dl {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 1px var(--sp-3);
+    gap: 0 var(--sp-3);
     margin: var(--sp-2) 0 0;
   }
   dt {
@@ -908,13 +1018,13 @@
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: var(--sp-1);
   }
   .notes li {
     display: flex;
     flex-direction: column;
-    border-left: 2px solid var(--danger-border);
-    padding-left: 7px;
+    border-left: 2px solid var(--faint);
+    padding-left: var(--sp-2);
   }
   .el {
     font-size: 11px;
@@ -922,15 +1032,12 @@
   .reason {
     font-family: var(--mono);
     font-size: 11px;
-    color: var(--danger-fg);
+    color: var(--muted);
   }
   .muted {
     margin: 0;
     color: var(--muted);
     font-size: 11px;
-  }
-  .spacer {
-    margin-top: auto;
   }
   .status {
     margin: 0;
@@ -942,15 +1049,15 @@
     color: var(--danger-fg);
   }
   .attribution {
+    margin-top: auto;
+    padding-top: var(--sp-2);
     font-size: 11px;
     letter-spacing: 0.06em;
     color: var(--muted);
   }
   main {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-    background: var(--bg-0);
+    position: absolute;
+    inset: 0;
     display: flex;
     flex-direction: column;
   }
@@ -973,6 +1080,50 @@
     margin-left: auto;
     flex: none;
   }
+  .empty {
+    position: absolute;
+    z-index: 6;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(420px, calc(100% - 2 * var(--sp-4)));
+    padding: var(--sp-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+  .empty h2 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fg);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .empty p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .choices {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    margin-top: var(--sp-2);
+  }
+  .browse {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    white-space: nowrap;
+    font-size: 11px;
+    color: var(--muted);
+  }
   .dialog {
     position: absolute;
     top: 60px;
@@ -991,7 +1142,7 @@
   }
   .dialog h2 {
     margin: 0 0 var(--sp-2);
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--danger-fg);
     text-transform: none;
@@ -999,7 +1150,7 @@
   }
   .dialog p {
     margin: 0 0 var(--sp-2);
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--fg);
   }
   .dialog ul {
@@ -1008,13 +1159,13 @@
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 0;
   }
   .dialog ul button {
     display: flex;
     gap: var(--sp-3);
     width: 100%;
-    padding: 2px var(--sp-2);
+    padding: var(--sp-0) var(--sp-2);
     background: transparent;
     border-color: transparent;
     text-align: left;
@@ -1049,4 +1200,5 @@
       transition: none;
     }
   }
+
 </style>

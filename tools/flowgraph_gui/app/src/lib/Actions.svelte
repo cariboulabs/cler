@@ -10,15 +10,26 @@
     reason: string | null;
   };
 
-  export type Alert = { text: string; at: number };
+  export type Alert = { text: string; at: number; tone: 'error' | 'note' };
+
+  export type FitPadding = {
+    top: `${number}px`;
+    right: `${number}px`;
+    bottom: `${number}px`;
+    left: `${number}px`;
+  };
 
   type Props = {
     canUndo: boolean;
     canRedo: boolean;
     canOpenEditor: boolean;
     canEdit: boolean;
+    demo: boolean;
     editNote: string;
     alert: Alert | null;
+    leftOpen: boolean;
+    rightOpen: boolean;
+    fitPadding: FitPadding;
     selectedNode: string | null;
     selectedEdge: string | null;
     problems: Problem[];
@@ -29,6 +40,7 @@
     ontoggleleft: () => void;
     ontoggleright: () => void;
     ontoggledrawer: () => void;
+    ontogglechrome: () => void;
     onviewsource: (block: string) => void;
     oncopydeclaration: (block: string) => void;
     onopeneditor: (block: string) => void;
@@ -55,8 +67,12 @@
     canRedo,
     canOpenEditor,
     canEdit,
+    demo,
     editNote,
     alert,
+    leftOpen,
+    rightOpen,
+    fitPadding,
     selectedNode,
     selectedEdge,
     problems,
@@ -67,6 +83,7 @@
     ontoggleleft,
     ontoggleright,
     ontoggledrawer,
+    ontogglechrome,
     onviewsource,
     oncopydeclaration,
     onopeneditor,
@@ -81,6 +98,7 @@
 
   const ZOOM_MS = 150;
   const FIT_MS = 200;
+  const RAIL_MS = 200;
   const SAVED_MS = 1500;
   const ALERT_MS = 4000;
   const MENU_WIDTH = 200;
@@ -94,7 +112,8 @@
     '-': 'zoom-out',
     _: 'zoom-out',
     '0': 'fit',
-    '`': 'drawer'
+    '`': 'drawer',
+    '\\': 'chrome'
   };
   const ICONS: Record<string, string[]> = {
     open: ['M2 12.6V4.4a.9.9 0 0 1 .9-.9h3.1l1.3 1.6h5.8a.9.9 0 0 1 .9.9v6.6a.9.9 0 0 1-.9.9H2.9a.9.9 0 0 1-.9-.9Z'],
@@ -118,6 +137,12 @@
       'M1.5 9.4h13',
       'M4.4 5.1 6.2 6.9 4.4 8.7',
       'M8 8.7h3.4'
+    ],
+    chrome: [
+      'M2 3.5h12',
+      'M2 12.5h12',
+      'M5.6 6.4 8 8.8l2.4-2.4',
+      'M10.4 10.6 8 8.8'
     ]
   };
 
@@ -128,8 +153,23 @@
 
   const failing = $derived(problems.some((problem) => problem.severity === 'error'));
 
+  let rails: string | null = null;
+
   $effect(() => {
-    if (alert) flash(alert.text, true, ALERT_MS);
+    if (alert) flash(alert.text, alert.tone === 'error', ALERT_MS);
+  });
+
+  $effect(() => {
+    const shape = `${leftOpen}/${rightOpen}`;
+    if (shape === rails) return;
+    const first = rails === null;
+    rails = shape;
+    if (first) return;
+    const timer = setTimeout(
+      () => void flow.fitView({ padding: fitPadding, duration: FIT_MS }),
+      RAIL_MS
+    );
+    return () => clearTimeout(timer);
   });
 
   const actions = $derived<Action[]>([
@@ -155,7 +195,7 @@
       label: 'Fit view',
       shortcut: 'Ctrl+0',
       enabled: true,
-      run: () => void flow.fitView({ padding: 0.15, duration: FIT_MS })
+      run: () => void flow.fitView({ padding: fitPadding, duration: FIT_MS })
     },
     {
       id: 'drawer',
@@ -163,6 +203,13 @@
       shortcut: 'Ctrl+`',
       enabled: true,
       run: ontoggledrawer
+    },
+    {
+      id: 'chrome',
+      label: leftOpen || rightOpen ? 'Hide chrome' : 'Show chrome',
+      shortcut: 'Ctrl+\\',
+      enabled: true,
+      run: ontogglechrome
     }
   ]);
 
@@ -269,6 +316,10 @@
   }
 
   function flashSaved() {
+    if (!canEdit) {
+      flash(editNote, false, ALERT_MS);
+      return;
+    }
     flash('saved automatically', false, SAVED_MS);
   }
 
@@ -354,15 +405,22 @@
 <div class="bar" data-testid="top-bar">
   <img src="/brand/cler_mark.png" alt="cler" width="22" height="22" />
   <span class="wordmark">cler</span>
+  {#if demo}
+    <span class="demo" data-testid="demo-chip" title={editNote}>demo</span>
+  {/if}
   <span class="tagline">flowgraph editor</span>
   <span class="grow"></span>
   <button
     class="problems"
     class:danger={failing}
+    class:clear={problems.length === 0}
     data-testid="problems"
     data-count={problems.length}
     aria-expanded={problemsOpen}
-    title="{problems.length} conflicts, unresolved elements and runnerless blocks in this site"
+    disabled={problems.length === 0}
+    title={problems.length === 0
+      ? 'no conflicts, nothing unresolved, every block runs'
+      : `${problems.length} conflicts, unresolved elements and runnerless blocks in this site`}
     onclick={(event) => {
       event.stopPropagation();
       menu = null;
@@ -407,7 +465,7 @@
     class="toast"
     class:danger={toast.danger}
     role={toast.danger ? 'alert' : undefined}
-    data-testid={toast.danger ? 'alert-toast' : 'saved-toast'}
+    data-testid={toast.danger ? 'alert-toast' : 'note-toast'}
   >
     <span>{toast.text}</span>
     {#if toast.danger}
@@ -464,8 +522,8 @@
     top: 0;
     left: 0;
     right: 0;
-    z-index: 6;
-    height: 40px;
+    z-index: 9;
+    height: var(--bar-h);
     display: flex;
     align-items: center;
     gap: var(--sp-2);
@@ -483,6 +541,18 @@
     font-weight: 600;
     letter-spacing: 0.02em;
     color: var(--fg);
+  }
+  .demo {
+    flex: none;
+    padding: 0 var(--sp-1);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-xs);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    cursor: help;
   }
   .tagline {
     font-size: 11px;
@@ -530,13 +600,14 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
+    animation: lift 150ms ease-out;
   }
   .menu button {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-4);
-    padding: 4px var(--sp-2);
+    padding: var(--sp-1) var(--sp-2);
     background: transparent;
     border-color: transparent;
     text-align: left;
@@ -546,11 +617,11 @@
     border-color: transparent;
   }
   .info {
-    padding: 3px var(--sp-2) 5px;
+    padding: var(--sp-0) var(--sp-2) var(--sp-1);
     border-bottom: 1px solid var(--border);
     margin-bottom: var(--sp-1);
     font-family: var(--mono);
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--muted);
   }
   .key {
@@ -560,12 +631,18 @@
   }
   .problems {
     flex: none;
-    padding: 2px 7px;
+    padding: var(--sp-0) var(--sp-2);
     background: var(--bg-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-size: 11px;
     color: var(--muted);
+  }
+  .problems.clear:disabled {
+    border-color: color-mix(in srgb, var(--ok) 55%, var(--border));
+    background: color-mix(in srgb, var(--ok) 14%, var(--bg-2));
+    color: var(--muted);
+    cursor: default;
   }
   .problems.danger {
     border-color: var(--danger-border);
@@ -574,9 +651,10 @@
   }
   .drop {
     position: absolute;
-    top: 44px;
+    top: calc(var(--bar-h) + var(--sp-1));
     right: var(--sp-3);
     z-index: 20;
+    animation: lift 150ms ease-out;
     min-width: 280px;
     max-width: 420px;
     max-height: 300px;
@@ -594,7 +672,7 @@
     display: flex;
     align-items: baseline;
     gap: var(--sp-2);
-    padding: 3px var(--sp-2);
+    padding: var(--sp-0) var(--sp-2);
     background: transparent;
     border-color: transparent;
     text-align: left;
@@ -605,8 +683,8 @@
   }
   .kind {
     flex: none;
-    padding: 0 4px;
-    border-radius: 3px;
+    padding: 0 var(--sp-1);
+    border-radius: var(--radius-xs);
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.04em;
@@ -618,24 +696,27 @@
     color: var(--bg-0);
   }
   .what {
+    flex: none;
     font-family: var(--mono);
     font-size: 11px;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
   }
   .drop .key {
     margin-left: auto;
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .empty {
-    padding: 3px var(--sp-2);
+    padding: var(--sp-0) var(--sp-2);
     font-size: 11px;
     color: var(--muted);
   }
   .toast {
     position: absolute;
-    top: 48px;
+    top: calc(var(--bar-h) + var(--sp-2));
     left: 50%;
     z-index: 20;
     transform: translateX(-50%);
@@ -643,14 +724,14 @@
     align-items: center;
     gap: var(--sp-2);
     max-width: min(560px, 70vw);
-    padding: 5px var(--sp-3);
+    padding: var(--sp-1) var(--sp-3);
     background: var(--glass);
     backdrop-filter: blur(12px);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     color: var(--muted);
-    font-size: 11.5px;
+    font-size: 12px;
     animation: rise 150ms ease-out;
   }
   .toast.danger {
@@ -665,7 +746,7 @@
     background: transparent;
     border-color: transparent;
     color: inherit;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1;
   }
   @keyframes rise {
@@ -674,8 +755,16 @@
       transform: translate(-50%, -4px);
     }
   }
+  @keyframes lift {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
-    .toast {
+    .toast,
+    .menu,
+    .drop {
       animation: none;
     }
   }

@@ -50,8 +50,7 @@ describe('the palette lists what the crate found', () => {
       await expect.poll(() => entries.count()).toBe(1);
       expect(await entries.first().getAttribute('data-block')).toBe('FanoutBlock');
 
-      await page.click('[data-block="FanoutBlock"] .row');
-      expect(await page.textContent('[data-testid="palette-signature"]')).toContain(
+      expect(await page.getAttribute('[data-block="FanoutBlock"] .row', 'title')).toContain(
         'const size_t num_outputs'
       );
 
@@ -80,7 +79,9 @@ describe('the palette lists what the crate found', () => {
       const page = await viewer('?example=hello_world');
       await page.waitForSelector('[data-testid="palette"] .entry');
       expect(await page.locator('[data-testid="palette"] .entry').count()).toBe(4);
-      expect(await page.textContent('[data-testid="palette-notice"]')).toContain('example mode');
+      expect(await page.getAttribute('[data-testid="demo-chip"]', 'title')).toContain(
+        'example mode'
+      );
       expect(await page.getAttribute('[data-block="AddBlock"]', 'draggable')).toBe('false');
       await page.close();
     },
@@ -538,7 +539,7 @@ describe('each right-click target has its own menu', () => {
       );
       await page.keyboard.press('Escape');
 
-      await openMenu(page, '.svelte-flow__pane', { x: 40, y: 400 });
+      await openMenu(page, '.svelte-flow__pane', { x: 660, y: 760 });
       expect(await page.getAttribute('[data-testid="context-menu"]', 'data-menu')).toBe('pane');
       expect(await menuIds(page)).toEqual([
         'menu-add-here',

@@ -265,7 +265,7 @@
   }
   .cat,
   .ports {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--muted);
   }
   .ports {
@@ -274,19 +274,19 @@
   }
   .sig {
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--muted);
     word-break: break-all;
   }
   .fields {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: var(--sp-1);
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: var(--sp-0);
   }
   .label {
     display: flex;
@@ -297,11 +297,11 @@
   .hint {
     margin-left: auto;
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--muted);
   }
   .req {
-    padding-left: 2px;
+    padding-left: var(--sp-0);
     color: var(--danger-fg);
   }
   input {
@@ -310,13 +310,13 @@
     color: var(--fg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 3px 6px;
+    padding: var(--sp-1) var(--sp-2);
     font-family: var(--mono);
     font-size: 11px;
   }
   input:focus {
     outline: none;
-    border-color: var(--accent);
+    border-color: var(--accent-hi);
   }
   ul {
     margin: 0;
@@ -328,9 +328,9 @@
   ul button {
     display: flex;
     align-items: baseline;
-    gap: 5px;
+    gap: var(--sp-1);
     width: 100%;
-    padding: 2px 5px;
+    padding: var(--sp-0) var(--sp-1);
     background: transparent;
     border-color: transparent;
     text-align: left;
@@ -340,7 +340,7 @@
     border-color: transparent;
   }
   .name {
-    font-size: 11.5px;
+    font-size: 12px;
   }
   footer {
     display: flex;
@@ -353,7 +353,7 @@
   }
   .note {
     margin: 0;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--muted);
   }
   .err {

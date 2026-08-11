@@ -152,7 +152,10 @@ function countLabel(count: PortCount, ports: SpecPort[]): string {
 export function portsSummary(spec: BlockSpec): string {
   const inputs = spec.ports.filter((port) => port.direction === 'input');
   const outputs = spec.ports.filter((port) => port.direction === 'output');
-  return `${countLabel(spec.input_count, inputs)} in · ${countLabel(spec.output_count, outputs)} out`;
+  const left = countLabel(spec.input_count, inputs);
+  const right = countLabel(spec.output_count, outputs);
+  if (left === '?' || right === '?') return '';
+  return `${left} in · ${right} out`;
 }
 
 function templateHead(spec: BlockSpec): string {

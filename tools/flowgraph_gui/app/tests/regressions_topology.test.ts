@@ -26,6 +26,7 @@ import {
   dragWire,
   handle,
   hold,
+  modelOf,
   openMenu,
   release,
   specs,
@@ -342,7 +343,7 @@ describe('5. a refusal is visible with the sidebar collapsed', () => {
     async () => {
       const page = await boot();
       await page.click('[data-testid="toggle-left"]');
-      await page.waitForTimeout(250);
+      await page.waitForTimeout(900);
       await dragWire(page, handle('source1', 'out'), handle('adder', 'in[1]'));
 
       const toast = page.locator('[data-testid="alert-toast"]');
@@ -443,11 +444,14 @@ describe('8. picking an example leaves the real document alone', () => {
   it(
     'G3/G5 closes the open document and locks open-in-editor',
     async () => {
-      const page = await boot();
-      await page.selectOption('[data-testid="example-select"]', 'plots');
+      const model = modelOf('hello_world');
+      model.sites = [];
+      const page = await boot({ model, empty: true });
+      expect(await page.locator('[data-testid="example-select"]').count()).toBe(0);
+      await page.selectOption('[data-testid="empty-examples"]', 'plots');
       await page.waitForSelector('.svelte-flow__node[data-id="cw_throttle"]');
       await expect.poll(() => calls(page)).toContain('close_document');
-      expect(await page.locator('[data-testid="palette-notice"]').textContent()).toContain(
+      expect(await page.getAttribute('[data-testid="demo-chip"]', 'title')).toContain(
         'example mode'
       );
 

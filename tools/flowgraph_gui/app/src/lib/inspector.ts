@@ -7,6 +7,7 @@ export type Field = {
   slot: string;
   value: string;
   hint: string | null;
+  hintIsCode: boolean;
   editable: boolean;
   toCommand: (text: string) => Command;
   refuse?: (text: string) => string | null;
@@ -138,6 +139,7 @@ export function blockFields(
     slot: '',
     value: block.display_name ?? '',
     hint: nameEditable ? null : (reason ?? NO_DISPLAY_NAME),
+    hintIsCode: false,
     editable: nameEditable,
     toCommand: (text) => ({
       command: 'set_display_name',
@@ -159,6 +161,7 @@ export function blockFields(
           ? `resolves to ${arg.resolved}`
           : naming.hint
         : reason,
+      hintIsCode: block.editable,
       editable: block.editable,
       toCommand: (text) => ({
         command: 'set_template_arg',
@@ -179,6 +182,7 @@ export function blockFields(
       slot: naming.slot,
       value: arg.text,
       hint: block.editable ? naming.hint : reason,
+      hintIsCode: block.editable,
       editable: block.editable,
       toCommand: (text) => ({
         command: 'set_param',
@@ -203,6 +207,7 @@ export function configFields(site: number, config: SiteConfig): Field[] {
       slot: '',
       value: assignment.value,
       hint: editable ? null : (assignment.read_only_reason ?? config.read_only_reason),
+      hintIsCode: false,
       editable,
       toCommand: (text) => ({
         command: 'set_config',

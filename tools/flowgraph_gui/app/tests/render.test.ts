@@ -4,6 +4,7 @@ import { createServer, type ViteDevServer } from 'vite';
 import { fixtures } from '../src/fixtures';
 import { projectSite } from '../src/lib/project';
 import type { Command, FileModel, Site } from '../src/lib/schema';
+import { openInspector } from './ui';
 
 const MIN_VISIBLE_FRACTION = 0.95;
 const BOOT_TIMEOUT = 120_000;
@@ -351,6 +352,7 @@ describe('editing against a fake backend', () => {
   beforeEach(async () => {
     editor = await browser.newPage({ viewport: VIEWPORT });
     await editor.addInitScript(installFakeBackend, { path: FAKE_PATH, model: editableModel() });
+    await editor.addInitScript(openInspector);
     await editor.goto(origin, { waitUntil: 'load' });
     await editor.click('button.primary');
     await editor.waitForSelector(`.path[title="${FAKE_PATH}"]`);
@@ -537,7 +539,7 @@ describe('editing against a fake backend', () => {
 describe('top bar, context menu and shortcuts', () => {
   let editor: Page;
 
-  const PANE_SPOT = { x: 40, y: 400 };
+  const PANE_SPOT = { x: 660, y: 760 };
 
   const rawCalls = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.calls);
   const calls = async () => (await rawCalls()).filter((name) => name !== 'palette');
@@ -560,6 +562,7 @@ describe('top bar, context menu and shortcuts', () => {
   beforeEach(async () => {
     editor = await browser.newPage({ viewport: VIEWPORT });
     await editor.addInitScript(installFakeBackend, { path: FAKE_PATH, model: editableModel() });
+    await editor.addInitScript(openInspector);
     await editor.goto(origin, { waitUntil: 'load' });
     await editor.click('button.primary');
     await editor.waitForSelector('.svelte-flow__node');
@@ -663,7 +666,7 @@ describe('top bar, context menu and shortcuts', () => {
       const before = await calls();
       await editor.keyboard.press('Control+s');
 
-      const toast = editor.locator('[data-testid="saved-toast"]');
+      const toast = editor.locator('[data-testid="note-toast"]');
       await toast.waitFor();
       expect(await toast.textContent()).toContain('saved automatically');
       expect(await calls()).toEqual(before);
@@ -735,6 +738,7 @@ describe('retractable panels', () => {
   beforeEach(async () => {
     editor = await browser.newPage({ viewport: VIEWPORT });
     await editor.addInitScript(installFakeBackend, { path: FAKE_PATH, model: editableModel() });
+    await editor.addInitScript(openInspector);
     await editor.goto(origin, { waitUntil: 'load' });
     await editor.click('button.primary');
     await editor.waitForSelector('.svelte-flow__node');
@@ -749,13 +753,13 @@ describe('retractable panels', () => {
     async () => {
       await settled('.sidebar', SIDEBAR_WIDTH);
       await settled('.inspector', INSPECTOR_WIDTH);
-      const canvasOpen = await width('main');
+      expect(await width('main')).toBeCloseTo(VIEWPORT.width, 0);
 
       await editor.click('[data-testid="toggle-left"]');
       await editor.click('[data-testid="toggle-right"]');
       await settled('.sidebar', RAIL_WIDTH);
       await settled('.inspector', RAIL_WIDTH);
-      expect(await width('main')).toBeGreaterThan(canvasOpen);
+      expect(await width('main')).toBeCloseTo(VIEWPORT.width, 0);
 
       expect(await editor.locator('.sidebar .path').isVisible()).toBe(false);
       expect(await editor.locator('.inspector input').first().isVisible()).toBe(false);
@@ -780,7 +784,7 @@ describe('retractable panels', () => {
   it(
     'toggles on [ and ] unless the keystroke lands in a field',
     async () => {
-      await editor.locator('.svelte-flow__pane').click({ position: { x: 8, y: 300 } });
+      await editor.locator('.svelte-flow__pane').click({ position: { x: 660, y: 760 } });
       await editor.keyboard.press('[');
       await settled('.sidebar', RAIL_WIDTH);
       await editor.keyboard.press(']');
@@ -814,7 +818,7 @@ describe('retractable panels', () => {
       await settled('.inspector', INSPECTOR_WIDTH);
       await expect.poll(() => editor.textContent('.inspector .title')).toBe('Adder');
 
-      await editor.locator('.svelte-flow__pane').click({ position: { x: 8, y: 300 } });
+      await editor.locator('.svelte-flow__pane').click({ position: { x: 660, y: 760 } });
       await expect.poll(() => editor.locator('.inspector .title').count()).toBe(0);
       await settled('.inspector', INSPECTOR_WIDTH);
     },
@@ -838,23 +842,25 @@ describe('retractable panels', () => {
   );
 
   it(
-    'survives a toggle without disturbing zoom or pan',
+    'refits the graph after a toggle instead of leaving it off centre',
     async () => {
-      await editor.click('.svelte-flow__controls-zoomin');
+      const fitted = await settledViewport(editor);
+      await editor.click('[data-testid="zoom-in"]');
       await editor.mouse.move(700, 400);
       await editor.mouse.down();
       await editor.mouse.move(760, 460, { steps: 8 });
       await editor.mouse.up();
       await editor.waitForTimeout(400);
-      const before = await settledViewport(editor);
+      expect(await settledViewport(editor)).not.toBe(fitted);
 
       await editor.click('[data-testid="toggle-left"]');
       await settled('.sidebar', RAIL_WIDTH);
       await editor.click('[data-testid="toggle-right"]');
       await settled('.inspector', RAIL_WIDTH);
-      await editor.waitForTimeout(300);
 
-      expect(await viewportTransform(editor)).toBe(before);
+      await expect
+        .poll(async () => scaleOf(await viewportTransform(editor)), { timeout: 4000 })
+        .toBeGreaterThan(scaleOf(fitted));
     },
     CASE_TIMEOUT
   );
@@ -865,6 +871,7 @@ describe('fixture mode stays a read-only viewer', () => {
 
   beforeEach(async () => {
     viewer = await browser.newPage({ viewport: VIEWPORT });
+    await viewer.addInitScript(openInspector);
     await viewer.goto(`${origin}/?fixture=adsb_receiver`, { waitUntil: 'load' });
     await viewer.waitForSelector('.svelte-flow__node');
   }, CASE_TIMEOUT);
@@ -885,7 +892,9 @@ describe('fixture mode stays a read-only viewer', () => {
       for (let index = 0; index < count; index++) {
         expect(await inputs.nth(index).isDisabled()).toBe(true);
       }
-      expect(await viewer.textContent('[data-testid="viewer-note"]')).toContain('read-only viewer');
+      expect(await viewer.getAttribute('[data-testid="demo-chip"]', 'title')).toContain(
+        'read-only viewer'
+      );
 
       expect(await viewer.locator('[data-testid="undo"]').isDisabled()).toBe(true);
       expect(await viewer.locator('[data-testid="reload-banner"]').count()).toBe(0);
@@ -903,12 +912,14 @@ describe('fixture mode stays a read-only viewer', () => {
       await viewer.click('[data-testid="toggle-right"]');
       await expect.poll(() => boxWidth('.sidebar'), { timeout: 2000 }).toBeCloseTo(44, 0);
       await expect.poll(() => boxWidth('.inspector'), { timeout: 2000 }).toBeCloseTo(44, 0);
-      await expect.poll(() => boxWidth('main'), { timeout: 2000 }).toBeCloseTo(1352, 0);
+      await expect.poll(() => boxWidth('main'), { timeout: 2000 }).toBeCloseTo(1440, 0);
 
       await viewer.click('.svelte-flow__node[data-id="iq2mag"]');
       await expect.poll(() => boxWidth('.inspector'), { timeout: 2000 }).toBeCloseTo(320, 0);
       expect(await viewer.locator('.inspector input').first().isDisabled()).toBe(true);
-      expect(await viewer.textContent('[data-testid="viewer-note"]')).toContain('read-only viewer');
+      expect(await viewer.getAttribute('[data-testid="demo-chip"]', 'title')).toContain(
+        'read-only viewer'
+      );
     },
     CASE_TIMEOUT
   );
@@ -919,7 +930,9 @@ describe('fixture mode stays a read-only viewer', () => {
       expect(await viewer.locator('[data-testid="redo"]').isDisabled()).toBe(true);
       expect(await viewer.locator('[data-testid="fit"]').isDisabled()).toBe(false);
 
-      await viewer.locator('.svelte-flow__pane').click({ button: 'right', position: { x: 40, y: 400 } });
+      await viewer
+        .locator('.svelte-flow__pane')
+        .click({ button: 'right', position: { x: 660, y: 760 } });
       const menu = viewer.locator('[data-testid="context-menu"]');
       await menu.waitFor();
       expect(await viewer.locator('[data-testid="menu-undo"]').isDisabled()).toBe(true);

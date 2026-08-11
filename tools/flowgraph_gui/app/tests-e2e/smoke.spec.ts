@@ -91,7 +91,7 @@ test('a) picking an example inside the desktop shell drops to a read-only viewer
   await node('cw_throttle').click();
   await shot('example-picked');
 
-  await expect(page.getByTestId('viewer-note')).toBeVisible();
+  await expect(page.getByTestId('demo-chip')).toBeVisible();
   const fields = page.locator('input[data-field]');
   await expect(fields.first()).toBeVisible();
   const count = await fields.count();

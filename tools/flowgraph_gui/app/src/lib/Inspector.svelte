@@ -20,13 +20,12 @@
     selected: string | null;
     spec: BlockSpec | undefined;
     enabled: boolean;
-    notice: string;
     submit: (command: Command) => Promise<Outcome>;
     open: boolean;
     ontoggle: () => void;
   };
 
-  const { path, site, siteIndex, selected, spec, enabled, notice, submit, open, ontoggle }: Props =
+  const { path, site, siteIndex, selected, spec, enabled, submit, open, ontoggle }: Props =
     $props();
 
   const IME_KEY_CODE = 229;
@@ -124,6 +123,11 @@
   function readable(text: string): string {
     return text.replace(/_/g, ' ');
   }
+
+  function hintText(field: Field): string | undefined {
+    if (!field.hint) return undefined;
+    return field.hintIsCode ? field.hint : readable(field.hint);
+  }
 </script>
 
 {#snippet fieldRow(field: Field, ownerReason: string | null)}
@@ -137,7 +141,7 @@
       data-field={field.id}
       value={drafts[keyOf(field)] ?? field.value}
       disabled={!enabled || !field.editable}
-      title={field.hint ? readable(field.hint) : undefined}
+      title={hintText(field)}
       oninput={(event) => (drafts[keyOf(field)] = event.currentTarget.value)}
       onblur={() => run(field, blurAction(drafts[keyOf(field)], field.value))}
       onkeydown={(event) => onKeydown(event, field)}
@@ -145,7 +149,7 @@
     {#if errors[keyOf(field)]}
       <span class="err" data-error={field.id}>{errors[keyOf(field)]}</span>
     {:else if field.hint && field.hint !== ownerReason}
-      <span class="hint">{readable(field.hint)}</span>
+      <span class="hint">{hintText(field)}</span>
     {/if}
   </label>
 {/snippet}
@@ -259,26 +263,26 @@
         {/if}
       </section>
     {/if}
-
-    {#if !enabled}
-      <p class="muted" data-testid="viewer-note">{notice}</p>
-    {/if}
   </div>
 </aside>
 
 <style>
   .inspector {
-    flex: none;
-    width: 320px;
-    background: var(--bg-1);
-    border-left: 1px solid var(--border);
+    position: absolute;
+    z-index: 8;
+    top: calc(var(--bar-h) + var(--sp-3));
+    right: var(--sp-3);
+    bottom: var(--sp-3);
+    width: var(--rail-right);
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
     overflow: hidden;
     display: flex;
     flex-direction: column;
     transition: width 150ms ease;
-  }
-  .inspector.collapsed {
-    width: 44px;
   }
   .head {
     display: flex;
@@ -287,13 +291,13 @@
     padding: var(--sp-3);
   }
   .collapsed .head {
-    padding: var(--sp-2) 9px;
+    padding: var(--sp-2);
   }
   .toggle {
     flex: none;
     width: 26px;
-    padding: 2px 0;
-    font-size: 15px;
+    padding: var(--sp-0) 0;
+    font-size: 14px;
     line-height: 1.1;
     color: var(--muted);
   }
@@ -360,7 +364,7 @@
   dl {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 1px var(--sp-3);
+    gap: 0 var(--sp-3);
     margin: var(--sp-2) 0 0;
   }
   dt {
@@ -374,10 +378,10 @@
   .reason {
     margin: var(--sp-2) 0 0;
     padding: var(--sp-1) var(--sp-2);
-    border: 1px solid var(--danger-border);
-    background: var(--danger-bg);
+    border: 1px solid var(--faint);
+    background: var(--bg-2);
     border-radius: var(--radius-sm);
-    color: var(--danger-fg);
+    color: var(--muted);
     font-size: 11px;
   }
   .fields {
@@ -388,7 +392,7 @@
   .field {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--sp-0);
   }
   .label {
     display: flex;
@@ -399,7 +403,7 @@
   .slot {
     margin-left: auto;
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--faint);
   }
   input {
@@ -408,7 +412,7 @@
     color: var(--fg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 4px 6px;
+    padding: var(--sp-1) var(--sp-2);
     font-family: var(--mono);
     font-size: 11px;
   }
@@ -417,7 +421,7 @@
   }
   input:focus {
     outline: none;
-    border-color: var(--accent);
+    border-color: var(--accent-hi);
     box-shadow: var(--glow) color-mix(in srgb, var(--accent) 45%, transparent);
   }
   input:disabled {
@@ -443,7 +447,7 @@
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--sp-0);
   }
   .ports li {
     display: flex;

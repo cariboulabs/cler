@@ -11,5 +11,11 @@ export default defineConfig({
     fs: { allow: ['.', '../cler-graph/tests/data', '../../../desktop_examples'] }
   },
   build: { target: 'es2022' },
-  test: { include: ['tests/**/*.test.ts'], environment: 'node' }
+  test: {
+    include: ['tests/**/*.test.ts'],
+    environment: 'node',
+    fileParallelism: false,
+    testTimeout: 90_000,
+    hookTimeout: 180_000
+  }
 });

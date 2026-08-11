@@ -12,6 +12,7 @@
     hits: Span[];
     marks: CodeMark[];
     anchors: Span[];
+    siteAnchor: Span | null;
     height: number;
     onpick: (offset: number) => void;
     ontoggle: () => void;
@@ -27,6 +28,7 @@
     hits,
     marks,
     anchors,
+    siteAnchor,
     height,
     onpick,
     ontoggle,
@@ -43,7 +45,7 @@
 
   const lines = $derived(codeLines(source, hits, marks, anchors));
   const basename = $derived(path.split('/').pop() ?? path);
-  const anchor = $derived(hits[0]?.start ?? null);
+  const anchor = $derived(hits[0]?.start ?? siteAnchor?.start ?? null);
   const tall = $derived(dragged ?? height);
 
   $effect(() => {
@@ -135,7 +137,7 @@
     <h2>Code</h2>
     <span class="file" title={path} data-testid="drawer-file">{basename}</span>
     <span class="chip" data-testid="drawer-revision">rev {revision}</span>
-    <span class="chip" class:danger={readOnly > 0} data-testid="drawer-readonly">
+    <span class="chip" class:locked={readOnly > 0} data-testid="drawer-readonly">
       {readOnly} read-only
     </span>
     <span class="grow"></span>
@@ -144,7 +146,7 @@
       data-testid="drawer-close"
       aria-label="Collapse code drawer"
       title="Collapse code drawer  Ctrl+`"
-      onclick={ontoggle}>×</button
+      onclick={ontoggle}>▾</button
     >
   </header>
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -169,20 +171,30 @@
 <style>
   .drawer {
     position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    left: calc(var(--rail-left) + 2 * var(--sp-3));
+    right: calc(var(--rail-right) + 2 * var(--sp-3));
+    bottom: var(--sp-3);
     z-index: 7;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: var(--bg-1);
-    border-top: 1px solid var(--border);
-    transition: height 150ms ease;
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    transition:
+      height 150ms ease,
+      left 150ms ease,
+      right 150ms ease;
+  }
+  .drawer.collapsed {
+    border-width: 0;
+    box-shadow: none;
   }
   .grip {
     flex: none;
-    height: 5px;
+    height: var(--sp-1);
     cursor: ns-resize;
     background: transparent;
   }
@@ -210,18 +222,16 @@
     color: var(--fg);
   }
   .chip {
-    padding: 1px 6px;
+    padding: 0 var(--sp-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--bg-2);
     font-family: var(--mono);
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--muted);
   }
-  .chip.danger {
-    border-color: var(--danger-border);
-    background: var(--danger-bg);
-    color: var(--danger-fg);
+  .chip.locked {
+    border-color: var(--faint);
   }
   .grow {
     flex: 1;
@@ -230,7 +240,7 @@
     flex: none;
     width: 26px;
     padding: 0;
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1.1;
     color: var(--muted);
   }
@@ -240,7 +250,7 @@
     overflow: auto;
     padding-bottom: var(--sp-2);
     font-family: var(--mono);
-    font-size: 11.5px;
+    font-size: 12px;
     line-height: 1.5;
   }
   .collapsed .body {
@@ -265,10 +275,10 @@
   }
   .hit {
     background: color-mix(in srgb, var(--accent) 30%, transparent);
-    border-radius: 2px;
+    border-radius: var(--radius-xs);
   }
   .ro {
-    text-decoration: underline wavy var(--danger-border);
+    text-decoration: underline wavy var(--faint);
     text-underline-offset: 3px;
   }
   .kw {

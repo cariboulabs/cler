@@ -12,18 +12,20 @@
     specs: BlockSpec[];
     documentPath: string;
     enabled: boolean;
-    notice: string;
     open: boolean;
     ontoggle: () => void;
     onpick: (spec: BlockSpec) => void;
   };
 
-  const { specs, documentPath, enabled, notice, open, ontoggle, onpick }: Props = $props();
+  const { specs, documentPath, enabled, open, ontoggle, onpick }: Props = $props();
 
   let query = $state('');
-  let expanded = $state<string | null>(null);
 
   const entries = $derived(searchSpecs(specs, query, documentPath));
+  const categories = $derived(
+    new Set(entries.map((spec) => categoryOf(spec, documentPath)))
+  );
+  const showCategory = $derived(categories.size > 1);
 
   function startDrag(event: DragEvent, spec: BlockSpec) {
     if (!enabled || !event.dataTransfer) return;
@@ -47,9 +49,6 @@
       data-testid="palette-search"
       bind:value={query}
     />
-    {#if !enabled}
-      <p class="muted" data-testid="palette-notice">{notice}</p>
-    {/if}
     <ul>
       {#each entries as spec (spec.origin + spec.name)}
         <li
@@ -59,22 +58,18 @@
           draggable={enabled}
           ondragstart={(event) => startDrag(event, spec)}
         >
-          <button
-            class="row"
-            title={ctorSignature(spec)}
-            onclick={() => (expanded = expanded === spec.name ? null : spec.name)}
-            ondblclick={() => enabled && onpick(spec)}
-          >
+          <button class="row" title={ctorSignature(spec)} ondblclick={() => enabled && onpick(spec)}>
             <span class="name">{spec.name}</span>
-            <span class="cat">{categoryOf(spec, documentPath)}</span>
-            <span class="ports">{portsSummary(spec)}</span>
+            {#if showCategory}
+              <span class="cat">{categoryOf(spec, documentPath)}</span>
+            {/if}
+            {#if portsSummary(spec)}
+              <span class="ports">{portsSummary(spec)}</span>
+            {/if}
             {#if spec.may_block}
               <span class="chip" title="this block may block its worker">may_block</span>
             {/if}
           </button>
-          {#if expanded === spec.name}
-            <code class="sig" data-testid="palette-signature">{ctorSignature(spec)}</code>
-          {/if}
         </li>
       {:else}
         <li class="muted">nothing matches “{query}”</li>
@@ -86,11 +81,13 @@
 <style>
   h2 {
     margin: 0 0 var(--sp-2);
+    font-size: 11px;
+    line-height: 1.45;
   }
   .head {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--sp-1);
     width: 100%;
     padding: 0;
     background: transparent;
@@ -115,12 +112,12 @@
     color: var(--fg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 4px 6px;
+    padding: var(--sp-1) var(--sp-2);
     font-size: 11px;
   }
   input:focus {
     outline: none;
-    border-color: var(--accent);
+    border-color: var(--accent-hi);
   }
   ul {
     margin: var(--sp-2) 0 0;
@@ -130,7 +127,7 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 0;
   }
   .entry {
     border-left: 2px solid transparent;
@@ -144,9 +141,9 @@
   .row {
     display: flex;
     align-items: baseline;
-    gap: 5px;
+    gap: var(--sp-1);
     width: 100%;
-    padding: 2px 6px;
+    padding: var(--sp-0) var(--sp-2);
     background: transparent;
     border-color: transparent;
     text-align: left;
@@ -156,39 +153,33 @@
     border-color: transparent;
   }
   .name {
-    font-size: 11.5px;
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 12px;
     color: var(--fg);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .cat {
-    font-size: 10px;
+    flex: none;
+    font-size: 11px;
     color: var(--muted);
   }
   .ports {
-    margin-left: auto;
     flex: none;
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--muted);
   }
   .chip {
     flex: none;
-    padding: 0 4px;
-    border-radius: 3px;
+    padding: 0 var(--sp-1);
+    border-radius: var(--radius-xs);
     background: var(--warn-bg);
     border: 1px solid var(--warn-border);
     font-size: 9px;
     color: var(--fg);
-  }
-  .sig {
-    display: block;
-    padding: 2px 6px 5px 8px;
-    font-family: var(--mono);
-    font-size: 10px;
-    color: var(--muted);
-    word-break: break-all;
   }
   .muted {
     margin: var(--sp-1) 0 0;

@@ -13,11 +13,14 @@
   --glow: 0 0 8px;
   --radius: 8px;
   --radius-sm: 5px;
+  --radius-xs: 3px;
 
+  --sp-0: 2px;
   --sp-1: 0.25rem;
   --sp-2: 0.5rem;
   --sp-3: 0.75rem;
   --sp-4: 1rem;
+  --bar-h: 40px;
   --font: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
 
@@ -28,7 +31,7 @@
   --border-hi: #3a444f;
   --fg: #e6edf3;
   --muted: #8b98a9;
-  --faint: #5a6675;
+  --faint: #6b7787;
 
   --danger-fg: #e66767;
   --danger-bg: #37181c;
@@ -40,7 +43,7 @@
   --type-1: #3987e5;
   --type-2: #199e70;
   --type-3: #c98500;
-  --type-4: #008300;
+  --type-4: #00a3b4;
   --type-5: #9085e9;
   --type-6: #e66767;
 
@@ -64,17 +67,17 @@ body {
   background: var(--bg-0);
   color: var(--fg);
   font-family: var(--font);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-hi);
   outline-offset: 2px;
 }
 
 button {
-  padding: 5px 10px;
+  padding: var(--sp-1) var(--sp-3);
   border: 1px solid var(--border-hi);
   border-radius: var(--radius-sm);
   background: var(--bg-1);
@@ -99,7 +102,7 @@ button:disabled {
 
 button.primary {
   width: 100%;
-  padding: 7px 10px;
+  padding: var(--sp-2) var(--sp-3);
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-fg);
@@ -117,7 +120,7 @@ select {
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 5px;
+  padding: var(--sp-1);
   font: inherit;
 }
 
@@ -125,19 +128,27 @@ select:hover {
   border-color: var(--border-hi);
 }
 
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+#app .svelte-flow {
+  z-index: auto;
+}
+
 .svelte-flow {
   --xy-background-color: var(--bg-0);
   --xy-node-color: var(--fg);
   --xy-node-background-color: var(--bg-1);
   --xy-node-border: 1px solid var(--border);
-  --xy-controls-button-background-color: var(--bg-1);
-  --xy-controls-button-background-color-hover: var(--bg-2);
-  --xy-controls-button-color: var(--fg);
-  --xy-controls-button-color-hover: var(--accent-hi);
-  --xy-controls-button-border-color: var(--border);
   --xy-minimap-background-color: var(--bg-1);
   --xy-minimap-mask-background-color: var(--scrim);
-  --xy-attribution-background-color: transparent;
+  --xy-connectionline-stroke: var(--accent-hi);
+  --xy-connectionline-stroke-width: 2.4;
 }
 
 .svelte-flow__edge.cler-edge .svelte-flow__edge-path {
@@ -146,7 +157,7 @@ select:hover {
 }
 
 .svelte-flow__edge.cler-edge-readonly .svelte-flow__edge-path {
-  stroke: var(--danger);
+  stroke: var(--faint);
   stroke-dasharray: 5 3;
 }
 
@@ -154,6 +165,23 @@ select:hover {
   stroke: var(--danger);
   stroke-width: 2.4;
   stroke-dasharray: 5 3;
+}
+
+.svelte-flow__edge.cler-edge-dim {
+  opacity: 0.4;
+}
+
+.svelte-flow__edge.cler-edge-lift .svelte-flow__edge-path {
+  stroke-width: 2.8;
+}
+
+.svelte-flow__edges:has(.svelte-flow__edge:hover) .svelte-flow__edge:not(:hover) {
+  opacity: 0.4;
+}
+
+.svelte-flow__edge.cler-edge:hover .svelte-flow__edge-path {
+  stroke: var(--accent-hi);
+  stroke-width: 3;
 }
 
 .svelte-flow__edge.selected .svelte-flow__edge-path {
@@ -167,29 +195,64 @@ select:hover {
   height: 7px;
   background: var(--muted);
   border: 1px solid var(--bg-1);
+  transition:
+    scale 150ms ease,
+    background 150ms ease;
+}
+
+.svelte-flow__node:hover .svelte-flow__handle {
+  scale: 1.6;
+  background: var(--accent-hi);
+}
+
+.svelte-flow__handle.connectingto {
+  background: var(--accent-hi);
+  box-shadow: var(--glow) var(--accent);
+}
+
+.svelte-flow__node .block {
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.block.unwired {
+  border-style: dashed;
+  border-color: var(--faint);
+  background: repeating-linear-gradient(
+    135deg,
+    var(--bg-1),
+    var(--bg-1) 8px,
+    var(--bg-2) 8px,
+    var(--bg-2) 16px
+  );
+  color: var(--muted);
+}
+
+.block.readonly {
+  border-color: var(--faint);
+}
+
+.svelte-flow__node:hover .block {
+  border-color: var(--border-hi);
+  box-shadow: var(--shadow);
 }
 
 .svelte-flow__node.selected .block {
-  border-color: var(--accent);
+  border-color: var(--accent-hi);
   box-shadow: var(--glow) color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
-.svelte-flow__controls-button {
-  background: var(--bg-1);
-  border-bottom: 1px solid var(--border);
-  fill: var(--fg);
-}
-
-.svelte-flow__controls-button:hover {
-  background: var(--bg-2);
-}
-
 .svelte-flow__minimap {
+  margin-right: calc(var(--rail-right, 0px) + var(--sp-3));
+  margin-bottom: var(--sp-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
-.svelte-flow__attribution {
-  background: transparent;
-  color: var(--muted);
+@media (prefers-reduced-motion: reduce) {
+  .svelte-flow__handle,
+  .svelte-flow__node .block {
+    transition: none;
+  }
 }

@@ -1,5 +1,5 @@
 import { chromium, type Browser, type Page } from 'playwright';
-import { afterAll, beforeAll } from 'vitest';
+import { afterAll, beforeAll, expect } from 'vitest';
 import { createServer, type ViteDevServer } from 'vite';
 import { fixtures, fixtureSources } from '../src/fixtures';
 import type { BlockSpec } from '../src/lib/palette';
@@ -20,6 +20,7 @@ type Setup = {
   source: string;
   specs: BlockSpec[];
   refusal: unknown;
+  openError: string | null;
 };
 
 type Fake = {
@@ -243,6 +244,7 @@ function installFake(setup: Setup) {
     if (command === 'plugin:event|listen') return args.handler;
     if (command === 'plugin:dialog|open') return state.path;
     calls.push(command);
+    if (command === 'open_document' && setup.openError !== null) throw setup.openError;
     if (command === 'palette') return JSON.parse(JSON.stringify(setup.specs));
     if (command === 'apply_commands') {
       const commands = args.commands as Loose[];
@@ -319,7 +321,19 @@ export function withoutEdge(model: FileModel, from: string, to: string): FileMod
   return model;
 }
 
-export type BootOptions = { fixture?: string; model?: FileModel; refusal?: unknown };
+export type BootOptions = {
+  fixture?: string;
+  model?: FileModel;
+  refusal?: unknown;
+  openError?: string;
+  empty?: boolean;
+};
+
+export function openInspector(): void {
+  if (localStorage.getItem('cler.panel.right') === null) {
+    localStorage.setItem('cler.panel.right', 'open');
+  }
+}
 
 export async function boot(options: BootOptions = {}): Promise<Page> {
   const name = options.fixture ?? 'hello_world';
@@ -329,10 +343,16 @@ export async function boot(options: BootOptions = {}): Promise<Page> {
     model: options.model ?? modelOf(name),
     source: sourceOf(name),
     specs,
-    refusal: options.refusal ?? null
+    refusal: options.refusal ?? null,
+    openError: options.openError ?? null
   });
+  await page.addInitScript(openInspector);
   await page.goto(origin, { waitUntil: 'load' });
   await page.click('button.primary');
+  if (options.empty === true) {
+    await page.waitForSelector('[data-testid="empty-state"]');
+    return page;
+  }
   await page.waitForSelector(`.path[title="${FAKE_PATH}"]`);
   await page.waitForSelector('.svelte-flow__node');
   await page.waitForSelector('[data-testid="palette"] .entry');
@@ -432,8 +452,61 @@ export function useBrowser(): void {
   });
 }
 
-export async function viewer(query: string): Promise<Page> {
+export async function viewer(query: string, panels: 'stored' | 'first-run' = 'stored'): Promise<Page> {
   const page = await browser.newPage({ viewport: VIEWPORT });
+  if (panels === 'stored') await page.addInitScript(openInspector);
   await page.goto(`${origin}/${query}`, { waitUntil: 'load' });
   return page;
+}
+
+export async function token(page: Page, name: string): Promise<string> {
+  const hex = await page.evaluate(
+    (which) => getComputedStyle(document.documentElement).getPropertyValue(which).trim(),
+    name
+  );
+  const value = hex.replace('#', '');
+  const channel = (at: number) => parseInt(value.slice(at, at + 2), 16);
+  return `rgb(${channel(0)}, ${channel(2)}, ${channel(4)})`;
+}
+
+export function styleOf(page: Page, selector: string, property: string): Promise<string> {
+  return page.evaluate(
+    ([where, which]) => {
+      const element = document.querySelector(where ?? '');
+      if (!element) throw new Error(`nothing matches ${where}`);
+      return getComputedStyle(element).getPropertyValue(which ?? '');
+    },
+    [selector, property]
+  );
+}
+
+export function zoomOf(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const viewport = document.querySelector('.svelte-flow__viewport');
+    if (!(viewport instanceof HTMLElement)) throw new Error('no flow viewport');
+    return Number(/scale\(([\d.]+)\)/.exec(viewport.style.transform)?.[1] ?? 0);
+  });
+}
+
+export async function settledZoom(page: Page): Promise<number> {
+  let last = -1;
+  await expect
+    .poll(
+      async () => {
+        const now = await zoomOf(page);
+        const stable = now > 0 && Math.abs(now - last) < 1e-6;
+        last = now;
+        return stable;
+      },
+      { interval: 250, timeout: 8000 }
+    )
+    .toBe(true);
+  return last;
+}
+
+export function widthOf(page: Page, selector: string): Promise<number> {
+  return page
+    .locator(selector)
+    .boundingBox()
+    .then((box) => box?.width ?? -1);
 }

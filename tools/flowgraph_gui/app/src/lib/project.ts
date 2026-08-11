@@ -163,10 +163,15 @@ export function edgeTitle(edge: Edge): string | undefined {
   return type === null ? undefined : `sample type: ${type}`;
 }
 
-function edgeClass(edge: Edge): string {
+function edgeClass(edge: Edge, selected: string | null): string {
   const names = ['cler-edge'];
   if (!edge.editable) names.push('cler-edge-readonly');
   if (edge.type_conflict) names.push('cler-edge-conflict');
+  if (selected !== null) {
+    names.push(
+      edge.from === selected || edge.to === selected ? 'cler-edge-lift' : 'cler-edge-dim'
+    );
+  }
   return names.join(' ');
 }
 
@@ -201,7 +206,8 @@ function toEdge(
   edge: Edge,
   id: string,
   colors: Map<string, string>,
-  connectable: boolean
+  connectable: boolean,
+  selected: string | null
 ): RoutedEdge {
   return {
     id,
@@ -220,14 +226,15 @@ function toEdge(
     selectable: true,
     deletable: false,
     style: edgeStyle(edge, colors),
-    class: edgeClass(edge)
+    class: edgeClass(edge, selected)
   };
 }
 
 export function projectSite(
   site: Site,
   specs: BlockSpec[] = [],
-  connectable = false
+  connectable = false,
+  selected: string | null = null
 ): Projection {
   const wired = wiredEdges(site);
   const ids = edgeIds(wired);
@@ -235,7 +242,7 @@ export function projectSite(
   return {
     nodes: site.blocks.map((block) => toNode(site, block, specs, connectable)),
     edges: wired.map((edge, index) =>
-      toEdge(edge, ids[index] ?? edgeKey(edge), colors, connectable)
+      toEdge(edge, ids[index] ?? edgeKey(edge), colors, connectable, selected)
     )
   };
 }
@@ -279,6 +286,7 @@ export function mergeProjection(
 ): Projection {
   const kept = new Map(previous.nodes.map((node) => [node.id, node]));
   const bends = new Map(previous.edges.map((edge) => [edge.id, edge.data?.bends ?? []]));
+  const chosen = new Map(previous.edges.map((edge) => [edge.id, edge.selected === true]));
   const placed = new Map<string, EdgePoint>();
   for (const node of next.nodes) {
     const before = kept.get(node.id);
@@ -300,6 +308,7 @@ export function mergeProjection(
     }),
     edges: next.edges.map((edge) => ({
       ...edge,
+      selected: chosen.get(edge.id) ?? false,
       data: { ...edge.data, bends: bends.get(edge.id) ?? [] }
     }))
   };

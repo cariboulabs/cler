@@ -91,8 +91,8 @@
     background: color-mix(in srgb, var(--accent) 35%, transparent);
   }
   :global(.svelte-flow__edge-label.cler-type-badge) {
-    padding: 1px 5px;
-    border-radius: 4px;
+    padding: 1px var(--sp-1);
+    border-radius: var(--radius-xs);
     background: var(--danger);
     color: var(--accent-fg);
     font-size: 9px;

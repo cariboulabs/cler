@@ -5,6 +5,7 @@ import { fixtures } from '../src/fixtures';
 import { describeApplyError, queued, setInvoker } from '../src/lib/backend';
 import { edgeIds, mergeProjection, projectSite } from '../src/lib/project';
 import { siteViewIds, type Command, type FileModel, type Site } from '../src/lib/schema';
+import { openInspector } from './ui';
 
 const BOOT_TIMEOUT = 120_000;
 const CASE = 60_000;
@@ -270,6 +271,7 @@ function uhdModel(): FileModel {
 
 async function boot(options: { model?: FileModel; shiftOffsets?: boolean } = {}): Promise<Page> {
   const page = await browser.newPage({ viewport: VIEWPORT });
+  await page.addInitScript(openInspector);
   await page.addInitScript(installFake, {
     path: FAKE_PATH,
     model: options.model ?? helloModel(),
@@ -605,8 +607,8 @@ describe('A. view state survives an ordinary edit', () => {
               .transform ?? 'none'
         );
       await select(page, 'source1');
-      await page.click('.svelte-flow__controls-zoomin');
-      await page.click('.svelte-flow__controls-zoomin');
+      await page.click('[data-testid="zoom-in"]');
+      await page.click('[data-testid="zoom-in"]');
       await page.waitForTimeout(500);
       const zoomed = await viewport();
 
@@ -1540,6 +1542,7 @@ describe('G. fixture mode never reaches for a backend', () => {
 
   async function bootExample(): Promise<Page> {
     const page = await browser.newPage({ viewport: VIEWPORT });
+    await page.addInitScript(openInspector);
     await page.addInitScript(installFake, {
       path: FAKE_PATH,
       model: helloModel(),
@@ -1563,8 +1566,8 @@ describe('G. fixture mode never reaches for a backend', () => {
       await select(page, 'iq2mag');
       const field = page.locator('.inspector input').first();
       expect(await field.isDisabled()).toBe(true);
-      expect(await page.textContent('[data-testid="viewer-note"]')).toBe(DESKTOP_NOTE);
-      expect(await page.textContent('[data-testid="palette-notice"]')).toBe(DESKTOP_NOTE);
+      expect(await page.getAttribute('[data-testid="demo-chip"]', 'title')).toBe(DESKTOP_NOTE);
+      expect(await page.textContent('[data-testid="demo-chip"]')).toBe('demo');
       expect(await page.textContent('[data-testid="examples-head"]')).toBe('Examples (viewer)');
 
       await page.evaluate(() => {
@@ -1596,8 +1599,8 @@ describe('G. fixture mode never reaches for a backend', () => {
       await page.waitForSelector(`.path[title="${FAKE_PATH}"]`);
       await page.waitForSelector('.svelte-flow__node[data-id="source1"]');
 
-      expect(await page.locator('[data-testid="viewer-note"]').count()).toBe(0);
-      expect(await page.locator('[data-testid="palette-notice"]').count()).toBe(0);
+      expect(await page.locator('[data-testid="demo-chip"]').count()).toBe(0);
+      expect(await page.locator('[data-testid="examples-head"]').count()).toBe(0);
 
       await select(page, 'source1');
       const field = page.locator('input[data-field="source1.ctor.1"]');
@@ -1811,13 +1814,14 @@ describe('H. the inspector is readable', () => {
     'H3 measures the fixture-mode viewer, where every field is disabled',
     async () => {
       const page = await browser.newPage({ viewport: VIEWPORT });
+      await page.addInitScript(openInspector);
       await page.goto(`${origin}/?fixture=adsb_receiver`, { waitUntil: 'load' });
       await page.waitForSelector('.svelte-flow__node');
       await page.click('.svelte-flow__node[data-id="source"]');
       await page.waitForSelector('.inspector input');
 
       const rows = (await page.evaluate(measureTargets, [
-        ['viewer note', '[data-testid="viewer-note"]'],
+        ['demo chip', '[data-testid="demo-chip"]'],
         ['read-only reason banner', '[data-testid="block-reason"]'],
         ['disabled field text', '.inspector input'],
         ['field label', '.inspector .label'],

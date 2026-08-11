@@ -5,6 +5,7 @@ import { fixtures, fixtureSources } from '../src/fixtures';
 import { codeLines } from '../src/lib/code';
 import { blockSpans, targetAt } from '../src/lib/project';
 import { lineOfOffset, type FileModel, type Span } from '../src/lib/schema';
+import { openInspector } from './ui';
 
 const BOOT_TIMEOUT = 120_000;
 const CASE = 90_000;
@@ -165,6 +166,7 @@ async function boot(name = 'hello_world'): Promise<Page> {
     permissions: ['clipboard-read', 'clipboard-write']
   });
   page.setDefaultTimeout(STEP_TIMEOUT);
+  await page.addInitScript(openInspector);
   await page.addInitScript(installFake, {
     path: FAKE_PATH,
     model: fixtureModel(name),
@@ -555,7 +557,9 @@ describe('the node context menu reaches the code', () => {
     'keeps the pane menu unchanged',
     async () => {
       const page = await boot();
-      await page.locator('.svelte-flow__pane').click({ button: 'right', position: { x: 40, y: 400 } });
+      await page
+        .locator('.svelte-flow__pane')
+        .click({ button: 'right', position: { x: 660, y: 760 } });
       await page.waitForSelector('[data-testid="context-menu"]');
       expect(
         await page.locator('[data-testid="context-menu"] button').evaluateAll((buttons) =>
@@ -577,6 +581,7 @@ describe('the drawer in fixture mode', () => {
         permissions: ['clipboard-read', 'clipboard-write']
       });
       page.setDefaultTimeout(STEP_TIMEOUT);
+      await page.addInitScript(openInspector);
       await page.goto(`${origin}/?fixture=hello_world`, { waitUntil: 'load' });
       await page.waitForSelector('.svelte-flow__node');
 
@@ -621,7 +626,7 @@ describe('the drawer shortcut respects a field with focus', () => {
     'toggles on Ctrl+backtick but not while typing',
     async () => {
       const page = await boot();
-      await page.locator('.svelte-flow__pane').click({ position: { x: 8, y: 300 } });
+      await page.locator('.svelte-flow__pane').click({ position: { x: 660, y: 760 } });
       await page.keyboard.press('Control+`');
       await page.waitForSelector('[data-testid="drawer-body"] .row');
       await page.waitForTimeout(250);

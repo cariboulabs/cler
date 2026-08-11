@@ -60,31 +60,15 @@
     background: var(--bg-1);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 8px 10px;
+    padding: var(--sp-2) var(--sp-3);
     color: var(--fg);
     font-size: 12px;
     line-height: 1.4;
   }
-  .block.unwired {
-    border-style: dashed;
-    border-color: var(--faint);
-    background: repeating-linear-gradient(
-      135deg,
-      var(--bg-1),
-      var(--bg-1) 8px,
-      var(--bg-2) 8px,
-      var(--bg-2) 16px
-    );
-    color: var(--muted);
-  }
-  .block.readonly {
-    border-color: var(--danger-border);
-    background: var(--danger-bg);
-  }
   header {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--sp-1);
     height: 17px;
   }
   .name {
@@ -98,14 +82,16 @@
     flex: none;
     font-size: 9px;
     letter-spacing: 0.04em;
-    padding: 1px 5px;
-    border-radius: 4px;
-    background: var(--danger);
-    color: var(--accent-fg);
+    padding: 0 var(--sp-1);
+    border: 1px solid var(--faint);
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--muted);
     font-weight: 700;
     cursor: help;
   }
   .unwired-badge {
+    border-color: var(--muted);
     background: var(--muted);
     color: var(--bg-0);
   }
@@ -115,8 +101,8 @@
   .type,
   .var {
     font-family: var(--mono);
-    font-size: 10.5px;
-    height: 14px;
+    font-size: 11px;
+    height: 15px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -128,17 +114,17 @@
     color: var(--muted);
   }
   .ports {
-    margin: 4px -10px 0;
+    margin: var(--sp-1) calc(-1 * var(--sp-3)) 0;
   }
   .port {
     position: relative;
     height: 18px;
-    padding-left: 10px;
+    padding-left: var(--sp-3);
     display: flex;
     align-items: center;
   }
   .port-label {
-    padding-left: 4px;
+    padding-left: var(--sp-1);
     font-size: 11px;
     color: var(--muted);
     font-family: var(--mono);

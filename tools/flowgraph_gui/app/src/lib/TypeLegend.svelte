@@ -33,9 +33,10 @@
 <style>
   .legend {
     position: absolute;
-    left: 52px;
-    bottom: 15px;
+    left: calc(var(--rail-left) + 2 * var(--sp-3));
+    bottom: var(--sp-3);
     z-index: 5;
+    transition: left 150ms ease;
     min-width: 108px;
     max-width: 260px;
     padding: var(--sp-1);
@@ -52,7 +53,7 @@
     justify-content: space-between;
     gap: var(--sp-3);
     width: 100%;
-    padding: 2px var(--sp-2);
+    padding: var(--sp-0) var(--sp-2);
     background: transparent;
     border-color: transparent;
     font-size: 11px;
@@ -69,23 +70,23 @@
     font-size: 11px;
   }
   ul {
-    margin: 2px 0 0;
-    padding: 0 var(--sp-2) 2px;
+    margin: var(--sp-0) 0 0;
+    padding: 0 var(--sp-2) var(--sp-0);
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--sp-0);
   }
   li {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--sp-2);
   }
   .swatch {
     flex: none;
     width: 10px;
     height: 10px;
-    border-radius: 2px;
+    border-radius: var(--radius-xs);
   }
   .name {
     font-family: var(--mono);
