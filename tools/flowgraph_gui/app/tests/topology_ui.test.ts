@@ -470,7 +470,7 @@ describe('unwiring, removing and deleting', () => {
     async () => {
       const source = sourceOf('hello_world');
       const spans: Span[] = [];
-      for (const needle of ['plot.set_initial_window', 'plot.render()']) {
+      for (const needle of ['plot.set_initial_window', 'gui.render(flowgraph)']) {
         const at = source.indexOf(needle);
         if (at === -1) throw new Error(`no ${needle}`);
         spans.push({ start: at, end: at + 4 });

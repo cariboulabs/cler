@@ -428,7 +428,7 @@ fn delete_block_refuses_when_the_variable_is_used_outside_the_graph() {
         panic!("expected a reference refusal, got {error}");
     };
     assert_eq!(block, "plot");
-    assert_eq!(spans.len(), 2);
+    assert_eq!(spans.len(), 1);
     let cited: Vec<&str> = spans
         .iter()
         .map(|span| {
@@ -442,10 +442,7 @@ fn delete_block_refuses_when_the_variable_is_used_outside_the_graph() {
         .collect();
     assert_eq!(
         cited,
-        [
-            "plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f); //x,y, width, height",
-            "plot.render();"
-        ]
+        ["plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f); //x,y, width, height"]
     );
     assert!(spans.iter().all(|s| &before[s.start..s.end] == "plot"));
     assert_eq!(session.source(), before);
@@ -985,20 +982,9 @@ fn check(before: &Site, after: &Site, command: &Command) {
         Command::Disconnect { .. } => {
             assert_eq!(after.edges.len(), before.edges.len() - 1);
         }
-        Command::AddRender { block, .. } => {
-            let gui = after.gui.as_ref().expect("a render implies a loop");
-            assert!(
-                gui.renders.iter().any(|call| call.block == *block),
-                "add_render must leave the block in the loop"
-            );
-        }
-        Command::RemoveRender { block, .. } => {
-            let absent = after
-                .gui
-                .as_ref()
-                .map(|gui| gui.renders.iter().all(|call| call.block != *block))
-                .unwrap_or(true);
-            assert!(absent, "remove_render must take the block out of the loop");
+        Command::MaterializeGui { .. } => {
+            let gui = after.gui.as_ref().expect("materialize_gui leaves a loop");
+            assert!(!gui.legacy, "materialize_gui writes the canonical loop");
         }
         Command::AddToGraph { block, .. } => {
             assert!(
@@ -1072,8 +1058,7 @@ fn corrupt(rng: &mut Lcg, command: &Command) -> (u64, Command) {
             | Command::AddBlock { site, .. }
             | Command::RemoveFromGraph { site, .. }
             | Command::AddToGraph { site, .. }
-            | Command::AddRender { site, .. }
-            | Command::RemoveRender { site, .. }
+            | Command::MaterializeGui { site }
             | Command::DeleteBlock { site, .. }
             | Command::DefineBlock { site, .. } => *site = 900,
         },
@@ -1083,13 +1068,11 @@ fn corrupt(rng: &mut Lcg, command: &Command) -> (u64, Command) {
             | Command::SetDisplayName { block, .. }
             | Command::RemoveFromGraph { block, .. }
             | Command::AddToGraph { block, .. }
-            | Command::AddRender { block, .. }
-            | Command::RemoveRender { block, .. }
             | Command::DeleteBlock { block, .. } => *block = "no_such_block".to_string(),
             Command::Connect { from, .. } => *from = "no_such_block".to_string(),
             Command::Disconnect { edge, .. } => *edge = 4242,
             Command::AddBlock { var_name, .. } => *var_name = "not an identifier".to_string(),
-            Command::SetConfig { site, .. } => *site = 900,
+            Command::SetConfig { site, .. } | Command::MaterializeGui { site } => *site = 900,
             Command::DefineBlock { name, .. } => *name = "not an identifier".to_string(),
         },
         3 => match &mut broken {
@@ -1103,9 +1086,8 @@ fn corrupt(rng: &mut Lcg, command: &Command) -> (u64, Command) {
             Command::SetDisplayName { block, .. }
             | Command::RemoveFromGraph { block, .. }
             | Command::AddToGraph { block, .. }
-            | Command::AddRender { block, .. }
-            | Command::RemoveRender { block, .. }
             | Command::DeleteBlock { block, .. } => *block = "no_such_block".to_string(),
+            Command::MaterializeGui { site } => *site = 900,
             Command::SetConfig { path, .. } => *path = "x = 1; std::abort(); //".to_string(),
             Command::DefineBlock { name, .. } => *name = "LacksTheSuffix".to_string(),
         },
@@ -1127,11 +1109,10 @@ fn corrupt(rng: &mut Lcg, command: &Command) -> (u64, Command) {
             }
             Command::RemoveFromGraph { block, .. }
             | Command::AddToGraph { block, .. }
-            | Command::AddRender { block, .. }
-            | Command::RemoveRender { block, .. }
             | Command::DeleteBlock { block, .. } => {
                 *block = "no_such_block".to_string()
             }
+            Command::MaterializeGui { site } => *site = 900,
             Command::DefineBlock { value_type, .. } => {
                 *value_type = "float> pwned; using other = int".to_string()
             }
@@ -1610,7 +1591,7 @@ int main() {
 }
 
 #[test]
-fn the_first_renderable_block_materializes_a_gui_loop() {
+fn materialize_gui_writes_the_canonical_loop() {
     let source = r#"#include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/plots/plot_timeseries.hpp"
@@ -1636,81 +1617,75 @@ int main() {
     assert!(only_site(&session).gui.is_none());
 
     session
-        .apply(transaction(
-            0,
-            vec![Command::AddRender {
-                site: 0,
-                block: "plot".to_string(),
-            }],
-        ))
+        .apply(transaction(0, vec![Command::MaterializeGui { site: 0 }]))
         .expect("materializes the loop");
 
     let written = session.source().to_string();
     assert!(written.contains("#include \"desktop_blocks/gui/gui_manager.hpp\""));
     assert!(written.contains("cler::GuiManager gui(800, 400,"));
     assert!(written.contains("while (!gui.should_close()) {"));
-    assert!(written.contains("plot.render();"));
+    assert!(written.contains("gui.render(flowgraph);"));
     assert!(!written.contains("is_stopped"), "the idle wait loop is replaced");
+    assert!(!written.contains("plot.render();"), "no per-block render lines");
 
     let site = only_site(&session);
     let gui = site.gui.expect("the loop is now modelled");
     assert_eq!(gui.var, "gui");
-    assert_eq!(
-        gui.renders.iter().map(|call| call.block.as_str()).collect::<Vec<_>>(),
-        vec!["plot"]
-    );
+    assert!(!gui.legacy);
 }
 
 #[test]
-fn a_second_renderable_block_joins_the_existing_loop() {
+fn materialize_gui_refuses_a_site_that_already_has_a_loop() {
     let mut session = session("hello_world.cpp");
-    session
-        .apply(transaction(
-            0,
-            vec![Command::AddBlock {
-                site: 0,
-                type_name: "PlotCSpectrumBlock".to_string(),
-                template_args: Vec::new(),
-                ctor_args: vec![
-                    "\"Spectrum\"".to_string(),
-                    "{\"in\"}".to_string(),
-                    "1000".to_string(),
-                    "512".to_string(),
-                ],
-                var_name: "spectrum".to_string(),
-            }],
-        ))
-        .expect("add the plot");
-    session
-        .apply(transaction(
-            1,
-            vec![Command::AddRender {
-                site: 0,
-                block: "spectrum".to_string(),
-            }],
-        ))
-        .expect("join the loop");
+    assert!(only_site(&session)
+        .gui
+        .as_ref()
+        .is_some_and(|gui| !gui.legacy));
 
-    let site = only_site(&session);
-    let gui = site.gui.expect("hello_world already renders");
-    assert_eq!(
-        gui.renders.iter().map(|call| call.block.as_str()).collect::<Vec<_>>(),
-        vec!["plot", "spectrum"]
+    let refused = session
+        .apply(transaction(0, vec![Command::MaterializeGui { site: 0 }]))
+        .expect_err("hello_world already has a gui loop");
+    let ApplyError::UnsupportedShape { detail } = refused else {
+        panic!("expected an unsupported-shape refusal, got {refused}");
+    };
+    assert_eq!(detail, "this site already has a gui loop");
+}
+
+#[test]
+fn materialize_gui_refuses_a_hand_written_legacy_loop() {
+    let source = r#"#include "cler.hpp"
+#include "desktop_blocks/plots/plot_timeseries.hpp"
+#include "desktop_blocks/gui/gui_manager.hpp"
+
+int main() {
+    cler::GuiManager gui(800, 400, "Legacy");
+    PlotTimeSeriesBlock plot("Plot", {"in"}, 1000, 10.0f);
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&plot)
     );
+    flowgraph.run();
+    while (!gui.should_close()) {
+        gui.begin_frame();
+        plot.render();
+        gui.end_frame();
+    }
+    return 0;
+}
+"#;
+    let mut session = DocumentSession::load(source).expect("loads");
+    assert!(only_site(&session)
+        .gui
+        .as_ref()
+        .is_some_and(|gui| gui.legacy));
 
-    session
-        .apply(transaction(
-            2,
-            vec![Command::RemoveRender {
-                site: 0,
-                block: "spectrum".to_string(),
-            }],
-        ))
-        .expect("leave the loop");
-    let after = only_site(&session);
+    let refused = session
+        .apply(transaction(0, vec![Command::MaterializeGui { site: 0 }]))
+        .expect_err("the editor leaves hand-written loops alone");
+    let ApplyError::UnsupportedShape { detail } = refused else {
+        panic!("expected an unsupported-shape refusal, got {refused}");
+    };
     assert_eq!(
-        after.gui.expect("loop survives").renders.len(),
-        1,
-        "removing a render leaves the rest of the loop alone"
+        detail,
+        "this site has a hand-written gui loop; the editor will not modify it"
     );
 }

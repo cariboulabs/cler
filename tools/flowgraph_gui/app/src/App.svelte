@@ -1264,8 +1264,8 @@
     const varName = form.varName.trim();
     pinned.set(varName, at);
     const commands: Command[] = [addBlockCommand(siteIndex, spec, form)];
-    if (spec.renderable) {
-      commands.push({ command: 'add_render', site: siteIndex, block: varName });
+    if (spec.is_gui && doc.model.sites[siteIndex]?.gui === null) {
+      commands.push({ command: 'materialize_gui', site: siteIndex });
     }
     const outcome = await submitAll(commands);
     if (outcome.ok) {

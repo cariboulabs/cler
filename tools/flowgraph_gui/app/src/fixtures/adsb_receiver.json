@@ -1,5 +1,5 @@
 {
-  "sha256": "980a8faee6c7f4c7e9e6d2db54576e12e4b06af3f7b428a02ea6cc1f16596368",
+  "sha256": "1e353c674d6e14053e1924ab07e74bb23349d1dfd2907d243b9b19e18035e9c3",
   "version": "0.3.0",
   "file": "desktop_examples/adsb_receiver.cpp",
   "has_errors": false,
@@ -355,21 +355,9 @@
         "var": "gui",
         "span": {
           "start": 9024,
-          "end": 9220
+          "end": 9090
         },
-        "end_frame_span": {
-          "start": 9118,
-          "end": 9134
-        },
-        "renders": [
-          {
-            "block": "aggregator",
-            "span": {
-              "start": 9089,
-              "end": 9109
-            }
-          }
-        ]
+        "legacy": false
       },
       "unresolved": [],
       "editable": false,

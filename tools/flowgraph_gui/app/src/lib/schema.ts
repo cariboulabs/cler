@@ -76,6 +76,7 @@ export type Site = Capability & {
   runners: Runner[];
   config: SiteConfig | null;
   unresolved: Unresolved[];
+  gui: { var: string; span: Span; legacy: boolean } | null;
 };
 
 export type FileModel = {
@@ -142,8 +143,7 @@ export type Command =
     }
   | { command: 'remove_from_graph'; site: number; block: string }
   | { command: 'add_to_graph'; site: number; block: string }
-  | { command: 'add_render'; site: number; block: string }
-  | { command: 'remove_render'; site: number; block: string }
+  | { command: 'materialize_gui'; site: number }
   | { command: 'delete_block'; site: number; block: string }
   | {
       command: 'define_block';

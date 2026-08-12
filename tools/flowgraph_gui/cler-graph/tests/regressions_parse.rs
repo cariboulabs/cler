@@ -504,6 +504,74 @@ fn gui_manager_is_not_a_canvas_node() {
 }
 
 #[test]
+fn a_canonical_gui_loop_is_modelled() {
+    let source = r#"
+#include "cler.hpp"
+#include "desktop_blocks/gui/gui_manager.hpp"
+int main() {
+    cler::GuiManager gui(800, 400, "Canonical");
+    SourceCWBlock<float> source("Source", 1.0f, 1.0f, 1000);
+    SinkNullBlock<float> sink("Sink");
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, &sink.in),
+        cler::BlockRunner(&sink)
+    );
+    flowgraph.run();
+    while (!gui.should_close()) {
+        gui.render(flowgraph);
+    }
+}
+"#;
+    let site = only(source);
+    let loop_model = site.gui.expect("the canonical loop is modelled");
+    assert_eq!(loop_model.var, "gui");
+    assert!(!loop_model.legacy);
+}
+
+#[test]
+fn an_old_style_frame_loop_is_legacy() {
+    let source = r#"
+#include "cler.hpp"
+#include "desktop_blocks/gui/gui_manager.hpp"
+int main() {
+    cler::GuiManager gui(800, 400, "Legacy");
+    PlotTimeSeriesBlock plot("Plot", {"in"}, 1000, 10.0f);
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&plot)
+    );
+    flowgraph.run();
+    while (!gui.should_close()) {
+        gui.begin_frame();
+        plot.render();
+        gui.end_frame();
+    }
+}
+"#;
+    let site = only(source);
+    let loop_model = site.gui.expect("the legacy loop is modelled");
+    assert_eq!(loop_model.var, "gui");
+    assert!(loop_model.legacy);
+}
+
+#[test]
+fn a_site_without_a_gui_loop_models_none() {
+    let source = r#"
+#include "cler.hpp"
+int main() {
+    SourceCWBlock<float> source("Source", 1.0f, 1.0f, 1000);
+    SinkNullBlock<float> sink("Sink");
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, &sink.in),
+        cler::BlockRunner(&sink)
+    );
+    flowgraph.run();
+}
+"#;
+    let site = only(source);
+    assert!(site.gui.is_none());
+}
+
+#[test]
 fn b12d_conditional_emplace_is_flagged() {
     let source = r#"
 #include "cler.hpp"

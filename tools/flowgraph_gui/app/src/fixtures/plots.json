@@ -1,5 +1,5 @@
 {
-  "sha256": "8b019f5826244ae17cd67e56ea9ad60b711c8652e02640882681ee25ff6fff2d",
+  "sha256": "e2da71983118a85a29115d6568227ee32a3559b470e2e4a4a69e97f48f8e5aa9",
   "version": "0.3.0",
   "file": "desktop_examples/plots.cpp",
   "has_errors": false,
@@ -1014,43 +1014,10 @@
       "gui": {
         "var": "gui",
         "span": {
-          "start": 3312,
-          "end": 3613
+          "start": 3262,
+          "end": 3328
         },
-        "end_frame_span": {
-          "start": 3523,
-          "end": 3539
-        },
-        "renders": [
-          {
-            "block": "cw_timeseries_plot",
-            "span": {
-              "start": 3377,
-              "end": 3405
-            }
-          },
-          {
-            "block": "chirp_timeseries_plot",
-            "span": {
-              "start": 3414,
-              "end": 3445
-            }
-          },
-          {
-            "block": "cspectrum_plot",
-            "span": {
-              "start": 3454,
-              "end": 3478
-            }
-          },
-          {
-            "block": "cspectrogram_plot",
-            "span": {
-              "start": 3487,
-              "end": 3514
-            }
-          }
-        ]
+        "legacy": false
       },
       "unresolved": [],
       "editable": true,

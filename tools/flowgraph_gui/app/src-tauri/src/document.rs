@@ -1329,17 +1329,17 @@ mod render_tests {
         let path = file.display().to_string();
         super::open(&docs, &path).expect("opens");
         let command = serde_json::json!({
-            "command": "add_render",
-            "site": 0,
-            "block": "plot"
+            "command": "materialize_gui",
+            "site": 0
         });
-        let state = super::apply(&docs, &path, 0, vec![command]).expect("add_render applies");
+        let state = super::apply(&docs, &path, 0, vec![command]).expect("materialize_gui applies");
         assert!(
             state.source.contains("cler::GuiManager gui(800, 400, \"my_receiver\")"),
             "the window carries the document name: {}",
             state.source
         );
-        assert!(state.source.contains("plot.render();"));
+        assert!(state.source.contains("gui.render("));
+        assert!(!state.source.contains("plot.render();"));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

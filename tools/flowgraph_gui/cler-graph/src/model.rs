@@ -168,17 +168,10 @@ pub struct Site {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct RenderCall {
-    pub block: String,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct GuiLoop {
     pub var: String,
     pub span: Span,
-    pub end_frame_span: Span,
-    pub renders: Vec<RenderCall>,
+    pub legacy: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -1,5 +1,5 @@
 {
-  "sha256": "be739eeb3175d38268191d86022ef4734998084713422143a17d51aeb959b993",
+  "sha256": "1719754be6301b95c2fac19ac9bce95d837031574c72a56c91f5bb0d99b58091",
   "version": "0.3.0",
   "file": "desktop_examples/polyphase_channelizer.cpp",
   "has_errors": false,
@@ -1036,28 +1036,9 @@
         "var": "gui_manager",
         "span": {
           "start": 5362,
-          "end": 5624
+          "end": 5444
         },
-        "end_frame_span": {
-          "start": 5525,
-          "end": 5549
-        },
-        "renders": [
-          {
-            "block": "plot_polyphase_cspectrum",
-            "span": {
-              "start": 5443,
-              "end": 5477
-            }
-          },
-          {
-            "block": "plot_input_cspectrum",
-            "span": {
-              "start": 5486,
-              "end": 5516
-            }
-          }
-        ]
+        "legacy": false
       },
       "unresolved": [],
       "editable": true,

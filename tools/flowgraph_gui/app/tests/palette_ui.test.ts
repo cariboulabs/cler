@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fixtures } from '../src/fixtures';
 import { addForm, braceListLength } from '../src/lib/palette';
-import { boot, CASE, commands, dragBlock, openLibrary, openMenu, shot, specs, useBrowser, type FakeWindow } from './ui';
+import { boot, CASE, commands, dragBlock, modelOf, openLibrary, openMenu, shot, specs, useBrowser, type FakeWindow } from './ui';
 
 useBrowser();
 
@@ -141,14 +141,16 @@ describe('placing a plot', () => {
   it(
     'renders it without the user writing a loop',
     async () => {
-      const page = await boot();
+      const model = modelOf('hello_world');
+      if (model.sites[0]) model.sites[0].gui = null;
+      const page = await boot({ model });
       await openLibrary(page);
       await page.fill('[data-testid="palette-search"]', 'PlotCSpectrum');
       await dragBlock(page, 'PlotCSpectrumBlock', { x: 640, y: 620 });
 
       await expect.poll(() => commands(page)).toEqual([
         expect.objectContaining({ command: 'add_block', type: 'PlotCSpectrumBlock' }),
-        { command: 'add_render', site: 0, block: 'plot_c_spectrum' }
+        { command: 'materialize_gui', site: 0 }
       ]);
       await page.close();
     },

@@ -229,6 +229,7 @@ function syntheticSite(specs: EdgeSpec[]): Site {
     runners: [],
     config: null,
     unresolved: [],
+    gui: null,
     editable: true,
     read_only_reason: null
   };

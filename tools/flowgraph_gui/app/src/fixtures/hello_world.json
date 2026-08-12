@@ -1,5 +1,5 @@
 {
-  "sha256": "b00263fc1115481ab0c174d6729029b2ad2343f9ca6bfe5e4b76c561ad2fae89",
+  "sha256": "b67f7e9cc6f70b5573149e55208e33e9f006ca62f1db710aeebaeb9fd75582dd",
   "version": "0.3.0",
   "file": "desktop_examples/hello_world.cpp",
   "has_errors": false,
@@ -416,22 +416,10 @@
       "gui": {
         "var": "gui",
         "span": {
-          "start": 1191,
-          "end": 1377
+          "start": 1190,
+          "end": 1256
         },
-        "end_frame_span": {
-          "start": 1287,
-          "end": 1303
-        },
-        "renders": [
-          {
-            "block": "plot",
-            "span": {
-              "start": 1264,
-              "end": 1278
-            }
-          }
-        ]
+        "legacy": false
       },
       "unresolved": [],
       "editable": true,

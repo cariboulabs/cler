@@ -1102,41 +1102,56 @@ impl<'t> Extractor<'t> {
             .unwrap_or(node)
     }
 
-    fn gui_loop(&self, scope: Node<'t>) -> Option<GuiLoop> {
-        let frame = descendants(scope).into_iter().find(|node| {
-            node.kind() == "call_expression" && self.callee_name(*node) == "end_frame"
-        })?;
-        let var = frame
-            .child_by_field_name("function")
+    fn call_receiver(&self, call: Node<'t>) -> Option<String> {
+        call.child_by_field_name("function")
             .and_then(|field| field.child_by_field_name("argument"))
-            .map(|object| self.text(object).to_string())?;
-        let loop_node = frame
-            .parent()
-            .into_iter()
-            .flat_map(|node| std::iter::successors(Some(node), |found| found.parent()))
-            .find(|node| node.kind() == "while_statement")?;
-        let end_frame_span = span(self.statement_node(frame));
-        let renders = descendants(loop_node)
-            .into_iter()
-            .filter(|node| {
-                node.kind() == "call_expression" && self.callee_name(*node) == "render"
-            })
-            .filter_map(|node| {
-                let object = node
-                    .child_by_field_name("function")?
-                    .child_by_field_name("argument")?;
-                let block = self.text(object).to_string();
-                (block != var).then(|| RenderCall {
-                    block,
-                    span: span(self.statement_node(node)),
+            .map(|object| self.text(object).to_string())
+    }
+
+    fn gui_loop(&self, scope: Node<'t>) -> Option<GuiLoop> {
+        let canonical = descendants(scope).into_iter().find_map(|node| {
+            if node.kind() != "while_statement" {
+                return None;
+            }
+            let condition = node.child_by_field_name("condition")?;
+            let var = descendants(condition)
+                .into_iter()
+                .filter(|found| {
+                    found.kind() == "call_expression"
+                        && self.callee_name(*found) == "should_close"
                 })
+                .find_map(|found| self.call_receiver(found))?;
+            let body = node.child_by_field_name("body")?;
+            let renders = descendants(body).into_iter().any(|found| {
+                found.kind() == "call_expression"
+                    && self.callee_name(found) == "render"
+                    && self.call_receiver(found).as_deref() == Some(var.as_str())
+            });
+            renders.then(|| GuiLoop {
+                var,
+                span: span(node),
+                legacy: false,
             })
-            .collect();
+        });
+        if canonical.is_some() {
+            return canonical;
+        }
+
+        let frame = descendants(scope).into_iter().find(|node| {
+            node.kind() == "call_expression"
+                && matches!(
+                    self.callee_name(*node).as_str(),
+                    "end_frame" | "begin_frame"
+                )
+        })?;
+        let var = self.call_receiver(frame)?;
+        let anchor = std::iter::successors(frame.parent(), |found| found.parent())
+            .find(|node| node.kind() == "while_statement")
+            .unwrap_or_else(|| self.statement_node(frame));
         Some(GuiLoop {
             var,
-            span: span(loop_node),
-            end_frame_span,
-            renders,
+            span: span(anchor),
+            legacy: true,
         })
     }
 

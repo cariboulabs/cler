@@ -650,16 +650,24 @@ impl<'a> Planner<'a> {
         Splice::remove(start, end)
     }
 
-    fn materialize_gui(&self, site: &Site, block: &str) -> Result<Vec<Splice>, ApplyError> {
+    fn materialize_gui(&self, site: &Site) -> Result<Vec<Splice>, ApplyError> {
         let eol = self.line_ending();
-        let run = self.statement_of(self.node(
+        let call = self.node(
             site.config
                 .as_ref()
                 .map(|config| config.run_call_span)
                 .ok_or_else(|| ApplyError::UnsupportedShape {
                     detail: "this site has no run call to render after".to_string(),
                 })?,
-        )?);
+        )?;
+        let flowgraph = call
+            .child_by_field_name("function")
+            .and_then(|function| function.child_by_field_name("argument"))
+            .map(|object| self.text(object).to_string())
+            .ok_or_else(|| ApplyError::UnsupportedShape {
+                detail: "this site has no run call to render after".to_string(),
+            })?;
+        let run = self.statement_of(call);
         let indent = self.indent(run.start_byte());
         let inner = format!("{indent}    ");
         let mut splices = Vec::new();
@@ -680,7 +688,7 @@ impl<'a> Planner<'a> {
 
         let idle = self.idle_loop_after(run);
         let loop_text = format!(
-            "{indent}while (!gui.should_close()) {{{eol}{inner}gui.begin_frame();{eol}{inner}{block}.render();{eol}{inner}gui.end_frame();{eol}{indent}}}{eol}"
+            "{indent}while (!gui.should_close()) {{{eol}{inner}gui.render({flowgraph});{eol}{indent}}}{eol}"
         );
         match idle {
             Some(node) => splices.push(Splice::replace(
@@ -828,8 +836,7 @@ impl<'a> Planner<'a> {
             | Command::AddBlock { site, .. }
             | Command::RemoveFromGraph { site, .. }
             | Command::AddToGraph { site, .. }
-            | Command::AddRender { site, .. }
-            | Command::RemoveRender { site, .. }
+            | Command::MaterializeGui { site }
             | Command::DeleteBlock { site, .. }
             | Command::DefineBlock { site, .. } => *site,
         };
@@ -1123,48 +1130,19 @@ impl<'a> Planner<'a> {
                 Ok(vec![self.append_runners(target, &[format!("(&{block})")])?])
             }
 
-            Command::AddRender { site, block } => {
+            Command::MaterializeGui { site } => {
                 let target = self.site(*site)?;
-                self.editable_block(*site, block)?;
-                match &target.gui {
-                    Some(gui) => {
-                        if gui.renders.iter().any(|call| call.block == *block) {
-                            return Err(ApplyError::UnsupportedShape {
-                                detail: format!("{block} already renders"),
-                            });
-                        }
-                        let anchor = self.node(gui.end_frame_span)?;
-                        let indent = self.indent(anchor.start_byte());
-                        let eol = self.line_ending();
-                        Ok(vec![Splice::insert(
-                            self.line_start(anchor.start_byte()),
-                            format!("{indent}{block}.render();{eol}"),
-                        )])
-                    }
-                    None => self.materialize_gui(target, block),
+                if let Some(gui) = &target.gui {
+                    return Err(ApplyError::UnsupportedShape {
+                        detail: if gui.legacy {
+                            "this site has a hand-written gui loop; the editor will not modify it"
+                                .to_string()
+                        } else {
+                            "this site already has a gui loop".to_string()
+                        },
+                    });
                 }
-            }
-
-            Command::RemoveRender { site, block } => {
-                let target = self.site(*site)?;
-                let gui = target
-                    .gui
-                    .as_ref()
-                    .ok_or_else(|| ApplyError::UnsupportedShape {
-                        detail: "this site has no render loop".to_string(),
-                    })?;
-                let call = gui
-                    .renders
-                    .iter()
-                    .find(|call| call.block == *block)
-                    .ok_or_else(|| ApplyError::UnsupportedShape {
-                        detail: format!("{block} does not render"),
-                    })?;
-                let statement = self.node(call.span)?;
-                Ok(vec![Splice::remove(
-                    self.line_start(statement.start_byte()),
-                    self.line_end(statement.end_byte()),
-                )])
+                self.materialize_gui(target)
             }
 
             Command::RemoveFromGraph { site, block } => {

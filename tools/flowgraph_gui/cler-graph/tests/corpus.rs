@@ -155,7 +155,7 @@ fn spike_resolves_the_trig_alias() {
     assert_eq!(trigger.alias.as_deref(), Some("Trig"));
     assert_eq!(trigger.template_args[0].text, "float");
     assert!(trigger.editable);
-    assert_eq!(site.blocks.len(), 7);
+    assert_eq!(site.blocks.len(), 9);
     assert_eq!(site.edges.len(), 6);
 
     let source = site.block("source").expect("source block");

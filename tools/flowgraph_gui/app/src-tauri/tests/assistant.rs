@@ -71,7 +71,7 @@ fn spec(name: &str) -> BlockSpec {
         template_params: Vec::new(),
         ctor_params: Vec::new(),
         may_block: true,
-        renderable: false,
+        is_gui: false,
         conditional_members: false,
         ports: vec![
             Port {
@@ -465,8 +465,7 @@ fn tag(command: &Command) -> &'static str {
         Command::AddBlock { .. } => "add_block",
         Command::RemoveFromGraph { .. } => "remove_from_graph",
         Command::AddToGraph { .. } => "add_to_graph",
-        Command::AddRender { .. } => "add_render",
-        Command::RemoveRender { .. } => "remove_render",
+        Command::MaterializeGui { .. } => "materialize_gui",
         Command::DeleteBlock { .. } => "delete_block",
         Command::DefineBlock { .. } => "define_block",
     }
@@ -549,7 +548,7 @@ fn the_tool_schema_matches_the_command_enum_field_for_field() {
         variants.len(),
         "two schema variants map onto one command"
     );
-    assert_eq!(covered.len(), 13, "the schema is missing a command");
+    assert_eq!(covered.len(), 12, "the schema is missing a command");
 }
 
 #[test]

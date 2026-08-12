@@ -444,20 +444,9 @@ fn commands() -> Vec<Value> {
             ],
         ),
         variant(
-            "add_render",
-            "Draw a block in the gui loop, creating the loop if the file has none.",
-            vec![
-                site(),
-                ("block", words("variable name of the block"), true),
-            ],
-        ),
-        variant(
-            "remove_render",
-            "Stop drawing a block in the gui loop.",
-            vec![
-                site(),
-                ("block", words("variable name of the block"), true),
-            ],
+            "materialize_gui",
+            "Create the gui window and render loop for a site that has none; blocks marked is_gui render automatically.",
+            vec![site()],
         ),
         variant(
             "delete_block",

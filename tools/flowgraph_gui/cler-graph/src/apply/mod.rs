@@ -73,13 +73,8 @@ pub enum Command {
         site: usize,
         block: String,
     },
-    AddRender {
+    MaterializeGui {
         site: usize,
-        block: String,
-    },
-    RemoveRender {
-        site: usize,
-        block: String,
     },
     DeleteBlock {
         site: usize,

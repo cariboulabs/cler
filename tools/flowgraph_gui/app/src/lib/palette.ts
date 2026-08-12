@@ -34,7 +34,7 @@ export type BlockSpec = {
   template_params: TemplateParam[];
   ctor_params: CtorParam[];
   may_block: boolean;
-  renderable: boolean;
+  is_gui: boolean;
   conditional_members: boolean;
   ports: SpecPort[];
   input_count: PortCount;
@@ -307,7 +307,7 @@ export function specsFromSites(sites: Site[], documentPath: string): BlockSpec[]
         template_params: [],
         ctor_params: [],
         may_block: false,
-        renderable: false,
+        is_gui: false,
         conditional_members: false,
         ports: [],
         input_count: 'unknown' as PortCount,
