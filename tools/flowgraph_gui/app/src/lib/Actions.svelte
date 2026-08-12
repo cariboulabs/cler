@@ -31,6 +31,10 @@
   export type Tasks = { check: Gate; build: Gate; run: Gate };
 
   type Props = {
+    path: string;
+    examples: string[];
+    onnew: () => void;
+    onexample: (name: string) => void;
     canUndo: boolean;
     canRedo: boolean;
     canSave: boolean;
@@ -87,6 +91,10 @@
   type Menu = { x: number; y: number; node: string | null; edge: string | null };
 
   const {
+    path,
+    examples,
+    onnew,
+    onexample,
     canUndo,
     canRedo,
     canSave,
@@ -139,18 +147,7 @@
   const MENU_WIDTH = 200;
   const MENU_HEIGHT = 260;
   const MENU_IDS = ['check', 'build', 'run', 'save', 'save-as', 'undo', 'redo', 'fit'];
-  const TOOLBAR_IDS = [
-    'check',
-    'build',
-    'run',
-    'open',
-    'save',
-    'undo',
-    'redo',
-    'zoom-out',
-    'zoom-in',
-    'fit'
-  ];
+  const TOOLBAR_IDS = ['check', 'build', 'run', 'undo', 'redo', 'zoom-out', 'zoom-in', 'fit'];
   const CTRL_KEYS: Record<string, string> = {
     y: 'redo',
     o: 'open',
@@ -201,6 +198,9 @@
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let problemsOpen = $state(false);
   let draftOpen = $state(false);
+  let fileOpen = $state(false);
+  let examplesOpen = $state(false);
+
 
   const listed = $derived<Problem[]>([...compiled, ...problems]);
   const failing = $derived(listed.some((problem) => problem.severity === 'error'));
@@ -423,6 +423,7 @@
 
   function isTyping(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false;
+    if (target instanceof HTMLInputElement && target.readOnly) return false;
     return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
   }
 
@@ -497,12 +498,90 @@
     menu = null;
     problemsOpen = false;
     draftOpen = false;
+    fileOpen = false;
+    examplesOpen = false;
   }}
 />
 
 <div class="bar" data-testid="top-bar">
   <img src="/brand/cler_mark.png" alt="cler" width="22" height="22" />
   <span class="wordmark">cler</span>
+  <span class="draft-slot">
+    <button
+      class="file"
+      data-testid="file-menu"
+      aria-expanded={fileOpen}
+      onclick={(event) => {
+        event.stopPropagation();
+        menu = null;
+        problemsOpen = false;
+        draftOpen = false;
+        examplesOpen = false;
+        fileOpen = !fileOpen;
+      }}>File</button
+    >
+    {#if fileOpen}
+      <div class="draft-menu file-menu" data-testid="file-menu-list">
+        <button
+          data-testid="file-new"
+          onclick={() => {
+            fileOpen = false;
+            onnew();
+          }}>New…</button
+        >
+        <button
+          data-testid="file-open"
+          onclick={() => {
+            fileOpen = false;
+            onopen();
+          }}>Open…<span class="key">Ctrl+O</span></button
+        >
+        <span class="submenu-slot">
+          <button
+            data-testid="file-open-example"
+            aria-expanded={examplesOpen}
+            onclick={(event) => {
+              event.stopPropagation();
+              examplesOpen = !examplesOpen;
+            }}>Open example<span class="key">▸</span></button
+          >
+          {#if examplesOpen}
+            <div class="draft-menu examples-menu" data-testid="examples-menu">
+              {#each examples as name (name)}
+                <button
+                  class="example"
+                  data-example={name}
+                  onclick={() => {
+                    fileOpen = false;
+                    examplesOpen = false;
+                    onexample(name);
+                  }}>{name}</button
+                >
+              {/each}
+            </div>
+          {/if}
+        </span>
+        <hr />
+        <button
+          data-testid="file-save"
+          disabled={!canSave}
+          title={canSave ? undefined : saveNote}
+          onclick={() => {
+            fileOpen = false;
+            onsave();
+          }}>Save<span class="key">Ctrl+S</span></button
+        >
+        <button
+          data-testid="file-save-as"
+          onclick={() => {
+            fileOpen = false;
+            onsaveas();
+          }}>Save as…</button
+        >
+      </div>
+    {/if}
+  </span>
+  <input class="doc-path" data-testid="doc-path" type="text" readonly value={path} title={path} />
   {#if demo}
     <span class="demo" data-testid="demo-chip" title={editNote}>demo</span>
   {/if}
@@ -554,7 +633,6 @@
       {/if}
     </span>
   {/if}
-  <span class="tagline">flowgraph editor</span>
   <span class="grow"></span>
   <button
     class="problems"
@@ -745,6 +823,64 @@
   .draft-slot {
     position: relative;
     display: inline-flex;
+  }
+  .file {
+    flex: none;
+    padding: var(--sp-0) var(--sp-2);
+    background: transparent;
+    border-color: transparent;
+    font-size: 12px;
+    color: var(--fg);
+  }
+  .file:hover {
+    background: var(--bg-2);
+  }
+  .file-menu {
+    min-width: 190px;
+  }
+  .file-menu hr {
+    width: 100%;
+    margin: var(--sp-0) 0;
+    border: none;
+    border-top: 1px solid var(--border);
+  }
+  .file-menu .key {
+    float: right;
+    margin-left: var(--sp-3);
+    color: var(--faint);
+    font-size: 11px;
+  }
+  .submenu-slot {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .examples-menu {
+    position: absolute;
+    top: 0;
+    left: calc(100% + var(--sp-0));
+  }
+  .file-menu .example {
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .doc-path {
+    flex: 1;
+    min-width: 80px;
+    max-width: 560px;
+    height: 24px;
+    padding: 0 var(--sp-2);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-overflow: ellipsis;
+  }
+  .doc-path:focus {
+    outline: none;
+    border-color: var(--border-hi);
   }
   .draft-menu {
     position: absolute;

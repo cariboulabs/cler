@@ -94,6 +94,10 @@ export function saveDocumentAs(path: string, newPath: string): Promise<DocumentS
   return documentCall('save_document_as', { path, newPath });
 }
 
+export function newDocument(path: string): Promise<DocumentState> {
+  return documentCall('new_document', { path });
+}
+
 export function saveCache(path: string, ui: unknown): Promise<void> {
   return invoker('save_cache', { path, ui }) as Promise<void>;
 }

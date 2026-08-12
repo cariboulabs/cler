@@ -46,7 +46,9 @@ describe('the empty-state card carries the honest reason', () => {
       expect(await page.locator('aside.sidebar button.primary').count()).toBe(0);
       await shot(page, 'first-run-empty-state');
 
-      await page.selectOption('[data-testid="example-select"]', 'plots');
+      await page.click('[data-testid="file-menu"]');
+      await page.click('[data-testid="file-open-example"]');
+      await page.click('[data-example="plots"]');
       await page.waitForSelector('.svelte-flow__node[data-id="cw_throttle"]');
       await page.close();
     },
@@ -352,7 +354,6 @@ describe('the cheap repaints', () => {
       const path = page.locator('.sidebar .path');
       expect(await path.textContent()).toBe('hello_world.cpp');
       expect(await path.getAttribute('title')).toBe('/tmp/fake/hello_world.cpp');
-      expect(await page.textContent('[data-testid="examples-head"]')).toBe('Examples');
       await page.close();
     },
     CASE

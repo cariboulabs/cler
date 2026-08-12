@@ -446,6 +446,34 @@ pub fn save(docs: &Documents, path: &str) -> Result<DocumentState, String> {
     Ok(snapshot(&target, doc))
 }
 
+const NEW_DOCUMENT_TEMPLATE: &str = r#"#include "cler.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
+
+#include <chrono>
+#include <thread>
+
+int main() {
+    auto flowgraph = cler::make_desktop_flowgraph();
+
+    cler::FlowGraphConfig config;
+    config.scheduler = cler::SchedulerType::ThreadPerBlock;
+    flowgraph.run(config);
+    while (!flowgraph.is_stopped()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    return 0;
+}
+"#;
+
+pub fn create(docs: &Documents, path: &str) -> Result<DocumentState, String> {
+    if Path::new(path).exists() {
+        return Err(format!("{path} already exists"));
+    }
+    std::fs::write(path, NEW_DOCUMENT_TEMPLATE)
+        .map_err(|cause| format!("cannot write {path}: {cause}"))?;
+    open(docs, path)
+}
+
 pub fn save_as(docs: &Documents, path: &str, new_path: &str) -> Result<DocumentState, String> {
     let source = {
         let mut map = lock(docs);

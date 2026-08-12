@@ -449,7 +449,7 @@ describe('editing against a fake backend', () => {
 
       const locked = editor.locator('input[data-field="config.adaptive_sleep"]');
       expect(await locked.isDisabled()).toBe(true);
-      await expect.poll(() => editor.textContent('.inspector')).toContain('config from factory');
+      await expect.poll(() => editor.textContent('.sidebar')).toContain('config from factory');
     },
     CASE_TIMEOUT
   );
@@ -585,18 +585,20 @@ describe('top bar, context menu and shortcuts', () => {
   it(
     'keeps document and canvas actions in the top bar, with history enabled only when it exists',
     async () => {
-      const ids = ['open', 'undo', 'redo', 'zoom-out', 'zoom-in', 'fit'];
+      const ids = ['undo', 'redo', 'zoom-out', 'zoom-in', 'fit'];
       const titles = await Promise.all(
         ids.map((id) => editor.getAttribute(`[data-testid="${id}"]`, 'title'))
       );
       expect(titles).toEqual([
-        'Open file (Ctrl+O)',
         null,
         null,
         'Zoom out (Ctrl+-)',
         'Zoom in (Ctrl+=)',
         'Fit view (Ctrl+0)'
       ]);
+      expect(await editor.locator('[data-testid="file-menu"]').count()).toBe(1);
+      expect(await editor.locator('[data-testid="open"]').count()).toBe(0);
+      expect(await editor.locator('[data-testid="save"]').count()).toBe(0);
       expect(await editor.textContent('[data-testid="undo-tooltip"]')).toBe('nothing to undo');
       expect(await editor.textContent('[data-testid="redo-tooltip"]')).toBe('nothing to redo');
       for (const id of ['drawer', 'assistant', 'chrome']) {
@@ -606,7 +608,7 @@ describe('top bar, context menu and shortcuts', () => {
       expect(await editor.locator('.sidebar button', { hasText: 'Undo' }).count()).toBe(0);
       expect(await editor.locator('[data-testid="undo"]').isDisabled()).toBe(true);
       expect(await editor.locator('[data-testid="redo"]').isDisabled()).toBe(true);
-      for (const id of ['open', 'zoom-out', 'zoom-in', 'fit']) {
+      for (const id of ['zoom-out', 'zoom-in', 'fit']) {
         expect(await editor.locator(`[data-testid="${id}"]`).isDisabled()).toBe(false);
       }
 

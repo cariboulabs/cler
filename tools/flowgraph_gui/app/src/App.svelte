@@ -18,6 +18,7 @@
   import AddBlock from './lib/AddBlock.svelte';
   import Assistant from './lib/Assistant.svelte';
   import BlockNode from './lib/BlockNode.svelte';
+  import FieldList from './lib/FieldList.svelte';
   import Inspector from './lib/Inspector.svelte';
   import Palette from './lib/Palette.svelte';
   import { type RailTab } from './lib/RailTabs.svelte';
@@ -57,6 +58,7 @@
     redoDocument,
     reloadDocument,
     runTarget,
+    newDocument,
     saveDocument,
     saveDocumentAs,
     spansOf,
@@ -123,7 +125,7 @@
   import CodeDrawer from './lib/CodeDrawer.svelte';
   import type { Tab } from './lib/CodeDrawer.svelte';
   import { fixtureNames } from './fixtures';
-  import type { Outcome } from './lib/inspector';
+  import { configFields, type Outcome } from './lib/inspector';
 
   const nodeTypes: NodeTypes = { block: BlockNode as unknown as NodeTypes[string] };
   const edgeTypes: EdgeTypes = { routed: RoutedEdge as unknown as EdgeTypes[string] };
@@ -202,6 +204,7 @@
   let drawerMounted = $state(false);
   let actions = $state<Actions | null>(null);
   let inspector = $state<Inspector | null>(null);
+  let configList = $state<FieldList | null>(null);
   let adder = $state<AddBlock | null>(null);
   let specs = $state.raw<BlockSpec[]>([]);
   let selectedEdge = $state<string | null>(null);
@@ -653,6 +656,7 @@
     }
     clampContext();
     inspector?.discardDrafts();
+    configList?.discardDrafts();
     diagLines = [];
     output = [];
     busy = null;
@@ -915,6 +919,29 @@
     hint('draft discarded, saved file restored');
   }
 
+  async function newFile() {
+    if (!desktop) {
+      announce('new file needs the desktop shell');
+      return;
+    }
+    const picked = await pickSavePath('flowgraph.cpp');
+    if (!picked) return;
+    try {
+      const next = await newDocument(picked);
+      opened = picked;
+      install(next, true);
+      hint(`created ${picked.split('/').pop() ?? picked}`);
+    } catch (error) {
+      announce(describeApplyError(error));
+    }
+  }
+
+  function openExampleByName(name: string) {
+    if (desktop && name === fixtureName) return;
+    fixtureName = name;
+    if (!desktop) openFixture();
+  }
+
   async function saveAs() {
     if (!desktop) {
       announce('save as needs the desktop shell');
@@ -937,6 +964,7 @@
 
   function discardOnReload() {
     inspector?.discardDrafts();
+    configList?.discardDrafts();
   }
 
   async function submitAll(commands: Command[]): Promise<Outcome> {
@@ -1288,7 +1316,7 @@
 >
   <aside class="sidebar" class:collapsed={!leftOpen}>
     <div class="head">
-      <h1>Document</h1>
+      <h1>Settings</h1>
       <button
         class="toggle"
         data-testid="toggle-left"
@@ -1324,6 +1352,42 @@
         </section>
       {/if}
 
+      <section>
+        <h2>Run arguments</h2>
+        <input
+          class="runargs"
+          data-testid="run-args"
+          type="text"
+          placeholder="command-line args"
+          title="command-line arguments passed to the binary on Run"
+          value={runArgs}
+          onchange={(event) => {
+            runArgs = event.currentTarget.value;
+            storePanels();
+          }}
+        />
+      </section>
+
+      {#if site?.config}
+        <section>
+          <h2>
+            Flowgraph config <span class="config-source">{site.config.source}</span>
+          </h2>
+          {#if configFields(siteIndex, site.config).length === 0}
+            <p class="muted">no direct assignments</p>
+          {:else}
+            <FieldList
+              bind:this={configList}
+              scope={`${doc.path}::${siteIndex}::`}
+              fields={configFields(siteIndex, site.config)}
+              ownerReason={site.config.read_only_reason}
+              enabled={editable}
+              {submit}
+            />
+          {/if}
+        </section>
+      {/if}
+
       {#if site}
         <section>
           <h2>Graph</h2>
@@ -1341,22 +1405,6 @@
           </dl>
         </section>
       {/if}
-
-      <section>
-        <h2>Run</h2>
-        <input
-          class="runargs"
-          data-testid="run-args"
-          type="text"
-          placeholder="command-line args"
-          title="command-line arguments passed to the binary on Run"
-          value={runArgs}
-          onchange={(event) => {
-            runArgs = event.currentTarget.value;
-            storePanels();
-          }}
-        />
-      </section>
 
       {#if site}
         <section>
@@ -1382,15 +1430,6 @@
           {/if}
         </section>
       {/if}
-
-      <section>
-        <h2 data-testid="examples-head">Examples</h2>
-        <select data-testid="example-select" bind:value={fixtureName} onchange={openFixture}>
-          {#each fixtureNames as name (name)}
-            <option value={name}>{name}</option>
-          {/each}
-        </select>
-      </section>
 
       {#if status}
         <p class="status" data-testid="status">{status}</p>
@@ -1446,6 +1485,10 @@
           <Background bgColor="var(--bg-0)" patternColor="var(--border)" gap={18} size={2} />
           <Actions
             bind:this={actions}
+            path={opened ?? doc.path}
+            examples={fixtureNames}
+            onnew={() => void newFile()}
+            onexample={openExampleByName}
             canUndo={doc.canUndo}
             canRedo={doc.canRedo}
             canSave={editable && !needsReload}
@@ -1723,13 +1766,19 @@
   }
   .runargs {
     width: 100%;
-    padding: var(--sp-0) var(--sp-1);
+    padding: var(--sp-1) var(--sp-2);
     background: var(--bg-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-family: var(--mono);
     font-size: 11px;
     color: var(--fg);
+  }
+  .config-source {
+    text-transform: none;
+    letter-spacing: 0;
+    font-family: var(--mono);
+    font-weight: 400;
   }
   dl {
     display: grid;

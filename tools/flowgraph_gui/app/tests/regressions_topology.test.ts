@@ -419,7 +419,9 @@ describe('8. examples are real editable documents in the desktop shell', () => {
     'G3/G5 opens the selected example and keeps editor actions enabled',
     async () => {
       const page = await boot();
-      await page.selectOption('[data-testid="example-select"]', 'plots');
+      await page.click('[data-testid="file-menu"]');
+      await page.click('[data-testid="file-open-example"]');
+      await page.click('[data-example="plots"]');
       await expect
         .poll(async () => (await calls(page)).filter((call) => call === 'open_document').length)
         .toBe(2);

@@ -223,6 +223,15 @@ fn dispatch(
                 emitter(events),
             )
         })),
+        "new_document" => match document::create(docs, &path).and_then(|state| {
+            document::canonical(&path).map(|target| {
+                watch_parent(watcher, &target).ok();
+                state
+            })
+        }) {
+            Ok(state) => carry(state),
+            Err(message) => Reply::Refused(message),
+        },
         "save_document_as" => {
             let Some(new_path) = args.get("newPath").and_then(Value::as_str) else {
                 return Reply::Loud("save_document_as needs a newPath argument".to_string());

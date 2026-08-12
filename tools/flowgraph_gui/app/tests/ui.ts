@@ -459,6 +459,15 @@ function installFake(setup: Setup) {
       state.dirty = false;
       state.revision += 1;
     }
+    if (command === 'new_document') {
+      state.model = structuredClone(pristine.model);
+      state.source = pristine.source;
+      state.path = String((args as Loose).path);
+      state.dirty = false;
+      state.canUndo = false;
+      state.canRedo = false;
+      state.revision += 1;
+    }
     if (command === 'reload_document') {
       state.model = structuredClone(pristine.model);
       state.source = pristine.source;

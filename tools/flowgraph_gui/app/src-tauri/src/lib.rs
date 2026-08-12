@@ -107,6 +107,18 @@ fn save_document(path: String, docs: State<'_, Documents>) -> Result<DocumentSta
 }
 
 #[tauri::command]
+fn new_document(
+    path: String,
+    docs: State<'_, Documents>,
+    watcher: State<'_, FileWatcher>,
+) -> Result<DocumentState, String> {
+    let state = document::create(&docs, &path)?;
+    let target = document::canonical(&path)?;
+    watch_parent(&watcher, &target)?;
+    Ok(state)
+}
+
+#[tauri::command]
 fn save_document_as(
     path: String,
     new_path: String,
@@ -359,6 +371,7 @@ pub fn run() {
             move_nodes,
             undo,
             redo,
+            new_document,
             save_document,
             save_document_as,
             save_cache,

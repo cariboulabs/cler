@@ -854,7 +854,8 @@ describe('B. no state survives the block it belongs to', () => {
         (next) => (window as unknown as FakeWindow).__fake.setPath(next),
         OTHER_PATH
       );
-      await page.click('[data-testid="open"]');
+      await page.click('[data-testid="file-menu"]');
+      await page.click('[data-testid="file-open"]');
       await page.waitForSelector(`.path[title="${OTHER_PATH}"]`);
       await select(page, 'source1');
       expect(await page.locator('[data-error="source1.ctor.1"]').count()).toBe(0);
@@ -1658,7 +1659,8 @@ describe('G. fixture mode never reaches for a backend', () => {
 
       await page.click('.svelte-flow__node[data-id="fanout"]');
       await page.waitForSelector('.inspector input');
-      await page.click('[data-testid="open"]');
+      await page.click('[data-testid="file-menu"]');
+      await page.click('[data-testid="file-open"]');
       await page.locator('[data-testid="undo"]').click({ force: true });
       await page.locator('[data-testid="redo"]').click({ force: true });
       await page.selectOption('.sidebar select >> nth=0', { index: 1 });
@@ -1695,7 +1697,6 @@ describe('G. fixture mode never reaches for a backend', () => {
       await select(page, 'source1');
       expect(await page.locator('.inspector input').first().isDisabled()).toBe(false);
       expect(await page.locator('[data-testid="demo-chip"]').count()).toBe(0);
-      expect(await page.textContent('[data-testid="examples-head"]')).toBe('Examples');
       expect((await names(page)).filter((name) => name === 'open_document')).toHaveLength(1);
       await page.close();
     },
@@ -1706,7 +1707,9 @@ describe('G. fixture mode never reaches for a backend', () => {
     'G3 opens another real document when the selected example changes',
     async () => {
       const page = await boot();
-      await page.selectOption('[data-testid="example-select"]', 'plots');
+      await page.click('[data-testid="file-menu"]');
+      await page.click('[data-testid="file-open-example"]');
+      await page.click('[data-example="plots"]');
       await expect
         .poll(async () => (await names(page)).filter((name) => name === 'open_document').length)
         .toBe(2);
