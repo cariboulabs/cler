@@ -119,6 +119,7 @@ pub struct Edge {
 pub enum ConfigSource {
     Variable,
     InlineTemporary,
+    Absent,
 }
 
 #[derive(Debug, Clone, Serialize)]

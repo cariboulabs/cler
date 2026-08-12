@@ -15,6 +15,7 @@ export type Field = {
   hint: string | null;
   hintIsCode: boolean;
   editable: boolean;
+  options?: string[];
   toCommand: (text: string) => Command;
   refuse?: (text: string) => string | null;
 };
@@ -208,9 +209,29 @@ export function blockFields(
   return [name, ...templates, ...ctors];
 }
 
+const SCHEDULERS = [
+  'cler::SchedulerType::ThreadPerBlock',
+  'cler::SchedulerType::FixedThreadPool',
+  'cler::SchedulerType::PinnedIslands'
+];
+
+const KNOWN_CONFIG: { path: string; hint: string; options?: string[] }[] = [
+  { path: 'scheduler', hint: 'default ThreadPerBlock', options: SCHEDULERS },
+  { path: 'num_workers', hint: 'workers for FixedThreadPool / PinnedIslands, default 4' },
+  {
+    path: 'collect_detailed_stats',
+    hint: 'per-block stats, costs throughput, default false',
+    options: ['true', 'false']
+  },
+  { path: 'max_calls_per_tick', hint: 'default 4' }
+];
+
 export function configFields(site: number, config: SiteConfig): Field[] {
-  return config.assignments.map((assignment) => {
+  const setConfig = (path: string) => (text: string) =>
+    ({ command: 'set_config', site, path, new_value: text }) as Command;
+  const assigned = config.assignments.map((assignment): Field => {
     const editable = config.editable && assignment.editable;
+    const known = KNOWN_CONFIG.find((entry) => entry.path === assignment.path);
     return {
       id: `config.${assignment.path}`,
       label: assignment.path,
@@ -219,12 +240,24 @@ export function configFields(site: number, config: SiteConfig): Field[] {
       hint: editable ? null : (assignment.read_only_reason ?? config.read_only_reason),
       hintIsCode: false,
       editable,
-      toCommand: (text) => ({
-        command: 'set_config',
-        site,
-        path: assignment.path,
-        new_value: text
-      })
+      options: known?.options,
+      toCommand: setConfig(assignment.path)
     };
   });
+  const unassigned = KNOWN_CONFIG.filter(
+    (entry) => !config.assignments.some((assignment) => assignment.path === entry.path)
+  ).map(
+    (entry): Field => ({
+      id: `config.${entry.path}`,
+      label: entry.path,
+      slot: '',
+      value: '',
+      hint: config.editable ? entry.hint : config.read_only_reason,
+      hintIsCode: false,
+      editable: config.editable,
+      options: entry.options,
+      toCommand: setConfig(entry.path)
+    })
+  );
+  return [...assigned, ...unassigned];
 }

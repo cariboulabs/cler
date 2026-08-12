@@ -67,7 +67,10 @@ fn hello_world_is_fully_editable() {
     assert_eq!(site.edges.len(), 4);
     assert!(site.editable);
     assert!(site.unresolved.is_empty());
-    assert!(site.config.is_none());
+    let config = site.config.as_ref().expect("a bare run() exposes an absent config");
+    assert_eq!(config.source, ConfigSource::Absent);
+    assert!(config.editable);
+    assert!(config.assignments.is_empty());
     assert!(site.blocks.iter().all(|b| b.editable && b.in_graph));
     assert!(site.edges.iter().all(|e| e.editable));
 

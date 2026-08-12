@@ -114,10 +114,18 @@
         value={drafts[keyOf(field)] ?? field.value}
         disabled={!enabled || !field.editable}
         title={hintText(field)}
+        list={field.options ? `${scope}${field.id}.options` : undefined}
         oninput={(event) => (drafts[keyOf(field)] = event.currentTarget.value)}
         onblur={() => run(field, blurAction(drafts[keyOf(field)], field.value))}
         onkeydown={(event) => onKeydown(event, field)}
       />
+      {#if field.options}
+        <datalist id={`${scope}${field.id}.options`}>
+          {#each field.options as option (option)}
+            <option value={option}></option>
+          {/each}
+        </datalist>
+      {/if}
       {#if errors[keyOf(field)]}
         <span class="err" data-error={field.id}>{errors[keyOf(field)]}</span>
       {:else if field.hint && field.hint !== ownerReason}

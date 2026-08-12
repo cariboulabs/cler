@@ -931,8 +931,20 @@
       opened = picked;
       install(next, true);
       hint(`created ${picked.split('/').pop() ?? picked}`);
+      void warnIfOutsideRepo(picked);
     } catch (error) {
       announce(describeApplyError(error));
+    }
+  }
+
+  async function warnIfOutsideRepo(path: string) {
+    const outside =
+      'this file is outside a cler repository — editing works, build and run need one';
+    try {
+      const info = await findTarget(path);
+      if (!info.available && (info.reason ?? '').includes('repository')) announce(outside);
+    } catch {
+      announce(outside);
     }
   }
 
@@ -953,7 +965,10 @@
       opened = picked;
       install(next, true);
     });
-    if (outcome.ok) hint(`saved as ${picked.split('/').pop() ?? picked}`);
+    if (outcome.ok) {
+      hint(`saved as ${picked.split('/').pop() ?? picked}`);
+      void warnIfOutsideRepo(picked);
+    }
   }
 
   async function save() {

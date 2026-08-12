@@ -284,7 +284,23 @@ describe('field commands', () => {
     };
 
     const rows = configFields(2, config);
-    expect(rows.map((row) => row.id)).toEqual(['config.scheduler', 'config.adaptive_sleep']);
+    expect(rows.map((row) => row.id)).toEqual([
+      'config.scheduler',
+      'config.adaptive_sleep',
+      'config.num_workers',
+      'config.collect_detailed_stats',
+      'config.max_calls_per_tick'
+    ]);
+    expect(rows[0]?.options).toContain('cler::SchedulerType::PinnedIslands');
+    const unassigned = rows.find((row) => row.id === 'config.num_workers');
+    expect(unassigned?.value).toBe('');
+    expect(unassigned?.editable).toBe(true);
+    expect(unassigned?.toCommand('2')).toEqual({
+      command: 'set_config',
+      site: 2,
+      path: 'num_workers',
+      new_value: '2'
+    });
     expect(rows[0]?.toCommand('cler::SchedulerType::FixedThreadPool')).toEqual({
       command: 'set_config',
       site: 2,

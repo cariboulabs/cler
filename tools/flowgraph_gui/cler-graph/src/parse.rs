@@ -1042,9 +1042,19 @@ impl<'t> Extractor<'t> {
             .map(named_children)
             .unwrap_or_default();
         let argument = if self.callee_name(run_call) == "run_for" {
-            (arguments.len() > 1).then(|| arguments[arguments.len() - 1])?
+            (arguments.len() > 1).then(|| arguments[arguments.len() - 1])
         } else {
-            arguments.first().copied()?
+            arguments.first().copied()
+        };
+        let Some(argument) = argument else {
+            return Some(Config {
+                var: None,
+                source: ConfigSource::Absent,
+                assignments: Vec::new(),
+                run_call_span: span(run_call),
+                editable: true,
+                read_only_reason: None,
+            });
         };
 
         if argument.kind() != "identifier" {

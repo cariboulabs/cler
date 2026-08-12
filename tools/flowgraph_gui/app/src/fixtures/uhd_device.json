@@ -339,7 +339,17 @@
           "type_conflict": false
         }
       ],
-      "config": null,
+      "config": {
+        "var": null,
+        "source": "absent",
+        "assignments": [],
+        "run_call_span": {
+          "start": 6070,
+          "end": 6085
+        },
+        "editable": true,
+        "read_only_reason": null
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null
@@ -694,7 +704,17 @@
           "type_conflict": false
         }
       ],
-      "config": null,
+      "config": {
+        "var": null,
+        "source": "absent",
+        "assignments": [],
+        "run_call_span": {
+          "start": 7582,
+          "end": 7597
+        },
+        "editable": true,
+        "read_only_reason": null
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null
@@ -1035,7 +1055,17 @@
           "type_conflict": false
         }
       ],
-      "config": null,
+      "config": {
+        "var": null,
+        "source": "absent",
+        "assignments": [],
+        "run_call_span": {
+          "start": 8818,
+          "end": 8833
+        },
+        "editable": true,
+        "read_only_reason": null
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null
@@ -1288,7 +1318,17 @@
           "type_conflict": false
         }
       ],
-      "config": null,
+      "config": {
+        "var": null,
+        "source": "absent",
+        "assignments": [],
+        "run_call_span": {
+          "start": 10051,
+          "end": 10066
+        },
+        "editable": true,
+        "read_only_reason": null
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null

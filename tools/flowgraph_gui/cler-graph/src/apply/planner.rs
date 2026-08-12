@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use tree_sitter::{Node, Tree};
 
-use crate::model::{Block, FileModel, Reason, Runner, Site, Span};
+use crate::model::{Block, ConfigSource, FileModel, Reason, Runner, Site, Span};
 use crate::parse::{descendants, named_children};
 use crate::parse_source;
 
@@ -797,12 +797,34 @@ impl<'a> Planner<'a> {
                         reason: config.read_only_reason,
                     });
                 }
-                let var = config
-                    .var
-                    .as_deref()
-                    .ok_or_else(|| ApplyError::UnsupportedShape {
-                        detail: "config has no variable to assign through".to_string(),
+                let Some(var) = config.var.as_deref() else {
+                    if config.source != ConfigSource::Absent {
+                        return Err(ApplyError::UnsupportedShape {
+                            detail: "config has no variable to assign through".to_string(),
+                        });
+                    }
+                    let run = self.node(config.run_call_span)?;
+                    let arguments = run.child_by_field_name("arguments").ok_or_else(|| {
+                        ApplyError::UnsupportedShape {
+                            detail: "run call has no argument list".to_string(),
+                        }
                     })?;
+                    let call_patch = if arguments.named_child_count() > 0 {
+                        ", config"
+                    } else {
+                        "config"
+                    };
+                    let statement = self.statement_of(run);
+                    let indent = self.indent(statement.start_byte());
+                    let eol = self.line_ending();
+                    let declaration = format!(
+                        "{indent}cler::FlowGraphConfig config;{eol}{indent}config.{path} = {new_value};{eol}"
+                    );
+                    return Ok(vec![
+                        Splice::insert(self.line_start(statement.start_byte()), declaration),
+                        Splice::insert(arguments.end_byte() - 1, call_patch.to_string()),
+                    ]);
+                };
                 let assignment = format!("{var}.{path} = {new_value};");
                 let eol = self.line_ending();
                 match config

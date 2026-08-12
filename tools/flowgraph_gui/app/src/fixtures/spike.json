@@ -620,7 +620,17 @@
           "type_conflict": false
         }
       ],
-      "config": null,
+      "config": {
+        "var": null,
+        "source": "absent",
+        "assignments": [],
+        "run_call_span": {
+          "start": 4929,
+          "end": 4944
+        },
+        "editable": true,
+        "read_only_reason": null
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null
