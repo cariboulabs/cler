@@ -1472,11 +1472,51 @@ int main() {
     assert!(session
         .source()
         .contains("cler::BlockRunner(&source_cw, &plot.in[0])"));
+    assert!(
+        session.source().contains("cler::BlockRunner(&plot)"),
+        "the sink needs its own runner or it never executes: {}",
+        session.source()
+    );
 
     let site = only_site(&session);
-    assert_eq!(site.runners.len(), 1);
+    assert_eq!(site.runners.len(), 2);
     assert_eq!(site.edges.len(), 1);
+    assert!(site.blocks.iter().all(|block| block.in_graph));
 
     let second = session.source().to_string();
     assert!(second.contains("cler::make_desktop_flowgraph(\n"), "the call stays multi-line");
+}
+
+#[test]
+fn connecting_into_an_existing_graph_gives_a_new_sink_its_runner() {
+    let mut session = session("hello_world.cpp");
+    session
+        .apply(transaction(
+            0,
+            vec![Command::AddBlock {
+                site: 0,
+                type_name: "SinkNullBlock".to_string(),
+                template_args: vec!["float".to_string()],
+                ctor_args: vec!["\"Null\"".to_string()],
+                var_name: "null_sink".to_string(),
+            }],
+        ))
+        .expect("add sink");
+    session
+        .apply(transaction(
+            1,
+            vec![Command::Connect {
+                site: 0,
+                from: "throttle".to_string(),
+                to: "null_sink".to_string(),
+                port: "in".to_string(),
+                port_index: None,
+            }],
+        ))
+        .expect("connect into the new sink");
+
+    assert!(session.source().contains("cler::BlockRunner(&null_sink)"));
+    let site = only_site(&session);
+    let sink = site.block("null_sink").expect("sink survives");
+    assert!(sink.in_graph, "a wired sink must run");
 }

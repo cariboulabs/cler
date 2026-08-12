@@ -394,6 +394,15 @@ fn artifact_name(target: &Path, found: &Target) -> Result<String, String> {
     Ok(format!("{PRODUCER}:{key}:{}", found.name))
 }
 
+#[cfg(test)]
+pub fn build_input_for_test(
+    target: &Path,
+    found: &Target,
+    draft: &DraftState,
+) -> Result<InputKey, String> {
+    build_input(target, found, draft)
+}
+
 fn build_input(target: &Path, found: &Target, draft: &DraftState) -> Result<InputKey, String> {
     let root = repo_root(target).ok_or_else(|| outside(target))?;
     let relative = target.strip_prefix(&root).unwrap_or(target);
@@ -569,7 +578,7 @@ fn dependency_inputs(
     started: SystemTime,
 ) -> Result<BTreeMap<String, String>, String> {
     let root = repo_root(target).ok_or_else(|| outside(target))?;
-    let relative_target = target.strip_prefix(&root).map_err(|_| outside(target))?;
+    let relative_target = target.strip_prefix(&root).ok();
     let mut depfiles = Vec::new();
     collect_depfiles(build_dir, &mut depfiles)?;
     if depfiles.is_empty() {
@@ -587,7 +596,9 @@ fn dependency_inputs(
             let Some((name, actual)) = dependency_name(&path, source_dir, build_dir, &root) else {
                 continue;
             };
-            if name == format!("{REPO_DEPENDENCY}{}", relative_target.display()) {
+            if relative_target
+                .is_some_and(|relative| name == format!("{REPO_DEPENDENCY}{}", relative.display()))
+            {
                 continue;
             }
             if !path.starts_with(build_dir)

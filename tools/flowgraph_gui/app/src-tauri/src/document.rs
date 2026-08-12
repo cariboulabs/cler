@@ -1246,3 +1246,45 @@ mod external_add_tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
+#[cfg(test)]
+mod external_build_tests {
+    #[test]
+    fn an_external_draft_records_its_artifact() {
+        let _guard = crate::settings::test_guard();
+        let dir = std::env::temp_dir().join(format!("cler-ext-build-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let file = dir.join("flowgraph.cpp");
+        std::fs::write(
+            &file,
+            concat!(
+                "#include \"cler.hpp\"\n",
+                "#include \"task_policies/cler_desktop_tpolicy.hpp\"\n",
+                "#include \"desktop_blocks/sources/source_cw.hpp\"\n",
+                "#include \"desktop_blocks/sinks/sink_null.hpp\"\n",
+                "int main() {\n",
+                "    SourceCWBlock<float> source(\"Source\", 1.0f, 1.0f, 1000);\n",
+                "    SinkNullBlock<float> sink(\"Null\");\n",
+                "    auto flowgraph = cler::make_desktop_flowgraph(\n",
+                "        cler::BlockRunner(&source, &sink.in),\n",
+                "        cler::BlockRunner(&sink)\n",
+                "    );\n",
+                "    flowgraph.run();\n",
+                "    return 0;\n",
+                "}\n"
+            ),
+        )
+        .expect("seed");
+
+        let docs = super::Documents::default();
+        let path = file.display().to_string();
+        super::open(&docs, &path).expect("opens");
+        let draft = super::snapshot_draft(&docs, &path).expect("draft");
+        let found = crate::build::find_target(&path).expect("target");
+        assert!(found.available, "{:?}", found.reason);
+        assert!(found.name.starts_with("cler_draft_"));
+        assert!(crate::build::build_input_for_test(&file, &found, &draft).is_ok());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

@@ -649,6 +649,37 @@ impl<'a> Planner<'a> {
         Splice::remove(start, end)
     }
 
+    fn append_runners(&self, site: &Site, tails: &[String]) -> Result<Splice, ApplyError> {
+        let call = self.node(site.span)?;
+        let list = self.argument_list(call)?;
+        let factory = self.runner_factory(site);
+        let eol = self.line_ending();
+        match named_children(list).last().copied() {
+            Some(last) => {
+                let indent = self.indent(last.start_byte());
+                let written = tails
+                    .iter()
+                    .map(|tail| format!(",{eol}{indent}{factory}{tail}"))
+                    .collect::<String>();
+                Ok(Splice::insert(last.end_byte(), written))
+            }
+            None => {
+                let statement = self.statement_of(call);
+                let outer = self.indent(statement.start_byte());
+                let inner = format!("{outer}    ");
+                let written = tails
+                    .iter()
+                    .map(|tail| format!("{factory}{tail}"))
+                    .collect::<Vec<_>>()
+                    .join(&format!(",{eol}{inner}"));
+                Ok(Splice::insert(
+                    list.end_byte() - 1,
+                    format!("{eol}{inner}{written}{eol}{outer}"),
+                ))
+            }
+        }
+    }
+
     fn runner_factory(&self, site: &Site) -> String {
         site.runners
             .iter()
@@ -865,50 +896,36 @@ impl<'a> Planner<'a> {
                 let source = self.editable_block(*site, from)?;
                 let sink = self.editable_block(*site, to)?;
                 let argument = channel_argument(&sink.var, port, *port_index);
-                match target
-                    .runners
-                    .iter()
-                    .find(|runner| runner.block.as_deref() == Some(source.var.as_str()))
-                {
-                    Some(_) => {
-                        let runner = self.editable_runner(target, &source.var)?;
-                        let list = self.argument_list(self.node(runner.span)?)?;
-                        let last = named_children(list).last().copied().ok_or_else(|| {
-                            ApplyError::UnsupportedShape {
-                                detail: format!("runner for {from} has no arguments"),
-                            }
-                        })?;
-                        Ok(vec![Splice::insert(
-                            last.end_byte(),
-                            format!(", {argument}"),
-                        )])
-                    }
-                    None => {
-                        let call = self.node(target.span)?;
-                        let list = self.argument_list(call)?;
-                        let factory = self.runner_factory(target);
-                        let eol = self.line_ending();
-                        let runner = format!("{factory}(&{}, {argument})", source.var);
-                        match named_children(list).last().copied() {
-                            Some(last) => {
-                                let indent = self.indent(last.start_byte());
-                                Ok(vec![Splice::insert(
-                                    last.end_byte(),
-                                    format!(",{eol}{indent}{runner}"),
-                                )])
-                            }
-                            None => {
-                                let statement = self.statement_of(call);
-                                let outer = self.indent(statement.start_byte());
-                                let inner = format!("{outer}    ");
-                                Ok(vec![Splice::insert(
-                                    list.end_byte() - 1,
-                                    format!("{eol}{inner}{runner}{eol}{outer}"),
-                                )])
-                            }
-                        }
-                    }
+                let runs = |var: &str| {
+                    target
+                        .runners
+                        .iter()
+                        .any(|runner| runner.block.as_deref() == Some(var))
+                };
+                let mut tails: Vec<String> = Vec::new();
+                if !runs(&source.var) {
+                    tails.push(format!("(&{}, {argument})", source.var));
                 }
+                if !runs(&sink.var) {
+                    tails.push(format!("(&{})", sink.var));
+                }
+                if runs(&source.var) {
+                    let runner = self.editable_runner(target, &source.var)?;
+                    let list = self.argument_list(self.node(runner.span)?)?;
+                    let last = named_children(list).last().copied().ok_or_else(|| {
+                        ApplyError::UnsupportedShape {
+                            detail: format!("runner for {from} has no arguments"),
+                        }
+                    })?;
+                    let mut splices =
+                        vec![Splice::insert(last.end_byte(), format!(", {argument}"))];
+                    if !tails.is_empty() {
+                        splices.push(self.append_runners(target, &tails)?);
+                    }
+                    splices.sort_by_key(|splice| splice.start);
+                    return Ok(splices);
+                }
+                Ok(vec![self.append_runners(target, &tails)?])
             }
 
             Command::Disconnect { site, edge } => {
