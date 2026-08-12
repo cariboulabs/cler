@@ -54,7 +54,11 @@
     draggable={enabled}
     ondragstart={(event) => startDrag(event, spec)}
   >
-    <button class="row" title={ctorSignature(spec)} ondblclick={() => enabled && onpick(spec)}>
+    <button
+      class="row"
+      title={`${ctorSignature(spec)}\nclick to place — or drag onto the canvas`}
+      onclick={() => enabled && onpick(spec)}
+    >
       <span class="name">{spec.name}</span>
       {#if portsSummary(spec)}
         <span class="ports">{portsSummary(spec)}</span>
