@@ -10,6 +10,7 @@
 #include <type_traits>
 
 struct PlotCSpectrumBlock : public cler::BlockBase {
+    static constexpr bool is_gui = true;
     const size_t BUFFER_SIZE_MULTIPLIER = 3;
     static constexpr size_t MAX_INPUT_CHANNEL_SLOTS = 16;
 
@@ -38,6 +39,8 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
     void set_active(bool active) {
         _external_pause.store(!active, std::memory_order_release);
     }
+
+    void set_visible(bool visible) { _visible = visible; }
 
     // GUI-THREAD-ONLY: retunes the frequency axis and requests a one-shot
     // X-axis re-fit on the next render(). procedure() never reads _sps.
@@ -94,4 +97,6 @@ private:
     std::atomic<bool> _gui_pause = false;
 
     std::atomic<bool> _external_pause{false};
+
+    bool _visible = true;
 };

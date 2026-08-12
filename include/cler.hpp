@@ -179,6 +179,14 @@ namespace cler {
     template<typename Block>
     constexpr bool block_declares_may_block_v = block_declares_may_block<Block>::value;
 
+    template<typename Block, typename = void>
+    struct block_declares_is_gui : std::false_type {};
+    template<typename Block>
+    struct block_declares_is_gui<Block, std::enable_if_t<Block::is_gui>> : std::true_type {};
+    template<typename Block>
+    constexpr bool block_declares_is_gui_v =
+        block_declares_is_gui<std::remove_cv_t<std::remove_reference_t<Block>>>::value;
+
     template<typename Block, typename... Channels>
     struct BlockRunner {
         Block* block;
@@ -405,6 +413,11 @@ namespace cler {
         using ThreadPerBlockScheduler = sched::ThreadPerBlockScheduler<SchedulerHost>;
         using FixedThreadPoolScheduler = sched::FixedThreadPoolScheduler<SchedulerHost>;
         using PinnedIslandsScheduler = sched::PinnedIslandsScheduler<SchedulerHost>;
+
+        template <typename F>
+        void for_each_block(F&& f) {
+            std::apply([&](auto&... runners) { (f(*runners.block), ...); }, _runners);
+        }
 
         void run(const FlowGraphConfig& config = FlowGraphConfig{}) {
             _config = config;

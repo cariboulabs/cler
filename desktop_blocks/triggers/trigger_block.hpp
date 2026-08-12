@@ -17,6 +17,7 @@
 // thread) reads.
 template <typename T = float>
 struct TriggerBlock : public cler::BlockBase {
+    static constexpr bool is_gui = true;
     cler::Channel<T> in;
 
     enum class Edge   { Rising, Falling };
@@ -187,7 +188,10 @@ struct TriggerBlock : public cler::BlockBase {
         return cler::Empty{};
     }
 
+    void set_visible(bool visible) { _visible = visible; }
+
     void render() {
+        if (!_visible) return;
         // Always is applied once, not every frame, or the window would snap
         // back and become unresizable.
         if (_pending_rect) {
@@ -287,6 +291,8 @@ struct TriggerBlock : public cler::BlockBase {
     }
 
 private:
+    bool _visible = true;
+
     struct Config {
         size_t sample_rate        = 1;   // rate the sample counts below were derived at
         float  threshold          = 0.0f;

@@ -167,6 +167,7 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
 
 
 void PlotCSpectrumBlock::render() {
+    if (!_visible) return;
     // Skip the snapshot while paused so the displayed data stays frozen even
     // though procedure() keeps draining input underneath.
     size_t available = 0;

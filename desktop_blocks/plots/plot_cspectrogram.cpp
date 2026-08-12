@@ -226,6 +226,7 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrogramBlock::procedure() {
 }
 
 void PlotCSpectrogramBlock::render() {
+    if (!_visible) return;
     // Applied once (Always, then flag cleared) so the user can still move or
     // resize afterward; Always every frame would re-snap the window.
     if (_pending_rect) {

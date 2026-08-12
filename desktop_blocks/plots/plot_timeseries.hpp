@@ -7,6 +7,7 @@
 #include "imgui.h"
 
 struct PlotTimeSeriesBlock : public cler::BlockBase {
+    static constexpr bool is_gui = true;
     static constexpr size_t MAX_INPUT_CHANNEL_SLOTS = 16;
 
     cler::Channel<float>* in;

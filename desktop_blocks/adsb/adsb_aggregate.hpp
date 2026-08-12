@@ -10,6 +10,7 @@
 #include <cmath>
 
 struct ADSBAggregateBlock : public cler::BlockBase {
+    static constexpr bool is_gui = true;
     cler::Channel<mode_s_msg> in;
 
     typedef void (*OnAircraftUpdateCallback)(const ADSBState&, void* context);

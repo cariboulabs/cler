@@ -5,9 +5,11 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 #ifdef CLER_GUI_HAVE_ZLIB
@@ -238,6 +240,14 @@ void GuiManager::request_screenshot(const std::string& path) {
 
 bool GuiManager::should_close() const {
     return glfwWindowShouldClose(window);
+}
+
+void GuiManager::request_close() {
+    glfwSetWindowShouldClose(window, GLFW_TRUE);
+}
+
+void GuiManager::frame_sleep() const {
+    std::this_thread::sleep_for(std::chrono::milliseconds(_frame_sleep_ms));
 }
 
 } // namespace cler

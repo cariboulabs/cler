@@ -10,6 +10,7 @@
 #include <type_traits>
 
 struct PlotCSpectrogramBlock : public cler::BlockBase {
+    static constexpr bool is_gui = true;
     const size_t BUFFER_SIZE_MULTIPLIER = 3;
 
     // Input is always fully drained (upstream fanout never stalls); only the
@@ -45,6 +46,8 @@ struct PlotCSpectrogramBlock : public cler::BlockBase {
     void set_active(bool active) {
         _external_pause.store(!active, std::memory_order_release);
     }
+
+    void set_visible(bool visible) { _visible = visible; }
 
     // GUI-THREAD-ONLY. Existing ring rows were recorded at the old rate and
     // would be mislabeled on the new axis, so this clears the ring (under
@@ -160,4 +163,6 @@ private:
     float  _grid_freq_mhz = 1.0f;    // vertical (frequency) line spacing, MHz
 
     std::atomic<bool> _gui_pause = false;
+
+    bool _visible = true;
 };
