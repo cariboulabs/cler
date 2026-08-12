@@ -108,23 +108,36 @@
         >{field.label}{#if field.slot}<span class="slot" data-slot={field.id}>{field.slot}</span
           >{/if}</span
       >
-      <input
-        type="text"
-        data-field={field.id}
-        value={drafts[keyOf(field)] ?? field.value}
-        disabled={!enabled || !field.editable}
-        title={hintText(field)}
-        list={field.options ? `${scope}${field.id}.options` : undefined}
-        oninput={(event) => (drafts[keyOf(field)] = event.currentTarget.value)}
-        onblur={() => run(field, blurAction(drafts[keyOf(field)], field.value))}
-        onkeydown={(event) => onKeydown(event, field)}
-      />
       {#if field.options}
-        <datalist id={`${scope}${field.id}.options`}>
+        <select
+          data-field={field.id}
+          value={field.value}
+          disabled={!enabled || !field.editable}
+          title={hintText(field)}
+          onchange={(event) => {
+            const text = event.currentTarget.value;
+            if (text !== '' && text !== field.value) run(field, { kind: 'commit', text });
+          }}
+        >
+          <option value="" disabled={field.value !== ''}>
+            {field.placeholder ?? 'unset'}
+          </option>
           {#each field.options as option (option)}
-            <option value={option}></option>
+            <option value={option}>{option}</option>
           {/each}
-        </datalist>
+        </select>
+      {:else}
+        <input
+          type="text"
+          data-field={field.id}
+          value={drafts[keyOf(field)] ?? field.value}
+          disabled={!enabled || !field.editable}
+          title={hintText(field)}
+          placeholder={field.placeholder}
+          oninput={(event) => (drafts[keyOf(field)] = event.currentTarget.value)}
+          onblur={() => run(field, blurAction(drafts[keyOf(field)], field.value))}
+          onkeydown={(event) => onKeydown(event, field)}
+        />
       {/if}
       {#if errors[keyOf(field)]}
         <span class="err" data-error={field.id}>{errors[keyOf(field)]}</span>
@@ -158,7 +171,8 @@
     font-size: 11px;
     color: var(--faint);
   }
-  input {
+  input,
+  select {
     width: 100%;
     background: var(--bg-2);
     color: var(--fg);
@@ -167,6 +181,15 @@
     padding: var(--sp-1) var(--sp-2);
     font-family: var(--mono);
     font-size: 11px;
+  }
+  select:disabled {
+    color: var(--muted);
+    background: var(--bg-1);
+    border-style: dashed;
+    cursor: not-allowed;
+  }
+  input::placeholder {
+    color: var(--faint);
   }
   input:hover:not(:disabled) {
     border-color: var(--border-hi);

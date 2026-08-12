@@ -434,9 +434,8 @@ describe('editing against a fake backend', () => {
   it(
     'edits a config assignment and disables the read-only one',
     async () => {
-      const editable = editor.locator('input[data-field="config.scheduler"]');
-      await editable.fill('cler::SchedulerType::FixedThreadPool');
-      await editable.blur();
+      const editable = editor.locator('select[data-field="config.scheduler"]');
+      await editable.selectOption('cler::SchedulerType::FixedThreadPool');
 
       await expect.poll(sent).toEqual([
         {
@@ -728,7 +727,7 @@ describe('top bar, context menu and shortcuts', () => {
       expect(await rightClickPrevented(editor, '.svelte-flow__pane')).toBe(true);
       await expect.poll(() => menu().count()).toBe(1);
 
-      expect(await rightClickPrevented(editor, 'input[data-field="config.scheduler"]')).toBe(false);
+      expect(await rightClickPrevented(editor, 'input[data-field="config.num_workers"]')).toBe(false);
       await expect.poll(() => menu().count()).toBe(0);
     },
     CASE_TIMEOUT
@@ -811,7 +810,7 @@ describe('retractable panels', () => {
       await settled('.sidebar', SIDEBAR_WIDTH);
       await settled('.inspector', INSPECTOR_WIDTH);
 
-      const field = editor.locator('input[data-field="config.scheduler"]');
+      const field = editor.locator('input[data-field="config.num_workers"]');
       await field.click();
       await field.pressSequentially('[]');
       await settled('.sidebar', SIDEBAR_WIDTH);

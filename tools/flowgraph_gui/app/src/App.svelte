@@ -1429,7 +1429,10 @@
       {#if site?.config}
         <section>
           <h2>
-            Flowgraph config <span class="config-source">{site.config.source}</span>
+            Flowgraph config
+            {#if site.config.source !== 'absent'}
+              <span class="config-source">{site.config.source}</span>
+            {/if}
           </h2>
           {#if configFields(siteIndex, site.config).length === 0}
             <p class="muted">no direct assignments</p>
@@ -1446,23 +1449,6 @@
         </section>
       {/if}
 
-      {#if site}
-        <section>
-          <h2>Graph</h2>
-          <dl>
-            <dt>function</dt>
-            <dd>{site.function}()</dd>
-            <dt>flowgraph</dt>
-            <dd>{site.flowgraph_var}</dd>
-            <dt>blocks</dt>
-            <dd>{site.blocks.length}</dd>
-            <dt>edges</dt>
-            <dd>{site.edges.length}</dd>
-            <dt>unwired</dt>
-            <dd>{site.blocks.filter((block) => !block.in_graph).length}</dd>
-          </dl>
-        </section>
-      {/if}
 
       {#if site}
         <section>
@@ -1470,12 +1456,10 @@
         </section>
       {/if}
 
-      {#if site}
+      {#if site && notes.length > 0}
         <section>
           <h2>Read-only ({notes.length})</h2>
-          {#if notes.length === 0}
-            <p class="muted">everything in this site is editable</p>
-          {:else}
+          {#if notes.length > 0}
             <ul class="notes">
               {#each notes as note (note.element + note.reason)}
                 <li>
@@ -1491,10 +1475,10 @@
 
       {#if desktop}
         <section data-testid="libraries">
-          <h2>Libraries</h2>
+          <h2>Block paths</h2>
           <dl>
             <dt>cler root</dt>
-            <dd class="path">{libSettings.clerRoot ?? 'auto — the repo of the open file'}</dd>
+            <dd class="path root-path">{libSettings.clerRoot ?? 'auto (repo of the open file)'}</dd>
           </dl>
           <div class="lib-actions">
             <button data-testid="pick-cler-root" onclick={() => void pickClerRoot()}
@@ -1881,6 +1865,10 @@
     letter-spacing: 0;
     font-family: var(--mono);
     font-weight: 400;
+  }
+  .root-path {
+    word-break: normal;
+    overflow-wrap: anywhere;
   }
   .lib-actions {
     display: flex;

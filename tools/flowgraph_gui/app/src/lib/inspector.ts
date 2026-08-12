@@ -16,6 +16,7 @@ export type Field = {
   hintIsCode: boolean;
   editable: boolean;
   options?: string[];
+  placeholder?: string;
   toCommand: (text: string) => Command;
   refuse?: (text: string) => string | null;
 };
@@ -215,16 +216,30 @@ const SCHEDULERS = [
   'cler::SchedulerType::PinnedIslands'
 ];
 
-const KNOWN_CONFIG: { path: string; hint: string; options?: string[] }[] = [
-  { path: 'scheduler', hint: 'default ThreadPerBlock', options: SCHEDULERS },
-  { path: 'num_workers', hint: 'workers for FixedThreadPool / PinnedIslands, default 4' },
+const KNOWN_CONFIG: { path: string; hint: string; options?: string[]; fallback: string }[] = [
+  {
+    path: 'scheduler',
+    hint: 'which scheduler runs the blocks',
+    options: SCHEDULERS,
+    fallback: 'cler::SchedulerType::ThreadPerBlock'
+  },
+  {
+    path: 'num_workers',
+    hint: 'workers for FixedThreadPool / PinnedIslands',
+    fallback: '4'
+  },
   {
     path: 'collect_detailed_stats',
-    hint: 'per-block stats, costs throughput, default false',
-    options: ['true', 'false']
+    hint: 'per-block stats, costs throughput',
+    options: ['true', 'false'],
+    fallback: 'false'
   },
-  { path: 'max_calls_per_tick', hint: 'default 4' }
+  { path: 'max_calls_per_tick', hint: '', fallback: '4' }
 ];
+
+function shortValue(text: string): string {
+  return text.split('::').pop() ?? text;
+}
 
 export function configFields(site: number, config: SiteConfig): Field[] {
   const setConfig = (path: string) => (text: string) =>
@@ -252,10 +267,11 @@ export function configFields(site: number, config: SiteConfig): Field[] {
       label: entry.path,
       slot: '',
       value: '',
-      hint: config.editable ? entry.hint : config.read_only_reason,
+      hint: config.editable ? entry.hint || null : config.read_only_reason,
       hintIsCode: false,
       editable: config.editable,
       options: entry.options,
+      placeholder: `default: ${shortValue(entry.fallback)}`,
       toCommand: setConfig(entry.path)
     })
   );

@@ -698,6 +698,12 @@ cler-validate desktop_examples/*.cpp     # missing runners, bad connections
 cler-viz file.cpp -o output.svg
 ```
 
+### Flowgraph GUI
+
+Before editing anything under `tools/flowgraph_gui/`, read
+`tools/flowgraph_gui/AGENTS.md` — it carries the tool's architecture map,
+layout contract, and UI/UX rules.
+
 ### Flowgraph GUI product constraint
 
 The GUI may place existing blocks discovered from the block library, but it
