@@ -253,6 +253,34 @@ A block whose `procedure()` can block (hardware refill, blocking I/O) declares
 `static constexpr bool may_block = true;` and automatically gets a dedicated
 thread instead of sharing a pool/island worker.
 
+### GUI blocks
+
+A block that draws every frame declares `static constexpr bool is_gui = true;`
+and implements `void render()`. `GuiManager::render(flowgraph)` renders one
+frame: `begin_frame()`, every `is_gui` block's `render()` in **runner order**,
+`end_frame()`, `frame_sleep()`. The canonical desktop GUI app is:
+
+```cpp
+cler::GuiManager gui(800, 400, "Title");
+// ... blocks, flowgraph ...
+flowgraph.run();
+while (!gui.should_close()) {
+    gui.render(flowgraph);
+}
+```
+
+If it draws or acts every frame, it is an `is_gui` block in the graph —
+control panels included. A GUI-only block has no channels and its
+`procedure()` returns `cler::Error::NotEnoughSamples`, so the scheduler backs
+off and parks it. Per-frame ordering is expressed by runner position (spike's
+capture block renders after the plots because it is listed after them). Note
+runner order also seeds scheduler topo tie-breaking; on a throughput-tuned
+graph, check the partition after reordering runners for render order.
+`render()` runs on the GUI thread concurrently with `procedure()` on a
+worker — anything both touch needs the plot blocks' snapshot/atomic pattern.
+Plots hide via `set_visible(false)` (render draws nothing) — distinct from
+`set_active(false)` (procedure drains without processing).
+
 ## 5. Channels & Buffer Access
 
 ```cpp

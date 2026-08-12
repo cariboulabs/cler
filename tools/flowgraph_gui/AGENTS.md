@@ -82,6 +82,12 @@ per document.
 
 - No wizard for defining new block *types* — blocks are authored in C++ and
   discovered by the palette (repo AGENTS.md rule).
+- The editor never authors or edits render-loop bodies. The framework owns
+  rendering (`gui.render(flowgraph)`, repo AGENTS.md "GUI blocks");
+  `materialize_gui` splices the GuiManager declaration and the constant
+  two-line loop once, anchored after `run()`, and never touches them again.
+  Hand-written loops (`begin_frame`/`end_frame`) parse as `gui.legacy` and are
+  refused, never modified. The palette's `is_gui` flag comes from the trait.
 - Palette = `desktop_blocks/` of the resolved repo + configured
   `blockLibraries`. Spliced `#include`s are library-root-relative so files
   stay portable; absolute paths live only in per-user settings.

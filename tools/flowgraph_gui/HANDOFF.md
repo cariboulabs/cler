@@ -55,7 +55,12 @@ remove by identifier, never reorder — spike's retile step is order-critical.
 not blocks. Currently the palette flag is `render()`-only because it scans
 `desktop_blocks/`; tighten it if example-local scanning ever lands.
 
-## OPEN — the question to resume on
+## CLOSED — resolved by GUI_OWNERSHIP_PLAN.md (branch gui-in-framework)
+
+Decided yes, shipped: `is_gui` trait, `GuiManager::render(fg)`, canonical
+two-line loop everywhere including spike, editor loop machinery deleted
+(`materialize_gui` replaces `add_render`/`remove_render`). The analysis below
+is kept for the record.
 
 **Should GUI management move into the framework instead of the editor?**
 The idea: mark GUI blocks with a trait, and have `make_desktop_flowgraph` (the

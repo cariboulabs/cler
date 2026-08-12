@@ -180,6 +180,10 @@ before/after, including first-capture behaviour. Manual gate, hardware-only.
 
 Each stage compiles, passes tests, commits and pushes before the next starts.
 
+**Status 2026-08-12: stages 1-5 landed** (113555f, 8bf8050, a363bab, 14be366,
+docs commit). Crate 196 / tauri 112 / frontend 346 / framework 20 tests green.
+Outstanding: spike capture-mode verification on real hardware (stage 3 gate).
+
 ## Risks
 
 - Spike is the only consumer of half these mechanisms and has hardware-only
