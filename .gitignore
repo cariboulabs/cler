@@ -9,3 +9,5 @@ perf-results/
 
 *.log
 imgui.ini
+node_modules/
+.vite/
