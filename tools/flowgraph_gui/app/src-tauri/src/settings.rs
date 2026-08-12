@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 const FILE: &str = "settings.json";
 const MARKER: &str = "include/cler.hpp";
+const PALETTE_DIR: &str = "desktop_blocks";
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -38,7 +39,7 @@ pub fn read(dir: &Path) -> AppSettings {
 }
 
 pub fn store(dir: &Path, settings: &AppSettings) -> Result<AppSettings, String> {
-    let validated = validate(settings)?;
+    let validated = prune(validate(settings)?);
     std::fs::create_dir_all(dir)
         .map_err(|cause| format!("cannot create {}: {cause}", dir.display()))?;
     let text = serde_json::to_string_pretty(&validated)
@@ -63,6 +64,25 @@ fn validate(settings: &AppSettings) -> Result<AppSettings, String> {
     Ok(settings.clone())
 }
 
+fn prune(settings: AppSettings) -> AppSettings {
+    let mut dirs: Vec<PathBuf> = settings
+        .block_libraries
+        .iter()
+        .filter_map(|library| Path::new(library).canonicalize().ok())
+        .collect();
+    if let Some(palette) = cler_root_fallback().map(|root| root.join(PALETTE_DIR)) {
+        dirs.retain(|dir| !dir.starts_with(&palette));
+    }
+    prune_nested(&mut dirs);
+    AppSettings {
+        cler_root: settings.cler_root,
+        block_libraries: dirs
+            .into_iter()
+            .map(|dir| dir.display().to_string())
+            .collect(),
+    }
+}
+
 pub fn cler_root_fallback() -> Option<PathBuf> {
     configured_root().or_else(builtin_root)
 }
@@ -80,13 +100,29 @@ fn builtin_root() -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+#[cfg(test)]
+pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 pub fn block_library_dirs() -> Vec<PathBuf> {
-    current()
+    let mut dirs: Vec<PathBuf> = current()
         .block_libraries
         .iter()
         .map(PathBuf::from)
+        .filter_map(|dir| dir.canonicalize().ok())
         .filter(|dir| dir.is_dir())
-        .collect()
+        .collect();
+    prune_nested(&mut dirs);
+    dirs
+}
+
+pub fn prune_nested(dirs: &mut Vec<PathBuf>) {
+    dirs.sort();
+    dirs.dedup();
+    let ordered = dirs.clone();
+    dirs.retain(|dir| !ordered.iter().any(|other| other != dir && dir.starts_with(other)));
 }
 
 #[cfg(test)]
@@ -102,6 +138,7 @@ mod tests {
 
     #[test]
     fn settings_round_trip_and_validation() {
+        let _guard = test_guard();
         let dir = temp("roundtrip");
         assert_eq!(read(&dir), AppSettings::default());
 
@@ -123,6 +160,21 @@ mod tests {
         };
         assert!(store(&dir, &bogus).is_err());
         assert_eq!(read(&dir), wanted);
+
+        let redundant = AppSettings {
+            cler_root: Some(fake_repo.display().to_string()),
+            block_libraries: vec![
+                fake_repo.join(PALETTE_DIR).display().to_string(),
+                library.display().to_string(),
+                library.join("nested").display().to_string(),
+            ],
+        };
+        std::fs::create_dir_all(fake_repo.join(PALETTE_DIR)).expect("palette dir");
+        std::fs::create_dir_all(library.join("nested")).expect("nested dir");
+        let stored = store(&dir, &redundant).expect("redundant libraries prune instead of failing");
+        assert_eq!(stored.block_libraries.len(), 1);
+        assert!(stored.block_libraries[0].ends_with(library.file_name().unwrap().to_str().unwrap()));
+        store(&dir, &wanted).expect("restore");
 
         let external = temp("external");
         let outside_file = external.join("flowgraph.cpp");

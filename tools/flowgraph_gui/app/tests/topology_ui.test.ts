@@ -107,7 +107,8 @@ describe('the palette lists what the crate found', () => {
       await expect.poll(() => entries.count()).toBe(1);
       expect(await entries.first().getAttribute('data-block')).toBe('FanoutBlock');
 
-      expect(await page.getAttribute('[data-block="FanoutBlock"] .row', 'title')).toContain(
+      await page.click('[data-block="FanoutBlock"] .row');
+      expect(await page.textContent('[data-detail="FanoutBlock"]')).toContain(
         'const size_t num_outputs'
       );
 

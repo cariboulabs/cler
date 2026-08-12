@@ -210,7 +210,10 @@ export function categoryOf(spec: BlockSpec, documentPath: string): string {
 
 export function libraryGroups(specs: BlockSpec[], documentPath: string): LibraryGroup[] {
   const root: LibraryGroup = { name: '', path: '', groups: [], specs: [], count: 0 };
+  const seen = new Set<string>();
   for (const spec of specs) {
+    if (seen.has(`${spec.origin}\u0000${spec.name}`)) continue;
+    seen.add(`${spec.origin}\u0000${spec.name}`);
     let parent = root;
     let path = '';
     for (const name of libraryPathOf(spec, documentPath)) {

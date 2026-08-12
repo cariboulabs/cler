@@ -566,6 +566,7 @@ export function withoutEdge(model: FileModel, from: string, to: string): FileMod
 
 export type BootOptions = {
   fixture?: string;
+  specs?: BlockSpec[];
   model?: FileModel;
   refusal?: unknown;
   openError?: string;
@@ -624,7 +625,7 @@ export async function boot(options: BootOptions = {}): Promise<Page> {
     path: FAKE_PATH,
     model: options.model ?? modelOf(name),
     source: sourceOf(name),
-    specs,
+    specs: options.specs ?? specs,
     refusal: options.refusal ?? null,
     openError: options.openError ?? null,
     target: options.target === undefined ? NO_TARGET : options.target,

@@ -1,6 +1,7 @@
 <script lang="ts">
   import RailTabs, { type RailTab } from './RailTabs.svelte';
   import {
+    categoryOf,
     ctorSignature,
     DRAG_TYPE,
     libraryGroups,
@@ -17,12 +18,12 @@
     open: boolean;
     ontoggle: () => void;
     ontab: (next: RailTab) => void;
-    onpick: (spec: BlockSpec) => void;
   };
 
-  const { specs, documentPath, enabled, open, ontoggle, ontab, onpick }: Props = $props();
+  const { specs, documentPath, enabled, open, ontoggle, ontab }: Props = $props();
 
   let query = $state('');
+  let described = $state<string | null>(null);
   let expanded = $state.raw(new Set<string>());
 
   const entries = $derived(searchSpecs(specs, query, documentPath));
@@ -56,8 +57,9 @@
   >
     <button
       class="row"
-      title={`${ctorSignature(spec)}\nclick to place — or drag onto the canvas`}
-      onclick={() => enabled && onpick(spec)}
+      aria-expanded={described === spec.name}
+      title="drag onto the canvas to place — click for details"
+      onclick={() => (described = described === spec.name ? null : spec.name)}
     >
       <span class="name">{spec.name}</span>
       {#if portsSummary(spec)}
@@ -67,6 +69,24 @@
         <span class="chip" title="this block may block its worker">may_block</span>
       {/if}
     </button>
+    {#if described === spec.name}
+      <div class="detail" data-detail={spec.name}>
+        <code class="sig">{ctorSignature(spec)}</code>
+        <dl>
+          <dt>path</dt>
+          <dd>{categoryOf(spec, documentPath)}</dd>
+          {#each spec.ports as port (port.direction + port.name)}
+            <dt>{port.direction}</dt>
+            <dd>{port.name}{port.element_type ? ` · ${port.element_type}` : ''}</dd>
+          {/each}
+        </dl>
+        <p class="how">
+          {enabled
+            ? 'drag this row onto the canvas to place it'
+            : 'open a real document to place blocks'}
+        </p>
+      </div>
+    {/if}
   </li>
 {/snippet}
 
@@ -294,6 +314,44 @@
   .row:hover {
     background: var(--bg-2);
     border-color: transparent;
+  }
+  .detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    margin: var(--sp-0) var(--sp-2) var(--sp-1);
+    padding: var(--sp-2);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .detail .sig {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg);
+    word-break: break-word;
+  }
+  .detail dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--sp-0) var(--sp-2);
+    margin: 0;
+  }
+  .detail dt {
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .detail dd {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--fg);
+    overflow-wrap: anywhere;
+  }
+  .detail .how {
+    margin: 0;
+    font-size: 11px;
+    color: var(--muted);
   }
   .name {
     flex: 1 1 auto;

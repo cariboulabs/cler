@@ -1285,10 +1285,6 @@
     return addRefusal(outcome.record, form) ?? { field: null, message: outcome.message };
   }
 
-  function placeSpec(spec: BlockSpec) {
-    adder?.placeAt(window.innerWidth / 2, window.innerHeight / 2, spec);
-  }
-
   function droppedSpec(event: DragEvent): BlockSpec | null {
     const name = event.dataTransfer?.getData(DRAG_TYPE);
     return name ? (specFor(shownSpecs, name) ?? null) : null;
@@ -1773,7 +1769,6 @@
       open={rightOpen}
       ontoggle={() => (rightOpen = !rightOpen)}
       ontab={pickRailTab}
-      onpick={placeSpec}
     />
   {:else}
     <Inspector

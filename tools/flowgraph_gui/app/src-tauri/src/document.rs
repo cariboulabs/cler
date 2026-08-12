@@ -786,12 +786,19 @@ fn nearby_palette(target: &Path) -> Vec<BlockSpec> {
                 .map(|root| root.join(PALETTE_DIR))
                 .filter(|dir| dir.is_dir())
         });
-    let mut roots: Vec<PathBuf> = repo_blocks.into_iter().collect();
+    let mut roots: Vec<PathBuf> = repo_blocks
+        .into_iter()
+        .filter_map(|dir| dir.canonicalize().ok())
+        .collect();
     roots.extend(crate::settings::block_library_dirs());
+    crate::settings::prune_nested(&mut roots);
     if roots.is_empty() {
         return Vec::new();
     }
-    palette_specs(&roots).unwrap_or_default()
+    let mut specs = palette_specs(&roots).unwrap_or_default();
+    let mut seen = HashSet::new();
+    specs.retain(|spec| seen.insert((spec.origin.clone(), spec.name.clone())));
+    specs
 }
 
 fn lock(docs: &Documents) -> MutexGuard<'_, HashMap<PathBuf, Document>> {
@@ -1133,7 +1140,26 @@ mod include_tests {
 #[cfg(test)]
 mod palette_tests {
     #[test]
+    fn a_library_inside_the_repo_palette_does_not_duplicate_specs() {
+        let _guard = crate::settings::test_guard();
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../desktop_examples/hello_world.cpp");
+        let specs = super::nearby_palette(&file.canonicalize().expect("example exists"));
+        let mut seen = std::collections::HashSet::new();
+        for spec in &specs {
+            assert!(
+                seen.insert((spec.origin.clone(), spec.name.clone())),
+                "duplicate spec {} from {}",
+                spec.name,
+                spec.origin
+            );
+        }
+        assert!(specs.iter().any(|spec| spec.name == "SinkNullBlock"));
+    }
+
+    #[test]
     fn an_external_file_still_gets_the_builtin_palette() {
+        let _guard = crate::settings::test_guard();
         let dir = std::env::temp_dir().join(format!("cler-ext-palette-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         let file = dir.join("flowgraph.cpp");
@@ -1153,6 +1179,7 @@ mod external_add_tests {
 
     #[test]
     fn adding_a_block_to_a_fresh_external_document_works() {
+        let _guard = crate::settings::test_guard();
         let dir = std::env::temp_dir().join(format!("cler-ext-add-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).expect("temp dir");
