@@ -127,7 +127,7 @@ describe('the drawer carries code, diagnostics and output', () => {
       await row.first().waitFor();
       expect(await page.locator('[data-diagnostic-block]').count()).toBe(0);
       expect(await row.first().textContent()).toContain('vector:120');
-      expect(await page.getAttribute('[data-testid="problems"]', 'data-count')).toBe('0');
+      expect(await page.locator('[data-testid="problems"]').count()).toBe(0);
       await page.close();
     },
     CASE

@@ -646,11 +646,10 @@ describe('the problems chip surfaces what the model says', () => {
   );
 
   it(
-    'shows zero for a clean graph',
+    'hides the chip for a clean graph',
     async () => {
       const page = await boot();
-      expect(await page.getAttribute('[data-testid="problems"]', 'data-count')).toBe('0');
-      expect(await page.textContent('[data-testid="problems"]')).toContain('0 problems');
+      expect(await page.locator('[data-testid="problems"]').count()).toBe(0);
       await page.close();
     },
     CASE

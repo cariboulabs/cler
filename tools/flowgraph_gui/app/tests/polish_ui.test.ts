@@ -321,14 +321,11 @@ describe('the canvas answers the cursor', () => {
 
 describe('the cheap repaints', () => {
   it(
-    'disables the problems chip when the graph is clean',
+    'hides the problems chip when the graph is clean',
     async () => {
       const page = await viewer('?fixture=hello_world');
       await page.waitForSelector('.svelte-flow__node');
-      const chip = page.locator('[data-testid="problems"]');
-      expect(await chip.getAttribute('data-count')).toBe('0');
-      expect(await chip.isDisabled()).toBe(true);
-      expect(await chip.getAttribute('class')).toContain('clear');
+      expect(await page.locator('[data-testid="problems"]').count()).toBe(0);
       await page.close();
     },
     CASE

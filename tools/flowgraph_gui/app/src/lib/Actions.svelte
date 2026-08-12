@@ -659,25 +659,23 @@
     </span>
   {/if}
   <span class="grow"></span>
-  <button
-    class="problems"
-    class:danger={failing}
-    class:clear={listed.length === 0}
-    data-testid="problems"
-    data-count={listed.length}
-    aria-expanded={problemsOpen}
-    disabled={listed.length === 0}
-    title={listed.length === 0
-      ? 'no conflicts, nothing unresolved, every block runs'
-      : `${listed.length} compiler diagnostics, conflicts, unresolved elements and runnerless blocks`}
-    onclick={(event) => {
-      event.stopPropagation();
-      menu = null;
-      problemsOpen = !problemsOpen;
-    }}
-  >
-    {listed.length} problem{listed.length === 1 ? '' : 's'}
-  </button>
+  {#if listed.length > 0}
+    <button
+      class="problems"
+      class:danger={failing}
+      data-testid="problems"
+      data-count={listed.length}
+      aria-expanded={problemsOpen}
+      title={`${listed.length} compiler diagnostics, conflicts, unresolved elements and runnerless blocks`}
+      onclick={(event) => {
+        event.stopPropagation();
+        menu = null;
+        problemsOpen = !problemsOpen;
+      }}
+    >
+      {listed.length} problem{listed.length === 1 ? '' : 's'}
+    </button>
+  {/if}
   {#each toolbarActions as action (action.id)}
     {#if action.id === 'open' || action.id === 'zoom-out'}
       <span class="sep"></span>
