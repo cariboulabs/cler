@@ -1488,7 +1488,7 @@
       {#if desktop}
         <section data-testid="libraries">
           <h2>
-            Block paths
+            Library block paths
             <span class="section-menu-slot">
               <button
                 class="section-menu"
@@ -1533,6 +1533,11 @@
             <dt>cler root</dt>
             <dd class="path root-path">{libSettings.clerRoot ?? 'auto (repo of the open file)'}</dd>
           </dl>
+          <p class="path-hint">
+            The cler root is the cler checkout this document builds against; its
+            desktop_blocks fill the library. Auto uses the repo containing the
+            open file — set it only for files outside a cler checkout.
+          </p>
           {#each libSettings.blockLibraries as library (library)}
             <div class="lib-row">
               <span class="path" title={library}>{library}</span>
@@ -1913,6 +1918,12 @@
     word-break: normal;
     overflow-wrap: anywhere;
   }
+  .path-hint {
+    margin: var(--sp-1) 0 0;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--muted);
+  }
   .section-menu-slot {
     position: relative;
     margin-left: auto;
@@ -1981,6 +1992,7 @@
     grid-template-columns: auto 1fr;
     gap: 0 var(--sp-3);
     margin: var(--sp-2) 0 0;
+    align-items: baseline;
   }
   dt {
     color: var(--muted);

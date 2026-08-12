@@ -1,0 +1,37 @@
+#pragma once
+
+#include "imgui.h"
+
+namespace cler::palette {
+
+constexpr ImVec4 rgba(unsigned r, unsigned g, unsigned b, float a = 1.0f) {
+    return ImVec4(r / 255.0f, g / 255.0f, b / 255.0f, a);
+}
+
+inline constexpr ImVec4 bg0       = rgba(0x14, 0x0f, 0x10);
+inline constexpr ImVec4 bg1       = rgba(0x1d, 0x16, 0x18);
+inline constexpr ImVec4 bg2       = rgba(0x28, 0x1d, 0x20);
+inline constexpr ImVec4 border    = rgba(0x41, 0x2d, 0x31);
+inline constexpr ImVec4 border_hi = rgba(0x57, 0x3b, 0x40);
+inline constexpr ImVec4 fg        = rgba(0xf0, 0xe9, 0xea);
+inline constexpr ImVec4 muted     = rgba(0xa8, 0x97, 0x9a);
+inline constexpr ImVec4 faint     = rgba(0x6e, 0x5d, 0x60);
+inline constexpr ImVec4 accent    = rgba(0xb8, 0x18, 0x28);
+inline constexpr ImVec4 accent_hi = rgba(0xd1, 0x1f, 0x33);
+inline constexpr ImVec4 accent_bg = rgba(0x3c, 0x14, 0x1a);
+inline constexpr ImVec4 ok        = rgba(0x2e, 0x8b, 0x57);
+inline constexpr ImVec4 warn      = rgba(0xb8, 0x77, 0x0a);
+inline constexpr ImVec4 danger    = rgba(0xc0, 0x20, 0x2e);
+
+inline constexpr ImVec4 plot_series[] = {
+    rgba(0xd1, 0x1f, 0x33),
+    rgba(0xe0, 0x9c, 0x1a),
+    rgba(0x3f, 0xae, 0x6e),
+    rgba(0x4f, 0x9c, 0xd9),
+    rgba(0xa0, 0x6f, 0xd6),
+    rgba(0xc9, 0xb4, 0x8a),
+    rgba(0x3a, 0xb5, 0xa5),
+    rgba(0xd6, 0x6a, 0x8a),
+};
+
+}

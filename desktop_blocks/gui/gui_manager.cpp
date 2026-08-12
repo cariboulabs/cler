@@ -1,4 +1,5 @@
 #include "gui_manager.hpp"
+#include "cler_palette.hpp"
 #include "cler_desktop_utils.hpp"
 
 #include <GLFW/glfw3.h>
@@ -167,6 +168,81 @@ bool write_screenshot(const std::string& path, int w, int h) {
     return write_framebuffer_bmp(path.c_str(), w, h);
 }
 
+constexpr ImVec4 with_alpha(ImVec4 v, float a) {
+    return ImVec4(v.x, v.y, v.z, a);
+}
+
+void apply_cler_style() {
+    using namespace cler::palette;
+
+    ImGui::StyleColorsDark();
+    ImGuiStyle& style = ImGui::GetStyle();
+    ImVec4* c = style.Colors;
+    c[ImGuiCol_Text]                 = fg;
+    c[ImGuiCol_TextDisabled]         = muted;
+    c[ImGuiCol_WindowBg]             = bg1;
+    c[ImGuiCol_ChildBg]              = bg1;
+    c[ImGuiCol_PopupBg]              = bg2;
+    c[ImGuiCol_Border]               = border;
+    c[ImGuiCol_FrameBg]              = bg2;
+    c[ImGuiCol_FrameBgHovered]       = border;
+    c[ImGuiCol_FrameBgActive]        = border_hi;
+    c[ImGuiCol_TitleBg]              = accent_bg;
+    c[ImGuiCol_TitleBgActive]        = with_alpha(accent, 0.80f);
+    c[ImGuiCol_TitleBgCollapsed]     = accent_bg;
+    c[ImGuiCol_MenuBarBg]            = bg1;
+    c[ImGuiCol_ScrollbarBg]          = bg0;
+    c[ImGuiCol_ScrollbarGrab]        = border;
+    c[ImGuiCol_ScrollbarGrabHovered] = border_hi;
+    c[ImGuiCol_ScrollbarGrabActive]  = accent;
+    c[ImGuiCol_CheckMark]            = accent_hi;
+    c[ImGuiCol_SliderGrab]           = accent;
+    c[ImGuiCol_SliderGrabActive]     = accent_hi;
+    c[ImGuiCol_Button]               = accent_bg;
+    c[ImGuiCol_ButtonHovered]        = accent;
+    c[ImGuiCol_ButtonActive]         = accent_hi;
+    c[ImGuiCol_Header]               = with_alpha(accent, 0.45f);
+    c[ImGuiCol_HeaderHovered]        = with_alpha(accent, 0.65f);
+    c[ImGuiCol_HeaderActive]         = accent;
+    c[ImGuiCol_Separator]            = border;
+    c[ImGuiCol_SeparatorHovered]     = border_hi;
+    c[ImGuiCol_SeparatorActive]      = accent;
+    c[ImGuiCol_ResizeGrip]           = with_alpha(accent, 0.25f);
+    c[ImGuiCol_ResizeGripHovered]    = with_alpha(accent, 0.60f);
+    c[ImGuiCol_ResizeGripActive]     = accent_hi;
+    c[ImGuiCol_Tab]                  = bg2;
+    c[ImGuiCol_TabHovered]           = accent;
+    c[ImGuiCol_TabActive]            = with_alpha(accent, 0.55f);
+    c[ImGuiCol_TabUnfocused]         = bg1;
+    c[ImGuiCol_TabUnfocusedActive]   = bg2;
+    c[ImGuiCol_PlotLines]            = accent_hi;
+    c[ImGuiCol_PlotLinesHovered]     = accent_hi;
+    c[ImGuiCol_PlotHistogram]        = accent;
+    c[ImGuiCol_PlotHistogramHovered] = accent_hi;
+    c[ImGuiCol_TextSelectedBg]       = with_alpha(accent, 0.35f);
+    c[ImGuiCol_DragDropTarget]       = accent_hi;
+    c[ImGuiCol_NavHighlight]         = accent_hi;
+    style.FrameRounding  = 4.0f;
+    style.GrabRounding   = 4.0f;
+    style.WindowRounding = 6.0f;
+    style.PopupRounding  = 6.0f;
+
+    ImPlotStyle& pstyle = ImPlot::GetStyle();
+    ImVec4* p = pstyle.Colors;
+    p[ImPlotCol_FrameBg]      = bg1;
+    p[ImPlotCol_PlotBg]       = bg0;
+    p[ImPlotCol_PlotBorder]   = border;
+    p[ImPlotCol_LegendBg]     = with_alpha(bg1, 0.85f);
+    p[ImPlotCol_LegendBorder] = border;
+    p[ImPlotCol_AxisText]     = muted;
+    p[ImPlotCol_AxisGrid]     = with_alpha(border, 0.65f);
+    p[ImPlotCol_Selection]    = accent_hi;
+    p[ImPlotCol_Crosshairs]   = muted;
+
+    constexpr size_t n_series = sizeof(plot_series) / sizeof(plot_series[0]);
+    pstyle.Colormap = ImPlot::AddColormap("cler", plot_series, n_series, true);
+}
+
 } // namespace
 
 GuiManager::GuiManager(int width, int height, const std::string_view title) {
@@ -191,7 +267,7 @@ GuiManager::GuiManager(int width, int height, const std::string_view title) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImPlot::CreateContext();
-    ImGui::StyleColorsDark();
+    apply_cler_style();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
