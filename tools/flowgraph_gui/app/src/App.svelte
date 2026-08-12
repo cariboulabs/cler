@@ -1516,10 +1516,12 @@
               {/if}
             </span>
           </h2>
-          <dl>
-            <dt title="git checkout version for compiling and blocks">cler root…</dt>
-            <dd class="path root-path">{libSettings.clerRoot ?? 'auto (repo of the open file)'}</dd>
-          </dl>
+          {#if libSettings.clerRoot}
+            <dl>
+              <dt title="git checkout version for compiling and blocks">cler root</dt>
+              <dd class="path root-path">{libSettings.clerRoot}</dd>
+            </dl>
+          {/if}
           {#each libSettings.blockLibraries as library (library)}
             <div class="lib-row">
               <span class="path" title={library}>{library}</span>
