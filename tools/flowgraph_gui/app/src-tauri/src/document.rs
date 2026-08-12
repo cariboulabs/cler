@@ -1285,6 +1285,14 @@ mod external_build_tests {
         assert!(found.available, "{:?}", found.reason);
         assert!(found.name.starts_with("cler_draft_"));
         assert!(crate::build::build_input_for_test(&file, &found, &draft).is_ok());
+
+        let binary = crate::build::draft_binary_for_test(&file, &draft.workspace)
+            .expect("draft binary path");
+        assert_eq!(
+            binary.file_name().and_then(|name| name.to_str()),
+            Some(found.name.as_str()),
+            "Run looks for the binary cmake was told to build"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

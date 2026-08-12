@@ -123,21 +123,10 @@ fn cmake_target_dir<'a>(root: &Path, source_dir: &'a Path) -> &'a Path {
 
 pub fn find_target(path: &str) -> Result<Target, String> {
     let file = canonical(path)?;
-    let stem = file
-        .file_stem()
-        .and_then(OsStr::to_str)
-        .unwrap_or_default()
-        .to_string();
     let root = repo_root(&file).ok_or_else(|| outside(&file))?;
-    let inside = file
-        .parent()
-        .and_then(|dir| dir.strip_prefix(&root).ok())
-        .filter(|relative| relative.starts_with(EXAMPLES));
-    let name = match inside {
-        Some(_) => stem,
-        None => draft_target_name(&stem),
-    };
-    let relative = inside.unwrap_or_else(|| Path::new(""));
+    let document = DocumentTarget::resolve(&root, &file);
+    let name = document.name().to_string();
+    let relative = document.source_dir();
     let Some(dir) = choose_build(&root, relative) else {
         return Ok(refused(
             name,
@@ -148,7 +137,7 @@ pub fn find_target(path: &str) -> Result<Target, String> {
             ),
         ));
     };
-    let binary = dir.join(cmake_target_dir(&root, relative)).join(&name);
+    let binary = document.binary_in(&root, &dir);
     Ok(Target {
         available: true,
         reason: None,
@@ -239,7 +228,7 @@ pub fn build_draft(
         .then(|| write_requirements(&draft.workspace, &draft.requirements))
         .transpose()?;
     let root = repo_root(&target).ok_or_else(|| outside(&target))?;
-    let external = repo_relative(&root, &target).is_none();
+    let external = DocumentTarget::resolve(&root, &target).is_draft();
     let script = draft_runner(
         &found,
         &source_dir,
@@ -392,6 +381,11 @@ fn artifact_name(target: &Path, found: &Target) -> Result<String, String> {
         .map(|relative| relative.display().to_string())
         .unwrap_or_else(|_| target.display().to_string());
     Ok(format!("{PRODUCER}:{key}:{}", found.name))
+}
+
+#[cfg(test)]
+pub fn draft_binary_for_test(target: &Path, workspace: &Path) -> Result<PathBuf, String> {
+    draft_tree(target, workspace).map(|(_, _, binary)| binary)
 }
 
 #[cfg(test)]
@@ -784,18 +778,61 @@ fn draft_tree(target: &Path, workspace: &Path) -> Result<(PathBuf, PathBuf, Path
     let root = repo_root(target).ok_or_else(|| outside(target))?;
     let source_dir = workspace.join("source");
     let build_dir = workspace.join("build");
-    let name = target
-        .file_stem()
-        .and_then(OsStr::to_str)
-        .unwrap_or_default();
-    let binary = match repo_relative(&root, target) {
-        Some(relative) => build_dir
-            .join(cmake_target_dir(&root, relative.parent().unwrap_or_else(|| Path::new(""))))
-            .join(name),
-        None => build_dir.join(name),
-    };
+    let binary = DocumentTarget::resolve(&root, target).binary_in(&root, &build_dir);
     Ok((source_dir, build_dir, binary))
 }
+
+/// How a document reaches cmake: an example the repo already declares, or a
+/// draft the CLER_EDITOR_SOURCE hook declares for us. Resolve this once and
+/// pass it around; deriving it twice is how the binary path and the built
+/// target drifted apart.
+enum DocumentTarget {
+    Example { name: String, relative: PathBuf },
+    Draft { name: String },
+}
+
+impl DocumentTarget {
+    fn resolve(root: &Path, file: &Path) -> Self {
+        let stem = file.file_stem().and_then(OsStr::to_str).unwrap_or_default();
+        match repo_relative(root, file) {
+            Some(relative) => Example {
+                name: stem.to_string(),
+                relative: relative.to_path_buf(),
+            },
+            None => Draft {
+                name: draft_target_name(stem),
+            },
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Example { name, .. } | Draft { name } => name,
+        }
+    }
+
+    fn is_draft(&self) -> bool {
+        matches!(self, Draft { .. })
+    }
+
+    fn source_dir(&self) -> &Path {
+        match self {
+            Example { relative, .. } => relative.parent().unwrap_or_else(|| Path::new("")),
+            Draft { .. } => Path::new(""),
+        }
+    }
+
+    fn binary_in(&self, root: &Path, build_dir: &Path) -> PathBuf {
+        match self {
+            Example { name, .. } => build_dir
+                .join(cmake_target_dir(root, self.source_dir()))
+                .join(name),
+            Draft { name } => build_dir.join(name),
+        }
+    }
+}
+
+use DocumentTarget::{Draft, Example};
 
 pub fn draft_target_name(stem: &str) -> String {
     let safe: String = stem
@@ -814,9 +851,9 @@ fn repo_relative<'a>(root: &Path, target: &'a Path) -> Option<&'a Path> {
 
 fn prepare_overlay(target: &Path, draft: &Path, source_dir: &Path) -> Result<(), String> {
     let root = repo_root(target).ok_or_else(|| outside(target))?;
-    match repo_relative(&root, target) {
-        Some(relative) => mirror_layer(&root, source_dir, relative, draft),
-        None => mirror_tree(&root, source_dir),
+    match DocumentTarget::resolve(&root, target) {
+        Example { relative, .. } => mirror_layer(&root, source_dir, &relative, draft),
+        Draft { .. } => mirror_tree(&root, source_dir),
     }
 }
 
