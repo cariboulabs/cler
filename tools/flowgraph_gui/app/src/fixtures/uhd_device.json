@@ -350,6 +350,26 @@
         "editable": true,
         "read_only_reason": null
       },
+      "gui": {
+        "var": "gui",
+        "span": {
+          "start": 6168,
+          "end": 6353
+        },
+        "end_frame_span": {
+          "start": 6263,
+          "end": 6279
+        },
+        "renders": [
+          {
+            "block": "spectrogram",
+            "span": {
+              "start": 6233,
+              "end": 6254
+            }
+          }
+        ]
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null
@@ -715,6 +735,26 @@
         "editable": true,
         "read_only_reason": null
       },
+      "gui": {
+        "var": "gui",
+        "span": {
+          "start": 7686,
+          "end": 7868
+        },
+        "end_frame_span": {
+          "start": 7778,
+          "end": 7794
+        },
+        "renders": [
+          {
+            "block": "spectrum",
+            "span": {
+              "start": 7751,
+              "end": 7769
+            }
+          }
+        ]
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null
@@ -1066,6 +1106,26 @@
         "editable": true,
         "read_only_reason": null
       },
+      "gui": {
+        "var": "gui",
+        "span": {
+          "start": 8917,
+          "end": 9099
+        },
+        "end_frame_span": {
+          "start": 9009,
+          "end": 9025
+        },
+        "renders": [
+          {
+            "block": "spectrum",
+            "span": {
+              "start": 8982,
+              "end": 9000
+            }
+          }
+        ]
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null
@@ -1328,6 +1388,26 @@
         },
         "editable": true,
         "read_only_reason": null
+      },
+      "gui": {
+        "var": "gui",
+        "span": {
+          "start": 10239,
+          "end": 10423
+        },
+        "end_frame_span": {
+          "start": 10333,
+          "end": 10349
+        },
+        "renders": [
+          {
+            "block": "power_plot",
+            "span": {
+              "start": 10304,
+              "end": 10324
+            }
+          }
+        ]
       },
       "unresolved": [],
       "editable": true,

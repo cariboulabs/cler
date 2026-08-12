@@ -153,6 +153,10 @@ export function describeCommand(command: Command): string {
       return `take ${command.block} out of the graph, keeping its declaration`;
     case 'add_to_graph':
       return `give ${command.block} a runner so it executes`;
+    case 'add_render':
+      return `draw ${command.block} in the gui loop`;
+    case 'remove_render':
+      return `stop drawing ${command.block}`;
     case 'delete_block':
       return `delete ${command.block} and its declaration`;
     case 'define_block':

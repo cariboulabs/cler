@@ -1263,7 +1263,11 @@
   ): Promise<FieldRefusal | null> {
     const varName = form.varName.trim();
     pinned.set(varName, at);
-    const outcome = await submit(addBlockCommand(siteIndex, spec, form));
+    const commands: Command[] = [addBlockCommand(siteIndex, spec, form)];
+    if (spec.renderable) {
+      commands.push({ command: 'add_render', site: siteIndex, block: varName });
+    }
+    const outcome = await submitAll(commands);
     if (outcome.ok) {
       rightTab = 'inspector';
       selectNode(varName);

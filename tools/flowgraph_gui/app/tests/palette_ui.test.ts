@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fixtures } from '../src/fixtures';
 import { addForm, braceListLength } from '../src/lib/palette';
-import { boot, CASE, commands, openLibrary, openMenu, shot, specs, useBrowser, type FakeWindow } from './ui';
+import { boot, CASE, commands, dragBlock, openLibrary, openMenu, shot, specs, useBrowser, type FakeWindow } from './ui';
 
 useBrowser();
 
@@ -131,6 +131,25 @@ describe('the block menu reaches the block type', () => {
         () => (window as unknown as FakeWindow).__fake.editors
       );
       expect(opened).toEqual([{ path: expect.stringContaining('add.hpp'), line: 1 }]);
+      await page.close();
+    },
+    CASE
+  );
+});
+
+describe('placing a plot', () => {
+  it(
+    'renders it without the user writing a loop',
+    async () => {
+      const page = await boot();
+      await openLibrary(page);
+      await page.fill('[data-testid="palette-search"]', 'PlotCSpectrum');
+      await dragBlock(page, 'PlotCSpectrumBlock', { x: 640, y: 620 });
+
+      await expect.poll(() => commands(page)).toEqual([
+        expect.objectContaining({ command: 'add_block', type: 'PlotCSpectrumBlock' }),
+        { command: 'add_render', site: 0, block: 'plot_c_spectrum' }
+      ]);
       await page.close();
     },
     CASE

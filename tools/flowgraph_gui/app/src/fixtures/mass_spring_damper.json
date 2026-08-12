@@ -373,6 +373,40 @@
         "editable": true,
         "read_only_reason": null
       },
+      "gui": {
+        "var": "gui",
+        "span": {
+          "start": 10471,
+          "end": 10702
+        },
+        "end_frame_span": {
+          "start": 10612,
+          "end": 10628
+        },
+        "renders": [
+          {
+            "block": "plant",
+            "span": {
+              "start": 10536,
+              "end": 10551
+            }
+          },
+          {
+            "block": "plot",
+            "span": {
+              "start": 10560,
+              "end": 10574
+            }
+          },
+          {
+            "block": "controller",
+            "span": {
+              "start": 10583,
+              "end": 10603
+            }
+          }
+        ]
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null

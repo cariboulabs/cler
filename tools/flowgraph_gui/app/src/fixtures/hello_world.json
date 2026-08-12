@@ -413,6 +413,26 @@
         "editable": true,
         "read_only_reason": null
       },
+      "gui": {
+        "var": "gui",
+        "span": {
+          "start": 1191,
+          "end": 1377
+        },
+        "end_frame_span": {
+          "start": 1287,
+          "end": 1303
+        },
+        "renders": [
+          {
+            "block": "plot",
+            "span": {
+              "start": 1264,
+              "end": 1278
+            }
+          }
+        ]
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null

@@ -351,6 +351,26 @@
         "editable": true,
         "read_only_reason": null
       },
+      "gui": {
+        "var": "gui",
+        "span": {
+          "start": 9024,
+          "end": 9220
+        },
+        "end_frame_span": {
+          "start": 9118,
+          "end": 9134
+        },
+        "renders": [
+          {
+            "block": "aggregator",
+            "span": {
+              "start": 9089,
+              "end": 9109
+            }
+          }
+        ]
+      },
       "unresolved": [],
       "editable": false,
       "read_only_reason": "site_has_read_only_elements"

@@ -1011,6 +1011,47 @@
         "editable": true,
         "read_only_reason": null
       },
+      "gui": {
+        "var": "gui",
+        "span": {
+          "start": 3312,
+          "end": 3613
+        },
+        "end_frame_span": {
+          "start": 3523,
+          "end": 3539
+        },
+        "renders": [
+          {
+            "block": "cw_timeseries_plot",
+            "span": {
+              "start": 3377,
+              "end": 3405
+            }
+          },
+          {
+            "block": "chirp_timeseries_plot",
+            "span": {
+              "start": 3414,
+              "end": 3445
+            }
+          },
+          {
+            "block": "cspectrum_plot",
+            "span": {
+              "start": 3454,
+              "end": 3478
+            }
+          },
+          {
+            "block": "cspectrogram_plot",
+            "span": {
+              "start": 3487,
+              "end": 3514
+            }
+          }
+        ]
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null

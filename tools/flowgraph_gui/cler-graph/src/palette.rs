@@ -4,6 +4,7 @@ use crate::palette_types::*;
 use tree_sitter::{Node, Parser, Tree};
 
 const MAY_BLOCK: &str = "may_block";
+const RENDER: &str = "render";
 const PALETTE_EXTENSIONS: &[&str] = &["hpp", "cpp"];
 const CHANNEL: &str = "Channel<";
 const CHANNEL_BASE: &str = "ChannelBase<";
@@ -174,6 +175,7 @@ fn block_spec(node: Node, src: &str, code: &str, origin: &str) -> Option<BlockSp
             .map(|c| c.params)
             .unwrap_or_default(),
         may_block: declares_may_block(body, src, extent),
+        renderable: declares_render(body, src, extent),
         conditional_members,
         ports,
         input_count: if opaque {
@@ -489,6 +491,18 @@ fn guards_a_field(node: Node) -> bool {
     let mut cursor = node.walk();
     let found = node.children(&mut cursor).any(guards_a_field);
     found
+}
+
+fn declares_render(body: Node, src: &str, extent: usize) -> bool {
+    let mut cursor = body.walk();
+    let members: Vec<Node> = body
+        .children(&mut cursor)
+        .take_while(|child| child.start_byte() < extent)
+        .collect();
+    members.into_iter().any(|child| {
+        matches!(child.kind(), "field_declaration" | "function_definition")
+            && text(child, src).contains(&format!("{RENDER}()"))
+    })
 }
 
 fn declares_may_block(body: Node, src: &str, extent: usize) -> bool {

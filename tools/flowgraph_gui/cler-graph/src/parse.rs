@@ -849,6 +849,7 @@ impl<'t> Extractor<'t> {
 
         let blocks = self.blocks(scope, &decls, &referenced);
         let config = self.config(scope, call, flowgraph_var.as_deref());
+        let gui = self.gui_loop(scope);
 
         let mut site = Site {
             function,
@@ -859,6 +860,7 @@ impl<'t> Extractor<'t> {
             runners,
             edges,
             config,
+            gui,
             unresolved,
             editable: true,
             read_only_reason: None,
@@ -1091,6 +1093,50 @@ impl<'t> Extractor<'t> {
             run_call_span: span(run_call),
             editable: reason.is_none(),
             read_only_reason: reason,
+        })
+    }
+
+    fn statement_node(&self, node: Node<'t>) -> Node<'t> {
+        std::iter::successors(Some(node), |found| found.parent())
+            .find(|found| found.kind() == "expression_statement")
+            .unwrap_or(node)
+    }
+
+    fn gui_loop(&self, scope: Node<'t>) -> Option<GuiLoop> {
+        let frame = descendants(scope).into_iter().find(|node| {
+            node.kind() == "call_expression" && self.callee_name(*node) == "end_frame"
+        })?;
+        let var = frame
+            .child_by_field_name("function")
+            .and_then(|field| field.child_by_field_name("argument"))
+            .map(|object| self.text(object).to_string())?;
+        let loop_node = frame
+            .parent()
+            .into_iter()
+            .flat_map(|node| std::iter::successors(Some(node), |found| found.parent()))
+            .find(|node| node.kind() == "while_statement")?;
+        let end_frame_span = span(self.statement_node(frame));
+        let renders = descendants(loop_node)
+            .into_iter()
+            .filter(|node| {
+                node.kind() == "call_expression" && self.callee_name(*node) == "render"
+            })
+            .filter_map(|node| {
+                let object = node
+                    .child_by_field_name("function")?
+                    .child_by_field_name("argument")?;
+                let block = self.text(object).to_string();
+                (block != var).then(|| RenderCall {
+                    block,
+                    span: span(self.statement_node(node)),
+                })
+            })
+            .collect();
+        Some(GuiLoop {
+            var,
+            span: span(loop_node),
+            end_frame_span,
+            renders,
         })
     }
 

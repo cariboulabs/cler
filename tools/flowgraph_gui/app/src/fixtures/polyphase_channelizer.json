@@ -1032,6 +1032,33 @@
         "editable": true,
         "read_only_reason": null
       },
+      "gui": {
+        "var": "gui_manager",
+        "span": {
+          "start": 5362,
+          "end": 5624
+        },
+        "end_frame_span": {
+          "start": 5525,
+          "end": 5549
+        },
+        "renders": [
+          {
+            "block": "plot_polyphase_cspectrum",
+            "span": {
+              "start": 5443,
+              "end": 5477
+            }
+          },
+          {
+            "block": "plot_input_cspectrum",
+            "span": {
+              "start": 5486,
+              "end": 5516
+            }
+          }
+        ]
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null

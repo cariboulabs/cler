@@ -61,6 +61,7 @@ pub struct BlockSpec {
     pub template_params: Vec<TemplateParam>,
     pub ctor_params: Vec<CtorParam>,
     pub may_block: bool,
+    pub renderable: bool,
     pub conditional_members: bool,
     pub ports: Vec<Port>,
     pub input_count: PortCount,

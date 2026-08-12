@@ -721,3 +721,21 @@ fn specs_serialize_to_json() {
     assert!(json.contains("\"conditional_members\":false"));
     assert!(json.contains("\"direction\":\"output\""));
 }
+
+#[test]
+fn plot_blocks_are_renderable_and_dsp_blocks_are_not() {
+    for (file, name) in [
+        ("desktop_blocks/plots/plot_timeseries.hpp", "PlotTimeSeriesBlock"),
+        ("desktop_blocks/plots/plot_cspectrum.hpp", "PlotCSpectrumBlock"),
+        ("desktop_blocks/plots/plot_cspectrogram.hpp", "PlotCSpectrogramBlock"),
+    ] {
+        assert!(spec_named(file, name).renderable, "{name} draws a window");
+    }
+    for (file, name) in [
+        ("desktop_blocks/math/gain.hpp", "GainBlock"),
+        ("desktop_blocks/utils/fanout.hpp", "FanoutBlock"),
+        ("desktop_blocks/sinks/sink_null.hpp", "SinkNullBlock"),
+    ] {
+        assert!(!spec_named(file, name).renderable, "{name} has nothing to draw");
+    }
+}

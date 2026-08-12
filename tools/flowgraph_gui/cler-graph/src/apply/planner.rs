@@ -109,6 +109,7 @@ const TEMPLATE_PROBE: (&str, &str) = ("using cler_probe = cler_probe_template<",
 const TYPE_PROBE: (&str, &str) = ("using cler_probe = ", ";\n");
 
 const BLOCK_SUFFIX: &str = "Block";
+const GUI_HEADER: &str = "desktop_blocks/gui/gui_manager.hpp";
 const SKELETON_TODO: &str = "// TODO: implement";
 const CHANNEL_CAPACITY: &str = "cler::DOUBLY_MAPPED_MIN_SIZE / sizeof";
 
@@ -649,6 +650,93 @@ impl<'a> Planner<'a> {
         Splice::remove(start, end)
     }
 
+    fn materialize_gui(&self, site: &Site, block: &str) -> Result<Vec<Splice>, ApplyError> {
+        let eol = self.line_ending();
+        let run = self.statement_of(self.node(
+            site.config
+                .as_ref()
+                .map(|config| config.run_call_span)
+                .ok_or_else(|| ApplyError::UnsupportedShape {
+                    detail: "this site has no run call to render after".to_string(),
+                })?,
+        )?);
+        let indent = self.indent(run.start_byte());
+        let inner = format!("{indent}    ");
+        let mut splices = Vec::new();
+
+        if !self.src.contains(GUI_HEADER) {
+            let at = self.last_include_end();
+            splices.push(Splice::insert(at, format!("#include \"{GUI_HEADER}\"{eol}")));
+        }
+
+        let declaration = self.site_first_statement(site)?;
+        splices.push(Splice::insert(
+            self.line_start(declaration.start_byte()),
+            format!("{indent}cler::GuiManager gui(800, 400, \"cler flowgraph\");{eol}"),
+        ));
+
+        let idle = self.idle_loop_after(run);
+        let loop_text = format!(
+            "{indent}while (!gui.should_close()) {{{eol}{inner}gui.begin_frame();{eol}{inner}{block}.render();{eol}{inner}gui.end_frame();{eol}{indent}}}{eol}"
+        );
+        match idle {
+            Some(node) => splices.push(Splice::replace(
+                Span {
+                    start: self.line_start(node.start_byte()),
+                    end: self.line_end(node.end_byte()),
+                },
+                loop_text.trim_end_matches(|c| c == '\n' || c == '\r'),
+            )),
+            None => splices.push(Splice::insert(self.line_end(run.end_byte()), loop_text)),
+        }
+        splices.sort_by_key(|splice| splice.start);
+        Ok(splices)
+    }
+
+    fn line_end(&self, offset: usize) -> usize {
+        match self.src.get(offset..).and_then(|tail| tail.find('\n')) {
+            Some(found) => offset + found + 1,
+            None => self.src.len(),
+        }
+    }
+
+    fn last_include_end(&self) -> usize {
+        let mut at = 0;
+        let mut offset = 0;
+        for line in self.src.split_inclusive('\n') {
+            offset += line.len();
+            if line.trim_start().starts_with("#include") {
+                at = offset;
+            }
+        }
+        at
+    }
+
+    fn site_first_statement(&self, site: &Site) -> Result<Node<'a>, ApplyError> {
+        let body = self.function_body(site);
+        named_children(body)
+            .into_iter()
+            .next()
+            .ok_or_else(|| ApplyError::UnsupportedShape {
+                detail: "the site function has no statements".to_string(),
+            })
+    }
+
+    fn idle_loop_after(&self, run: Node<'a>) -> Option<Node<'a>> {
+        let mut found = run.next_named_sibling();
+        while let Some(node) = found {
+            if node.kind() == "while_statement" {
+                let condition = self.text(node);
+                if condition.contains("is_stopped") {
+                    return Some(node);
+                }
+                return None;
+            }
+            found = node.next_named_sibling();
+        }
+        None
+    }
+
     fn append_runners(&self, site: &Site, tails: &[String]) -> Result<Splice, ApplyError> {
         let call = self.node(site.span)?;
         let list = self.argument_list(call)?;
@@ -726,6 +814,8 @@ impl<'a> Planner<'a> {
             | Command::AddBlock { site, .. }
             | Command::RemoveFromGraph { site, .. }
             | Command::AddToGraph { site, .. }
+            | Command::AddRender { site, .. }
+            | Command::RemoveRender { site, .. }
             | Command::DeleteBlock { site, .. }
             | Command::DefineBlock { site, .. } => *site,
         };
@@ -1017,6 +1107,50 @@ impl<'a> Planner<'a> {
                     });
                 }
                 Ok(vec![self.append_runners(target, &[format!("(&{block})")])?])
+            }
+
+            Command::AddRender { site, block } => {
+                let target = self.site(*site)?;
+                self.editable_block(*site, block)?;
+                match &target.gui {
+                    Some(gui) => {
+                        if gui.renders.iter().any(|call| call.block == *block) {
+                            return Err(ApplyError::UnsupportedShape {
+                                detail: format!("{block} already renders"),
+                            });
+                        }
+                        let anchor = self.node(gui.end_frame_span)?;
+                        let indent = self.indent(anchor.start_byte());
+                        let eol = self.line_ending();
+                        Ok(vec![Splice::insert(
+                            self.line_start(anchor.start_byte()),
+                            format!("{indent}{block}.render();{eol}"),
+                        )])
+                    }
+                    None => self.materialize_gui(target, block),
+                }
+            }
+
+            Command::RemoveRender { site, block } => {
+                let target = self.site(*site)?;
+                let gui = target
+                    .gui
+                    .as_ref()
+                    .ok_or_else(|| ApplyError::UnsupportedShape {
+                        detail: "this site has no render loop".to_string(),
+                    })?;
+                let call = gui
+                    .renders
+                    .iter()
+                    .find(|call| call.block == *block)
+                    .ok_or_else(|| ApplyError::UnsupportedShape {
+                        detail: format!("{block} does not render"),
+                    })?;
+                let statement = self.node(call.span)?;
+                Ok(vec![Splice::remove(
+                    self.line_start(statement.start_byte()),
+                    self.line_end(statement.end_byte()),
+                )])
             }
 
             Command::RemoveFromGraph { site, block } => {

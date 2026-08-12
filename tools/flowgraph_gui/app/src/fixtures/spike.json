@@ -631,6 +631,54 @@
         "editable": true,
         "read_only_reason": null
       },
+      "gui": {
+        "var": "gui",
+        "span": {
+          "start": 7118,
+          "end": 14943
+        },
+        "end_frame_span": {
+          "start": 14639,
+          "end": 14655
+        },
+        "renders": [
+          {
+            "block": "panel",
+            "span": {
+              "start": 7475,
+              "end": 7490
+            }
+          },
+          {
+            "block": "trigger",
+            "span": {
+              "start": 10254,
+              "end": 10271
+            }
+          },
+          {
+            "block": "spectrum",
+            "span": {
+              "start": 10308,
+              "end": 10326
+            }
+          },
+          {
+            "block": "spectrogram",
+            "span": {
+              "start": 10363,
+              "end": 10384
+            }
+          },
+          {
+            "block": "channelizer",
+            "span": {
+              "start": 10421,
+              "end": 10442
+            }
+          }
+        ]
+      },
       "unresolved": [],
       "editable": true,
       "read_only_reason": null
