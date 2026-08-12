@@ -1146,3 +1146,33 @@ mod palette_tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
+#[cfg(test)]
+mod external_add_tests {
+    use super::*;
+
+    #[test]
+    fn adding_a_block_to_a_fresh_external_document_works() {
+        let dir = std::env::temp_dir().join(format!("cler-ext-add-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let file = dir.join("flowgraph.cpp");
+        let docs = Documents::default();
+        let path = file.display().to_string();
+        create(&docs, &path).expect("new document");
+        let command = serde_json::json!({
+            "command": "add_block",
+            "site": 0,
+            "type": "SourceCWBlock",
+            "template_args": ["float"],
+            "ctor_args": ["\"source\"", "1.0f", "1.0f", "1000"],
+            "var_name": "source"
+        });
+        let state = apply(&docs, &path, 0, vec![command]).expect("add_block applies");
+        assert!(state.source.contains("SourceCWBlock<float> source"));
+        assert!(state
+            .source
+            .contains("#include \"desktop_blocks/sources/source_cw.hpp\""));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
