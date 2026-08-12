@@ -1,6 +1,5 @@
 #include "cler.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
-#include <chrono>
 #include <algorithm>
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include "desktop_blocks/utils/throttle.hpp"
@@ -18,6 +17,7 @@ const float K = wn * wn * M; // Spring constant
 const float C = 2.0f * zeta * wn * M;
 
 struct PlantBlock : public cler::BlockBase {
+    static constexpr bool is_gui = true;
     cler::Channel<float> force_in;
     PlantBlock(const char* name)  
         : BlockBase(name), force_in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) {
@@ -157,6 +157,7 @@ struct PlantBlock : public cler::BlockBase {
 };
 
 struct ControllerBlock : public cler::BlockBase {
+    static constexpr bool is_gui = true;
     cler::Channel<float> measured_position_in;
     float* _buffer;
     size_t _buffer_size;
@@ -299,14 +300,8 @@ int main() {
 
     flowgraph.run();
 
-
     while (!gui.should_close()) {
-        gui.begin_frame();
-        plant.render();
-        plot.render();
-        controller.render();
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        gui.render(flowgraph);
     }
     return 0;
 }

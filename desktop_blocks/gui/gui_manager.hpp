@@ -14,6 +14,19 @@
 
 namespace cler {
 
+namespace gui::detail {
+
+template <typename FG>
+void render_blocks(FG& fg) {
+    fg.for_each_block([](auto& block) {
+        if constexpr (cler::block_declares_is_gui_v<decltype(block)>) {
+            block.render();
+        }
+    });
+}
+
+}
+
 class GuiManager {
 public:
     GuiManager(int width = 800, int height = 400, std::string_view title = "DSP Blocks");
@@ -32,6 +45,14 @@ public:
     void set_frame_sleep_ms(int ms) { _frame_sleep_ms = ms; }
     void frame_sleep() const;
 
+    template <typename FG>
+    void render(FG& fg) {
+        begin_frame();
+        gui::detail::render_blocks(fg);
+        end_frame();
+        frame_sleep();
+    }
+
     // Request a one-shot screenshot of the next completed frame. The capture
     // happens inside end_frame() after the UI is drawn but before the buffer
     // swap. A `.png` path writes an 8-bit RGB PNG (needs zlib at build time,
@@ -47,53 +68,5 @@ private:
     bool        _screenshot_pending = false;
     int         _frame_sleep_ms = 15;
 };
-
-namespace gui {
-
-namespace detail {
-    template <typename T, typename = void>
-    struct has_render : std::false_type {};
-    template <typename T>
-    struct has_render<T, std::void_t<decltype(std::declval<T&>().render())>>
-        : std::true_type {};
-    template <typename T>
-    constexpr bool has_render_v = has_render<std::remove_reference_t<T>>::value;
-
-    template <typename T, typename = void>
-    struct has_post_render : std::false_type {};
-    template <typename T>
-    struct has_post_render<T, std::void_t<decltype(std::declval<T&>().post_render())>>
-        : std::true_type {};
-    template <typename T>
-    constexpr bool has_post_render_v = has_post_render<std::remove_reference_t<T>>::value;
-} // namespace detail
-
-template <typename FG, typename... Extras>
-void render_all(FG& fg, Extras*... extras) {
-    static_assert(
-        ((detail::has_render_v<Extras> || detail::has_post_render_v<Extras>) && ...),
-        "every extra must implement render() and/or post_render()");
-    ([&] { if constexpr (detail::has_render_v<Extras>) extras->render(); }(), ...);
-    fg.for_each_block([](auto& block) {
-        if constexpr (cler::block_declares_is_gui_v<decltype(block)>) {
-            static_assert(detail::has_render_v<decltype(block)>,
-                          "a block declaring is_gui must implement void render()");
-            block.render();
-        }
-    });
-    ([&] { if constexpr (detail::has_post_render_v<Extras>) extras->post_render(); }(), ...);
-}
-
-template <typename FG, typename... Extras>
-void render_loop(GuiManager& gui, FG& fg, Extras*... extras) {
-    while (!gui.should_close() && !fg.is_stopped()) {
-        gui.begin_frame();
-        render_all(fg, extras...);
-        gui.end_frame();
-        gui.frame_sleep();
-    }
-}
-
-} // namespace gui
 
 } // namespace cler

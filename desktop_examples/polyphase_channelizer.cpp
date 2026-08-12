@@ -134,12 +134,7 @@ int main() {
     plot_input_cspectrum.set_initial_window(0.0, 0.0, GW, GH/2.0f);
     plot_polyphase_cspectrum.set_initial_window(0.0, GH/2.0f, GW, GH/2.0f);
     while (!gui_manager.should_close()) {
-        gui_manager.begin_frame();
-        plot_polyphase_cspectrum.render();
-        plot_input_cspectrum.render();
-        gui_manager.end_frame();
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        gui_manager.render(flowgraph);
     }
 
     flowgraph.stop();

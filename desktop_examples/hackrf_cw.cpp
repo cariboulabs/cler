@@ -32,6 +32,30 @@ void print_usage(const char* prog) {
     std::cout << std::endl;
 }
 
+struct UnderrunReporterBlock : public cler::BlockBase {
+    static constexpr bool is_gui = true;
+
+    SinkHackRFBlock* tx;
+    std::chrono::steady_clock::time_point last_stats = std::chrono::steady_clock::now();
+
+    UnderrunReporterBlock(const char* name, SinkHackRFBlock* tx)
+        : cler::BlockBase(name), tx(tx) {}
+
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        return cler::Error::NotEnoughSamples;
+    }
+
+    void render() {
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - last_stats).count() < 5) return;
+        size_t underruns = tx->get_underrun_count();
+        if (underruns > 0) {
+            std::cout << "TX underruns: " << underruns << std::endl;
+        }
+        last_stats = now;
+    }
+};
+
 int main(int argc, char** argv) {
     double freq_mhz = 915.0;
     double sample_rate_msps = 2.0;
@@ -132,11 +156,14 @@ int main(int argc, char** argv) {
 
     SinkHackRFBlock hackrf_tx("HackRF_TX", freq_hz, sample_rate_hz, txvga_gain_db, amp_enable);
 
+    UnderrunReporterBlock underrun_reporter("UnderrunReporter", &hackrf_tx);
+
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&cw_source, &fanout.in),
         cler::BlockRunner(&fanout, &spectrum.in[0], &hackrf_tx.in),
         cler::BlockRunner(&spectrum),
-        cler::BlockRunner(&hackrf_tx)
+        cler::BlockRunner(&hackrf_tx),
+        cler::BlockRunner(&underrun_reporter)
     );
 
     std::cout << "Starting flowgraph..." << std::endl;
@@ -145,23 +172,8 @@ int main(int argc, char** argv) {
     std::cout << "You should see a single spectral line at " << cw_offset_khz << " kHz offset." << std::endl;
     std::cout << std::endl;
 
-    auto last_stats = std::chrono::steady_clock::now();
     while (!gui.should_close()) {
-        gui.begin_frame();
-        spectrum.render();
-        gui.end_frame();
-
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_stats).count();
-        if (elapsed >= 5) {
-            size_t underruns = hackrf_tx.get_underrun_count();
-            if (underruns > 0) {
-                std::cout << "TX underruns: " << underruns << std::endl;
-            }
-            last_stats = now;
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        gui.render(flowgraph);
     }
 
     std::cout << "\nStopping transmission..." << std::endl;

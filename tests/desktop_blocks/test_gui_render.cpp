@@ -39,34 +39,11 @@ private:
     std::vector<std::string>* _log;
 };
 
-struct PreExtra {
-    std::vector<std::string>* log;
-    void render() { log->push_back("pre"); }
-};
-
-struct PostExtra {
-    std::vector<std::string>* log;
-    void post_render() { log->push_back("post"); }
-};
-
-struct BothExtra {
-    std::vector<std::string>* log;
-    void render() { log->push_back("both:pre"); }
-    void post_render() { log->push_back("both:post"); }
-};
-
 static_assert(cler::block_declares_is_gui_v<GuiBlock>);
 static_assert(cler::block_declares_is_gui_v<GuiBlock&>);
 static_assert(cler::block_declares_is_gui_v<const GuiBlock&>);
 static_assert(!cler::block_declares_is_gui_v<PlainBlock>);
 static_assert(!cler::block_declares_is_gui_v<PlainBlock&>);
-
-static_assert(cler::gui::detail::has_render_v<PreExtra>);
-static_assert(!cler::gui::detail::has_post_render_v<PreExtra>);
-static_assert(!cler::gui::detail::has_render_v<PostExtra>);
-static_assert(cler::gui::detail::has_post_render_v<PostExtra>);
-static_assert(cler::gui::detail::has_render_v<BothExtra&>);
-static_assert(cler::gui::detail::has_post_render_v<BothExtra&>);
 
 TEST(GuiRender, ForEachBlockVisitsRunnerOrder) {
     std::vector<std::string> log;
@@ -85,7 +62,7 @@ TEST(GuiRender, ForEachBlockVisitsRunnerOrder) {
     EXPECT_EQ(visited, (std::vector<std::string>{"a", "b", "c"}));
 }
 
-TEST(GuiRender, RenderAllRendersOnlyGuiBlocksInRunnerOrder) {
+TEST(GuiRender, RenderBlocksRendersOnlyGuiBlocksInRunnerOrder) {
     std::vector<std::string> log;
     GuiBlock a("a", &log);
     PlainBlock b("b", &log);
@@ -97,22 +74,8 @@ TEST(GuiRender, RenderAllRendersOnlyGuiBlocksInRunnerOrder) {
         cler::BlockRunner(&c)
     );
 
-    cler::gui::render_all(fg);
+    cler::gui::detail::render_blocks(fg);
     EXPECT_EQ(log, (std::vector<std::string>{"a", "c"}));
-}
-
-TEST(GuiRender, ExtrasRenderBeforeBlocksAndPostRenderAfter) {
-    std::vector<std::string> log;
-    GuiBlock a("a", &log);
-    PreExtra pre{&log};
-    PostExtra post{&log};
-    BothExtra both{&log};
-
-    auto fg = cler::make_desktop_flowgraph(cler::BlockRunner(&a));
-
-    cler::gui::render_all(fg, &pre, &both, &post);
-    EXPECT_EQ(log, (std::vector<std::string>{
-        "pre", "both:pre", "a", "both:post", "post"}));
 }
 
 }  // namespace

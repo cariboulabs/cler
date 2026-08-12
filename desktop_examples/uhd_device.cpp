@@ -13,7 +13,6 @@
 #include "power_detector.hpp"
 #include "desktop_blocks/utils/fanout.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
-#include <chrono>
 #include <iostream>
 #include <vector>
 #include <map>
@@ -144,10 +143,7 @@ void mode_rx(const USRPArgs& args) {
     std::cout << "Flowgraph running... Close window to exit." << std::endl;
 
     while (!gui.should_close()) {
-        gui.begin_frame();
-        spectrogram.render();
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        gui.render(flowgraph);
     }
 
     flowgraph.stop();
@@ -182,10 +178,7 @@ void mode_tx_chirp(const USRPArgs& args) {
     std::cout << "Transmitting chirp signal. Close window to stop." << std::endl;
 
     while (!gui.should_close()) {
-        gui.begin_frame();
-        spectrum.render();
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        gui.render(flowgraph);
     }
 
     flowgraph.stop();
@@ -215,10 +208,7 @@ void mode_tx_cw(const USRPArgs& args) {
     std::cout << "Transmitting CW tone. Close window to stop." << std::endl;
 
     while (!gui.should_close()) {
-        gui.begin_frame();
-        spectrum.render();
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        gui.render(flowgraph);
     }
 
     flowgraph.stop();
@@ -251,10 +241,7 @@ void mode_zero_span(const USRPArgs& args) {
     std::cout << "Showing instantaneous power vs time. Close window to exit." << std::endl;
 
     while (!gui.should_close()) {
-        gui.begin_frame();
-        power_plot.render();
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        gui.render(flowgraph);
     }
 
     flowgraph.stop();

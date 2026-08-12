@@ -99,6 +99,65 @@ constexpr float SPECTRUM_Y = 0.0f;
 constexpr float SPECTROGRAM_X = CONTROL_WIDTH + PLOT_WIDTH;
 constexpr float SPECTROGRAM_Y = 0.0f;
 
+struct SdrControlPanelBlock : public cler::BlockBase {
+    static constexpr bool is_gui = true;
+
+    SourceSoapySDRBlock<std::complex<float>>* sdr;
+    std::string device_args;
+    double sample_rate;
+    float current_freq_mhz;
+    float current_gain;
+
+    SdrControlPanelBlock(const char* name, SourceSoapySDRBlock<std::complex<float>>* sdr,
+                         std::string device_args, double sample_rate, float freq_mhz, float gain)
+        : cler::BlockBase(name), sdr(sdr), device_args(std::move(device_args)),
+          sample_rate(sample_rate), current_freq_mhz(freq_mhz), current_gain(gain) {}
+
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        return cler::Error::NotEnoughSamples;
+    }
+
+    void render() {
+        ImGui::SetNextWindowPos(ImVec2(CONTROL_X + SPACING, CONTROL_Y + SPACING), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(CONTROL_WIDTH - (2 * SPACING), CONTROL_HEIGHT), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("SDR Controls")) {
+            ImGui::Text("Device: %s", device_args.c_str());
+            ImGui::Text("Sample Rate: %.1f MSPS", sample_rate/1e6);
+            ImGui::Separator();
+
+            if (ImGui::SliderFloat("Frequency (MHz)", &current_freq_mhz, 24.0f, 1766.0f)) {
+                sdr->set_frequency(current_freq_mhz * 1e6);
+            }
+
+            if (ImGui::SliderFloat("Gain (dB)", &current_gain, 0.0f, 50.0f)) {
+                sdr->set_gain(current_gain);
+            }
+
+            ImGui::Separator();
+            ImGui::Text("Common Frequencies:");
+            if (ImGui::Button("FM Radio (100.3 MHz)")) {
+                current_freq_mhz = 100.3f;
+                sdr->set_frequency(current_freq_mhz * 1e6);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("NOAA Weather (162.4 MHz)")) {
+                current_freq_mhz = 162.4f;
+                sdr->set_frequency(current_freq_mhz * 1e6);
+            }
+            if (ImGui::Button("ISM Band (433.92 MHz)")) {
+                current_freq_mhz = 433.92f;
+                sdr->set_frequency(current_freq_mhz * 1e6);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("ADS-B (1090 MHz)")) {
+                current_freq_mhz = 1090.0f;
+                sdr->set_frequency(current_freq_mhz * 1e6);
+            }
+        }
+        ImGui::End();
+    }
+};
+
 int main(int argc, char* argv[]) {
     std::string device_args = "driver=rtlsdr";
     double freq_mhz = 100.3;  // Default FM radio frequency
@@ -177,7 +236,10 @@ int main(int argc, char* argv[]) {
     );
     spectrogram.set_initial_window(SPECTROGRAM_X, SPECTROGRAM_Y, PLOT_WIDTH, PLOT_HEIGHT);
 
+    SdrControlPanelBlock control_panel("SDRControls", &sdr_source, device_args, sample_rate, freq_mhz, gain);
+
     auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&control_panel),
         cler::BlockRunner(&sdr_source, &fanout.in),
         cler::BlockRunner(&fanout, &spectrum.in[0], &spectrogram.in[0]),
         cler::BlockRunner(&spectrum),
@@ -186,55 +248,8 @@ int main(int argc, char* argv[]) {
 
     flowgraph.run();
 
-    float current_freq_mhz = freq_mhz;
-    float current_gain = gain;
-
     while (!gui.should_close()) {
-        gui.begin_frame();
-
-        ImGui::SetNextWindowPos(ImVec2(CONTROL_X + SPACING, CONTROL_Y + SPACING), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(CONTROL_WIDTH - (2 * SPACING), CONTROL_HEIGHT), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("SDR Controls")) {
-            ImGui::Text("Device: %s", device_args.c_str());
-            ImGui::Text("Sample Rate: %.1f MSPS", sample_rate/1e6);
-            ImGui::Separator();
-            
-            if (ImGui::SliderFloat("Frequency (MHz)", &current_freq_mhz, 24.0f, 1766.0f)) {
-                sdr_source.set_frequency(current_freq_mhz * 1e6);
-            }
-            
-            if (ImGui::SliderFloat("Gain (dB)", &current_gain, 0.0f, 50.0f)) {
-                sdr_source.set_gain(current_gain);
-            }
-            
-            ImGui::Separator();
-            ImGui::Text("Common Frequencies:");
-            if (ImGui::Button("FM Radio (100.3 MHz)")) {
-                current_freq_mhz = 100.3f;
-                sdr_source.set_frequency(current_freq_mhz * 1e6);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("NOAA Weather (162.4 MHz)")) {
-                current_freq_mhz = 162.4f;
-                sdr_source.set_frequency(current_freq_mhz * 1e6);
-            }
-            if (ImGui::Button("ISM Band (433.92 MHz)")) {
-                current_freq_mhz = 433.92f;
-                sdr_source.set_frequency(current_freq_mhz * 1e6);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("ADS-B (1090 MHz)")) {
-                current_freq_mhz = 1090.0f;
-                sdr_source.set_frequency(current_freq_mhz * 1e6);
-            }
-        }
-        ImGui::End();
-
-        spectrum.render();
-        spectrogram.render();
-
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));  // ~60 FPS
+        gui.render(flowgraph);
     }
 
     flowgraph.stop();

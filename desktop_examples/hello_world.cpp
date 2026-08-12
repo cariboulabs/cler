@@ -32,12 +32,8 @@ int main() {
     );
 
     flowgraph.run();
-
-    while (gui.should_close() == false) {
-        gui.begin_frame();
-        plot.render();
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    while (!gui.should_close()) {
+        gui.render(flowgraph);
     }
     return 0;
 }

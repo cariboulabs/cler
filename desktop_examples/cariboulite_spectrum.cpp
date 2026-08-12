@@ -31,13 +31,8 @@ int main() {
     plot.set_initial_window(0.0f, 0.0f, 800.0f, 400.0f);
 
     flowgraph.run(cler::FlowGraphConfig{});
-
-
-    while (gui.should_close() == false) {
-        gui.begin_frame();
-        plot.render();
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    while (!gui.should_close()) {
+        gui.render(flowgraph);
     }
     flowgraph.stop();
     print_flowgraph_execution_report(flowgraph);

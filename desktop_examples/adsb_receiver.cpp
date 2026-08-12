@@ -236,10 +236,7 @@ int main(int argc, char** argv) {
     std::cout << std::endl;
 
     while (!gui.should_close()) {
-        gui.begin_frame();
-        aggregator.render();
-        gui.end_frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));  // ~60 FPS
+        gui.render(flowgraph);
     }
 
     std::cout << "Shutting down..." << std::endl;
