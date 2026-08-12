@@ -463,6 +463,7 @@ fn tag(command: &Command) -> &'static str {
         Command::Disconnect { .. } => "disconnect",
         Command::AddBlock { .. } => "add_block",
         Command::RemoveFromGraph { .. } => "remove_from_graph",
+        Command::AddToGraph { .. } => "add_to_graph",
         Command::DeleteBlock { .. } => "delete_block",
         Command::DefineBlock { .. } => "define_block",
     }
@@ -545,7 +546,7 @@ fn the_tool_schema_matches_the_command_enum_field_for_field() {
         variants.len(),
         "two schema variants map onto one command"
     );
-    assert_eq!(covered.len(), 10, "the schema is missing a command");
+    assert_eq!(covered.len(), 11, "the schema is missing a command");
 }
 
 #[test]

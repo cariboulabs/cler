@@ -985,6 +985,15 @@ fn check(before: &Site, after: &Site, command: &Command) {
         Command::Disconnect { .. } => {
             assert_eq!(after.edges.len(), before.edges.len() - 1);
         }
+        Command::AddToGraph { block, .. } => {
+            assert!(
+                after
+                    .runners
+                    .iter()
+                    .any(|runner| runner.block.as_deref() == Some(block.as_str())),
+                "add_to_graph must leave the block with a runner"
+            );
+        }
         Command::RemoveFromGraph { block, .. } => {
             assert!(after
                 .runners
@@ -1047,6 +1056,7 @@ fn corrupt(rng: &mut Lcg, command: &Command) -> (u64, Command) {
             | Command::Disconnect { site, .. }
             | Command::AddBlock { site, .. }
             | Command::RemoveFromGraph { site, .. }
+            | Command::AddToGraph { site, .. }
             | Command::DeleteBlock { site, .. }
             | Command::DefineBlock { site, .. } => *site = 900,
         },
@@ -1055,6 +1065,7 @@ fn corrupt(rng: &mut Lcg, command: &Command) -> (u64, Command) {
             | Command::SetTemplateArg { block, .. }
             | Command::SetDisplayName { block, .. }
             | Command::RemoveFromGraph { block, .. }
+            | Command::AddToGraph { block, .. }
             | Command::DeleteBlock { block, .. } => *block = "no_such_block".to_string(),
             Command::Connect { from, .. } => *from = "no_such_block".to_string(),
             Command::Disconnect { edge, .. } => *edge = 4242,
@@ -1072,6 +1083,7 @@ fn corrupt(rng: &mut Lcg, command: &Command) -> (u64, Command) {
             Command::AddBlock { ctor_args, .. } => ctor_args.clear(),
             Command::SetDisplayName { block, .. }
             | Command::RemoveFromGraph { block, .. }
+            | Command::AddToGraph { block, .. }
             | Command::DeleteBlock { block, .. } => *block = "no_such_block".to_string(),
             Command::SetConfig { path, .. } => *path = "x = 1; std::abort(); //".to_string(),
             Command::DefineBlock { name, .. } => *name = "LacksTheSuffix".to_string(),
@@ -1092,7 +1104,9 @@ fn corrupt(rng: &mut Lcg, command: &Command) -> (u64, Command) {
             Command::AddBlock { type_name, .. } => {
                 *type_name = "int pwned = 1; ThrottleBlock".to_string()
             }
-            Command::RemoveFromGraph { block, .. } | Command::DeleteBlock { block, .. } => {
+            Command::RemoveFromGraph { block, .. }
+            | Command::AddToGraph { block, .. }
+            | Command::DeleteBlock { block, .. } => {
                 *block = "no_such_block".to_string()
             }
             Command::DefineBlock { value_type, .. } => {
@@ -1519,4 +1533,55 @@ fn connecting_into_an_existing_graph_gives_a_new_sink_its_runner() {
     let site = only_site(&session);
     let sink = site.block("null_sink").expect("sink survives");
     assert!(sink.in_graph, "a wired sink must run");
+}
+
+#[test]
+fn add_to_graph_gives_a_wired_block_its_missing_runner() {
+    let source = r#"#include "cler.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
+#include "desktop_blocks/sources/source_cw.hpp"
+#include "desktop_blocks/sinks/sink_null.hpp"
+
+int main() {
+    SourceCWBlock<float> source_cw("Source", 1.0f, 1.0f, 1000);
+    SinkNullBlock<float> sink("Null");
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source_cw, &sink.in)
+    );
+
+    flowgraph.run();
+    return 0;
+}
+"#;
+    let mut session = DocumentSession::load(source).expect("loads");
+    let runs = |session: &DocumentSession| {
+        only_site(session)
+            .runners
+            .iter()
+            .any(|runner| runner.block.as_deref() == Some("sink"))
+    };
+    assert!(!runs(&session), "the sink starts without a runner");
+
+    session
+        .apply(transaction(
+            0,
+            vec![Command::AddToGraph {
+                site: 0,
+                block: "sink".to_string(),
+            }],
+        ))
+        .expect("add_to_graph applies");
+    assert!(session.source().contains("cler::BlockRunner(&sink)"));
+    assert!(runs(&session), "add_to_graph must leave the sink running");
+
+    let refused = session
+        .apply(transaction(
+            1,
+            vec![Command::AddToGraph {
+                site: 0,
+                block: "sink".to_string(),
+            }],
+        ))
+        .expect_err("a block that already runs is refused");
+    assert!(matches!(refused, ApplyError::UnsupportedShape { .. }));
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fixtures } from '../src/fixtures';
 import { addForm, braceListLength } from '../src/lib/palette';
-import { boot, CASE, openLibrary, shot, specs, useBrowser } from './ui';
+import { boot, CASE, commands, openLibrary, openMenu, shot, specs, useBrowser } from './ui';
 
 useBrowser();
 
@@ -88,4 +88,31 @@ describe('ports sized by a brace list', () => {
     expect(form.ctorArgs[1]?.value).toBe('{"in"}');
     expect(braceListLength(form.ctorArgs[1]?.value ?? '')).toBe(1);
   });
+});
+
+describe('a wired block without a runner', () => {
+  it(
+    'offers Add to graph in its menu and gains a runner',
+    async () => {
+      const base = fixtures.hello_world;
+      if (!base) throw new Error('no hello_world fixture');
+      const model = structuredClone(base);
+      const site = model.sites[0];
+      if (!site) throw new Error('no site');
+      site.runners = site.runners.filter((runner) => runner.block !== 'plot');
+
+      const page = await boot({ model });
+      await openMenu(page, '.svelte-flow__node[data-id="plot"]');
+      expect(await page.locator('[data-testid="menu-remove"]').count()).toBe(0);
+      const add = page.locator('[data-testid="menu-add-to-graph"]');
+      await add.waitFor();
+      await add.click();
+
+      await expect.poll(() => commands(page)).toEqual([
+        { command: 'add_to_graph', site: 0, block: 'plot' }
+      ]);
+      await page.close();
+    },
+    CASE
+  );
 });

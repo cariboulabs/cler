@@ -151,6 +151,8 @@ export function describeCommand(command: Command): string {
       return `add ${typeOf(command.type, command.template_args)} as ${command.var_name}`;
     case 'remove_from_graph':
       return `take ${command.block} out of the graph, keeping its declaration`;
+    case 'add_to_graph':
+      return `give ${command.block} a runner so it executes`;
     case 'delete_block':
       return `delete ${command.block} and its declaration`;
     case 'define_block':

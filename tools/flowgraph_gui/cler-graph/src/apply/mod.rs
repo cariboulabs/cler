@@ -69,6 +69,10 @@ pub enum Command {
         site: usize,
         block: String,
     },
+    AddToGraph {
+        site: usize,
+        block: String,
+    },
     DeleteBlock {
         site: usize,
         block: String,

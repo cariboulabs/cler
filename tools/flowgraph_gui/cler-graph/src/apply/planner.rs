@@ -725,6 +725,7 @@ impl<'a> Planner<'a> {
             | Command::Disconnect { site, .. }
             | Command::AddBlock { site, .. }
             | Command::RemoveFromGraph { site, .. }
+            | Command::AddToGraph { site, .. }
             | Command::DeleteBlock { site, .. }
             | Command::DefineBlock { site, .. } => *site,
         };
@@ -1001,6 +1002,21 @@ impl<'a> Planner<'a> {
                     self.line_start(statement.start_byte()),
                     declaration,
                 )])
+            }
+
+            Command::AddToGraph { site, block } => {
+                let target = self.site(*site)?;
+                self.editable_block(*site, block)?;
+                if target
+                    .runners
+                    .iter()
+                    .any(|runner| runner.block.as_deref() == Some(block.as_str()))
+                {
+                    return Err(ApplyError::UnsupportedShape {
+                        detail: format!("{block} already has a runner"),
+                    });
+                }
+                Ok(vec![self.append_runners(target, &[format!("(&{block})")])?])
             }
 
             Command::RemoveFromGraph { site, block } => {

@@ -141,6 +141,7 @@ export type Command =
       var_name: string;
     }
   | { command: 'remove_from_graph'; site: number; block: string }
+  | { command: 'add_to_graph'; site: number; block: string }
   | { command: 'delete_block'; site: number; block: string }
   | {
       command: 'define_block';

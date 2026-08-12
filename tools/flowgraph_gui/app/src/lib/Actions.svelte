@@ -73,6 +73,8 @@
     oncopydeclaration: (block: string) => void;
     onopeneditor: (block: string) => void;
     onremove: (block: string) => void;
+    onaddtograph: (block: string) => void;
+    runsAt: (block: string) => boolean;
     ondeleteblock: (block: string) => void;
     ondisconnect: (edge: string) => void;
     onaddhere: (clientX: number, clientY: number) => void;
@@ -133,6 +135,8 @@
     oncopydeclaration,
     onopeneditor,
     onremove,
+    onaddtograph,
+    runsAt,
     ondeleteblock,
     ondisconnect,
     onaddhere,
@@ -351,14 +355,23 @@
         hint: canOpenEditor ? undefined : editNote,
         run: () => onopeneditor(block)
       },
-      {
-        id: 'remove',
-        label: 'Remove from graph',
-        shortcut: 'Del',
-        enabled: canEdit,
-        hint: canEdit ? 'splices the runner out, the declaration stays' : editNote,
-        run: () => onremove(block)
-      },
+      runsAt(block)
+        ? {
+            id: 'remove',
+            label: 'Remove from graph',
+            shortcut: 'Del',
+            enabled: canEdit,
+            hint: canEdit ? 'splices the runner out, the declaration stays' : editNote,
+            run: () => onremove(block)
+          }
+        : {
+            id: 'add-to-graph',
+            label: 'Add to graph',
+            shortcut: '',
+            enabled: canEdit,
+            hint: canEdit ? 'gives this block a runner so it executes' : editNote,
+            run: () => onaddtograph(block)
+          },
       {
         id: 'delete-block',
         label: 'Delete block…',

@@ -1611,6 +1611,9 @@
             {compiled}
             {tasks}
             {running}
+            onaddtograph={(block) => void submit({ command: 'add_to_graph', site: siteIndex, block })}
+            runsAt={(block) =>
+              site?.runners.some((runner) => runner.block === block) ?? false}
             ondiscarddraft={() => void discardDraft()}
             onsaveas={() => void saveAs()}
             edgeAt={edgeInfo}

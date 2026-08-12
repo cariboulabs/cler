@@ -436,6 +436,14 @@ fn commands() -> Vec<Value> {
             ],
         ),
         variant(
+            "add_to_graph",
+            "Give a declared block a runner so it executes.",
+            vec![
+                site(),
+                ("block", words("variable name of the block"), true),
+            ],
+        ),
+        variant(
             "delete_block",
             "Unwire a block and delete its declaration.",
             vec![
