@@ -34,14 +34,17 @@ static void help(const char* text) {
 }
 
 // Render-only: writes staged source config and mutex-guarded trigger config; owns neither.
-struct ControlPanel {
-    ControlPanel(ISource* src, Trig* trig,
+struct ControlPanel : public cler::BlockBase {
+    static constexpr bool is_gui = true;
+
+    ControlPanel(const char* name, ISource* src, Trig* trig,
                  PlotCSpectrumBlock* spectrum,
                  PlotCSpectrogramBlock* sgram,
                  PowerDetectorBlock<std::complex<float>>* power,
                  ChannelizerPanelBlock* chan,
                  size_t sgram_rows, const SpikeArgs& a)
-        : _src(src), _trig(trig), _spectrum(spectrum), _sgram(sgram), _power(power),
+        : BlockBase(name),
+          _src(src), _trig(trig), _spectrum(spectrum), _sgram(sgram), _power(power),
           _chan(chan),
           _kind(src->kind()),
           _freq_ui_max_mhz(src->kind() == SourceKind::HackRF ? 7250.0f : 6000.0f),
@@ -61,6 +64,10 @@ struct ControlPanel {
           _zs_bw_mhz(static_cast<float>(a.rate / 1e6)),   // full rate = bypass
           _max_window_ms(trig->max_window_ms()) {
         _history_s = fpr_to_history(8);   // default depth; conf key history_s overrides
+    }
+
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        return cler::Error::NotEnoughSamples;
     }
 
     // Slider/drag that becomes a typed input on double-click; [tmin,tmax] (default vmin/vmax) bounds the typed value.
@@ -392,6 +399,65 @@ struct ControlPanel {
         window_size = ImGui::GetWindowSize();
 
         ImGui::End();
+
+        // Hidden plots keep draining input (fanout never stalls) but skip FFT/copy work, so they can't jitter the trigger path.
+        _sgram->set_active(show_spectrogram);
+        _spectrum->set_active(show_spectrum);
+        _chan->set_active(show_channelizer);
+        _trig->set_visible(show_scope);
+        _spectrum->set_visible(show_spectrum);
+        _sgram->set_visible(show_spectrogram);
+        _chan->set_visible(show_channelizer);
+
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        if (vp->WorkSize.x != _pending_work_size.x ||
+            vp->WorkSize.y != _pending_work_size.y) {
+            _pending_work_size = vp->WorkSize;
+            _work_size_stable  = 0;
+        } else if (_work_size_stable < kResizeSettleFrames) {
+            ++_work_size_stable;
+        }
+        const bool resize_retile =
+            _work_size_stable >= kResizeSettleFrames &&
+            (vp->WorkSize.x != _tiled_work_size.x ||
+             vp->WorkSize.y != _tiled_work_size.y);
+
+        // Read visibility AFTER render() (toggle applies this frame) but stage rects BEFORE the view renders below consume them.
+        bool retile = _first_layout || arrange_requested || resize_retile ||
+                      show_scope       != _prev_scope ||
+                      show_spectrum    != _prev_spectrum ||
+                      show_spectrogram != _prev_spectrogram ||
+                      show_channelizer != _prev_channelizer;
+        _first_layout = false;
+        arrange_requested = false;
+        _prev_scope       = show_scope;
+        _prev_spectrum    = show_spectrum;
+        _prev_spectrogram = show_spectrogram;
+        _prev_channelizer = show_channelizer;
+
+        if (retile) {
+            // Plot area = viewport minus the panel's rect and margins, split into N equal rows.
+            _tiled_work_size = vp->WorkSize;
+            const float gap = 8.0f;
+            const float x = window_pos.x + window_size.x + 10.0f;
+            const float w = vp->WorkPos.x + vp->WorkSize.x - 10.0f - x;
+            const float y0 = vp->WorkPos.y + 10.0f;
+            const float total_h = vp->WorkSize.y - 20.0f;
+            const int n = (show_scope ? 1 : 0) +
+                          (show_spectrum ? 1 : 0) +
+                          (show_spectrogram ? 1 : 0) +
+                          (show_channelizer ? 1 : 0);
+            if (n > 0 && w > 50.0f && total_h > 50.0f) {
+                const float row_h = (total_h - gap * static_cast<float>(n - 1))
+                                    / static_cast<float>(n);
+                int row = 0;
+                auto row_y = [&](int r) { return y0 + static_cast<float>(r) * (row_h + gap); };
+                if (show_scope)       _trig->apply_window_rect(x, row_y(row++), w, row_h);
+                if (show_spectrum)    _spectrum->apply_window_rect(x, row_y(row++), w, row_h);
+                if (show_spectrogram) _sgram->apply_window_rect(x, row_y(row++), w, row_h);
+                if (show_channelizer) _chan->apply_window_rect(x, row_y(row++), w, row_h);
+            }
+        }
     }
 
     // Transient status line under the Snapshot button (auto-hides).
@@ -736,6 +802,16 @@ private:
     // Double-click-to-type state: which field (by label pointer) is being typed.
     const char* _editing  = nullptr;
     bool        _editing_start = false;
+
+    // Tile visible plots as equal-height rows right of the panel: on first frame, view-set change, "Arrange windows", or a debounced resize.
+    bool _prev_scope = false, _prev_spectrum = false, _prev_spectrogram = false;
+    bool _prev_channelizer = false;
+    bool _first_layout = true;
+    // Retile only once WorkSize is STABLE for kResizeSettleFrames (no fighting a drag) and differs from the size last tiled.
+    static constexpr int kResizeSettleFrames = 5;
+    ImVec2 _tiled_work_size{0.0f, 0.0f};     // WorkSize used by the last tiling
+    ImVec2 _pending_work_size{0.0f, 0.0f};   // last observed WorkSize
+    int    _work_size_stable = 0;            // frames it has been unchanged
 
     // Snapshot: dest dir (conf key snapshot_dir, asked once via modal), edit buffer, transient status.
     std::string _snapshot_dir;

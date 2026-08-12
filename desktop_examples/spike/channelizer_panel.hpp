@@ -21,6 +21,8 @@
 // SINK: procedure() always drains `in`, even while hidden, so it can never
 // back up the shared fanout.
 struct ChannelizerPanelBlock : public cler::BlockBase {
+    static constexpr bool is_gui = true;
+
     cler::Channel<std::complex<float>> in;
 
     static constexpr size_t N_MIN      = 2;
@@ -149,6 +151,8 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
         _external_pause.store(!active, std::memory_order_release);
     }
 
+    void set_visible(bool visible) { _visible = visible; }
+
     void set_initial_window(float x, float y, float w, float h) {
         _win_pos  = ImVec2(x, y);
         _win_size = ImVec2(w, h);
@@ -228,6 +232,7 @@ struct ChannelizerPanelBlock : public cler::BlockBase {
     }
 
     void render() {
+        if (!_visible) return;
         if (_pending_rect) {
             ImGui::SetNextWindowPos(_pending_rect_pos, ImGuiCond_Always);
             ImGui::SetNextWindowSize(_pending_rect_size, ImGuiCond_Always);
@@ -413,6 +418,7 @@ private:
     std::vector<std::string> _tick_labels;
     std::vector<const char*> _tick_ptrs;
 
+    bool   _visible = true;
     ImVec2 _win_pos{380.0f, 455.0f};
     ImVec2 _win_size{1100.0f, 430.0f};
     bool   _pending_rect = false;
