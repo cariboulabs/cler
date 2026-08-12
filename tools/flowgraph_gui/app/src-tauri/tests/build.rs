@@ -164,17 +164,16 @@ fn find_target_follows_the_example_subdirectory_into_the_build_tree() {
 }
 
 #[test]
-fn a_file_outside_the_examples_has_no_target() {
+fn a_file_outside_the_examples_builds_as_a_draft_target() {
     let root = repo("outside");
     let source = root.join("scratch/mine.cpp");
     write(&source, "int main() { return 0; }\n");
     write(&root.join("build/CMakeCache.txt"), "configured\n");
 
     let found = build::find_target(as_str(&source)).expect("answer");
-    assert!(!found.available);
-    assert_eq!(found.build_dir, None);
-    let reason = found.reason.unwrap_or_default();
-    assert!(reason.contains("desktop_examples"), "{reason}");
+    assert!(found.available, "{:?}", found.reason);
+    assert_eq!(found.name, "cler_draft_mine");
+    assert_eq!(found.build_dir.as_deref(), Some(as_str(&root.join("build"))));
 }
 
 #[test]
@@ -195,15 +194,14 @@ fn without_a_configured_build_directory_the_reason_is_the_command_to_run() {
 }
 
 #[test]
-fn a_file_outside_a_cler_repository_edits_and_checks_but_has_no_target() {
+fn a_file_outside_a_cler_repository_builds_against_the_fallback_root() {
     let dir = temp_dir("stray");
     let source = dir.join("stray.cpp");
     write(&source, "int main() { return 0; }\n");
 
     let found = build::find_target(as_str(&source)).expect("builtin repo fallback resolves");
-    assert!(!found.available);
-    let reason = found.reason.unwrap_or_default();
-    assert!(reason.contains("outside the cler repository"), "{reason}");
+    assert!(found.available, "{:?}", found.reason);
+    assert_eq!(found.name, "cler_draft_stray");
 
     if have_gxx() {
         let jobs = Jobs::default();
@@ -593,4 +591,20 @@ fn run_forwards_the_given_arguments_to_the_binary() {
         Some("-s hackrf -f 100e6")
     );
     await_event(&seen, "run-finished");
+}
+
+#[test]
+fn a_draft_target_cannot_collide_with_a_repo_example_of_the_same_name() {
+    let root = repo("collide");
+    let example = root.join("desktop_examples/flowgraph.cpp");
+    write(&example, "int main() { return 0; }\n");
+    write(&root.join("build/CMakeCache.txt"), "configured\n");
+    let outside = root.join("elsewhere/flowgraph.cpp");
+    write(&outside, "int main() { return 0; }\n");
+
+    let repo_target = build::find_target(as_str(&example)).expect("example target");
+    let draft_target = build::find_target(as_str(&outside)).expect("draft target");
+    assert_eq!(repo_target.name, "flowgraph");
+    assert_eq!(draft_target.name, "cler_draft_flowgraph");
+    assert_ne!(repo_target.binary, draft_target.binary);
 }

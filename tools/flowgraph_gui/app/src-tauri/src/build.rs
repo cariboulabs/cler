@@ -45,6 +45,7 @@ const EXAMPLES: &str = "desktop_examples";
 const STANDARD: &str = "-std=c++17";
 const GRACE: Duration = Duration::from_secs(3);
 const PRODUCER: &str = "cmake";
+const DRAFT_PREFIX: &str = "cler_draft_";
 const DRAFT_INPUT: &str = "draft";
 const REQUIREMENTS_INPUT: &str = "requirements";
 const CMAKE_INPUT: &str = "cmake";
@@ -122,25 +123,21 @@ fn cmake_target_dir<'a>(root: &Path, source_dir: &'a Path) -> &'a Path {
 
 pub fn find_target(path: &str) -> Result<Target, String> {
     let file = canonical(path)?;
-    let name = file
+    let stem = file
         .file_stem()
         .and_then(OsStr::to_str)
         .unwrap_or_default()
         .to_string();
     let root = repo_root(&file).ok_or_else(|| outside(&file))?;
-    let Some(relative) = file.parent().and_then(|dir| dir.strip_prefix(&root).ok()) else {
-        return Ok(refused(
-            name,
-            "outside the cler repository — no cmake target yet; editing and check still work"
-                .to_string(),
-        ));
+    let inside = file
+        .parent()
+        .and_then(|dir| dir.strip_prefix(&root).ok())
+        .filter(|relative| relative.starts_with(EXAMPLES));
+    let name = match inside {
+        Some(_) => stem,
+        None => draft_target_name(&stem),
     };
-    if !relative.starts_with(EXAMPLES) {
-        return Ok(refused(
-            name,
-            format!("only files under {EXAMPLES}/ have a cmake target"),
-        ));
-    }
+    let relative = inside.unwrap_or_else(|| Path::new(""));
     let Some(dir) = choose_build(&root, relative) else {
         return Ok(refused(
             name,
@@ -241,11 +238,14 @@ pub fn build_draft(
         .exact
         .then(|| write_requirements(&draft.workspace, &draft.requirements))
         .transpose()?;
+    let root = repo_root(&target).ok_or_else(|| outside(&target))?;
+    let external = repo_relative(&root, &target).is_none();
     let script = draft_runner(
         &found,
         &source_dir,
         &build_dir,
         requirements_file.as_deref(),
+        external.then_some(draft.path.as_path()),
     )?;
     let mut command = Command::new("cmake");
     command.arg("-P").arg(script);
@@ -387,13 +387,16 @@ fn refused(name: String, reason: String) -> Target {
 
 fn artifact_name(target: &Path, found: &Target) -> Result<String, String> {
     let root = repo_root(target).ok_or_else(|| outside(target))?;
-    let relative = target.strip_prefix(root).map_err(|_| outside(target))?;
-    Ok(format!("{PRODUCER}:{}:{}", relative.display(), found.name))
+    let key = target
+        .strip_prefix(root)
+        .map(|relative| relative.display().to_string())
+        .unwrap_or_else(|_| target.display().to_string());
+    Ok(format!("{PRODUCER}:{key}:{}", found.name))
 }
 
 fn build_input(target: &Path, found: &Target, draft: &DraftState) -> Result<InputKey, String> {
     let root = repo_root(target).ok_or_else(|| outside(target))?;
-    let relative = target.strip_prefix(&root).map_err(|_| outside(target))?;
+    let relative = target.strip_prefix(&root).unwrap_or(target);
     let configured = found.build_dir.as_deref().unwrap_or_default();
     let cache = Path::new(configured).join("CMakeCache.txt");
     let recipe = json!({
@@ -768,24 +771,53 @@ fn cores() -> usize {
 
 fn draft_tree(target: &Path, workspace: &Path) -> Result<(PathBuf, PathBuf, PathBuf), String> {
     let root = repo_root(target).ok_or_else(|| outside(target))?;
-    let relative = target.strip_prefix(&root).map_err(|_| outside(target))?;
     let source_dir = workspace.join("source");
     let build_dir = workspace.join("build");
     let name = target
         .file_stem()
         .and_then(OsStr::to_str)
         .unwrap_or_default();
-    let source_parent = relative.parent().unwrap_or_else(|| Path::new(""));
-    let binary = build_dir
-        .join(cmake_target_dir(&root, source_parent))
-        .join(name);
+    let binary = match repo_relative(&root, target) {
+        Some(relative) => build_dir
+            .join(cmake_target_dir(&root, relative.parent().unwrap_or_else(|| Path::new(""))))
+            .join(name),
+        None => build_dir.join(name),
+    };
     Ok((source_dir, build_dir, binary))
+}
+
+pub fn draft_target_name(stem: &str) -> String {
+    let safe: String = stem
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    format!("{DRAFT_PREFIX}{safe}")
+}
+
+fn repo_relative<'a>(root: &Path, target: &'a Path) -> Option<&'a Path> {
+    target
+        .strip_prefix(root)
+        .ok()
+        .filter(|relative| relative.starts_with(EXAMPLES))
 }
 
 fn prepare_overlay(target: &Path, draft: &Path, source_dir: &Path) -> Result<(), String> {
     let root = repo_root(target).ok_or_else(|| outside(target))?;
-    let relative = target.strip_prefix(&root).map_err(|_| outside(target))?;
-    mirror_layer(&root, source_dir, relative, draft)
+    match repo_relative(&root, target) {
+        Some(relative) => mirror_layer(&root, source_dir, relative, draft),
+        None => mirror_tree(&root, source_dir),
+    }
+}
+
+fn mirror_tree(real: &Path, overlay: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(overlay)
+        .map_err(|cause| format!("cannot create {}: {cause}", overlay.display()))?;
+    let entries = std::fs::read_dir(real)
+        .map_err(|cause| format!("cannot read {}: {cause}", real.display()))?;
+    for entry in entries.flatten() {
+        ensure_link(&entry.path(), &overlay.join(entry.file_name()))?;
+    }
+    Ok(())
 }
 
 fn mirror_layer(real: &Path, overlay: &Path, relative: &Path, draft: &Path) -> Result<(), String> {
@@ -869,6 +901,7 @@ fn draft_runner(
     source_dir: &Path,
     build_dir: &Path,
     requirements_file: Option<&Path>,
+    draft_source: Option<&Path>,
 ) -> Result<PathBuf, String> {
     std::fs::create_dir_all(build_dir)
         .map_err(|cause| format!("cannot create {}: {cause}", build_dir.display()))?;
@@ -881,6 +914,9 @@ fn draft_runner(
         "-DCLER_BUILD_PERFORMANCE=OFF".to_string(),
         format!("-DCLER_EDITOR_TARGET={}", found.name),
     ];
+    if let Some(source) = draft_source {
+        configure.push(format!("-DCLER_EDITOR_SOURCE={}", source.display()));
+    }
     if let Some(requirements_file) = requirements_file {
         configure.push(format!(
             "-DCLER_EDITOR_REQUIREMENTS_FILE={}",
@@ -1027,6 +1063,19 @@ fn choose_build(root: &Path, relative: &Path) -> Option<PathBuf> {
         .cloned()
 }
 
+fn spawn_past_busy_text(command: &mut Command) -> std::io::Result<Child> {
+    const ATTEMPTS: usize = 20;
+    for attempt in 0..ATTEMPTS {
+        match command.spawn() {
+            Err(cause) if cause.raw_os_error() == Some(26) && attempt + 1 < ATTEMPTS => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            outcome => return outcome,
+        }
+    }
+    command.spawn()
+}
+
 fn key(kind: &str, target: &Path) -> String {
     format!("{kind}:{}", target.display())
 }
@@ -1132,11 +1181,11 @@ fn spawn_mapped(
     completion: Option<Completion>,
 ) -> Result<Started, String> {
     let job_id = NEXT_JOB.fetch_add(1, Ordering::Relaxed);
-    let mut child = command
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    let mut child = spawn_past_busy_text(&mut command)
         .map_err(|cause| format!("cannot start {kind}: {cause}"))?;
     let out = child.stdout.take();
     let err = child.stderr.take();

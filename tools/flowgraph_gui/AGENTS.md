@@ -67,6 +67,17 @@ in two places under two names, one of them is wrong.
    affordances on list rows (a `✕` to remove) are fine; free-standing
    buttons in the panel body are not.
 
+## Building a document
+
+A file inside `desktop_examples/` builds through its own CMake target. Any
+other file — anywhere on disk — builds as a *draft target*: the shadow
+workspace mirrors the resolved cler root, and the repo's
+`CLER_EDITOR_SOURCE` hook creates `cler_draft_<stem>` for it. Draft targets
+are namespaced precisely so a file named like a repo example cannot silently
+build that example instead. Both paths share exact block linking, artifact
+provenance, and Run gating; nothing about the shadow build is special-cased
+per document.
+
 ## Product constraints
 
 - No wizard for defining new block *types* — blocks are authored in C++ and
