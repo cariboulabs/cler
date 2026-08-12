@@ -672,7 +672,10 @@ impl<'a> Planner<'a> {
         let declaration = self.site_first_statement(site)?;
         splices.push(Splice::insert(
             self.line_start(declaration.start_byte()),
-            format!("{indent}cler::GuiManager gui(800, 400, \"cler flowgraph\");{eol}"),
+            format!(
+                "{indent}cler::GuiManager gui(800, 400, \"{}\");{eol}",
+                self.window_title()
+            ),
         ));
 
         let idle = self.idle_loop_after(run);
@@ -685,7 +688,7 @@ impl<'a> Planner<'a> {
                     start: self.line_start(node.start_byte()),
                     end: self.line_end(node.end_byte()),
                 },
-                loop_text.trim_end_matches(|c| c == '\n' || c == '\r'),
+                &loop_text,
             )),
             None => splices.push(Splice::insert(self.line_end(run.end_byte()), loop_text)),
         }
@@ -698,6 +701,17 @@ impl<'a> Planner<'a> {
             Some(found) => offset + found + 1,
             None => self.src.len(),
         }
+    }
+
+    fn window_title(&self) -> String {
+        self.model
+            .file
+            .as_deref()
+            .and_then(|path| path.rsplit('/').next())
+            .and_then(|name| name.split('.').next())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or("cler flowgraph")
+            .to_string()
     }
 
     fn last_include_end(&self) -> usize {

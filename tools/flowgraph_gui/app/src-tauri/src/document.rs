@@ -1296,3 +1296,50 @@ mod external_build_tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
+#[cfg(test)]
+mod render_tests {
+    #[test]
+    fn materializing_a_loop_titles_the_window_after_the_document() {
+        let _guard = crate::settings::test_guard();
+        let dir = std::env::temp_dir().join(format!("cler-render-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let file = dir.join("my_receiver.cpp");
+        std::fs::write(
+            &file,
+            concat!(
+                "#include \"cler.hpp\"\n",
+                "#include \"task_policies/cler_desktop_tpolicy.hpp\"\n",
+                "#include \"desktop_blocks/plots/plot_timeseries.hpp\"\n",
+                "int main() {\n",
+                "    PlotTimeSeriesBlock plot(\"Plot\", {\"in\"}, 1000, 10.0f);\n",
+                "    auto flowgraph = cler::make_desktop_flowgraph(\n",
+                "        cler::BlockRunner(&plot)\n",
+                "    );\n",
+                "    cler::FlowGraphConfig config;\n",
+                "    flowgraph.run(config);\n",
+                "    return 0;\n",
+                "}\n"
+            ),
+        )
+        .expect("seed");
+
+        let docs = super::Documents::default();
+        let path = file.display().to_string();
+        super::open(&docs, &path).expect("opens");
+        let command = serde_json::json!({
+            "command": "add_render",
+            "site": 0,
+            "block": "plot"
+        });
+        let state = super::apply(&docs, &path, 0, vec![command]).expect("add_render applies");
+        assert!(
+            state.source.contains("cler::GuiManager gui(800, 400, \"my_receiver\")"),
+            "the window carries the document name: {}",
+            state.source
+        );
+        assert!(state.source.contains("plot.render();"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
