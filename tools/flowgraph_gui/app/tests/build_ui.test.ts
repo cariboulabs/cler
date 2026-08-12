@@ -94,6 +94,7 @@ describe('the drawer carries code, diagnostics and output', () => {
       expect(await row.first().textContent()).toContain(BAD_LITERAL);
       expect(await page.textContent('[data-diagnostic-block]')).toBe('source1');
       expect(await page.locator('[data-testid="drawer-busy"]').count()).toBe(0);
+      await page.waitForTimeout(200);
       await shot(page, 'diagnostics');
 
       await page.click('[data-testid="tab-output"]');
@@ -178,10 +179,10 @@ describe('build and run follow what find_target reports', () => {
       expect(await page.locator('[data-testid="run"]').isDisabled()).toBe(true);
       for (const action of ['build', 'run']) {
         expect(await styleOf(page, `[data-testid="${action}"]`, 'background-color')).toBe(
-          await token(page, '--danger-bg')
+          await token(page, '--bg-1')
         );
         expect(await styleOf(page, `[data-testid="${action}"]`, 'border-top-color')).toBe(
-          await token(page, '--danger-border')
+          await token(page, '--border')
         );
       }
       expect(await page.textContent('[data-testid="build-tooltip"]')).toContain(
@@ -359,6 +360,7 @@ describe('draft chip', () => {
       page.on('dialog', (dialog) => void dialog.accept());
       await makeDraft(page);
       expect(await page.locator('[data-testid="draft-menu"] button').count()).toBe(3);
+      await shot(page, 'draft-menu');
 
       await page.click('[data-testid="draft-discard"]');
       await expect.poll(() => page.locator('[data-testid="draft-chip"]').count()).toBe(0);

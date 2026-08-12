@@ -28,6 +28,7 @@ import {
   modelOf,
   openMenu,
   release,
+  shot,
   specs,
   useBrowser,
   wire
@@ -174,6 +175,7 @@ describe('1. an argument without a default is required, never dropped', () => {
       expect(await confirm.isDisabled()).toBe(true);
       expect(await page.locator('[data-add-required="ctor.3"]').count()).toBe(1);
       expect(await page.textContent('[data-testid="add-why"]')).toContain('required field');
+      await shot(page, 'add-block-popover');
 
       await page.press('[data-add-field="ctor.1"]', 'Enter');
       await expect.poll(() => page.textContent('[data-add-error="template.0"]')).toBe('required');

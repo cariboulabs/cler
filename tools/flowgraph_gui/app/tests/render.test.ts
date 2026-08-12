@@ -4,7 +4,7 @@ import { createServer, type ViteDevServer } from 'vite';
 import { fixtures } from '../src/fixtures';
 import { projectSite } from '../src/lib/project';
 import type { Command, FileModel, Site } from '../src/lib/schema';
-import { openInspector } from './ui';
+import { openInspector, shot } from './ui';
 
 const MIN_VISIBLE_FRACTION = 0.95;
 const BOOT_TIMEOUT = 120_000;
@@ -1071,6 +1071,7 @@ describe('typed edges on the canvas', () => {
         (node) => getComputedStyle(node).backgroundColor
       );
       expect(swatch).toBe(await token('--type-1'));
+      await shot(typed, 'type-legend');
 
       await typed.click('[data-testid="type-legend-toggle"]');
       await expect.poll(() => legend.locator('li').count()).toBe(0);

@@ -17,6 +17,7 @@ export type Field = {
   editable: boolean;
   options?: string[];
   placeholder?: string;
+  required?: boolean;
   toCommand: (text: string) => Command;
   refuse?: (text: string) => string | null;
 };
@@ -175,6 +176,7 @@ export function blockFields(
         : reason,
       hintIsCode: block.editable,
       editable: block.editable,
+      required: isRequiredArgumentPlaceholder(arg.text),
       toCommand: (text) => ({
         command: 'set_template_arg',
         site: siteIndex,
@@ -196,6 +198,7 @@ export function blockFields(
       hint: block.editable ? naming.hint : reason,
       hintIsCode: block.editable,
       editable: block.editable,
+      required: isRequiredArgumentPlaceholder(arg.text),
       toCommand: (text) => ({
         command: 'set_param',
         site: siteIndex,

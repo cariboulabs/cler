@@ -981,9 +981,11 @@
     color: var(--fg);
   }
   .icon:disabled {
-    border-color: var(--danger-border);
-    background: var(--danger-bg);
-    color: var(--danger-fg);
+    border-style: dashed;
+    border-color: var(--border);
+    background: var(--bg-1);
+    color: var(--muted);
+    cursor: not-allowed;
   }
   .icon:hover:not(:disabled) {
     background: var(--bg-2);
@@ -1076,7 +1078,7 @@
   .drop {
     position: absolute;
     top: calc(var(--bar-h) + var(--sp-1));
-    right: var(--sp-3);
+    right: calc(var(--rail-right) + var(--sp-3));
     z-index: 20;
     animation: lift 150ms ease-out;
     min-width: 280px;

@@ -98,6 +98,7 @@ describe('the palette lists what the crate found', () => {
 
       await page.click('[data-library-path="sources"] > .folder-row');
       expect(await page.locator('[data-testid="palette"] .chip').count()).toBeGreaterThan(0);
+      await shot(page, 'library-tab');
 
       await page.click('[data-library-path="math"] > .folder-row');
       expect(await page.locator('[data-block="GainBlock"]').count()).toBe(0);

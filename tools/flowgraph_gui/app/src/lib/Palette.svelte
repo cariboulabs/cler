@@ -278,8 +278,9 @@
   }
   .row {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: var(--sp-1);
+    gap: var(--sp-0) var(--sp-1);
     width: 100%;
     padding: var(--sp-0) var(--sp-2);
     background: transparent;
@@ -292,7 +293,8 @@
   }
   .name {
     flex: 1 1 auto;
-    min-width: 0;
+    min-width: 14ch;
+    font-family: var(--mono);
     font-size: 12px;
     color: var(--fg);
     overflow: hidden;

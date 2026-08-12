@@ -105,7 +105,8 @@
   {#each fields as field (field.id)}
     <label class="field" class:ro={!field.editable}>
       <span class="label"
-        >{field.label}{#if field.slot}<span class="slot" data-slot={field.id}>{field.slot}</span
+        >{field.label}{#if field.required}<span class="req" data-required={field.id}>*</span
+          >{/if}{#if field.slot}<span class="slot" data-slot={field.id}>{field.slot}</span
           >{/if}</span
       >
       {#if field.options}
@@ -170,6 +171,10 @@
     font-family: var(--mono);
     font-size: 11px;
     color: var(--faint);
+  }
+  .req {
+    padding-left: var(--sp-0);
+    color: var(--danger-fg);
   }
   input,
   select {

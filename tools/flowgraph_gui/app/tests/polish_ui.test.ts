@@ -47,6 +47,8 @@ describe('the empty-state card carries the honest reason', () => {
       await shot(page, 'first-run-empty-state');
 
       await page.click('[data-testid="file-menu"]');
+      await page.waitForSelector('[data-testid="file-menu-list"]');
+      await shot(page, 'file-menu-open');
       await page.click('[data-testid="file-open-example"]');
       await page.click('[data-example="plots"]');
       await page.waitForSelector('.svelte-flow__node[data-id="cw_throttle"]');
