@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include "desktop_blocks/plots/plot_timeseries.hpp"
@@ -80,4 +81,6 @@ int main() {
     while (!gui.should_close()) {
         gui.render(flowgraph);
     }
+    flowgraph.stop();
+    cler::print_flowgraph_execution_report(flowgraph);
 }

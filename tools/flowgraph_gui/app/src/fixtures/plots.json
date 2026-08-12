@@ -1,5 +1,5 @@
 {
-  "sha256": "e2da71983118a85a29115d6568227ee32a3559b470e2e4a4a69e97f48f8e5aa9",
+  "sha256": "56ed71f8613a22babe7d52adb9b9edb8dd920095025c32fb11cc0eba19c338bd",
   "version": "0.3.0",
   "file": "desktop_examples/plots.cpp",
   "has_errors": false,
@@ -7,10 +7,10 @@
   "sites": [
     {
       "function": "main",
-      "call_offset": 2336,
+      "call_offset": 2370,
       "span": {
-        "start": 2336,
-        "end": 3234
+        "start": 2370,
+        "end": 3268
       },
       "flowgraph_var": "flowgraph",
       "blocks": [
@@ -24,8 +24,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 676,
-                "end": 695
+                "start": 710,
+                "end": 729
               }
             }
           ],
@@ -33,37 +33,37 @@
             {
               "text": "\"CWSource\"",
               "span": {
-                "start": 707,
-                "end": 717
+                "start": 741,
+                "end": 751
               }
             },
             {
               "text": "1.0f",
               "span": {
-                "start": 719,
-                "end": 723
+                "start": 753,
+                "end": 757
               }
             },
             {
               "text": "2.0f",
               "span": {
-                "start": 725,
-                "end": 729
+                "start": 759,
+                "end": 763
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 731,
-                "end": 734
+                "start": 765,
+                "end": 768
               }
             }
           ],
           "display_name": "CWSource",
           "in_graph": true,
           "span": {
-            "start": 662,
-            "end": 736
+            "start": 696,
+            "end": 770
           },
           "editable": true,
           "read_only_reason": null
@@ -78,8 +78,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 755,
-                "end": 774
+                "start": 789,
+                "end": 808
               }
             }
           ],
@@ -87,23 +87,23 @@
             {
               "text": "\"CWThrottle\"",
               "span": {
-                "start": 788,
-                "end": 800
+                "start": 822,
+                "end": 834
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 802,
-                "end": 805
+                "start": 836,
+                "end": 839
               }
             }
           ],
           "display_name": "CWThrottle",
           "in_graph": true,
           "span": {
-            "start": 741,
-            "end": 807
+            "start": 775,
+            "end": 841
           },
           "editable": true,
           "read_only_reason": null
@@ -118,8 +118,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 824,
-                "end": 843
+                "start": 858,
+                "end": 877
               }
             }
           ],
@@ -127,23 +127,23 @@
             {
               "text": "\"CWFanout\"",
               "span": {
-                "start": 855,
-                "end": 865
+                "start": 889,
+                "end": 899
               }
             },
             {
               "text": "3",
               "span": {
-                "start": 867,
-                "end": 868
+                "start": 901,
+                "end": 902
               }
             }
           ],
           "display_name": "CWFanout",
           "in_graph": true,
           "span": {
-            "start": 812,
-            "end": 870
+            "start": 846,
+            "end": 904
           },
           "editable": true,
           "read_only_reason": null
@@ -158,23 +158,23 @@
             {
               "text": "\"CWComplex2RealImag\"",
               "span": {
-                "start": 918,
-                "end": 938
+                "start": 952,
+                "end": 972
               }
             },
             {
               "text": "ComplexToMagPhaseBlock::Mode::RealImag",
               "span": {
-                "start": 940,
-                "end": 978
+                "start": 974,
+                "end": 1012
               }
             }
           ],
           "display_name": "CWComplex2RealImag",
           "in_graph": true,
           "span": {
-            "start": 875,
-            "end": 980
+            "start": 909,
+            "end": 1014
           },
           "editable": true,
           "read_only_reason": null
@@ -189,37 +189,37 @@
             {
               "text": "\"CW-TimeSeriesPlot\"",
               "span": {
-                "start": 1033,
-                "end": 1052
+                "start": 1067,
+                "end": 1086
               }
             },
             {
               "text": "{\"Real\", \"Imaginary\"}",
               "span": {
-                "start": 1062,
-                "end": 1083
+                "start": 1096,
+                "end": 1117
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 1093,
-                "end": 1096
+                "start": 1127,
+                "end": 1130
               }
             },
             {
               "text": "10.0f",
               "span": {
-                "start": 1106,
-                "end": 1111
+                "start": 1140,
+                "end": 1145
               }
             }
           ],
           "display_name": "CW-TimeSeriesPlot",
           "in_graph": true,
           "span": {
-            "start": 985,
-            "end": 1140
+            "start": 1019,
+            "end": 1174
           },
           "editable": true,
           "read_only_reason": null
@@ -234,8 +234,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 1163,
-                "end": 1182
+                "start": 1197,
+                "end": 1216
               }
             }
           ],
@@ -243,51 +243,51 @@
             {
               "text": "\"ChirpSource\"",
               "span": {
-                "start": 1197,
-                "end": 1210
+                "start": 1231,
+                "end": 1244
               }
             },
             {
               "text": "1.0f",
               "span": {
-                "start": 1212,
-                "end": 1216
+                "start": 1246,
+                "end": 1250
               }
             },
             {
               "text": "20.0f",
               "span": {
-                "start": 1218,
-                "end": 1223
+                "start": 1252,
+                "end": 1257
               }
             },
             {
               "text": "80.0f",
               "span": {
-                "start": 1225,
-                "end": 1230
+                "start": 1259,
+                "end": 1264
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 1232,
-                "end": 1235
+                "start": 1266,
+                "end": 1269
               }
             },
             {
               "text": "10.0f",
               "span": {
-                "start": 1237,
-                "end": 1242
+                "start": 1271,
+                "end": 1276
               }
             }
           ],
           "display_name": "ChirpSource",
           "in_graph": true,
           "span": {
-            "start": 1146,
-            "end": 1244
+            "start": 1180,
+            "end": 1278
           },
           "editable": true,
           "read_only_reason": null
@@ -302,8 +302,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 1263,
-                "end": 1282
+                "start": 1297,
+                "end": 1316
               }
             }
           ],
@@ -311,23 +311,23 @@
             {
               "text": "\"ChirpThrottle\"",
               "span": {
-                "start": 1299,
-                "end": 1314
+                "start": 1333,
+                "end": 1348
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 1316,
-                "end": 1319
+                "start": 1350,
+                "end": 1353
               }
             }
           ],
           "display_name": "ChirpThrottle",
           "in_graph": true,
           "span": {
-            "start": 1249,
-            "end": 1321
+            "start": 1283,
+            "end": 1355
           },
           "editable": true,
           "read_only_reason": null
@@ -342,8 +342,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 1338,
-                "end": 1357
+                "start": 1372,
+                "end": 1391
               }
             }
           ],
@@ -351,23 +351,23 @@
             {
               "text": "\"ChirpFanout\"",
               "span": {
-                "start": 1372,
-                "end": 1385
+                "start": 1406,
+                "end": 1419
               }
             },
             {
               "text": "3",
               "span": {
-                "start": 1387,
-                "end": 1388
+                "start": 1421,
+                "end": 1422
               }
             }
           ],
           "display_name": "ChirpFanout",
           "in_graph": true,
           "span": {
-            "start": 1326,
-            "end": 1390
+            "start": 1360,
+            "end": 1424
           },
           "editable": true,
           "read_only_reason": null
@@ -382,23 +382,23 @@
             {
               "text": "\"ChirpComplex2RealImag\"",
               "span": {
-                "start": 1435,
-                "end": 1458
+                "start": 1469,
+                "end": 1492
               }
             },
             {
               "text": "ComplexToMagPhaseBlock::Mode::RealImag",
               "span": {
-                "start": 1460,
-                "end": 1498
+                "start": 1494,
+                "end": 1532
               }
             }
           ],
           "display_name": "ChirpComplex2RealImag",
           "in_graph": true,
           "span": {
-            "start": 1395,
-            "end": 1500
+            "start": 1429,
+            "end": 1534
           },
           "editable": true,
           "read_only_reason": null
@@ -413,37 +413,37 @@
             {
               "text": "\"Chirp-TimeSeriesPlot\"",
               "span": {
-                "start": 1556,
-                "end": 1578
+                "start": 1590,
+                "end": 1612
               }
             },
             {
               "text": "{\"Real\", \"Imaginary\"}",
               "span": {
-                "start": 1588,
-                "end": 1609
+                "start": 1622,
+                "end": 1643
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 1619,
-                "end": 1622
+                "start": 1653,
+                "end": 1656
               }
             },
             {
               "text": "10.0f",
               "span": {
-                "start": 1632,
-                "end": 1637
+                "start": 1666,
+                "end": 1671
               }
             }
           ],
           "display_name": "Chirp-TimeSeriesPlot",
           "in_graph": true,
           "span": {
-            "start": 1505,
-            "end": 1666
+            "start": 1539,
+            "end": 1700
           },
           "editable": true,
           "read_only_reason": null
@@ -458,37 +458,37 @@
             {
               "text": "\"Chirp-CSpectrumPlot\"",
               "span": {
-                "start": 1719,
-                "end": 1740
+                "start": 1753,
+                "end": 1774
               }
             },
             {
               "text": "{\"CW\", \"Chirp\"}",
               "span": {
-                "start": 1750,
-                "end": 1765
+                "start": 1784,
+                "end": 1799
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 1775,
-                "end": 1778
+                "start": 1809,
+                "end": 1812
               }
             },
             {
               "text": "256",
               "span": {
-                "start": 1788,
-                "end": 1791
+                "start": 1822,
+                "end": 1825
               }
             }
           ],
           "display_name": "Chirp-CSpectrumPlot",
           "in_graph": true,
           "span": {
-            "start": 1676,
-            "end": 1821
+            "start": 1710,
+            "end": 1855
           },
           "editable": true,
           "read_only_reason": null
@@ -503,44 +503,44 @@
             {
               "text": "\"CW-SpectrogramPlot\"",
               "span": {
-                "start": 1876,
-                "end": 1896
+                "start": 1910,
+                "end": 1930
               }
             },
             {
               "text": "{\"CW\", \"Chirp\"}",
               "span": {
-                "start": 1906,
-                "end": 1921
+                "start": 1940,
+                "end": 1955
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 1931,
-                "end": 1934
+                "start": 1965,
+                "end": 1968
               }
             },
             {
               "text": "128",
               "span": {
-                "start": 1944,
-                "end": 1947
+                "start": 1978,
+                "end": 1981
               }
             },
             {
               "text": "100",
               "span": {
-                "start": 1980,
-                "end": 1983
+                "start": 2014,
+                "end": 2017
               }
             }
           ],
           "display_name": "CW-SpectrogramPlot",
           "in_graph": true,
           "span": {
-            "start": 1827,
-            "end": 1998
+            "start": 1861,
+            "end": 2032
           },
           "editable": true,
           "read_only_reason": null
@@ -554,8 +554,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 2374,
-            "end": 2420
+            "start": 2408,
+            "end": 2454
           },
           "editable": true,
           "read_only_reason": null
@@ -567,8 +567,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 2430,
-            "end": 2476
+            "start": 2464,
+            "end": 2510
           },
           "editable": true,
           "read_only_reason": null
@@ -580,8 +580,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 2486,
-            "end": 2589
+            "start": 2520,
+            "end": 2623
           },
           "editable": true,
           "read_only_reason": null
@@ -593,8 +593,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 2599,
-            "end": 2692
+            "start": 2633,
+            "end": 2726
           },
           "editable": true,
           "read_only_reason": null
@@ -606,8 +606,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 2702,
-            "end": 2740
+            "start": 2736,
+            "end": 2774
           },
           "editable": true,
           "read_only_reason": null
@@ -619,8 +619,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 2752,
-            "end": 2804
+            "start": 2786,
+            "end": 2838
           },
           "editable": true,
           "read_only_reason": null
@@ -632,8 +632,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 2814,
-            "end": 2866
+            "start": 2848,
+            "end": 2900
           },
           "editable": true,
           "read_only_reason": null
@@ -645,8 +645,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 2876,
-            "end": 2979
+            "start": 2910,
+            "end": 3013
           },
           "editable": true,
           "read_only_reason": null
@@ -658,8 +658,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 2989,
-            "end": 3085
+            "start": 3023,
+            "end": 3119
           },
           "editable": true,
           "read_only_reason": null
@@ -671,8 +671,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 3095,
-            "end": 3136
+            "start": 3129,
+            "end": 3170
           },
           "editable": true,
           "read_only_reason": null
@@ -684,8 +684,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 3147,
-            "end": 3181
+            "start": 3181,
+            "end": 3215
           },
           "editable": true,
           "read_only_reason": null
@@ -697,8 +697,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 3191,
-            "end": 3228
+            "start": 3225,
+            "end": 3262
           },
           "editable": true,
           "read_only_reason": null
@@ -717,8 +717,8 @@
           "arg_index": 1,
           "text": "&cw_throttle.in",
           "span": {
-            "start": 2404,
-            "end": 2419
+            "start": 2438,
+            "end": 2453
           },
           "editable": true,
           "read_only_reason": null,
@@ -738,8 +738,8 @@
           "arg_index": 1,
           "text": "&cw_fanout.in",
           "span": {
-            "start": 2462,
-            "end": 2475
+            "start": 2496,
+            "end": 2509
           },
           "editable": true,
           "read_only_reason": null,
@@ -759,8 +759,8 @@
           "arg_index": 1,
           "text": "&cw_complex2realimag.in",
           "span": {
-            "start": 2516,
-            "end": 2539
+            "start": 2550,
+            "end": 2573
           },
           "editable": true,
           "read_only_reason": null,
@@ -780,8 +780,8 @@
           "arg_index": 2,
           "text": "&cspectrum_plot.in[0]",
           "span": {
-            "start": 2541,
-            "end": 2562
+            "start": 2575,
+            "end": 2596
           },
           "editable": true,
           "read_only_reason": null,
@@ -801,8 +801,8 @@
           "arg_index": 3,
           "text": "&cspectrogram_plot.in[0]",
           "span": {
-            "start": 2564,
-            "end": 2588
+            "start": 2598,
+            "end": 2622
           },
           "editable": true,
           "read_only_reason": null,
@@ -822,8 +822,8 @@
           "arg_index": 1,
           "text": "&cw_timeseries_plot.in[0]",
           "span": {
-            "start": 2639,
-            "end": 2664
+            "start": 2673,
+            "end": 2698
           },
           "editable": true,
           "read_only_reason": null,
@@ -843,8 +843,8 @@
           "arg_index": 2,
           "text": "&cw_timeseries_plot.in[1]",
           "span": {
-            "start": 2666,
-            "end": 2691
+            "start": 2700,
+            "end": 2725
           },
           "editable": true,
           "read_only_reason": null,
@@ -864,8 +864,8 @@
           "arg_index": 1,
           "text": "&chirp_throttle.in",
           "span": {
-            "start": 2785,
-            "end": 2803
+            "start": 2819,
+            "end": 2837
           },
           "editable": true,
           "read_only_reason": null,
@@ -885,8 +885,8 @@
           "arg_index": 1,
           "text": "&chirp_fanout.in",
           "span": {
-            "start": 2849,
-            "end": 2865
+            "start": 2883,
+            "end": 2899
           },
           "editable": true,
           "read_only_reason": null,
@@ -906,8 +906,8 @@
           "arg_index": 1,
           "text": "&chirp_c2realimag.in",
           "span": {
-            "start": 2909,
-            "end": 2929
+            "start": 2943,
+            "end": 2963
           },
           "editable": true,
           "read_only_reason": null,
@@ -927,8 +927,8 @@
           "arg_index": 2,
           "text": "&cspectrum_plot.in[1]",
           "span": {
-            "start": 2931,
-            "end": 2952
+            "start": 2965,
+            "end": 2986
           },
           "editable": true,
           "read_only_reason": null,
@@ -948,8 +948,8 @@
           "arg_index": 3,
           "text": "&cspectrogram_plot.in[1]",
           "span": {
-            "start": 2954,
-            "end": 2978
+            "start": 2988,
+            "end": 3012
           },
           "editable": true,
           "read_only_reason": null,
@@ -969,8 +969,8 @@
           "arg_index": 1,
           "text": "&chirp_timeseries_plot.in[0]",
           "span": {
-            "start": 3026,
-            "end": 3054
+            "start": 3060,
+            "end": 3088
           },
           "editable": true,
           "read_only_reason": null,
@@ -990,8 +990,8 @@
           "arg_index": 2,
           "text": "&chirp_timeseries_plot.in[1]",
           "span": {
-            "start": 3056,
-            "end": 3084
+            "start": 3090,
+            "end": 3118
           },
           "editable": true,
           "read_only_reason": null,
@@ -1005,8 +1005,8 @@
         "source": "absent",
         "assignments": [],
         "run_call_span": {
-          "start": 3241,
-          "end": 3256
+          "start": 3275,
+          "end": 3290
         },
         "editable": true,
         "read_only_reason": null
@@ -1014,8 +1014,8 @@
       "gui": {
         "var": "gui",
         "span": {
-          "start": 3262,
-          "end": 3328
+          "start": 3296,
+          "end": 3362
         },
         "legacy": false
       },

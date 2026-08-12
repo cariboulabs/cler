@@ -1,5 +1,5 @@
 {
-  "sha256": "1e353c674d6e14053e1924ab07e74bb23349d1dfd2907d243b9b19e18035e9c3",
+  "sha256": "3144c72eddf55bb17b0b84ae99438bff2dccaa8f9acf659a2bb6bda5cc2eaeea",
   "version": "0.3.0",
   "file": "desktop_examples/adsb_receiver.cpp",
   "has_errors": false,
@@ -7,10 +7,10 @@
   "sites": [
     {
       "function": "main",
-      "call_offset": 8445,
+      "call_offset": 8479,
       "span": {
-        "start": 8445,
-        "end": 8670
+        "start": 8479,
+        "end": 8704
       },
       "flowgraph_var": "flowgraph",
       "blocks": [
@@ -24,51 +24,51 @@
             {
               "text": "\"Source\"",
               "span": {
-                "start": 7099,
-                "end": 7107
+                "start": 7133,
+                "end": 7141
               }
             },
             {
               "text": "use_soapy",
               "span": {
-                "start": 7121,
-                "end": 7130
+                "start": 7155,
+                "end": 7164
               }
             },
             {
               "text": "use_soapy ? \"\" : source_arg",
               "span": {
-                "start": 7144,
-                "end": 7171
+                "start": 7178,
+                "end": 7205
               }
             },
             {
               "text": "ADSB_FREQ_HZ",
               "span": {
-                "start": 7231,
-                "end": 7243
+                "start": 7265,
+                "end": 7277
               }
             },
             {
               "text": "SAMPLE_RATE_HZ",
               "span": {
-                "start": 7257,
-                "end": 7271
+                "start": 7291,
+                "end": 7305
               }
             },
             {
               "text": "GAIN_DB",
               "span": {
-                "start": 7285,
-                "end": 7292
+                "start": 7319,
+                "end": 7326
               }
             }
           ],
           "display_name": "Source",
           "in_graph": true,
           "span": {
-            "start": 7008,
-            "end": 7052
+            "start": 7042,
+            "end": 7086
           },
           "editable": false,
           "read_only_reason": "optional_emplace_declaration"
@@ -83,23 +83,23 @@
             {
               "text": "\"IQ to Magnitude\"",
               "span": {
-                "start": 7800,
-                "end": 7817
+                "start": 7834,
+                "end": 7851
               }
             },
             {
               "text": "SAMPLE_RATE_HZ",
               "span": {
-                "start": 7819,
-                "end": 7833
+                "start": 7853,
+                "end": 7867
               }
             }
           ],
           "display_name": "IQ to Magnitude",
           "in_graph": true,
           "span": {
-            "start": 7774,
-            "end": 7835
+            "start": 7808,
+            "end": 7869
           },
           "editable": true,
           "read_only_reason": null
@@ -114,23 +114,23 @@
             {
               "text": "\"ADSB Decoder\"",
               "span": {
-                "start": 8055,
-                "end": 8069
+                "start": 8089,
+                "end": 8103
               }
             },
             {
               "text": "decoder_mode",
               "span": {
-                "start": 8071,
-                "end": 8083
+                "start": 8105,
+                "end": 8117
               }
             }
           ],
           "display_name": "ADSB Decoder",
           "in_graph": true,
           "span": {
-            "start": 8030,
-            "end": 8085
+            "start": 8064,
+            "end": 8119
           },
           "editable": true,
           "read_only_reason": null
@@ -145,8 +145,8 @@
               "text": "uint16_t",
               "resolved": null,
               "span": {
-                "start": 8105,
-                "end": 8113
+                "start": 8139,
+                "end": 8147
               }
             }
           ],
@@ -154,16 +154,16 @@
             {
               "text": "\"Null Sink\"",
               "span": {
-                "start": 8125,
-                "end": 8136
+                "start": 8159,
+                "end": 8170
               }
             }
           ],
           "display_name": "Null Sink",
           "in_graph": false,
           "span": {
-            "start": 8091,
-            "end": 8138
+            "start": 8125,
+            "end": 8172
           },
           "editable": true,
           "read_only_reason": null
@@ -178,44 +178,44 @@
             {
               "text": "\"ADSB Map\"",
               "span": {
-                "start": 8183,
-                "end": 8193
+                "start": 8217,
+                "end": 8227
               }
             },
             {
               "text": "initial_lat",
               "span": {
-                "start": 8203,
-                "end": 8214
+                "start": 8237,
+                "end": 8248
               }
             },
             {
               "text": "initial_lon",
               "span": {
-                "start": 8216,
-                "end": 8227
+                "start": 8250,
+                "end": 8261
               }
             },
             {
               "text": "on_aircraft_update",
               "span": {
-                "start": 8237,
-                "end": 8255
+                "start": 8271,
+                "end": 8289
               }
             },
             {
               "text": "nullptr",
               "span": {
-                "start": 8265,
-                "end": 8272
+                "start": 8299,
+                "end": 8306
               }
             }
           ],
           "display_name": "ADSB Map",
           "in_graph": true,
           "span": {
-            "start": 8144,
-            "end": 8357
+            "start": 8178,
+            "end": 8391
           },
           "editable": true,
           "read_only_reason": null
@@ -229,8 +229,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 8483,
-            "end": 8522
+            "start": 8517,
+            "end": 8556
           },
           "editable": false,
           "read_only_reason": "unsupported_block_expression"
@@ -242,8 +242,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 8532,
-            "end": 8571
+            "start": 8566,
+            "end": 8605
           },
           "editable": true,
           "read_only_reason": null
@@ -255,8 +255,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 8581,
-            "end": 8624
+            "start": 8615,
+            "end": 8658
           },
           "editable": true,
           "read_only_reason": null
@@ -268,8 +268,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 8634,
-            "end": 8664
+            "start": 8668,
+            "end": 8698
           },
           "editable": true,
           "read_only_reason": null
@@ -288,8 +288,8 @@
           "arg_index": 1,
           "text": "&iq2mag.in",
           "span": {
-            "start": 8511,
-            "end": 8521
+            "start": 8545,
+            "end": 8555
           },
           "editable": false,
           "read_only_reason": "unsupported_block_expression",
@@ -309,8 +309,8 @@
           "arg_index": 1,
           "text": "&decoder.in",
           "span": {
-            "start": 8559,
-            "end": 8570
+            "start": 8593,
+            "end": 8604
           },
           "editable": true,
           "read_only_reason": null,
@@ -330,8 +330,8 @@
           "arg_index": 1,
           "text": "&aggregator.in",
           "span": {
-            "start": 8609,
-            "end": 8623
+            "start": 8643,
+            "end": 8657
           },
           "editable": true,
           "read_only_reason": null,
@@ -345,8 +345,8 @@
         "source": "absent",
         "assignments": [],
         "run_call_span": {
-          "start": 8731,
-          "end": 8746
+          "start": 8765,
+          "end": 8780
         },
         "editable": true,
         "read_only_reason": null
@@ -354,8 +354,8 @@
       "gui": {
         "var": "gui",
         "span": {
-          "start": 9024,
-          "end": 9090
+          "start": 9058,
+          "end": 9124
         },
         "legacy": false
       },

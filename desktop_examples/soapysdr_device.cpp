@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/sources/source_soapysdr.hpp"
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
@@ -253,5 +254,6 @@ int main(int argc, char* argv[]) {
     }
 
     flowgraph.stop();
+    cler::print_flowgraph_execution_report(flowgraph);
     return 0;
 }

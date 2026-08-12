@@ -199,11 +199,11 @@
         </button>
       {/each}
     </div>
-    <span class="file" title={path} data-testid="drawer-file">{basename}</span>
-    <span class="chip" data-testid="drawer-revision">rev {revision}</span>
-    <span class="chip" class:locked={readOnly > 0} data-testid="drawer-readonly">
-      {readOnly} read-only
-    </span>
+    {#if readOnly > 0}
+      <span class="chip locked" data-testid="drawer-readonly">
+        {readOnly} read-only
+      </span>
+    {/if}
     {#if busy}
       <span class="chip" data-testid="drawer-busy">{busy}…</span>
     {/if}

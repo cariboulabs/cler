@@ -3,6 +3,7 @@
 // ACTUAL hardware rate lands.
 
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/utils/fanout.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
@@ -132,6 +133,7 @@ static int run_app(SpikeArgs& args) {
     }
 
     flowgraph.stop();
+    cler::print_flowgraph_execution_report(flowgraph);
     // Capture runs must not persist settings: --capture overrides the snapshot
     // dir and scope visibility, and an unattended run would overwrite the
     // user's tuned conf with them.

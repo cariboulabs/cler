@@ -1,5 +1,5 @@
 {
-  "sha256": "ea2dba64cb640afe08627b4fa9e49067273c8cf6c94854c278ec3e2288ac8191",
+  "sha256": "5888389e5cb059fee3d823f97119d781b69edecc459d4278d861f61afd090cd3",
   "version": "0.3.0",
   "file": "desktop_examples/uhd_device.cpp",
   "has_errors": false,
@@ -7,10 +7,10 @@
   "sites": [
     {
       "function": "mode_rx",
-      "call_offset": 5806,
+      "call_offset": 5840,
       "span": {
-        "start": 5806,
-        "end": 6045
+        "start": 5840,
+        "end": 6079
       },
       "flowgraph_var": "flowgraph",
       "blocks": [
@@ -24,8 +24,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 5293,
-                "end": 5312
+                "start": 5327,
+                "end": 5346
               }
             }
           ],
@@ -33,51 +33,51 @@
             {
               "text": "\"USRP\"",
               "span": {
-                "start": 5326,
-                "end": 5332
+                "start": 5360,
+                "end": 5366
               }
             },
             {
               "text": "args.freq",
               "span": {
-                "start": 5334,
-                "end": 5343
+                "start": 5368,
+                "end": 5377
               }
             },
             {
               "text": "args.rate",
               "span": {
-                "start": 5353,
-                "end": 5362
+                "start": 5387,
+                "end": 5396
               }
             },
             {
               "text": "args.device_address",
               "span": {
-                "start": 5364,
-                "end": 5383
+                "start": 5398,
+                "end": 5417
               }
             },
             {
               "text": "args.gain",
               "span": {
-                "start": 5385,
-                "end": 5394
+                "start": 5419,
+                "end": 5428
               }
             },
             {
               "text": "1",
               "span": {
-                "start": 5396,
-                "end": 5397
+                "start": 5430,
+                "end": 5431
               }
             }
           ],
           "display_name": "USRP",
           "in_graph": true,
           "span": {
-            "start": 5278,
-            "end": 5416
+            "start": 5312,
+            "end": 5450
           },
           "editable": true,
           "read_only_reason": null
@@ -92,37 +92,37 @@
             {
               "text": "\"USRP Spectrum\"",
               "span": {
-                "start": 5513,
-                "end": 5528
+                "start": 5547,
+                "end": 5562
               }
             },
             {
               "text": "{\"I/Q\"}",
               "span": {
-                "start": 5530,
-                "end": 5537
+                "start": 5564,
+                "end": 5571
               }
             },
             {
               "text": "args.rate",
               "span": {
-                "start": 5539,
-                "end": 5548
+                "start": 5573,
+                "end": 5582
               }
             },
             {
               "text": "args.fft",
               "span": {
-                "start": 5550,
-                "end": 5558
+                "start": 5584,
+                "end": 5592
               }
             }
           ],
           "display_name": "USRP Spectrum",
           "in_graph": true,
           "span": {
-            "start": 5485,
-            "end": 5560
+            "start": 5519,
+            "end": 5594
           },
           "editable": true,
           "read_only_reason": null
@@ -137,44 +137,44 @@
             {
               "text": "\"Spectrogram\"",
               "span": {
-                "start": 5599,
-                "end": 5612
+                "start": 5633,
+                "end": 5646
               }
             },
             {
               "text": "{\"usrp_signal\"}",
               "span": {
-                "start": 5614,
-                "end": 5629
+                "start": 5648,
+                "end": 5663
               }
             },
             {
               "text": "args.rate",
               "span": {
-                "start": 5631,
-                "end": 5640
+                "start": 5665,
+                "end": 5674
               }
             },
             {
               "text": "args.fft",
               "span": {
-                "start": 5642,
-                "end": 5650
+                "start": 5676,
+                "end": 5684
               }
             },
             {
               "text": "4000",
               "span": {
-                "start": 5652,
-                "end": 5656
+                "start": 5686,
+                "end": 5690
               }
             }
           ],
           "display_name": "Spectrogram",
           "in_graph": true,
           "span": {
-            "start": 5565,
-            "end": 5658
+            "start": 5599,
+            "end": 5692
           },
           "editable": true,
           "read_only_reason": null
@@ -189,8 +189,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 5675,
-                "end": 5694
+                "start": 5709,
+                "end": 5728
               }
             }
           ],
@@ -198,23 +198,23 @@
             {
               "text": "\"Fanout\"",
               "span": {
-                "start": 5703,
-                "end": 5711
+                "start": 5737,
+                "end": 5745
               }
             },
             {
               "text": "2",
               "span": {
-                "start": 5713,
-                "end": 5714
+                "start": 5747,
+                "end": 5748
               }
             }
           ],
           "display_name": "Fanout",
           "in_graph": true,
           "span": {
-            "start": 5663,
-            "end": 5716
+            "start": 5697,
+            "end": 5750
           },
           "editable": true,
           "read_only_reason": null
@@ -228,8 +228,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 5844,
-            "end": 5887
+            "start": 5878,
+            "end": 5921
           },
           "editable": true,
           "read_only_reason": null
@@ -241,8 +241,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 5897,
-            "end": 5960
+            "start": 5931,
+            "end": 5994
           },
           "editable": true,
           "read_only_reason": null
@@ -254,8 +254,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 5970,
-            "end": 5998
+            "start": 6004,
+            "end": 6032
           },
           "editable": true,
           "read_only_reason": null
@@ -267,8 +267,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 6008,
-            "end": 6039
+            "start": 6042,
+            "end": 6073
           },
           "editable": true,
           "read_only_reason": null
@@ -287,8 +287,8 @@
           "arg_index": 1,
           "text": "&fanout.in",
           "span": {
-            "start": 5876,
-            "end": 5886
+            "start": 5910,
+            "end": 5920
           },
           "editable": true,
           "read_only_reason": null,
@@ -308,8 +308,8 @@
           "arg_index": 1,
           "text": "&spectrum.in[0]",
           "span": {
-            "start": 5924,
-            "end": 5939
+            "start": 5958,
+            "end": 5973
           },
           "editable": true,
           "read_only_reason": null,
@@ -329,8 +329,8 @@
           "arg_index": 2,
           "text": "&spectrogram.in[0]",
           "span": {
-            "start": 5941,
-            "end": 5959
+            "start": 5975,
+            "end": 5993
           },
           "editable": true,
           "read_only_reason": null,
@@ -344,8 +344,8 @@
         "source": "absent",
         "assignments": [],
         "run_call_span": {
-          "start": 6052,
-          "end": 6067
+          "start": 6086,
+          "end": 6101
         },
         "editable": true,
         "read_only_reason": null
@@ -353,8 +353,8 @@
       "gui": {
         "var": "gui",
         "span": {
-          "start": 6150,
-          "end": 6216
+          "start": 6184,
+          "end": 6250
         },
         "legacy": false
       },
@@ -364,10 +364,10 @@
     },
     {
       "function": "mode_tx_chirp",
-      "call_offset": 7209,
+      "call_offset": 7298,
       "span": {
-        "start": 7209,
-        "end": 7438
+        "start": 7298,
+        "end": 7527
       },
       "flowgraph_var": "flowgraph",
       "blocks": [
@@ -381,8 +381,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 6440,
-                "end": 6459
+                "start": 6529,
+                "end": 6548
               }
             }
           ],
@@ -390,51 +390,51 @@
             {
               "text": "\"USRP_TX\"",
               "span": {
-                "start": 6471,
-                "end": 6480
+                "start": 6560,
+                "end": 6569
               }
             },
             {
               "text": "args.device_address",
               "span": {
-                "start": 6490,
-                "end": 6509
+                "start": 6579,
+                "end": 6598
               }
             },
             {
               "text": "1",
               "span": {
-                "start": 6511,
-                "end": 6512
+                "start": 6600,
+                "end": 6601
               }
             },
             {
               "text": "0",
               "span": {
-                "start": 6531,
-                "end": 6532
+                "start": 6620,
+                "end": 6621
               }
             },
             {
               "text": "\"sc16\"",
               "span": {
-                "start": 6545,
-                "end": 6551
+                "start": 6634,
+                "end": 6640
               }
             },
             {
               "text": "&config",
               "span": {
-                "start": 6553,
-                "end": 6560
+                "start": 6642,
+                "end": 6649
               }
             }
           ],
           "display_name": "USRP_TX",
           "in_graph": true,
           "span": {
-            "start": 6427,
-            "end": 6562
+            "start": 6516,
+            "end": 6651
           },
           "editable": true,
           "read_only_reason": null
@@ -449,8 +449,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 6648,
-                "end": 6667
+                "start": 6737,
+                "end": 6756
               }
             }
           ],
@@ -458,51 +458,51 @@
             {
               "text": "\"Chirp\"",
               "span": {
-                "start": 6675,
-                "end": 6682
+                "start": 6764,
+                "end": 6771
               }
             },
             {
               "text": "args.amp",
               "span": {
-                "start": 6733,
-                "end": 6741
+                "start": 6822,
+                "end": 6830
               }
             },
             {
               "text": "-500e3f",
               "span": {
-                "start": 6792,
-                "end": 6799
+                "start": 6881,
+                "end": 6888
               }
             },
             {
               "text": "500e3f",
               "span": {
-                "start": 6850,
-                "end": 6856
+                "start": 6939,
+                "end": 6945
               }
             },
             {
               "text": "args.rate",
               "span": {
-                "start": 6907,
-                "end": 6916
+                "start": 6996,
+                "end": 7005
               }
             },
             {
               "text": "args.chirp_duration_s",
               "span": {
-                "start": 6967,
-                "end": 6988
+                "start": 7056,
+                "end": 7077
               }
             }
           ],
           "display_name": "Chirp",
           "in_graph": true,
           "span": {
-            "start": 6631,
-            "end": 6990
+            "start": 6720,
+            "end": 7079
           },
           "editable": true,
           "read_only_reason": null
@@ -517,8 +517,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 7007,
-                "end": 7026
+                "start": 7096,
+                "end": 7115
               }
             }
           ],
@@ -526,23 +526,23 @@
             {
               "text": "\"Fanout\"",
               "span": {
-                "start": 7035,
-                "end": 7043
+                "start": 7124,
+                "end": 7132
               }
             },
             {
               "text": "2",
               "span": {
-                "start": 7045,
-                "end": 7046
+                "start": 7134,
+                "end": 7135
               }
             }
           ],
           "display_name": "Fanout",
           "in_graph": true,
           "span": {
-            "start": 6995,
-            "end": 7048
+            "start": 7084,
+            "end": 7137
           },
           "editable": true,
           "read_only_reason": null
@@ -557,37 +557,37 @@
             {
               "text": "\"TX Spectrum\"",
               "span": {
-                "start": 7081,
-                "end": 7094
+                "start": 7170,
+                "end": 7183
               }
             },
             {
               "text": "{\"Chirp\"}",
               "span": {
-                "start": 7096,
-                "end": 7105
+                "start": 7185,
+                "end": 7194
               }
             },
             {
               "text": "args.rate",
               "span": {
-                "start": 7107,
-                "end": 7116
+                "start": 7196,
+                "end": 7205
               }
             },
             {
               "text": "2048",
               "span": {
-                "start": 7118,
-                "end": 7122
+                "start": 7207,
+                "end": 7211
               }
             }
           ],
           "display_name": "TX Spectrum",
           "in_graph": true,
           "span": {
-            "start": 7053,
-            "end": 7124
+            "start": 7142,
+            "end": 7213
           },
           "editable": true,
           "read_only_reason": null
@@ -601,8 +601,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 7247,
-            "end": 7284
+            "start": 7336,
+            "end": 7373
           },
           "editable": true,
           "read_only_reason": null
@@ -614,8 +614,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 7294,
-            "end": 7355
+            "start": 7383,
+            "end": 7444
           },
           "editable": true,
           "read_only_reason": null
@@ -627,8 +627,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 7365,
-            "end": 7393
+            "start": 7454,
+            "end": 7482
           },
           "editable": true,
           "read_only_reason": null
@@ -640,8 +640,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 7403,
-            "end": 7432
+            "start": 7492,
+            "end": 7521
           },
           "editable": true,
           "read_only_reason": null
@@ -660,8 +660,8 @@
           "arg_index": 1,
           "text": "&fanout.in",
           "span": {
-            "start": 7273,
-            "end": 7283
+            "start": 7362,
+            "end": 7372
           },
           "editable": true,
           "read_only_reason": null,
@@ -681,8 +681,8 @@
           "arg_index": 1,
           "text": "&spectrum.in[0]",
           "span": {
-            "start": 7321,
-            "end": 7336
+            "start": 7410,
+            "end": 7425
           },
           "editable": true,
           "read_only_reason": null,
@@ -702,8 +702,8 @@
           "arg_index": 2,
           "text": "&usrp_sink.in[0]",
           "span": {
-            "start": 7338,
-            "end": 7354
+            "start": 7427,
+            "end": 7443
           },
           "editable": true,
           "read_only_reason": null,
@@ -717,8 +717,8 @@
         "source": "absent",
         "assignments": [],
         "run_call_span": {
-          "start": 7445,
-          "end": 7460
+          "start": 7534,
+          "end": 7549
         },
         "editable": true,
         "read_only_reason": null
@@ -726,8 +726,8 @@
       "gui": {
         "var": "gui",
         "span": {
-          "start": 7549,
-          "end": 7615
+          "start": 7638,
+          "end": 7704
         },
         "legacy": false
       },
@@ -737,10 +737,10 @@
     },
     {
       "function": "mode_tx_cw",
-      "call_offset": 8332,
+      "call_offset": 8476,
       "span": {
-        "start": 8332,
-        "end": 8558
+        "start": 8476,
+        "end": 8702
       },
       "flowgraph_var": "flowgraph",
       "blocks": [
@@ -754,8 +754,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 7836,
-                "end": 7855
+                "start": 7980,
+                "end": 7999
               }
             }
           ],
@@ -763,51 +763,51 @@
             {
               "text": "\"USRP_TX\"",
               "span": {
-                "start": 7867,
-                "end": 7876
+                "start": 8011,
+                "end": 8020
               }
             },
             {
               "text": "args.device_address",
               "span": {
-                "start": 7886,
-                "end": 7905
+                "start": 8030,
+                "end": 8049
               }
             },
             {
               "text": "1",
               "span": {
-                "start": 7907,
-                "end": 7908
+                "start": 8051,
+                "end": 8052
               }
             },
             {
               "text": "0",
               "span": {
-                "start": 7927,
-                "end": 7928
+                "start": 8071,
+                "end": 8072
               }
             },
             {
               "text": "\"sc16\"",
               "span": {
-                "start": 7941,
-                "end": 7947
+                "start": 8085,
+                "end": 8091
               }
             },
             {
               "text": "&config",
               "span": {
-                "start": 7949,
-                "end": 7956
+                "start": 8093,
+                "end": 8100
               }
             }
           ],
           "display_name": "USRP_TX",
           "in_graph": true,
           "span": {
-            "start": 7823,
-            "end": 7958
+            "start": 7967,
+            "end": 8102
           },
           "editable": true,
           "read_only_reason": null
@@ -822,8 +822,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 8044,
-                "end": 8063
+                "start": 8188,
+                "end": 8207
               }
             }
           ],
@@ -831,37 +831,37 @@
             {
               "text": "\"CW\"",
               "span": {
-                "start": 8068,
-                "end": 8072
+                "start": 8212,
+                "end": 8216
               }
             },
             {
               "text": "args.amp",
               "span": {
-                "start": 8074,
-                "end": 8082
+                "start": 8218,
+                "end": 8226
               }
             },
             {
               "text": "args.cw_offset",
               "span": {
-                "start": 8084,
-                "end": 8098
+                "start": 8228,
+                "end": 8242
               }
             },
             {
               "text": "args.rate",
               "span": {
-                "start": 8100,
-                "end": 8109
+                "start": 8244,
+                "end": 8253
               }
             }
           ],
           "display_name": "CW",
           "in_graph": true,
           "span": {
-            "start": 8030,
-            "end": 8111
+            "start": 8174,
+            "end": 8255
           },
           "editable": true,
           "read_only_reason": null
@@ -876,8 +876,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 8128,
-                "end": 8147
+                "start": 8272,
+                "end": 8291
               }
             }
           ],
@@ -885,23 +885,23 @@
             {
               "text": "\"Fanout\"",
               "span": {
-                "start": 8156,
-                "end": 8164
+                "start": 8300,
+                "end": 8308
               }
             },
             {
               "text": "2",
               "span": {
-                "start": 8166,
-                "end": 8167
+                "start": 8310,
+                "end": 8311
               }
             }
           ],
           "display_name": "Fanout",
           "in_graph": true,
           "span": {
-            "start": 8116,
-            "end": 8169
+            "start": 8260,
+            "end": 8313
           },
           "editable": true,
           "read_only_reason": null
@@ -916,37 +916,37 @@
             {
               "text": "\"TX Spectrum\"",
               "span": {
-                "start": 8202,
-                "end": 8215
+                "start": 8346,
+                "end": 8359
               }
             },
             {
               "text": "{\"CW Tone\"}",
               "span": {
-                "start": 8217,
-                "end": 8228
+                "start": 8361,
+                "end": 8372
               }
             },
             {
               "text": "args.rate",
               "span": {
-                "start": 8230,
-                "end": 8239
+                "start": 8374,
+                "end": 8383
               }
             },
             {
               "text": "2048",
               "span": {
-                "start": 8241,
-                "end": 8245
+                "start": 8385,
+                "end": 8389
               }
             }
           ],
           "display_name": "TX Spectrum",
           "in_graph": true,
           "span": {
-            "start": 8174,
-            "end": 8247
+            "start": 8318,
+            "end": 8391
           },
           "editable": true,
           "read_only_reason": null
@@ -960,8 +960,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 8370,
-            "end": 8404
+            "start": 8514,
+            "end": 8548
           },
           "editable": true,
           "read_only_reason": null
@@ -973,8 +973,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 8414,
-            "end": 8475
+            "start": 8558,
+            "end": 8619
           },
           "editable": true,
           "read_only_reason": null
@@ -986,8 +986,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 8485,
-            "end": 8513
+            "start": 8629,
+            "end": 8657
           },
           "editable": true,
           "read_only_reason": null
@@ -999,8 +999,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 8523,
-            "end": 8552
+            "start": 8667,
+            "end": 8696
           },
           "editable": true,
           "read_only_reason": null
@@ -1019,8 +1019,8 @@
           "arg_index": 1,
           "text": "&fanout.in",
           "span": {
-            "start": 8393,
-            "end": 8403
+            "start": 8537,
+            "end": 8547
           },
           "editable": true,
           "read_only_reason": null,
@@ -1040,8 +1040,8 @@
           "arg_index": 1,
           "text": "&spectrum.in[0]",
           "span": {
-            "start": 8441,
-            "end": 8456
+            "start": 8585,
+            "end": 8600
           },
           "editable": true,
           "read_only_reason": null,
@@ -1061,8 +1061,8 @@
           "arg_index": 2,
           "text": "&usrp_sink.in[0]",
           "span": {
-            "start": 8458,
-            "end": 8474
+            "start": 8602,
+            "end": 8618
           },
           "editable": true,
           "read_only_reason": null,
@@ -1076,8 +1076,8 @@
         "source": "absent",
         "assignments": [],
         "run_call_span": {
-          "start": 8565,
-          "end": 8580
+          "start": 8709,
+          "end": 8724
         },
         "editable": true,
         "read_only_reason": null
@@ -1085,8 +1085,8 @@
       "gui": {
         "var": "gui",
         "span": {
-          "start": 8664,
-          "end": 8730
+          "start": 8808,
+          "end": 8874
         },
         "legacy": false
       },
@@ -1096,10 +1096,10 @@
     },
     {
       "function": "mode_zero_span",
-      "call_offset": 9477,
+      "call_offset": 9676,
       "span": {
-        "start": 9477,
-        "end": 9675
+        "start": 9676,
+        "end": 9874
       },
       "flowgraph_var": "flowgraph",
       "blocks": [
@@ -1113,8 +1113,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 8901,
-                "end": 8920
+                "start": 9100,
+                "end": 9119
               }
             }
           ],
@@ -1122,51 +1122,51 @@
             {
               "text": "\"USRP\"",
               "span": {
-                "start": 8934,
-                "end": 8940
+                "start": 9133,
+                "end": 9139
               }
             },
             {
               "text": "args.freq",
               "span": {
-                "start": 8942,
-                "end": 8951
+                "start": 9141,
+                "end": 9150
               }
             },
             {
               "text": "args.rate",
               "span": {
-                "start": 8961,
-                "end": 8970
+                "start": 9160,
+                "end": 9169
               }
             },
             {
               "text": "args.device_address",
               "span": {
-                "start": 8972,
-                "end": 8991
+                "start": 9171,
+                "end": 9190
               }
             },
             {
               "text": "args.gain",
               "span": {
-                "start": 8993,
-                "end": 9002
+                "start": 9192,
+                "end": 9201
               }
             },
             {
               "text": "1",
               "span": {
-                "start": 9004,
-                "end": 9005
+                "start": 9203,
+                "end": 9204
               }
             }
           ],
           "display_name": "USRP",
           "in_graph": true,
           "span": {
-            "start": 8886,
-            "end": 9007
+            "start": 9085,
+            "end": 9206
           },
           "editable": true,
           "read_only_reason": null
@@ -1181,8 +1181,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 9105,
-                "end": 9124
+                "start": 9304,
+                "end": 9323
               }
             }
           ],
@@ -1190,23 +1190,23 @@
             {
               "text": "\"PowerDetector\"",
               "span": {
-                "start": 9141,
-                "end": 9156
+                "start": 9340,
+                "end": 9355
               }
             },
             {
               "text": "-80.0f",
               "span": {
-                "start": 9158,
-                "end": 9164
+                "start": 9357,
+                "end": 9363
               }
             }
           ],
           "display_name": "PowerDetector",
           "in_graph": true,
           "span": {
-            "start": 9086,
-            "end": 9166
+            "start": 9285,
+            "end": 9365
           },
           "editable": true,
           "read_only_reason": null
@@ -1221,37 +1221,37 @@
             {
               "text": "\"Power vs Time\"",
               "span": {
-                "start": 9203,
-                "end": 9218
+                "start": 9402,
+                "end": 9417
               }
             },
             {
               "text": "{\"Power (dB)\"}",
               "span": {
-                "start": 9255,
-                "end": 9269
+                "start": 9454,
+                "end": 9468
               }
             },
             {
               "text": "args.rate",
               "span": {
-                "start": 9306,
-                "end": 9315
+                "start": 9505,
+                "end": 9514
               }
             },
             {
               "text": "5.0f",
               "span": {
-                "start": 9352,
-                "end": 9356
+                "start": 9551,
+                "end": 9555
               }
             }
           ],
           "display_name": "Power vs Time",
           "in_graph": true,
           "span": {
-            "start": 9172,
-            "end": 9358
+            "start": 9371,
+            "end": 9557
           },
           "editable": true,
           "read_only_reason": null
@@ -1265,8 +1265,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 9515,
-            "end": 9566
+            "start": 9714,
+            "end": 9765
           },
           "editable": true,
           "read_only_reason": null
@@ -1278,8 +1278,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 9576,
-            "end": 9629
+            "start": 9775,
+            "end": 9828
           },
           "editable": true,
           "read_only_reason": null
@@ -1291,8 +1291,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 9639,
-            "end": 9669
+            "start": 9838,
+            "end": 9868
           },
           "editable": true,
           "read_only_reason": null
@@ -1311,8 +1311,8 @@
           "arg_index": 1,
           "text": "&power_detector.in",
           "span": {
-            "start": 9547,
-            "end": 9565
+            "start": 9746,
+            "end": 9764
           },
           "editable": true,
           "read_only_reason": null,
@@ -1332,8 +1332,8 @@
           "arg_index": 1,
           "text": "&power_plot.in[0]",
           "span": {
-            "start": 9611,
-            "end": 9628
+            "start": 9810,
+            "end": 9827
           },
           "editable": true,
           "read_only_reason": null,
@@ -1347,8 +1347,8 @@
         "source": "absent",
         "assignments": [],
         "run_call_span": {
-          "start": 9682,
-          "end": 9697
+          "start": 9881,
+          "end": 9896
         },
         "editable": true,
         "read_only_reason": null
@@ -1356,8 +1356,8 @@
       "gui": {
         "var": "gui",
         "span": {
-          "start": 9870,
-          "end": 9936
+          "start": 10069,
+          "end": 10135
         },
         "legacy": false
       },

@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/sources/source_cw.hpp"
 #include "desktop_blocks/sinks/sink_hackrf.hpp"
@@ -178,6 +179,7 @@ int main(int argc, char** argv) {
 
     std::cout << "\nStopping transmission..." << std::endl;
     flowgraph.stop();
+    cler::print_flowgraph_execution_report(flowgraph);
 
     size_t final_underruns = hackrf_tx.get_underrun_count();
     std::cout << "Total TX underruns: " << final_underruns << std::endl;

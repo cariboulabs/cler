@@ -7,6 +7,7 @@
 #include "imgui_impl_opengl3.h"
 
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -20,6 +21,12 @@
 namespace cler {
 
 namespace {
+
+volatile std::sig_atomic_t g_interrupted = 0;
+
+void on_interrupt(int) {
+    g_interrupted = 1;
+}
 
 void put_u16(unsigned char* p, uint16_t v) {
     p[0] = static_cast<unsigned char>(v & 0xFF);
@@ -272,7 +279,10 @@ GuiManager::GuiManager(int width, int height, const std::string_view title) {
     ImGui_ImplOpenGL3_Init("#version 330");
 
     ImGui::GetStyle().AntiAliasedLines = true;
-    ImGui::GetStyle().AntiAliasedLinesUseTex = true; 
+    ImGui::GetStyle().AntiAliasedLinesUseTex = true;
+
+    std::signal(SIGINT, on_interrupt);
+    std::signal(SIGTERM, on_interrupt);
 }
 
 GuiManager::~GuiManager() {
@@ -315,7 +325,7 @@ void GuiManager::request_screenshot(const std::string& path) {
 }
 
 bool GuiManager::should_close() const {
-    return glfwWindowShouldClose(window);
+    return glfwWindowShouldClose(window) || g_interrupted != 0;
 }
 
 void GuiManager::request_close() {

@@ -325,8 +325,7 @@ describe('the code drawer opens, persists and resizes', () => {
 
       await openDrawer(page);
       expect(await drawerHeight(page)).toBeCloseTo(DEFAULT_HEIGHT, 0);
-      expect(await page.textContent('[data-testid="drawer-file"]')).toBe('hello_world.cpp');
-      expect(await page.textContent('[data-testid="drawer-revision"]')).toContain('rev 1');
+      expect(await page.locator('[data-testid="tab-code"]').count()).toBe(1);
 
       await page.reload({ waitUntil: 'load' });
       await page.waitForSelector('[data-testid="drawer-body"] .row');
@@ -474,14 +473,11 @@ describe('selection and the code stay in sync both ways', () => {
       const field = page.locator('input[data-field="spectrogram.ctor.0"]');
       await field.fill('"Waterfall Of A Very Different Length"');
       await field.blur();
-      await expect.poll(() => page.textContent('[data-testid="drawer-revision"]')).toContain(
-        'rev 2'
+      await expect.poll(() => page.textContent('[data-testid="drawer-body"]')).toContain(
+        'Waterfall Of A Very Different Length'
       );
       await page.waitForTimeout(250);
       expect(await scrollTop(page)).toBe(0);
-      expect(await page.textContent('[data-testid="drawer-body"]')).toContain(
-        'Waterfall Of A Very Different Length'
-      );
 
       await page.evaluate(() =>
         (window as unknown as FakeWindow).__fake.prepend('// pushed down\n'.repeat(40))

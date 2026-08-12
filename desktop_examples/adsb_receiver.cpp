@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include <optional>
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
@@ -241,6 +242,7 @@ int main(int argc, char** argv) {
 
     std::cout << "Shutting down..." << std::endl;
     flowgraph.stop();
+    cler::print_flowgraph_execution_report(flowgraph);
 
     std::cout << "Total aircraft tracked: " << aggregator.aircraft_count() << std::endl;
     std::cerr << "[DONE] Receiver completed successfully" << std::endl;

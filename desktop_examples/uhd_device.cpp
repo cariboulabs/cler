@@ -1,4 +1,5 @@
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include <cstdlib>
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/sources/source_uhd.hpp"
@@ -147,6 +148,7 @@ void mode_rx(const USRPArgs& args) {
     }
 
     flowgraph.stop();
+    cler::print_flowgraph_execution_report(flowgraph);
     std::cout << "Overflows: " << usrp_source.get_overflow_count() << std::endl;
 }
 
@@ -182,6 +184,7 @@ void mode_tx_chirp(const USRPArgs& args) {
     }
 
     flowgraph.stop();
+    cler::print_flowgraph_execution_report(flowgraph);
     std::cout << "Underflows: " << usrp_sink.get_underflow_count() << std::endl;
 }
 
@@ -212,6 +215,7 @@ void mode_tx_cw(const USRPArgs& args) {
     }
 
     flowgraph.stop();
+    cler::print_flowgraph_execution_report(flowgraph);
     std::cout << "Underflows: " << usrp_sink.get_underflow_count() << std::endl;
 }
 
@@ -245,6 +249,7 @@ void mode_zero_span(const USRPArgs& args) {
     }
 
     flowgraph.stop();
+    cler::print_flowgraph_execution_report(flowgraph);
     std::cout << "Overflows: " << usrp_source.get_overflow_count() << std::endl;
 }
 
