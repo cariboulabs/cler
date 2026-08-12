@@ -29,13 +29,13 @@ struct SourceChirpBlock : public cler::BlockBase {
         _n_samples_before_reset = static_cast<size_t>(_chirp_duration_s * _sps);
         _k = (_f1_hz - _f0_hz) / _chirp_duration_s; // Hz/s
 
-        const float dt = 1.0f / static_cast<float>(_sps);
-        const float w0 = 2.0f * cler::PI * _f0_hz * dt;
+        const double dt = 1.0 / static_cast<double>(_sps);
+        const double w0 = 2.0 * cler::PI * static_cast<double>(_f0_hz) * dt;
 
-        _psi = std::polar(1.0f, w0);
-        _psi_inc = std::polar(1.0f, 2.0f * cler::PI * _k * dt * dt); // second-difference recursion for phase acceleration
+        _psi = std::polar(1.0, w0);
+        _psi_inc = std::polar(1.0, 2.0 * cler::PI * static_cast<double>(_k) * dt * dt); // second-difference recursion for phase acceleration
 
-        _phasor = std::complex<float>(1.0f, 0.0f);
+        _phasor = std::complex<double>(1.0, 0.0);
     }
 
     ~SourceChirpBlock() = default;
@@ -47,7 +47,8 @@ struct SourceChirpBlock : public cler::BlockBase {
         }
 
         for (size_t i = 0; i < write_size; ++i) {
-            std::complex<float> chirp = _phasor;
+            std::complex<float> chirp(static_cast<float>(_phasor.real()),
+                                      static_cast<float>(_phasor.imag()));
 
             if constexpr (std::is_same_v<T, std::complex<float>>) {
                 write_ptr[i] = _amplitude * chirp;
@@ -72,11 +73,11 @@ struct SourceChirpBlock : public cler::BlockBase {
 private:
     void reset() {
         _samples_counter = 0;
-        _phasor = std::complex<float>(1.0f, 0.0f);
-        const float dt = 1.0f / static_cast<float>(_sps);
-        const float w0 = 2.0f * cler::PI * _f0_hz * dt;
-        _psi = std::polar(1.0f, w0);
-        _psi_inc = std::polar(1.0f, 2.0f * cler::PI * _k * dt * dt);
+        _phasor = std::complex<double>(1.0, 0.0);
+        const double dt = 1.0 / static_cast<double>(_sps);
+        const double w0 = 2.0 * cler::PI * static_cast<double>(_f0_hz) * dt;
+        _psi = std::polar(1.0, w0);
+        _psi_inc = std::polar(1.0, 2.0 * cler::PI * static_cast<double>(_k) * dt * dt);
     }
 
     float _amplitude;
@@ -89,7 +90,7 @@ private:
     float _k;              // sweep rate, Hz/s
     size_t _samples_counter = 0;
 
-    std::complex<float> _phasor;
-    std::complex<float> _psi;
-    std::complex<float> _psi_inc;
+    std::complex<double> _phasor;
+    std::complex<double> _psi;
+    std::complex<double> _psi_inc;
 };

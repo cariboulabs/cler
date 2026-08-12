@@ -23,10 +23,11 @@ struct SourceCWBlock : public cler::BlockBase {
             cler::panic("Sample rate must be greater than zero.");
         }
 
-        float phase_increment = 2.0f * cler::PI * _frequency_hz / static_cast<float>(_sps);
+        double phase_increment =
+            2.0 * cler::PI * static_cast<double>(_frequency_hz) / static_cast<double>(_sps);
 
-        _phasor = std::complex<float>(1.0f, 0.0f);
-        _phasor_inc = std::polar(1.0f, phase_increment);
+        _phasor = std::complex<double>(1.0, 0.0);
+        _phasor_inc = std::polar(1.0, phase_increment);
 
         _buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T);
         _buffer = new T[_buffer_size];
@@ -43,7 +44,8 @@ struct SourceCWBlock : public cler::BlockBase {
         }
 
         for (size_t i = 0; i < to_generate; ++i) {
-            std::complex<float> cw = _phasor;
+            std::complex<float> cw(static_cast<float>(_phasor.real()),
+                                   static_cast<float>(_phasor.imag()));
 
             if constexpr (std::is_same_v<T, std::complex<float>>) {
                 _buffer[i] = _amplitude * cw;
@@ -64,8 +66,8 @@ private:
     float _frequency_hz;
     size_t _sps;
 
-    std::complex<float> _phasor = {1.0f, 0.0f};
-    std::complex<float> _phasor_inc = {1.0f, 0.0f};
+    std::complex<double> _phasor = {1.0, 0.0};
+    std::complex<double> _phasor_inc = {1.0, 0.0};
 
     T* _buffer;
     size_t _buffer_size;

@@ -24,7 +24,7 @@ struct CustomSourceBlock : public cler::BlockBase {
         cw_source_block(cler::EmbeddableString<64>(this->name()) + "_CWSource",
                         amplitude, frequency_hz, sps),
         noise_block(cler::EmbeddableString<64>(this->name()) + "_AWGN",
-                    noise_stddev / 100.0f),
+                    noise_stddev),
         fanout_block(cler::EmbeddableString<64>(this->name()) + "_Fanout", 2)
     { }
 
@@ -72,11 +72,11 @@ int main() {
     float ch3_freq = channel_freq(channel_BW, 3, NUM_CHANNELS);
     float ch4_freq = channel_freq(channel_BW, 4, NUM_CHANNELS);
 
-    CustomSourceBlock cw_source0("CW Source 0", 1*1.0f, 0.01f, ch0_freq, SPS);
-    CustomSourceBlock cw_source1("CW Source 1", 1*10.0f, 0.01f, ch1_freq, SPS);
-    CustomSourceBlock cw_source2("CW Source 2", 1*100.0f, 0.01f, ch2_freq, SPS);
-    CustomSourceBlock cw_source3("CW Source 3", 1*1000.0f, 0.01f,  ch3_freq, SPS);
-    CustomSourceBlock cw_source4("CW Source 4", 1*10000.0f, 0.01f,  ch4_freq, SPS);
+    CustomSourceBlock cw_source0("CW Source 0", 1.0f, 0.01f, ch0_freq, SPS);
+    CustomSourceBlock cw_source1("CW Source 1", 3.0f, 0.01f, ch1_freq, SPS);
+    CustomSourceBlock cw_source2("CW Source 2", 10.0f, 0.01f, ch2_freq, SPS);
+    CustomSourceBlock cw_source3("CW Source 3", 30.0f, 0.01f, ch3_freq, SPS);
+    CustomSourceBlock cw_source4("CW Source 4", 100.0f, 0.01f, ch4_freq, SPS);
 
 
     AddBlock<std::complex<float>, NUM_CHANNELS> adder("Adder");
