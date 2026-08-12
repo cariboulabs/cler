@@ -370,6 +370,19 @@ function displayNameFor(varName: string): string {
   return `"${varName}"`;
 }
 
+function seededValue(spec: BlockSpec, param: CtorParam, index: number, varName: string): string {
+  if (index === 0 && param.param_type.includes('char*')) return displayNameFor(varName);
+  if (param.default !== null) return param.default;
+  for (const [count, label] of [
+    [spec.input_count, 'in'],
+    [spec.output_count, 'out']
+  ] as const) {
+    const authority = authorityOf(count);
+    if (authority.kind === 'ctor_arg_len' && authority.index === index) return `{"${label}"}`;
+  }
+  return '';
+}
+
 export function addForm(spec: BlockSpec, varName: string): AddForm {
   return {
     varName,
@@ -383,7 +396,7 @@ export function addForm(spec: BlockSpec, varName: string): AddForm {
     ctorArgs: spec.ctor_params.map((param, index) => ({
       id: `ctor.${index}`,
       label: param.name,
-      value: index === 0 && param.param_type.includes('char*') ? displayNameFor(varName) : (param.default ?? ''),
+      value: seededValue(spec, param, index, varName),
       hint: param.param_type,
       required: param.default === null
     }))

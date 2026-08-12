@@ -266,7 +266,7 @@
     left: `${(leftOpen ? SIDEBAR_WIDTH : RAIL_WIDTH) + INSET + FIT_GAP}px`
   });
   const shownSpecs = $derived(editable ? specs : specsFromSites(doc.model.sites, doc.path));
-  const problems = $derived<Problem[]>(problemsOf(site));
+  const problems = $derived<Problem[]>(problemsOf(site, specs));
   const declared = $derived(site ? site.blocks.map((block) => block.var) : []);
   const selectedBlock = $derived(site?.blocks.find((block) => block.var === selected) ?? null);
   const chatSelection = $derived(

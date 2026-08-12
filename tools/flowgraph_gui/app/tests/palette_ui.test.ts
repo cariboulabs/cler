@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { fixtures } from '../src/fixtures';
+import { addForm, braceListLength } from '../src/lib/palette';
 import { boot, CASE, openLibrary, shot, specs, useBrowser } from './ui';
 
 useBrowser();
@@ -51,4 +53,39 @@ describe('duplicate specs never brick the palette', () => {
     },
     CASE
   );
+});
+
+describe('ports sized by a brace list', () => {
+  it(
+    'seeds a placeable label list and reports a block whose list is not one',
+    async () => {
+      const source = fixtures.hello_world;
+      if (!source) throw new Error('no hello_world fixture');
+      const model = structuredClone(source);
+      const plot = model.sites[0]?.blocks.find((block) => block.var === 'plot');
+      if (!plot) throw new Error('no plot block in hello_world');
+      const labels = plot.ctor_args[1];
+      if (!labels) throw new Error('plot has no label argument');
+      labels.text = '"in"';
+
+      const page = await boot({ model });
+      await expect
+        .poll(() => page.getAttribute('[data-testid="problems"]', 'data-count'))
+        .not.toBe('0');
+      await page.click('[data-testid="problems"]');
+      expect(await page.textContent('[data-testid="problems-list"]')).toContain(
+        'must be a brace list'
+      );
+      await page.close();
+    },
+    CASE
+  );
+
+  it('seeds the label list when the palette form is built', () => {
+    const spec = specs.find((candidate) => candidate.name === 'PlotTimeSeriesBlock');
+    if (!spec) throw new Error('no PlotTimeSeriesBlock spec');
+    const form = addForm(spec, 'plot');
+    expect(form.ctorArgs[1]?.value).toBe('{"in"}');
+    expect(braceListLength(form.ctorArgs[1]?.value ?? '')).toBe(1);
+  });
 });

@@ -1,6 +1,7 @@
 import type { Edge as FlowEdge, Node as FlowNode } from '@xyflow/svelte';
 import {
   authorityOf,
+  braceListLength,
   countOf,
   missingRequiredFields,
   specOfBlock,
@@ -379,7 +380,7 @@ export function anchorSpans(sites: Site[]): Span[] {
 
 export type Problem = {
   id: string;
-  kind: 'conflict' | 'unresolved' | 'no runner' | 'compile';
+  kind: 'conflict' | 'unresolved' | 'no runner' | 'compile' | 'ports';
   severity: 'error' | 'warning';
   title: string;
   detail: string;
@@ -397,7 +398,23 @@ export function neverRuns(site: Site, block: Block): boolean {
   return block.in_graph && !hasRunner(site, block.var);
 }
 
-export function problemsOf(site: Site | undefined): Problem[] {
+export function unsizedPorts(block: Block, spec: BlockSpec | undefined): string | null {
+  if (!spec) return null;
+  for (const [count, side] of [
+    [spec.input_count, 'input'],
+    [spec.output_count, 'output']
+  ] as const) {
+    const authority = authorityOf(count);
+    if (authority.kind !== 'ctor_arg_len') continue;
+    const arg = block.ctor_args[authority.index];
+    if (arg === undefined || braceListLength(arg.text) !== null) continue;
+    const name = spec.ctor_params[authority.index]?.name ?? `argument ${authority.index}`;
+    return `${name} sizes the ${side} ports and must be a brace list, as in {"in"}`;
+  }
+  return null;
+}
+
+export function problemsOf(site: Site | undefined, specs: BlockSpec[] = []): Problem[] {
   if (!site) return [];
   const problems: Problem[] = [];
   const entries = wiredEntries(site);
@@ -426,6 +443,20 @@ export function problemsOf(site: Site | undefined): Problem[] {
       span: item.span,
       edge: null,
       block: null
+    });
+  }
+  for (const block of site.blocks) {
+    const detail = unsizedPorts(block, specOfBlock(specs, block));
+    if (detail === null) continue;
+    problems.push({
+      id: `unsized:${block.var}`,
+      kind: 'ports',
+      severity: 'error',
+      title: block.var,
+      detail,
+      span: block.span,
+      edge: null,
+      block: block.var
     });
   }
   for (const block of site.blocks) {
