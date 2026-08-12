@@ -140,6 +140,28 @@ pub fn key_path(config_dir: &Path) -> PathBuf {
     config_dir.join(KEY_FILE)
 }
 
+pub fn store_key(key: &str, config_dir: &Path) -> Result<Status, String> {
+    let trimmed = key.trim();
+    if trimmed.is_empty() {
+        return Err("the key is empty".to_string());
+    }
+    if !trimmed.starts_with("sk-ant-") {
+        return Err("that does not look like an Anthropic API key (sk-ant-…)".to_string());
+    }
+    std::fs::create_dir_all(config_dir)
+        .map_err(|cause| format!("cannot create {}: {cause}", config_dir.display()))?;
+    let file = key_path(config_dir);
+    std::fs::write(&file, trimmed)
+        .map_err(|cause| format!("cannot write {}: {cause}", file.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600))
+            .map_err(|cause| format!("cannot chmod {}: {cause}", file.display()))?;
+    }
+    Ok(status(config_dir))
+}
+
 pub fn locate(env_key: Option<String>, config_dir: &Path) -> Result<String, String> {
     if let Some(key) = env_key.map(|text| text.trim().to_string()).filter(|text| !text.is_empty()) {
         return Ok(key);

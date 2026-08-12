@@ -29,6 +29,8 @@
     applyCommands,
     assistantAsk,
     assistantStatus,
+    assistantSetKey,
+    openKeyConsole,
     assistantStop,
     onAssistantDelta,
     onAssistantDone,
@@ -715,6 +717,16 @@
       keyStatus = await assistantStatus();
     } catch (error) {
       keyStatus = { available: false, model: '—', reason: describeApplyError(error) };
+    }
+  }
+
+  async function saveAssistantKey(key: string): Promise<string | null> {
+    if (!desktop) return NO_SHELL;
+    try {
+      keyStatus = await assistantSetKey(key);
+      return null;
+    } catch (error) {
+      return describeApplyError(error);
     }
   }
 
@@ -1778,6 +1790,8 @@
       onask={(question) => void askAssistant(question)}
       onstop={stopAssistant}
       onrecheck={() => void refreshAssistant()}
+      onsetkey={saveAssistantKey}
+      ongetkey={() => void openKeyConsole()}
       onaccept={(id) => void acceptProposal(id)}
       onreject={rejectProposal}
       onreplan={(id) => void replanProposal(id)}

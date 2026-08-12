@@ -254,6 +254,14 @@ export function assistantStatus(): Promise<AssistantStatus> {
   return invoker('assistant_status', {}) as Promise<AssistantStatus>;
 }
 
+export function assistantSetKey(key: string): Promise<AssistantStatus> {
+  return invoker('assistant_set_key', { key }) as Promise<AssistantStatus>;
+}
+
+export function openKeyConsole(): Promise<void> {
+  return invoker('open_key_console', {}) as Promise<void>;
+}
+
 export function assistantAsk(
   path: string,
   question: string,

@@ -638,3 +638,27 @@ fn a_plain_answer_carries_no_proposal() {
     assert_eq!(reply.dropped, 0);
     assert_eq!(reply.failure, None);
 }
+
+#[test]
+fn store_key_normalizes_validates_and_locks_down() {
+    let dir = std::env::temp_dir().join(format!("cler-key-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(assistant::store_key("   ", &dir).is_err());
+    assert!(assistant::store_key("not-a-key", &dir).is_err());
+
+    assistant::store_key("  sk-ant-test123  ", &dir).expect("valid key stores");
+    assert_eq!(assistant::locate(None, &dir).expect("locate reads file"), "sk-ant-test123");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(assistant::key_path(&dir))
+            .expect("key file exists")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}

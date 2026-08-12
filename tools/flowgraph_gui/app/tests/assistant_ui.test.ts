@@ -85,6 +85,25 @@ describe('the assistant says what it needs before it costs anything', () => {
   );
 
   it(
+    'saves a pasted key and comes alive without a restart',
+    async () => {
+      const page = await boot({ assistant: NO_KEY });
+      await openAssistant(page);
+
+      await page.fill('[data-testid="assistant-key"]', 'nonsense');
+      await page.click('[data-testid="assistant-key-save"]');
+      await page.waitForSelector('[data-testid="assistant-key-error"]');
+
+      await page.fill('[data-testid="assistant-key"]', 'sk-ant-test123');
+      await page.click('[data-testid="assistant-key-save"]');
+      await page.waitForSelector('[data-testid="assistant-setup"]', { state: 'detached' });
+      expect((await calls(page)).filter((name) => name === 'assistant_set_key').length).toBe(2);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
     'names the model it will spend money on',
     async () => {
       const page = await boot();

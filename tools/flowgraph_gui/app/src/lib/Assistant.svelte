@@ -17,6 +17,8 @@
     onask: (question: string) => void;
     onstop: () => void;
     onrecheck: () => void;
+    onsetkey: (key: string) => Promise<string | null>;
+    ongetkey: () => void;
     onaccept: (id: number) => void;
     onreject: (id: number) => void;
     onreplan: (id: number) => void;
@@ -36,10 +38,15 @@
     onask,
     onstop,
     onrecheck,
+    onsetkey,
+    ongetkey,
     onaccept,
     onreject,
     onreplan
   }: Props = $props();
+
+  let keyDraft = $state('');
+  let keyError = $state<string | null>(null);
 
   const TRANSIENT = 'this conversation is not saved — it goes when the file closes';
   const EXPLAINS = 'explains only — this file is open read-only';
@@ -119,7 +126,37 @@
         <h2>Set up the assistant</h2>
         <p data-testid="assistant-reason">{status.reason ?? 'the assistant is unavailable'}</p>
         <p class="faint">Every answer costs money on your own Anthropic key.</p>
-        <button data-testid="assistant-recheck" onclick={onrecheck}>Check again</button>
+        <form
+          class="keyform"
+          onsubmit={(event) => {
+            event.preventDefault();
+            const trimmed = keyDraft.trim();
+            if (!trimmed) return;
+            keyError = null;
+            void onsetkey(trimmed).then((error) => {
+              keyError = error;
+              if (!error) keyDraft = '';
+            });
+          }}
+        >
+          <input
+            type="password"
+            data-testid="assistant-key"
+            placeholder="sk-ant-…"
+            autocomplete="off"
+            bind:value={keyDraft}
+          />
+          <button type="submit" data-testid="assistant-key-save" disabled={keyDraft.trim() === ''}>
+            Save key
+          </button>
+        </form>
+        {#if keyError}
+          <p class="key-error" data-testid="assistant-key-error">{keyError}</p>
+        {/if}
+        <div class="keyrow">
+          <button data-testid="assistant-get-key" onclick={ongetkey}>Get a key…</button>
+          <button data-testid="assistant-recheck" onclick={onrecheck}>Check again</button>
+        </div>
       </div>
     {/if}
 
@@ -344,6 +381,25 @@
     border: 1px solid var(--border);
     background: var(--bg-2);
     border-radius: var(--radius-sm);
+  }
+  .keyrow {
+    display: flex;
+    gap: var(--sp-1);
+  }
+  .keyform {
+    display: flex;
+    gap: var(--sp-1);
+    margin: var(--sp-2) 0;
+  }
+  .keyform input {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono);
+  }
+  .key-error {
+    color: var(--danger);
+    font-size: 11px;
+    margin: 0 0 var(--sp-2);
   }
   .setup h2 {
     margin: 0;

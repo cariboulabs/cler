@@ -252,6 +252,11 @@ fn assistant_status(app: AppHandle) -> Status {
 }
 
 #[tauri::command]
+fn assistant_set_key(key: String, app: AppHandle) -> Result<Status, String> {
+    assistant::store_key(&key, &config_dir(&app))
+}
+
+#[tauri::command]
 fn assistant_ask(
     path: String,
     question: String,
@@ -275,6 +280,12 @@ fn assistant_ask(
 #[tauri::command]
 fn assistant_stop(path: String, talks: State<'_, Talks>) {
     assistant::stop(talks.inner(), &path);
+}
+
+#[tauri::command]
+fn open_key_console() -> Result<(), String> {
+    let url = "https://console.anthropic.com/settings/keys".to_string();
+    spawn_detached(OPENER, std::slice::from_ref(&url))
 }
 
 #[tauri::command]
@@ -403,12 +414,14 @@ pub fn run() {
             parse_file,
             palette,
             open_in_editor,
+            open_key_console,
             check_document,
             find_target,
             build_target,
             run_target,
             stop_target,
             assistant_status,
+            assistant_set_key,
             assistant_ask,
             assistant_stop
         ])

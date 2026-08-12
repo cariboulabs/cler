@@ -383,6 +383,12 @@ function installFake(setup: Setup) {
     if (command === 'set_app_settings') return (args as Loose).next;
     if (command === 'run_target') runs.push(args.args);
     if (command === 'assistant_status') return setup.assistant;
+    if (command === 'assistant_set_key') {
+      const key = String((args as Loose).key ?? '');
+      if (!key.trim().startsWith('sk-ant-')) throw new Error('that does not look like an Anthropic API key (sk-ant-…)');
+      return { available: true, model: 'claude-opus-5', reason: null };
+    }
+    if (command === 'open_key_console') return null;
     if (command === 'assistant_stop') return null;
     if (command === 'assistant_ask') {
       asks.push({
