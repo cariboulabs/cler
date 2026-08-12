@@ -1621,10 +1621,28 @@ int main() {
         .expect("materializes the loop");
 
     let written = session.source().to_string();
-    assert!(written.contains("#include \"desktop_blocks/gui/gui_manager.hpp\""));
+    assert_eq!(
+        written
+            .matches("#include \"desktop_blocks/gui/gui_manager.hpp\"")
+            .count(),
+        1
+    );
+    assert_eq!(
+        written
+            .matches("#include \"cler_desktop_utils.hpp\"")
+            .count(),
+        1
+    );
     assert!(written.contains("cler::GuiManager gui(800, 400,"));
-    assert!(written.contains("while (!gui.should_close()) {"));
-    assert!(written.contains("gui.render(flowgraph);"));
+    assert_eq!(written.matches("while (!gui.should_close()) {").count(), 1);
+    assert_eq!(written.matches("gui.render(flowgraph);").count(), 1);
+    assert_eq!(written.matches(".stop();").count(), 1);
+    assert_eq!(
+        written
+            .matches("cler::print_flowgraph_execution_report(")
+            .count(),
+        1
+    );
     assert!(!written.contains("is_stopped"), "the idle wait loop is replaced");
     assert!(!written.contains("plot.render();"), "no per-block render lines");
 
@@ -1632,6 +1650,57 @@ int main() {
     let gui = site.gui.expect("the loop is now modelled");
     assert_eq!(gui.var, "gui");
     assert!(!gui.legacy);
+}
+
+#[test]
+fn materialize_gui_keeps_an_existing_stop_call() {
+    let source = r#"#include "cler.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
+#include "desktop_blocks/plots/plot_timeseries.hpp"
+
+#include <chrono>
+#include <thread>
+
+int main() {
+    PlotTimeSeriesBlock plot("Plot", {"in"}, 1000, 10.0f);
+    auto flowgraph = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&plot)
+    );
+
+    cler::FlowGraphConfig config;
+    flowgraph.run(config);
+    while (!flowgraph.is_stopped()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    flowgraph.stop();
+    return 0;
+}
+"#;
+    let mut session = DocumentSession::load(source).expect("loads");
+    session
+        .apply(transaction(0, vec![Command::MaterializeGui { site: 0 }]))
+        .expect("materializes the loop");
+
+    let written = session.source().to_string();
+    assert_eq!(
+        written
+            .matches("#include \"cler_desktop_utils.hpp\"")
+            .count(),
+        1
+    );
+    assert_eq!(written.matches("while (!gui.should_close()) {").count(), 1);
+    assert_eq!(written.matches(".stop();").count(), 1);
+    assert_eq!(
+        written
+            .matches("cler::print_flowgraph_execution_report(")
+            .count(),
+        1
+    );
+    let stop = written.find("flowgraph.stop();").expect("stop survives");
+    let report = written
+        .find("cler::print_flowgraph_execution_report(flowgraph);")
+        .expect("report is inserted");
+    assert!(stop < report, "the report follows the existing stop");
 }
 
 #[test]

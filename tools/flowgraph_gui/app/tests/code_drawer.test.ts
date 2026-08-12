@@ -184,7 +184,7 @@ async function boot(name = 'hello_world'): Promise<Page> {
     source: fixtureSource(name)
   });
   await page.goto(origin, { waitUntil: 'load' });
-  await page.waitForSelector(`.path[title="${FAKE_PATH}"]`);
+  await page.waitForSelector(`[data-testid="doc-path"][title="${FAKE_PATH}"]`);
   await page.waitForSelector('.svelte-flow__node');
   return page;
 }

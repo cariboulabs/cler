@@ -293,7 +293,7 @@ async function boot(options: { model?: FileModel; shiftOffsets?: boolean } = {})
     shiftOffsets: options.shiftOffsets ?? false
   });
   await page.goto(origin, { waitUntil: 'load' });
-  await page.waitForSelector(`.path[title="${FAKE_PATH}"]`);
+  await page.waitForSelector(`[data-testid="doc-path"][title="${FAKE_PATH}"]`);
   await page.waitForSelector('.svelte-flow__node');
   await page.waitForTimeout(300);
   return page;
@@ -752,7 +752,7 @@ describe('A. view state survives an ordinary edit', () => {
       const movedViewport = await viewport();
 
       await page.reload({ waitUntil: 'load' });
-      await page.waitForSelector(`.path[title="${FAKE_PATH}"]`);
+      await page.waitForSelector(`[data-testid="doc-path"][title="${FAKE_PATH}"]`);
       await page.waitForSelector('.svelte-flow__node[data-id="spectrum"]');
       await page.waitForTimeout(500);
 
@@ -772,7 +772,7 @@ describe('A. view state survives an ordinary edit', () => {
       await page.waitForTimeout(300);
 
       await page.reload({ waitUntil: 'load' });
-      await page.waitForSelector(`.path[title="${FAKE_PATH}"]`);
+      await page.waitForSelector(`[data-testid="doc-path"][title="${FAKE_PATH}"]`);
       await page.waitForSelector('.svelte-flow__node[data-id="chirp"]');
 
       expect(await page.locator('[data-testid="site-select"]').inputValue()).toBe('1');
@@ -856,7 +856,7 @@ describe('B. no state survives the block it belongs to', () => {
       );
       await page.click('[data-testid="file-menu"]');
       await page.click('[data-testid="file-open"]');
-      await page.waitForSelector(`.path[title="${OTHER_PATH}"]`);
+      await page.waitForSelector(`[data-testid="doc-path"][title="${OTHER_PATH}"]`);
       await select(page, 'source1');
       expect(await page.locator('[data-error="source1.ctor.1"]').count()).toBe(0);
       await page.close();
@@ -1158,7 +1158,6 @@ describe('D. a newer model is never replaced by an older one', () => {
       await input.fill('77.0f');
       await input.press('Enter');
       await expect.poll(() => input.inputValue()).toBe('77.0f');
-      const revision = await page.textContent('.sidebar dl dd:nth-of-type(2)');
 
       await page.evaluate(() => {
         const fake = (window as unknown as FakeWindow).__fake;
@@ -1190,7 +1189,6 @@ describe('D. a newer model is never replaced by an older one', () => {
       await page.click('[data-testid="undo"]');
       await page.waitForTimeout(600);
       expect(await input.inputValue()).toBe('77.0f');
-      expect(await page.textContent('.sidebar dl dd:nth-of-type(2)')).toBe(revision);
       await page.close();
     },
     CASE

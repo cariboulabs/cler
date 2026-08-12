@@ -1398,19 +1398,6 @@
     </div>
 
     <div class="body">
-      <section>
-        <h2>File</h2>
-        <div class="path" title={doc.path}>{doc.path.split('/').pop() ?? doc.path}</div>
-        <dl>
-          <dt>sites</dt>
-          <dd>{doc.model.sites.length}</dd>
-          <dt>revision</dt>
-          <dd>{doc.revision}</dd>
-          <dt>schema</dt>
-          <dd>{doc.model.version}</dd>
-        </dl>
-      </section>
-
       {#if doc.model.sites.length > 1}
         <section>
           <h2>Site</h2>
@@ -1530,14 +1517,9 @@
             </span>
           </h2>
           <dl>
-            <dt>cler root</dt>
+            <dt title="git checkout version for compiling and blocks">cler root…</dt>
             <dd class="path root-path">{libSettings.clerRoot ?? 'auto (repo of the open file)'}</dd>
           </dl>
-          <p class="path-hint">
-            The cler root is the cler checkout this document builds against; its
-            desktop_blocks fill the library. Auto uses the repo containing the
-            open file — set it only for files outside a cler checkout.
-          </p>
           {#each libSettings.blockLibraries as library (library)}
             <div class="lib-row">
               <span class="path" title={library}>{library}</span>
@@ -1917,12 +1899,6 @@
   .root-path {
     word-break: normal;
     overflow-wrap: anywhere;
-  }
-  .path-hint {
-    margin: var(--sp-1) 0 0;
-    font-size: 11px;
-    line-height: 1.5;
-    color: var(--muted);
   }
   .section-menu-slot {
     position: relative;

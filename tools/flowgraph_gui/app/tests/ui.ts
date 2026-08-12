@@ -646,7 +646,7 @@ export async function boot(options: BootOptions = {}): Promise<Page> {
     await page.waitForSelector('[data-testid="empty-state"]');
     return page;
   }
-  await page.waitForSelector(`.path[title="${FAKE_PATH}"]`);
+  await page.waitForSelector(`[data-testid="doc-path"][title="${FAKE_PATH}"]`);
   await page.waitForSelector('.svelte-flow__node');
   return page;
 }

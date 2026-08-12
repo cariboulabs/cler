@@ -365,7 +365,7 @@ describe('editing against a fake backend', () => {
     await editor.addInitScript(installFakeBackend, { path: FAKE_PATH, model: editableModel() });
     await editor.addInitScript(openInspector);
     await editor.goto(origin, { waitUntil: 'load' });
-    await editor.waitForSelector(`.path[title="${FAKE_PATH}"]`);
+    await editor.waitForSelector(`[data-testid="doc-path"][title="${FAKE_PATH}"]`);
     await editor.waitForSelector('.svelte-flow__node');
   }, CASE_TIMEOUT);
 

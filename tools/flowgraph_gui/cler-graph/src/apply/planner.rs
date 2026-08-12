@@ -110,6 +110,7 @@ const TYPE_PROBE: (&str, &str) = ("using cler_probe = ", ";\n");
 
 const BLOCK_SUFFIX: &str = "Block";
 const GUI_HEADER: &str = "desktop_blocks/gui/gui_manager.hpp";
+const DESKTOP_UTILS_HEADER: &str = "cler_desktop_utils.hpp";
 const SKELETON_TODO: &str = "// TODO: implement";
 const CHANNEL_CAPACITY: &str = "cler::DOUBLY_MAPPED_MIN_SIZE / sizeof";
 
@@ -676,6 +677,13 @@ impl<'a> Planner<'a> {
             let at = self.last_include_end();
             splices.push(Splice::insert(at, format!("#include \"{GUI_HEADER}\"{eol}")));
         }
+        if !self.src.contains(DESKTOP_UTILS_HEADER) {
+            let at = self.last_include_end();
+            splices.push(Splice::insert(
+                at,
+                format!("#include \"{DESKTOP_UTILS_HEADER}\"{eol}"),
+            ));
+        }
 
         let declaration = self.site_first_statement(site)?;
         splices.push(Splice::insert(
@@ -690,15 +698,25 @@ impl<'a> Planner<'a> {
         let loop_text = format!(
             "{indent}while (!gui.should_close()) {{{eol}{inner}gui.render({flowgraph});{eol}{indent}}}{eol}"
         );
+        let report_text =
+            format!("{indent}cler::print_flowgraph_execution_report({flowgraph});{eol}");
+        let existing_stop = self.stop_after(idle.unwrap_or(run), &flowgraph);
+        let epilogue = match existing_stop {
+            Some(stop) => {
+                splices.push(Splice::insert(self.line_end(stop.end_byte()), report_text));
+                loop_text
+            }
+            None => format!("{loop_text}{indent}{flowgraph}.stop();{eol}{report_text}"),
+        };
         match idle {
             Some(node) => splices.push(Splice::replace(
                 Span {
                     start: self.line_start(node.start_byte()),
                     end: self.line_end(node.end_byte()),
                 },
-                &loop_text,
+                &epilogue,
             )),
-            None => splices.push(Splice::insert(self.line_end(run.end_byte()), loop_text)),
+            None => splices.push(Splice::insert(self.line_end(run.end_byte()), epilogue)),
         }
         splices.sort_by_key(|splice| splice.start);
         Ok(splices)
@@ -753,6 +771,20 @@ impl<'a> Planner<'a> {
                     return Some(node);
                 }
                 return None;
+            }
+            found = node.next_named_sibling();
+        }
+        None
+    }
+
+    fn stop_after(&self, anchor: Node<'a>, flowgraph: &str) -> Option<Node<'a>> {
+        let target = format!("{flowgraph}.stop()");
+        let mut found = anchor.next_named_sibling();
+        while let Some(node) = found {
+            if node.kind() == "expression_statement"
+                && self.text(node).trim_start().starts_with(&target)
+            {
+                return Some(node);
             }
             found = node.next_named_sibling();
         }
