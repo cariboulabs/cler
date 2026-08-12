@@ -3,6 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use cler_flowgraph_gui::settings;
 use cler_flowgraph_gui::assistant;
 use cler_flowgraph_gui::build::{self, Emit, Jobs, RecordArtifact};
 use cler_flowgraph_gui::document::{self, Documents};
@@ -21,7 +22,12 @@ enum Reply {
     Loud(String),
 }
 
+fn e2e_config_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("cler-e2e-config-{}", std::process::id()))
+}
+
 fn main() {
+    settings::init(&e2e_config_dir());
     let port: u16 = std::env::args()
         .nth(1)
         .and_then(|text| text.parse().ok())
@@ -150,6 +156,20 @@ fn dispatch(
             model: assistant::MODEL.to_string(),
             reason: assistant::locate(None, Path::new("/nonexistent/cler-e2e")).err(),
         });
+    }
+    if cmd == "app_settings" {
+        return Reply::Value(serde_json::to_value(settings::current()).unwrap_or(Value::Null));
+    }
+    if cmd == "set_app_settings" {
+        let Ok(next) = serde_json::from_value::<settings::AppSettings>(
+            args.get("next").cloned().unwrap_or(Value::Null),
+        ) else {
+            return Reply::Loud("set_app_settings needs a settings object".to_string());
+        };
+        return match settings::store(&e2e_config_dir(), &next) {
+            Ok(stored) => Reply::Value(serde_json::to_value(stored).unwrap_or(Value::Null)),
+            Err(message) => Reply::Refused(message),
+        };
     }
     let path = match args.get("path").and_then(Value::as_str) {
         Some(text) => text.to_string(),

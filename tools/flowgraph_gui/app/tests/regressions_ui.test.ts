@@ -1072,7 +1072,7 @@ describe('C. exactly one command per intentional commit', () => {
       await page.waitForTimeout(1800);
 
       const observed = (await names(page)).filter(
-        (name) => !['open_document', 'palette', 'find_target', 'assistant_status'].includes(name)
+        (name) => !['open_document', 'palette', 'find_target', 'assistant_status', 'app_settings'].includes(name)
       );
       expect(observed, 'the draft commits first, the undo follows, neither is dropped').toEqual([
         'apply_commands',

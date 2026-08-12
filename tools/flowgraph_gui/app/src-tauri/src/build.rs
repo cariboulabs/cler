@@ -76,6 +76,7 @@ pub fn repo_root(target: &Path) -> Option<PathBuf> {
         .ancestors()
         .find(|dir| dir.join(MARKER).is_file())
         .map(Path::to_path_buf)
+        .or_else(crate::settings::cler_root_fallback)
 }
 
 pub fn check(jobs: &Jobs, path: &str, emit: Emit) -> Result<Started, String> {
@@ -976,6 +977,12 @@ fn subdirs(dir: &Path) -> Vec<PathBuf> {
 fn includes(root: &Path) -> Vec<PathBuf> {
     let mut dirs = vec![root.to_path_buf(), root.join("include")];
     dirs.extend(subdirs(&root.join("desktop_blocks")));
+    for library in crate::settings::block_library_dirs() {
+        if let Some(parent) = library.parent() {
+            dirs.push(parent.to_path_buf());
+        }
+        dirs.push(library.clone());
+    }
     for build in build_dirs(root) {
         for dep in subdirs(&build.1.join("_deps")) {
             dirs.push(dep.join("include"));

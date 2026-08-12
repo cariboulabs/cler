@@ -2,6 +2,7 @@ pub mod assistant;
 pub mod build;
 pub mod document;
 pub mod provenance;
+pub mod settings;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -104,6 +105,20 @@ fn redo(path: String, docs: State<'_, Documents>) -> Result<DocumentState, Strin
 #[tauri::command]
 fn save_document(path: String, docs: State<'_, Documents>) -> Result<DocumentState, String> {
     document::save(&docs, &path)
+}
+
+#[tauri::command]
+fn app_settings(app: AppHandle) -> settings::AppSettings {
+    settings::init(&config_dir(&app));
+    settings::current()
+}
+
+#[tauri::command]
+fn set_app_settings(
+    next: settings::AppSettings,
+    app: AppHandle,
+) -> Result<settings::AppSettings, String> {
+    settings::store(&config_dir(&app), &next)
 }
 
 #[tauri::command]
@@ -359,6 +374,7 @@ pub fn run() {
         .manage(Jobs::default())
         .manage(Talks::default())
         .setup(|app| {
+            settings::init(&config_dir(app.handle()));
             let watcher = build_watcher(app.handle().clone())?;
             app.manage(Mutex::new(watcher));
             Ok(())
@@ -371,6 +387,8 @@ pub fn run() {
             move_nodes,
             undo,
             redo,
+            app_settings,
+            set_app_settings,
             new_document,
             save_document,
             save_document_as,

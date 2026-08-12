@@ -351,7 +351,7 @@ describe('the cheap repaints', () => {
     'shows the file basename and keeps the full path in its tooltip',
     async () => {
       const page = await boot();
-      const path = page.locator('.sidebar .path');
+      const path = page.locator('.sidebar .path').first();
       expect(await path.textContent()).toBe('hello_world.cpp');
       expect(await path.getAttribute('title')).toBe('/tmp/fake/hello_world.cpp');
       await page.close();

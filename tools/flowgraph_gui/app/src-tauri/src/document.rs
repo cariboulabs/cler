@@ -219,7 +219,7 @@ pub fn apply(
     let (target, doc) = document(&mut map, path)?;
     refuse_external(doc, &target)?;
 
-    let origins = add_block_origins(&commands, &doc.palette);
+    let origins = add_block_origins(&commands, &doc.palette, &target);
     let pending = doc
         .session
         .preview_with_includes(Transaction {
@@ -254,7 +254,7 @@ pub fn preview(
     let (target, doc) = document(&mut map, path)?;
     refuse_external(doc, &target)?;
 
-    let origins = add_block_origins(&commands, &doc.palette);
+    let origins = add_block_origins(&commands, &doc.palette, &target);
     let pending = doc
         .session
         .preview_with_includes(Transaction {
@@ -271,7 +271,8 @@ pub fn preview(
     })
 }
 
-fn add_block_origins(commands: &[Command], palette: &[BlockSpec]) -> Vec<String> {
+fn add_block_origins(commands: &[Command], palette: &[BlockSpec], target: &Path) -> Vec<String> {
+    let roots = include_roots(target);
     commands
         .iter()
         .filter_map(|command| match command {
@@ -284,12 +285,33 @@ fn add_block_origins(commands: &[Command], palette: &[BlockSpec]) -> Vec<String>
                 .map(|spec| spec.origin.clone()),
             _ => None,
         })
-        .filter_map(|origin| {
-            origin
-                .find("desktop_blocks/")
-                .map(|offset| origin[offset..].replace('\\', "/"))
-        })
+        .filter_map(|origin| include_path(&origin, &roots))
         .collect()
+}
+
+fn include_roots(target: &Path) -> Vec<PathBuf> {
+    let repo_blocks = crate::build::repo_root(target).map(|root| root.join(PALETTE_DIR));
+    repo_blocks
+        .into_iter()
+        .chain(crate::settings::block_library_dirs())
+        .collect()
+}
+
+fn include_path(origin: &str, roots: &[PathBuf]) -> Option<String> {
+    let origin = Path::new(origin);
+    for root in roots {
+        let Some(parent) = root.parent() else {
+            continue;
+        };
+        if let Ok(relative) = origin.strip_prefix(parent) {
+            let mut segments = Vec::new();
+            for part in relative.components() {
+                segments.push(part.as_os_str().to_string_lossy().into_owned());
+            }
+            return Some(segments.join("/"));
+        }
+    }
+    None
 }
 
 pub fn move_nodes(
@@ -755,14 +777,21 @@ fn fresh(target: &Path, spelling: &str) -> Result<Document, String> {
 }
 
 fn nearby_palette(target: &Path) -> Vec<BlockSpec> {
-    let Some(root) = target
+    let repo_blocks = target
         .ancestors()
         .map(|dir| dir.join(PALETTE_DIR))
         .find(|dir| dir.is_dir())
-    else {
+        .or_else(|| {
+            crate::settings::cler_root_fallback()
+                .map(|root| root.join(PALETTE_DIR))
+                .filter(|dir| dir.is_dir())
+        });
+    let mut roots: Vec<PathBuf> = repo_blocks.into_iter().collect();
+    roots.extend(crate::settings::block_library_dirs());
+    if roots.is_empty() {
         return Vec::new();
-    };
-    palette_specs(&[root]).unwrap_or_default()
+    }
+    palette_specs(&roots).unwrap_or_default()
 }
 
 fn lock(docs: &Documents) -> MutexGuard<'_, HashMap<PathBuf, Document>> {
@@ -1075,5 +1104,28 @@ mod tests {
         let removed = expired_snapshots(snapshots, &current, now);
 
         assert_eq!(removed, vec![PathBuf::from("18.cpp")]);
+    }
+}
+
+#[cfg(test)]
+mod include_tests {
+    use super::include_path;
+    use std::path::PathBuf;
+
+    #[test]
+    fn include_paths_are_library_root_relative() {
+        let roots = vec![
+            PathBuf::from("/repo/desktop_blocks"),
+            PathBuf::from("/home/user/my_blocks"),
+        ];
+        assert_eq!(
+            include_path("/repo/desktop_blocks/filters/kaiser_lpf.hpp", &roots).as_deref(),
+            Some("desktop_blocks/filters/kaiser_lpf.hpp")
+        );
+        assert_eq!(
+            include_path("/home/user/my_blocks/agc.hpp", &roots).as_deref(),
+            Some("my_blocks/agc.hpp")
+        );
+        assert_eq!(include_path("/elsewhere/foo.hpp", &roots), None);
     }
 }

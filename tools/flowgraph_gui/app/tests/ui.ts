@@ -377,6 +377,8 @@ function installFake(setup: Setup) {
       return null;
     }
     calls.push(command);
+    if (command === 'app_settings') return { clerRoot: null, blockLibraries: [] };
+    if (command === 'set_app_settings') return (args as Loose).next;
     if (command === 'run_target') runs.push(args.args);
     if (command === 'assistant_status') return setup.assistant;
     if (command === 'assistant_stop') return null;

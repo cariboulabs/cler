@@ -29,6 +29,11 @@ export async function pickFile(): Promise<string | null> {
   return typeof picked === 'string' ? picked : null;
 }
 
+export async function pickFolder(): Promise<string | null> {
+  const picked = await open({ multiple: false, directory: true });
+  return typeof picked === 'string' ? picked : null;
+}
+
 export async function pickSavePath(defaultPath?: string): Promise<string | null> {
   const picked = await save({
     defaultPath,
@@ -96,6 +101,16 @@ export function saveDocumentAs(path: string, newPath: string): Promise<DocumentS
 
 export function newDocument(path: string): Promise<DocumentState> {
   return documentCall('new_document', { path });
+}
+
+export type AppSettings = { clerRoot: string | null; blockLibraries: string[] };
+
+export function appSettings(): Promise<AppSettings> {
+  return invoker('app_settings', {}) as Promise<AppSettings>;
+}
+
+export function setAppSettings(next: AppSettings): Promise<AppSettings> {
+  return invoker('set_app_settings', { next }) as Promise<AppSettings>;
 }
 
 export function saveCache(path: string, ui: unknown): Promise<void> {

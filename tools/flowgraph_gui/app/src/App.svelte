@@ -59,6 +59,10 @@
     reloadDocument,
     runTarget,
     newDocument,
+    appSettings,
+    setAppSettings,
+    pickFolder,
+    type AppSettings,
     saveDocument,
     saveDocumentAs,
     spansOf,
@@ -221,6 +225,7 @@
   let targetRefresh = $state(0);
   let rightTab = $state<RailTab>('inspector');
   let runArgs = $state('');
+  let libSettings = $state<AppSettings>({ clerRoot: null, blockLibraries: [] });
   let keyStatus = $state.raw<AssistantStatus | null>(null);
   let chat = $state.raw<Message[]>([]);
   let pendingReply = $state<number | null>(null);
@@ -447,6 +452,10 @@
 
   $effect(() => {
     void refreshAssistant();
+  });
+
+  $effect(() => {
+    void loadAppSettings();
   });
 
   $effect(() => {
@@ -934,6 +943,40 @@
       void warnIfOutsideRepo(picked);
     } catch (error) {
       announce(describeApplyError(error));
+    }
+  }
+
+  async function loadAppSettings() {
+    if (!desktop) return;
+    try {
+      libSettings = await appSettings();
+    } catch {
+      libSettings = { clerRoot: null, blockLibraries: [] };
+    }
+  }
+
+  async function updateLibraries(next: AppSettings) {
+    try {
+      libSettings = await setAppSettings(next);
+      void refreshPalette(doc.path);
+      hint('libraries updated');
+    } catch (error) {
+      announce(describeApplyError(error));
+    }
+  }
+
+  async function pickClerRoot() {
+    const dir = await pickFolder();
+    if (dir) await updateLibraries({ ...libSettings, clerRoot: dir });
+  }
+
+  async function addLibrary() {
+    const dir = await pickFolder();
+    if (dir && !libSettings.blockLibraries.includes(dir)) {
+      await updateLibraries({
+        ...libSettings,
+        blockLibraries: [...libSettings.blockLibraries, dir]
+      });
     }
   }
 
@@ -1446,6 +1489,50 @@
         </section>
       {/if}
 
+      {#if desktop}
+        <section data-testid="libraries">
+          <h2>Libraries</h2>
+          <dl>
+            <dt>cler root</dt>
+            <dd class="path">{libSettings.clerRoot ?? 'auto — the repo of the open file'}</dd>
+          </dl>
+          <div class="lib-actions">
+            <button data-testid="pick-cler-root" onclick={() => void pickClerRoot()}
+              >Set cler root…</button
+            >
+            {#if libSettings.clerRoot}
+              <button
+                data-testid="clear-cler-root"
+                onclick={() => void updateLibraries({ ...libSettings, clerRoot: null })}
+                >Clear</button
+              >
+            {/if}
+          </div>
+          {#each libSettings.blockLibraries as library (library)}
+            <div class="lib-row">
+              <span class="path" title={library}>{library}</span>
+              <button
+                class="lib-remove"
+                data-library-remove={library}
+                title="remove this block library"
+                onclick={() =>
+                  void updateLibraries({
+                    ...libSettings,
+                    blockLibraries: libSettings.blockLibraries.filter(
+                      (entry) => entry !== library
+                    )
+                  })}>✕</button
+              >
+            </div>
+          {/each}
+          <div class="lib-actions">
+            <button data-testid="add-library" onclick={() => void addLibrary()}
+              >Add block library…</button
+            >
+          </div>
+        </section>
+      {/if}
+
       {#if status}
         <p class="status" data-testid="status">{status}</p>
       {/if}
@@ -1794,6 +1881,32 @@
     letter-spacing: 0;
     font-family: var(--mono);
     font-weight: 400;
+  }
+  .lib-actions {
+    display: flex;
+    gap: var(--sp-2);
+  }
+  .lib-actions button {
+    font-size: 11px;
+    padding: var(--sp-0) var(--sp-2);
+  }
+  .lib-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+  .lib-row .path {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lib-remove {
+    flex: none;
+    padding: 0 var(--sp-1);
+    font-size: 11px;
+    color: var(--muted);
   }
   dl {
     display: grid;
