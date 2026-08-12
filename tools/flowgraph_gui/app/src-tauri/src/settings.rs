@@ -64,9 +64,20 @@ fn validate(settings: &AppSettings) -> Result<AppSettings, String> {
 }
 
 pub fn cler_root_fallback() -> Option<PathBuf> {
+    configured_root().or_else(builtin_root)
+}
+
+fn configured_root() -> Option<PathBuf> {
     let settings = current();
     let root = PathBuf::from(settings.cler_root?);
     root.join(MARKER).is_file().then_some(root)
+}
+
+fn builtin_root() -> Option<PathBuf> {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .find(|dir| dir.join(MARKER).is_file())
+        .map(Path::to_path_buf)
 }
 
 pub fn block_library_dirs() -> Vec<PathBuf> {
@@ -119,7 +130,8 @@ mod tests {
         assert_eq!(crate::build::repo_root(&outside_file), Some(fake_repo.clone()));
 
         store(&dir, &AppSettings::default()).expect("clear");
-        assert_eq!(crate::build::repo_root(&outside_file), None);
+        let builtin = crate::build::repo_root(&outside_file).expect("builtin repo fallback");
+        assert!(builtin.join(MARKER).is_file());
         std::fs::remove_dir_all(&external).ok();
         std::fs::remove_dir_all(&dir).ok();
         std::fs::remove_dir_all(&fake_repo).ok();

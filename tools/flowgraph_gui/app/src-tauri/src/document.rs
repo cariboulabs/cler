@@ -1129,3 +1129,20 @@ mod include_tests {
         assert_eq!(include_path("/elsewhere/foo.hpp", &roots), None);
     }
 }
+
+#[cfg(test)]
+mod palette_tests {
+    #[test]
+    fn an_external_file_still_gets_the_builtin_palette() {
+        let dir = std::env::temp_dir().join(format!("cler-ext-palette-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let file = dir.join("flowgraph.cpp");
+        std::fs::write(&file, "int main() { return 0; }\n").expect("external file");
+        let specs = super::nearby_palette(&file);
+        assert!(
+            specs.iter().any(|spec| spec.name == "SourceCWBlock"),
+            "external files resolve the palette via the builtin cler root"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

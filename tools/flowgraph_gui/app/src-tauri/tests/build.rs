@@ -195,18 +195,22 @@ fn without_a_configured_build_directory_the_reason_is_the_command_to_run() {
 }
 
 #[test]
-fn a_file_outside_a_cler_repository_is_refused() {
+fn a_file_outside_a_cler_repository_edits_and_checks_but_has_no_target() {
     let dir = temp_dir("stray");
     let source = dir.join("stray.cpp");
     write(&source, "int main() { return 0; }\n");
 
-    let refusal = build::find_target(as_str(&source)).expect_err("no repository");
-    assert!(refusal.contains("not inside a cler repository"), "{refusal}");
+    let found = build::find_target(as_str(&source)).expect("builtin repo fallback resolves");
+    assert!(!found.available);
+    let reason = found.reason.unwrap_or_default();
+    assert!(reason.contains("outside the cler repository"), "{reason}");
 
-    let jobs = Jobs::default();
-    let (_, emit) = recorder();
-    let denied = build::check(&jobs, as_str(&source), emit).expect_err("no repository");
-    assert!(denied.contains("include/cler.hpp"), "{denied}");
+    if have_gxx() {
+        let jobs = Jobs::default();
+        let (seen, emit) = recorder();
+        build::check(&jobs, as_str(&source), emit).expect("check runs against the fallback repo");
+        await_event(&seen, "check-finished");
+    }
 }
 
 #[test]

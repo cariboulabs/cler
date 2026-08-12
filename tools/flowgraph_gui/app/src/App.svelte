@@ -226,6 +226,7 @@
   let rightTab = $state<RailTab>('inspector');
   let runArgs = $state('');
   let libSettings = $state<AppSettings>({ clerRoot: null, blockLibraries: [] });
+  let pathsMenuOpen = $state(false);
   let keyStatus = $state.raw<AssistantStatus | null>(null);
   let chat = $state.raw<Message[]>([]);
   let pendingReply = $state<number | null>(null);
@@ -1366,6 +1367,8 @@
 
 </script>
 
+<svelte:window onclick={() => (pathsMenuOpen = false)} />
+
 <div
   class="shell"
   style="--rail-left: {leftOpen ? SIDEBAR_WIDTH : RAIL_WIDTH}px; --rail-right: {rightOpen
@@ -1475,23 +1478,52 @@
 
       {#if desktop}
         <section data-testid="libraries">
-          <h2>Block paths</h2>
+          <h2>
+            Block paths
+            <span class="section-menu-slot">
+              <button
+                class="section-menu"
+                data-testid="block-paths-menu"
+                aria-expanded={pathsMenuOpen}
+                title="manage block search paths"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  pathsMenuOpen = !pathsMenuOpen;
+                }}>⋯</button
+              >
+              {#if pathsMenuOpen}
+                <div class="panel-menu" data-testid="block-paths-menu-list">
+                  <button
+                    data-testid="pick-cler-root"
+                    onclick={() => {
+                      pathsMenuOpen = false;
+                      void pickClerRoot();
+                    }}>Set cler root…</button
+                  >
+                  {#if libSettings.clerRoot}
+                    <button
+                      data-testid="clear-cler-root"
+                      onclick={() => {
+                        pathsMenuOpen = false;
+                        void updateLibraries({ ...libSettings, clerRoot: null });
+                      }}>Use automatic cler root</button
+                    >
+                  {/if}
+                  <button
+                    data-testid="add-library"
+                    onclick={() => {
+                      pathsMenuOpen = false;
+                      void addLibrary();
+                    }}>Add block library…</button
+                  >
+                </div>
+              {/if}
+            </span>
+          </h2>
           <dl>
             <dt>cler root</dt>
             <dd class="path root-path">{libSettings.clerRoot ?? 'auto (repo of the open file)'}</dd>
           </dl>
-          <div class="lib-actions">
-            <button data-testid="pick-cler-root" onclick={() => void pickClerRoot()}
-              >Set cler root…</button
-            >
-            {#if libSettings.clerRoot}
-              <button
-                data-testid="clear-cler-root"
-                onclick={() => void updateLibraries({ ...libSettings, clerRoot: null })}
-                >Clear</button
-              >
-            {/if}
-          </div>
           {#each libSettings.blockLibraries as library (library)}
             <div class="lib-row">
               <span class="path" title={library}>{library}</span>
@@ -1509,11 +1541,6 @@
               >
             </div>
           {/each}
-          <div class="lib-actions">
-            <button data-testid="add-library" onclick={() => void addLibrary()}
-              >Add block library…</button
-            >
-          </div>
         </section>
       {/if}
 
@@ -1837,6 +1864,9 @@
     visibility: hidden;
   }
   h2 {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
     margin: 0 0 var(--sp-2);
     font-size: 11px;
     letter-spacing: 0.09em;
@@ -1870,13 +1900,50 @@
     word-break: normal;
     overflow-wrap: anywhere;
   }
-  .lib-actions {
-    display: flex;
-    gap: var(--sp-2);
+  .section-menu-slot {
+    position: relative;
+    margin-left: auto;
+    display: inline-flex;
   }
-  .lib-actions button {
-    font-size: 11px;
+  .section-menu {
+    padding: 0 var(--sp-1);
+    background: transparent;
+    border-color: transparent;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--muted);
+  }
+  .section-menu:hover {
+    background: var(--bg-2);
+  }
+  .panel-menu {
+    position: absolute;
+    top: calc(100% + var(--sp-0));
+    right: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    min-width: 190px;
+    padding: var(--sp-0);
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+  }
+  .panel-menu button {
+    justify-content: flex-start;
+    text-align: left;
+    width: 100%;
     padding: var(--sp-0) var(--sp-2);
+    background: transparent;
+    border: none;
+    font-size: 12px;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--fg);
+  }
+  .panel-menu button:hover {
+    background: var(--bg-2);
   }
   .lib-row {
     display: flex;

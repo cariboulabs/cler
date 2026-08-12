@@ -129,7 +129,11 @@ pub fn find_target(path: &str) -> Result<Target, String> {
         .to_string();
     let root = repo_root(&file).ok_or_else(|| outside(&file))?;
     let Some(relative) = file.parent().and_then(|dir| dir.strip_prefix(&root).ok()) else {
-        return Ok(refused(name, outside(&file)));
+        return Ok(refused(
+            name,
+            "outside the cler repository — no cmake target yet; editing and check still work"
+                .to_string(),
+        ));
     };
     if !relative.starts_with(EXAMPLES) {
         return Ok(refused(
