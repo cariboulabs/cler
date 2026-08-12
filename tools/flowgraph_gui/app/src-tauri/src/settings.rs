@@ -51,17 +51,20 @@ pub fn store(dir: &Path, settings: &AppSettings) -> Result<AppSettings, String> 
 }
 
 fn validate(settings: &AppSettings) -> Result<AppSettings, String> {
+    let mut validated = settings.clone();
     if let Some(root) = settings.cler_root.as_deref() {
-        if !Path::new(root).join(MARKER).is_file() {
-            return Err(format!("{root} is not a cler repository (no {MARKER})"));
-        }
+        let repo = Path::new(root)
+            .ancestors()
+            .find(|dir| dir.join(MARKER).is_file())
+            .ok_or_else(|| format!("{root} is not inside a cler repository (no {MARKER})"))?;
+        validated.cler_root = Some(repo.display().to_string());
     }
     for library in &settings.block_libraries {
         if !Path::new(library).is_dir() {
             return Err(format!("{library} is not a directory"));
         }
     }
-    Ok(settings.clone())
+    Ok(validated)
 }
 
 fn prune(settings: AppSettings) -> AppSettings {
@@ -160,6 +163,14 @@ mod tests {
         };
         assert!(store(&dir, &bogus).is_err());
         assert_eq!(read(&dir), wanted);
+
+        let inside = AppSettings {
+            cler_root: Some(fake_repo.join("include").display().to_string()),
+            block_libraries: Vec::new(),
+        };
+        let normalized = store(&dir, &inside).expect("subdir normalizes to the repo root");
+        assert_eq!(normalized.cler_root, Some(fake_repo.display().to_string()));
+        store(&dir, &wanted).expect("restore wanted");
 
         let redundant = AppSettings {
             cler_root: Some(fake_repo.display().to_string()),

@@ -113,6 +113,10 @@ export function setAppSettings(next: AppSettings): Promise<AppSettings> {
   return invoker('set_app_settings', { next }) as Promise<AppSettings>;
 }
 
+export function resolvedClerRoot(path: string): Promise<string | null> {
+  return invoker('resolved_cler_root', { path }) as Promise<string | null>;
+}
+
 export function saveCache(path: string, ui: unknown): Promise<void> {
   return invoker('save_cache', { path, ui }) as Promise<void>;
 }

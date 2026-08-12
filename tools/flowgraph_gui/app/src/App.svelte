@@ -61,6 +61,7 @@
     newDocument,
     appSettings,
     setAppSettings,
+    resolvedClerRoot,
     pickFolder,
     type AppSettings,
     saveDocument,
@@ -226,6 +227,19 @@
   let rightTab = $state<RailTab>('inspector');
   let runArgs = $state('');
   let libSettings = $state<AppSettings>({ clerRoot: null, blockLibraries: [] });
+  let resolvedRoot = $state<string | null>(null);
+
+  $effect(() => {
+    const path = doc.path;
+    if (!desktop || !path) {
+      resolvedRoot = null;
+      return;
+    }
+    void resolvedClerRoot(path).then(
+      (root) => (resolvedRoot = root),
+      () => (resolvedRoot = null)
+    );
+  });
   let pathsMenuOpen = $state(false);
   let keyStatus = $state.raw<AssistantStatus | null>(null);
   let chat = $state.raw<Message[]>([]);
@@ -1516,12 +1530,12 @@
               {/if}
             </span>
           </h2>
-          {#if libSettings.clerRoot}
-            <dl>
-              <dt title="git checkout version for compiling and blocks">cler root</dt>
-              <dd class="path root-path">{libSettings.clerRoot}</dd>
-            </dl>
-          {/if}
+          <dl>
+            <dt title="git checkout version for compiling and blocks">cler root</dt>
+            <dd class="path root-path">
+              {libSettings.clerRoot ?? (resolvedRoot ? `auto — ${resolvedRoot}` : 'auto')}
+            </dd>
+          </dl>
           {#each libSettings.blockLibraries as library (library)}
             <div class="lib-row">
               <span class="path" title={library}>{library}</span>

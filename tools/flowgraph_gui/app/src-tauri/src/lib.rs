@@ -122,6 +122,11 @@ fn set_app_settings(
 }
 
 #[tauri::command]
+fn resolved_cler_root(path: String) -> Option<String> {
+    build::repo_root(std::path::Path::new(&path)).map(|root| root.display().to_string())
+}
+
+#[tauri::command]
 fn new_document(
     path: String,
     docs: State<'_, Documents>,
@@ -389,6 +394,7 @@ pub fn run() {
             redo,
             app_settings,
             set_app_settings,
+            resolved_cler_root,
             new_document,
             save_document,
             save_document_as,
