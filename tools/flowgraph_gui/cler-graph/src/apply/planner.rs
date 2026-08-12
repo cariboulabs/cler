@@ -884,19 +884,29 @@ impl<'a> Planner<'a> {
                         )])
                     }
                     None => {
-                        let list = self.argument_list(self.node(target.span)?)?;
-                        let last = named_children(list).last().copied().ok_or_else(|| {
-                            ApplyError::UnsupportedShape {
-                                detail: "flowgraph call has no runners to append after".to_string(),
-                            }
-                        })?;
+                        let call = self.node(target.span)?;
+                        let list = self.argument_list(call)?;
                         let factory = self.runner_factory(target);
-                        let indent = self.indent(last.start_byte());
                         let eol = self.line_ending();
-                        Ok(vec![Splice::insert(
-                            last.end_byte(),
-                            format!(",{eol}{indent}{factory}(&{}, {argument})", source.var),
-                        )])
+                        let runner = format!("{factory}(&{}, {argument})", source.var);
+                        match named_children(list).last().copied() {
+                            Some(last) => {
+                                let indent = self.indent(last.start_byte());
+                                Ok(vec![Splice::insert(
+                                    last.end_byte(),
+                                    format!(",{eol}{indent}{runner}"),
+                                )])
+                            }
+                            None => {
+                                let statement = self.statement_of(call);
+                                let outer = self.indent(statement.start_byte());
+                                let inner = format!("{outer}    ");
+                                Ok(vec![Splice::insert(
+                                    list.end_byte() - 1,
+                                    format!("{eol}{inner}{runner}{eol}{outer}"),
+                                )])
+                            }
+                        }
                     }
                 }
             }

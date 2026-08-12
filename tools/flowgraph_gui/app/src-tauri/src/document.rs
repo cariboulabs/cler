@@ -1158,6 +1158,49 @@ mod palette_tests {
     }
 
     #[test]
+    fn wiring_an_empty_external_flowgraph_seeds_a_runner() {
+        let _guard = crate::settings::test_guard();
+        let dir = std::env::temp_dir().join(format!("cler-user-wire-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let file = dir.join("flowgraph.cpp");
+        let original = concat!(
+            "#include \"cler.hpp\"\n",
+            "#include \"task_policies/cler_desktop_tpolicy.hpp\"\n",
+            "#include \"desktop_blocks/sources/source_chirp.hpp\"\n",
+            "#include \"desktop_blocks/plots/plot_timeseries.hpp\"\n",
+            "\n",
+            "int main() {\n",
+            "    SourceChirpBlock<float> source_chirp(\"source_chirp\", 2, 10, 20, 4000000, 5);\n",
+            "    PlotTimeSeriesBlock plot_time_series(\"plot_time_series\", {\"in\"}, 4000000, 10);\n",
+            "    auto flowgraph = cler::make_desktop_flowgraph();\n",
+            "\n",
+            "    cler::FlowGraphConfig config;\n",
+            "    flowgraph.run(config);\n",
+            "    return 0;\n",
+            "}\n"
+        );
+        std::fs::write(&file, original).expect("seed file");
+
+        let docs = super::Documents::default();
+        let path = file.display().to_string();
+        super::open(&docs, &path).expect("opens");
+        let command = serde_json::json!({
+            "command": "connect",
+            "site": 0,
+            "from": "source_chirp",
+            "to": "plot_time_series",
+            "port": "in",
+            "port_index": 0
+        });
+        let state = super::apply(&docs, &path, 0, vec![command]).expect("connect applies");
+        assert!(state
+            .source
+            .contains("cler::BlockRunner(&source_chirp, &plot_time_series.in[0])"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn an_external_file_still_gets_the_builtin_palette() {
         let _guard = crate::settings::test_guard();
         let dir = std::env::temp_dir().join(format!("cler-ext-palette-{}", std::process::id()));

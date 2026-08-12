@@ -1439,3 +1439,44 @@ fn a_partially_read_only_site_still_edits_its_editable_blocks() {
         .expect_err("the optional-emplace block refuses edits");
     assert!(matches!(refused, ApplyError::NotEditable { .. }));
 }
+
+#[test]
+fn connect_seeds_the_first_runner_into_an_empty_flowgraph() {
+    let source = r#"#include "cler.hpp"
+#include "task_policies/cler_desktop_tpolicy.hpp"
+#include "desktop_blocks/sources/source_cw.hpp"
+#include "desktop_blocks/plots/plot_timeseries.hpp"
+
+int main() {
+    SourceCWBlock<float> source_cw("Source", 1.0f, 1.0f, 1000);
+    PlotTimeSeriesBlock plot("Plot", {"in"}, 1000, 10.0f);
+    auto flowgraph = cler::make_desktop_flowgraph();
+
+    flowgraph.run();
+    return 0;
+}
+"#;
+    let mut session = DocumentSession::load(source).expect("loads");
+    session
+        .apply(transaction(
+            0,
+            vec![Command::Connect {
+                site: 0,
+                from: "source_cw".to_string(),
+                to: "plot".to_string(),
+                port: "in".to_string(),
+                port_index: Some(0),
+            }],
+        ))
+        .expect("the first connection seeds a runner");
+    assert!(session
+        .source()
+        .contains("cler::BlockRunner(&source_cw, &plot.in[0])"));
+
+    let site = only_site(&session);
+    assert_eq!(site.runners.len(), 1);
+    assert_eq!(site.edges.len(), 1);
+
+    let second = session.source().to_string();
+    assert!(second.contains("cler::make_desktop_flowgraph(\n"), "the call stays multi-line");
+}
