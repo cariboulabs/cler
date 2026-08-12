@@ -525,7 +525,7 @@ describe('unwiring, removing and deleting', () => {
 
 describe('the Delete key follows the selection', () => {
   it(
-    'disconnects a selected edge, removes a selected node, and stays quiet while typing',
+    'disconnects a selected edge, deletes a selected node, and stays quiet while typing',
     async () => {
       const page = await boot();
       await page.click(wire('source1', 'adder'));
@@ -538,7 +538,7 @@ describe('the Delete key follows the selection', () => {
       await page.keyboard.press('Delete');
       await expect.poll(() => commands(page)).toEqual([
         { command: 'disconnect', site: 0, edge: 0 },
-        { command: 'remove_from_graph', site: 0, block: 'source2' }
+        { command: 'delete_block', site: 0, block: 'source2' }
       ]);
 
       await page.click('.svelte-flow__node[data-id="adder"]');
@@ -553,15 +553,17 @@ describe('the Delete key follows the selection', () => {
   );
 
   it(
-    'never deletes the declaration from the keyboard',
+    'deletes the block itself, leaving remove-from-graph to the menu',
     async () => {
       const page = await boot();
       await page.click('.svelte-flow__node[data-id="source2"]');
       await page.keyboard.press('Backspace');
       await expect.poll(() => commands(page)).toEqual([
-        { command: 'remove_from_graph', site: 0, block: 'source2' }
+        { command: 'delete_block', site: 0, block: 'source2' }
       ]);
-      expect((await commands(page)).some((entry) => entry.command === 'delete_block')).toBe(false);
+      expect((await commands(page)).some((entry) => entry.command === 'remove_from_graph')).toBe(
+        false
+      );
       await page.close();
     },
     CASE
@@ -580,6 +582,7 @@ describe('each right-click target has its own menu', () => {
       expect(await page.getAttribute('[data-testid="context-menu"]', 'data-menu')).toBe('block');
       expect(await menuIds(page)).toEqual([
         'menu-view-source',
+        'menu-open-block-source',
         'menu-copy-declaration',
         'menu-open-editor',
         'menu-remove',

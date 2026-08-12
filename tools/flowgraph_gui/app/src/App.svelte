@@ -1319,6 +1319,27 @@
     }
   }
 
+  function blockSourcePath(blockVar: string): string | null {
+    const block = site?.blocks.find((candidate) => candidate.var === blockVar);
+    const spec = block ? specOfBlock(specs, block) : undefined;
+    const origin = spec?.origin;
+    return origin && origin !== doc.path ? origin : null;
+  }
+
+  async function openBlockSource(blockVar: string) {
+    if (!desktop) {
+      announce('opening an editor needs the desktop shell');
+      return;
+    }
+    const origin = blockSourcePath(blockVar);
+    if (!origin) return;
+    try {
+      await openInEditor(origin, 1);
+    } catch (error) {
+      announce(describeApplyError(error));
+    }
+  }
+
   async function openEditor(blockVar: string) {
     if (!desktop) {
       announce('opening an editor needs the desktop shell');
@@ -1633,6 +1654,8 @@
             oncopydeclaration={(block) => void copyDeclaration(block)}
             onopeneditor={(block) => void openEditor(block)}
             onremove={removeFromGraph}
+            onopenblocksource={(block) => void openBlockSource(block)}
+            blockSourceAt={blockSourcePath}
             ondeleteblock={(block) => void deleteBlock(block)}
             ondisconnect={disconnect}
             onaddhere={addHere}

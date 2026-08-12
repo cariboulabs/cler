@@ -59,6 +59,7 @@ type Fake = {
   log: Command[][];
   calls: string[];
   runs: unknown[];
+  editors: { path: string; line: number }[];
   asks: Ask[];
   peeks: Peek[];
   bases: number[];
@@ -110,6 +111,7 @@ function installFake(setup: Setup) {
   const log: unknown[][] = [];
   const calls: string[] = [];
   const runs: unknown[] = [];
+  const editors: { path: string; line: number }[] = [];
   const pristine = structuredClone({ model: setup.model, source: setup.source });
   const asks: unknown[] = [];
   const peeks: unknown[] = [];
@@ -479,7 +481,10 @@ function installFake(setup: Setup) {
       state.revision += 1;
     }
     if (command === 'close_document') return null;
-    if (command === 'open_in_editor') return null;
+    if (command === 'open_in_editor') {
+      editors.push({ path: String((args as Loose).path), line: Number((args as Loose).line) });
+      return null;
+    }
     return snapshot();
   }
 
@@ -500,6 +505,7 @@ function installFake(setup: Setup) {
     log,
     calls,
     runs,
+    editors,
     asks,
     peeks,
     bases,

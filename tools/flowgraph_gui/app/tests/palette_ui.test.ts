@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fixtures } from '../src/fixtures';
 import { addForm, braceListLength } from '../src/lib/palette';
-import { boot, CASE, commands, openLibrary, openMenu, shot, specs, useBrowser } from './ui';
+import { boot, CASE, commands, openLibrary, openMenu, shot, specs, useBrowser, type FakeWindow } from './ui';
 
 useBrowser();
 
@@ -111,6 +111,26 @@ describe('a wired block without a runner', () => {
       await expect.poll(() => commands(page)).toEqual([
         { command: 'add_to_graph', site: 0, block: 'plot' }
       ]);
+      await page.close();
+    },
+    CASE
+  );
+});
+
+describe('the block menu reaches the block type', () => {
+  it(
+    'opens the header the block type came from',
+    async () => {
+      const page = await boot();
+      await openMenu(page, '.svelte-flow__node[data-id="adder"]');
+      const entry = page.locator('[data-testid="menu-open-block-source"]');
+      await entry.waitFor();
+      expect(await entry.getAttribute('title')).toContain('add.hpp');
+      await entry.click();
+      const opened = await page.evaluate(
+        () => (window as unknown as FakeWindow).__fake.editors
+      );
+      expect(opened).toEqual([{ path: expect.stringContaining('add.hpp'), line: 1 }]);
       await page.close();
     },
     CASE

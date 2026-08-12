@@ -506,11 +506,12 @@ describe('the node context menu reaches the code', () => {
       await page.locator('.svelte-flow__node[data-id="adder"]').click({ button: 'right' });
       await page.waitForSelector('[data-testid="context-menu"]');
       expect(await page.locator('[data-testid="context-menu"] button').allTextContents()).toEqual([
-        'View sourceCtrl+`',
+        'View declarationCtrl+`',
+        'Open block source…',
         'Copy declaration',
         'Open in editor',
-        'Remove from graphDel',
-        'Delete block…'
+        'Remove from graph',
+        'Delete block…Del'
       ]);
       expect(await page.locator('[data-testid="menu-open-editor"]').isDisabled()).toBe(false);
 

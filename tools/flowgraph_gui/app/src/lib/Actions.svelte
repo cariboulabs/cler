@@ -74,6 +74,8 @@
     onopeneditor: (block: string) => void;
     onremove: (block: string) => void;
     onaddtograph: (block: string) => void;
+    onopenblocksource: (block: string) => void;
+    blockSourceAt: (block: string) => string | null;
     runsAt: (block: string) => boolean;
     ondeleteblock: (block: string) => void;
     ondisconnect: (edge: string) => void;
@@ -136,6 +138,8 @@
     onopeneditor,
     onremove,
     onaddtograph,
+    onopenblocksource,
+    blockSourceAt,
     runsAt,
     ondeleteblock,
     ondisconnect,
@@ -335,10 +339,18 @@
     return [
       {
         id: 'view-source',
-        label: 'View source',
+        label: 'View declaration',
         shortcut: 'Ctrl+`',
         enabled: true,
         run: () => onviewsource(block)
+      },
+      {
+        id: 'open-block-source',
+        label: 'Open block source…',
+        shortcut: '',
+        enabled: blockSourceAt(block) !== null,
+        hint: blockSourceAt(block) ?? 'this block type has no discovered header',
+        run: () => onopenblocksource(block)
       },
       {
         id: 'copy-declaration',
@@ -359,7 +371,7 @@
         ? {
             id: 'remove',
             label: 'Remove from graph',
-            shortcut: 'Del',
+            shortcut: '',
             enabled: canEdit,
             hint: canEdit ? 'splices the runner out, the declaration stays' : editNote,
             run: () => onremove(block)
@@ -375,7 +387,7 @@
       {
         id: 'delete-block',
         label: 'Delete block…',
-        shortcut: '',
+        shortcut: 'Del',
         enabled: canEdit,
         hint: canEdit ? 'removes the declaration too' : editNote,
         run: () => ondeleteblock(block)
@@ -448,7 +460,7 @@
   function deleteSelection() {
     if (!canEdit) return;
     if (selectedEdge) ondisconnect(selectedEdge);
-    else if (selectedNode) onremove(selectedNode);
+    else if (selectedNode) ondeleteblock(selectedNode);
   }
 
   function onKeydown(event: KeyboardEvent) {
