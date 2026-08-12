@@ -78,6 +78,27 @@ building it:
 - Upside is real: it fixes headless-file-shows-nothing for hand-written code
   too, not just editor-generated code.
 
+## TODO — generated files must announce themselves
+
+Convention to adopt: **anything a script writes lives in a `generated/`
+directory and carries a `_gen` suffix**, so no one mistakes it for source or
+hand-edits it. Nothing follows this yet; the checked-in generated artifacts are:
+
+| today | becomes |
+|---|---|
+| `app/src/fixtures/hello_world.json` (and 7 siblings) | `app/src/generated/hello_world_gen.json` |
+| `app/tests/palette.json` | `app/tests/generated/palette_gen.json` |
+
+Ripple to fix in the same change: `app/src/fixtures/index.ts` (the only importer
+of the models — it also imports the `.cpp` sources with `?raw`, which are NOT
+generated and stay put), `tests/topology.test.ts:3` and `tests/ui.ts:7` for the
+palette, and `tools/flowgraph_gui/regen-fixtures.sh` which writes both sets.
+Fold the rule into `tools/flowgraph_gui/AGENTS.md` once it holds, next to the
+existing "fixtures regenerate via regen-fixtures.sh — never hand-edit them".
+
+Not done here because it is a rename touching test imports and the session was
+ending; it is mechanical and should be one commit.
+
 ## OPEN — smaller
 
 - `app/src/fixtures/*.json` are parsed models of real `.cpp` files, checked in so
@@ -85,7 +106,8 @@ building it:
   `tools/flowgraph_gui/regen-fixtures.sh` (also regenerates
   `app/tests/palette.json`); never hand-edit. Question raised whether they earn
   their keep — they do for browser mode, but the drift risk is real and bit us
-  once (stale `spike.json`).
+  once (stale `spike.json`). The `generated/` + `_gen` rename above is the
+  cheap mitigation.
 - User reported "I don't see it" for the render loop — unverified whether the
   running app was rebuilt after `f413796`. First step next session: rebuild,
   drag a plot into a fresh document, confirm the loop is written.
