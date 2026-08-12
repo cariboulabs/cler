@@ -16,9 +16,11 @@
     ontab: (next: RailTab) => void;
     onask: (question: string) => void;
     onstop: () => void;
-    onrecheck: () => void;
     onsetkey: (key: string) => Promise<string | null>;
     ongetkey: () => void;
+    onsignin: () => Promise<string | null>;
+    onfinish: (input: string) => Promise<string | null>;
+    onlogout: () => void;
     onaccept: (id: number) => void;
     onreject: (id: number) => void;
     onreplan: (id: number) => void;
@@ -37,9 +39,11 @@
     ontab,
     onask,
     onstop,
-    onrecheck,
     onsetkey,
     ongetkey,
+    onsignin,
+    onfinish,
+    onlogout,
     onaccept,
     onreject,
     onreplan
@@ -47,6 +51,10 @@
 
   let keyDraft = $state('');
   let keyError = $state<string | null>(null);
+  let showKeyForm = $state(false);
+  let waiting = $state(false);
+  let oauthDraft = $state('');
+  let oauthError = $state<string | null>(null);
 
   const TRANSIENT = 'this conversation is not saved — it goes when the file closes';
   const EXPLAINS = 'explains only — this file is open read-only';
@@ -117,46 +125,108 @@
 
   <div class="body">
     <div class="model" data-testid="assistant-model">
-      <span class="name">{status?.model ?? '—'}</span>
+      <span class="name">
+        {status?.model ?? '—'}
+        {#if status?.available === true && status.method === 'oauth'}
+          <button class="linkish signout" data-testid="assistant-logout" onclick={onlogout}>
+            Sign out
+          </button>
+        {/if}
+      </span>
       <span class="faint">{enabled ? PROPOSES : EXPLAINS}</span>
     </div>
 
     {#if status !== null && !status.available}
       <div class="setup" data-testid="assistant-setup">
-        <h2>Set up the assistant</h2>
-        <p data-testid="assistant-reason">{status.reason ?? 'the assistant is unavailable'}</p>
-        <p class="faint">Every answer costs money on your own Anthropic key.</p>
-        <form
-          class="keyform"
-          onsubmit={(event) => {
-            event.preventDefault();
-            const trimmed = keyDraft.trim();
-            if (!trimmed) return;
-            keyError = null;
-            void onsetkey(trimmed).then((error) => {
-              keyError = error;
-              if (!error) keyDraft = '';
+        <button
+          class="primary"
+          data-testid="assistant-signin"
+          disabled={waiting}
+          onclick={() => {
+            oauthError = null;
+            void onsignin().then((error) => {
+              oauthError = error;
+              waiting = error === null;
             });
           }}
         >
-          <input
-            type="password"
-            data-testid="assistant-key"
-            placeholder="sk-ant-…"
-            autocomplete="off"
-            bind:value={keyDraft}
-          />
-          <button type="submit" data-testid="assistant-key-save" disabled={keyDraft.trim() === ''}>
-            Save key
-          </button>
-        </form>
-        {#if keyError}
-          <p class="key-error" data-testid="assistant-key-error">{keyError}</p>
+          Sign in with Claude
+        </button>
+        <p class="faint">pay per answer, from your subscription's extra usage</p>
+        {#if waiting}
+          <p class="faint" data-testid="assistant-oauth-waiting">waiting for the browser…</p>
+          <form
+            class="keyform"
+            onsubmit={(event) => {
+              event.preventDefault();
+              const trimmed = oauthDraft.trim();
+              if (!trimmed) return;
+              oauthError = null;
+              void onfinish(trimmed).then((error) => {
+                oauthError = error;
+                if (!error) oauthDraft = '';
+              });
+            }}
+          >
+            <input
+              type="text"
+              data-testid="assistant-oauth-code"
+              placeholder="paste the redirect URL or code…"
+              autocomplete="off"
+              bind:value={oauthDraft}
+            />
+            <button
+              type="submit"
+              data-testid="assistant-oauth-finish"
+              disabled={oauthDraft.trim() === ''}
+            >
+              Finish
+            </button>
+          </form>
         {/if}
-        <div class="keyrow">
-          <button data-testid="assistant-get-key" onclick={ongetkey}>Get a key…</button>
-          <button data-testid="assistant-recheck" onclick={onrecheck}>Check again</button>
-        </div>
+        {#if oauthError}
+          <p class="key-error" data-testid="assistant-oauth-error">{oauthError}</p>
+        {/if}
+        <button
+          class="linkish"
+          data-testid="assistant-key-toggle"
+          aria-expanded={showKeyForm}
+          onclick={() => (showKeyForm = !showKeyForm)}
+        >
+          use an API key instead
+        </button>
+        {#if showKeyForm}
+          <form
+            class="keyform"
+            onsubmit={(event) => {
+              event.preventDefault();
+              const trimmed = keyDraft.trim();
+              if (!trimmed) return;
+              keyError = null;
+              void onsetkey(trimmed).then((error) => {
+                keyError = error;
+                if (!error) keyDraft = '';
+              });
+            }}
+          >
+            <input
+              type="password"
+              data-testid="assistant-key"
+              placeholder="sk-ant-…"
+              autocomplete="off"
+              bind:value={keyDraft}
+            />
+            <button type="submit" data-testid="assistant-key-save" disabled={keyDraft.trim() === ''}>
+              Save key
+            </button>
+          </form>
+          {#if keyError}
+            <p class="key-error" data-testid="assistant-key-error">{keyError}</p>
+          {/if}
+          <button class="linkish" data-testid="assistant-get-key" onclick={ongetkey}>
+            get a key from the console…
+          </button>
+        {/if}
       </div>
     {/if}
 
@@ -386,6 +456,19 @@
     display: flex;
     gap: var(--sp-1);
   }
+  .linkish {
+    align-self: flex-start;
+    padding: 0;
+    border: none;
+    background: none;
+    font-size: 11px;
+    color: var(--muted);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .signout {
+    margin-left: var(--sp-2);
+  }
   .keyform {
     display: flex;
     gap: var(--sp-1);
@@ -400,14 +483,6 @@
     color: var(--danger);
     font-size: 11px;
     margin: 0 0 var(--sp-2);
-  }
-  .setup h2 {
-    margin: 0;
-    font-size: 11px;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--muted);
-    font-weight: 600;
   }
   .setup p {
     margin: 0;

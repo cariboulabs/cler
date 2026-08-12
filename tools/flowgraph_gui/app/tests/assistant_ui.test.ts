@@ -57,13 +57,11 @@ describe('the assistant says what it needs before it costs anything', () => {
       const page = await boot({ assistant: NO_KEY });
       await openAssistant(page);
 
-      const reason = await page.textContent('[data-testid="assistant-reason"]');
-      expect(reason).toContain('ANTHROPIC_API_KEY');
-      expect(reason).toContain('anthropic-key');
-      expect(reason).toContain('chmod 600');
+      expect(await page.locator('[data-testid="assistant-signin"]').count()).toBe(1);
+      expect(await page.locator('[data-testid="assistant-key-toggle"]').count()).toBe(1);
       expect(await page.locator(INPUT).count()).toBe(0);
       expect(await page.locator(CHIP).count()).toBe(0);
-      expect(await page.textContent('[data-testid="assistant-setup"]')).toContain('costs money');
+      expect(await page.textContent('[data-testid="assistant-setup"]')).toContain('extra usage');
       await shot(page, 'assistant-setup');
       await page.close();
     },
@@ -75,9 +73,9 @@ describe('the assistant says what it needs before it costs anything', () => {
     async () => {
       const page = await boot({ assistant: NO_KEY });
       await openAssistant(page);
-      await page.click('[data-testid="assistant-recheck"]');
+      await page.click('[data-testid="assistant-key-toggle"]');
 
-      expect((await calls(page)).filter((name) => name === 'assistant_status').length).toBe(2);
+      expect((await calls(page)).filter((name) => name === 'assistant_status').length).toBe(1);
       expect(await asks(page)).toEqual([]);
       await page.close();
     },
@@ -90,6 +88,7 @@ describe('the assistant says what it needs before it costs anything', () => {
       const page = await boot({ assistant: NO_KEY });
       await openAssistant(page);
 
+      await page.click('[data-testid="assistant-key-toggle"]');
       await page.fill('[data-testid="assistant-key"]', 'nonsense');
       await page.click('[data-testid="assistant-key-save"]');
       await page.waitForSelector('[data-testid="assistant-key-error"]');
@@ -113,6 +112,128 @@ describe('the assistant says what it needs before it costs anything', () => {
         'claude-opus-5'
       );
       expect(await page.textContent('[data-testid="assistant-empty"]')).toContain('not saved');
+      await page.close();
+    },
+    CASE
+  );
+});
+
+/* ============================================================ oauth */
+
+describe('signing in with Claude is the front door', () => {
+  it(
+    'the sign-in button starts the browser flow and shows the paste fallback',
+    async () => {
+      const page = await boot({ assistant: NO_KEY });
+      await openAssistant(page);
+
+      expect(await page.locator('[data-testid="assistant-key"]').count()).toBe(0);
+      await page.click('[data-testid="assistant-signin"]');
+      await page.waitForSelector('[data-testid="assistant-oauth-waiting"]');
+
+      expect((await calls(page)).filter((name) => name === 'assistant_oauth_start').length).toBe(
+        1
+      );
+      expect(await page.textContent('[data-testid="assistant-oauth-waiting"]')).toContain(
+        'waiting for the browser'
+      );
+      expect(await page.locator('[data-testid="assistant-oauth-code"]').count()).toBe(1);
+      expect(await page.textContent('[data-testid="assistant-setup"]')).toContain(
+        "pay per answer, from your subscription's extra usage"
+      );
+      await shot(page, 'assistant-oauth-waiting');
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'pasting the redirect URL finishes the flow and the panel comes alive',
+    async () => {
+      const page = await boot({ assistant: NO_KEY });
+      await openAssistant(page);
+      await page.click('[data-testid="assistant-signin"]');
+      await page.waitForSelector('[data-testid="assistant-oauth-code"]');
+
+      await page.fill('[data-testid="assistant-oauth-code"]', 'short');
+      await page.click('[data-testid="assistant-oauth-finish"]');
+      await page.waitForSelector('[data-testid="assistant-oauth-error"]');
+      expect(await page.textContent('[data-testid="assistant-oauth-error"]')).toContain(
+        'Missing authorization code'
+      );
+
+      await page.fill(
+        '[data-testid="assistant-oauth-code"]',
+        'https://claude.ai/oauth/redirect?code=abc123&state=xyz'
+      );
+      await page.click('[data-testid="assistant-oauth-finish"]');
+      await page.waitForSelector('[data-testid="assistant-setup"]', { state: 'detached' });
+
+      expect((await calls(page)).filter((name) => name === 'assistant_oauth_finish').length).toBe(
+        2
+      );
+      expect(await page.locator(INPUT).count()).toBe(1);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'the browser completing on its own flips the panel through the auth event',
+    async () => {
+      const page = await boot({ assistant: NO_KEY });
+      await openAssistant(page);
+
+      await emit(page, 'assistant-auth-changed', {
+        available: true,
+        model: 'claude-opus-5',
+        reason: null,
+        method: 'oauth'
+      });
+      await page.waitForSelector('[data-testid="assistant-setup"]', { state: 'detached' });
+      expect(await page.locator('[data-testid="assistant-logout"]').count()).toBe(1);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'sign out shows only for oauth and tells the backend to forget the tokens',
+    async () => {
+      const keyed = await boot();
+      await openAssistant(keyed);
+      expect(await keyed.locator('[data-testid="assistant-logout"]').count()).toBe(0);
+      await keyed.close();
+
+      const page = await boot({
+        assistant: { available: true, model: 'claude-opus-5', reason: null, method: 'oauth' }
+      });
+      await openAssistant(page);
+      await page.click('[data-testid="assistant-logout"]');
+      await page.waitForSelector('[data-testid="assistant-setup"]');
+
+      expect((await calls(page)).filter((name) => name === 'assistant_oauth_logout').length).toBe(
+        1
+      );
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'the API-key form hides behind the toggle and still works',
+    async () => {
+      const page = await boot({ assistant: NO_KEY });
+      await openAssistant(page);
+
+      expect(await page.locator('[data-testid="assistant-key"]').count()).toBe(0);
+      await page.click('[data-testid="assistant-key-toggle"]');
+      await page.waitForSelector('[data-testid="assistant-key"]');
+      expect(await page.locator('[data-testid="assistant-get-key"]').count()).toBe(1);
+
+      await page.fill('[data-testid="assistant-key"]', 'sk-ant-test123');
+      await page.click('[data-testid="assistant-key-save"]');
+      await page.waitForSelector('[data-testid="assistant-setup"]', { state: 'detached' });
       await page.close();
     },
     CASE

@@ -19,12 +19,10 @@ test('j) the assistant asks for a key before it can cost anything', async ({
     await expect(page.getByTestId('assistant-model')).toContainText('claude-opus-5');
   });
 
-  await test.step('the real backend reports no key and says what to do', async () => {
+  await test.step('the real backend reports no key and offers both sign-in paths', async () => {
     await expect(page.getByTestId('assistant-setup')).toBeVisible();
-    const reason = page.getByTestId('assistant-reason');
-    await expect(reason).toContainText('ANTHROPIC_API_KEY');
-    await expect(reason).toContainText('anthropic-key');
-    await expect(reason).toContainText('chmod 600');
+    await expect(page.getByTestId('assistant-signin')).toBeVisible();
+    await expect(page.getByTestId('assistant-key-toggle')).toBeVisible();
     await expect(page.getByTestId('assistant-input')).toHaveCount(0);
     await expect(page.getByTestId('assistant-chip')).toHaveCount(0);
     await shot('assistant-setup');

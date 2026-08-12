@@ -26,7 +26,12 @@ export type FakeTarget = {
     | { state: 'ready'; artifactPath: string };
 };
 
-export type FakeAssistant = { available: boolean; model: string; reason: string | null };
+export type FakeAssistant = {
+  available: boolean;
+  model: string;
+  reason: string | null;
+  method: 'api_key' | 'oauth' | null;
+};
 
 export type Ask = { path: string; question: string; history: { role: string; text: string }[] };
 
@@ -378,6 +383,7 @@ function installFake(setup: Setup) {
       state.cache = args.ui as Record<string, unknown>;
       return null;
     }
+    if (command === 'resolved_cler_root') return '/tmp/fake';
     calls.push(command);
     if (command === 'app_settings') return { clerRoot: null, blockLibraries: [] };
     if (command === 'set_app_settings') return (args as Loose).next;
@@ -386,7 +392,18 @@ function installFake(setup: Setup) {
     if (command === 'assistant_set_key') {
       const key = String((args as Loose).key ?? '');
       if (!key.trim().startsWith('sk-ant-')) throw new Error('that does not look like an Anthropic API key (sk-ant-…)');
-      return { available: true, model: 'claude-opus-5', reason: null };
+      return { available: true, model: 'claude-opus-5', reason: null, method: 'api_key' };
+    }
+    if (command === 'assistant_oauth_start') return 'https://claude.ai/oauth/authorize?fake=1';
+    if (command === 'assistant_oauth_finish') {
+      const input = String((args as Loose).input ?? '');
+      if (input.startsWith('http') || input.includes('code=') || input.length > 8) {
+        return { available: true, model: 'claude-opus-5', reason: null, method: 'oauth' };
+      }
+      throw new Error('Missing authorization code');
+    }
+    if (command === 'assistant_oauth_logout') {
+      return { available: false, model: 'claude-opus-5', reason: 'no key', method: null };
     }
     if (command === 'open_key_console') return null;
     if (command === 'assistant_stop') return null;
@@ -593,14 +610,16 @@ export type BootOptions = {
 export const ASSISTANT_READY: FakeAssistant = {
   available: true,
   model: 'claude-opus-5',
-  reason: null
+  reason: null,
+  method: 'api_key'
 };
 
 export const NO_KEY: FakeAssistant = {
   available: false,
   model: 'claude-opus-5',
   reason:
-    'no Anthropic API key — export ANTHROPIC_API_KEY before starting the editor, or write the key into /home/pilot/.config/dev.cler.flowgraph-gui/anthropic-key and chmod 600 it'
+    'no Anthropic API key — export ANTHROPIC_API_KEY before starting the editor, or write the key into /home/pilot/.config/dev.cler.flowgraph-gui/anthropic-key and chmod 600 it',
+  method: null
 };
 
 export const NO_TARGET: FakeTarget = {

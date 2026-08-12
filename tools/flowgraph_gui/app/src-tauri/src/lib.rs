@@ -1,6 +1,7 @@
 pub mod assistant;
 pub mod build;
 pub mod document;
+pub mod oauth;
 pub mod provenance;
 pub mod settings;
 
@@ -283,6 +284,24 @@ fn assistant_stop(path: String, talks: State<'_, Talks>) {
 }
 
 #[tauri::command]
+fn assistant_oauth_start(app: AppHandle) -> Result<String, String> {
+    let dir = config_dir(&app);
+    let url = oauth::start_login(&dir, emitter(app))?;
+    let _ = spawn_detached(OPENER, std::slice::from_ref(&url));
+    Ok(url)
+}
+
+#[tauri::command]
+fn assistant_oauth_finish(input: String, app: AppHandle) -> Result<Status, String> {
+    oauth::finish_login(&input, &config_dir(&app))
+}
+
+#[tauri::command]
+fn assistant_oauth_logout(app: AppHandle) -> Status {
+    oauth::logout(&config_dir(&app))
+}
+
+#[tauri::command]
 fn open_key_console() -> Result<(), String> {
     let url = "https://console.anthropic.com/settings/keys".to_string();
     spawn_detached(OPENER, std::slice::from_ref(&url))
@@ -423,7 +442,10 @@ pub fn run() {
             assistant_status,
             assistant_set_key,
             assistant_ask,
-            assistant_stop
+            assistant_stop,
+            assistant_oauth_start,
+            assistant_oauth_finish,
+            assistant_oauth_logout
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

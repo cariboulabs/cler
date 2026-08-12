@@ -476,7 +476,7 @@ fn a_file_no_command_could_edit_never_reaches_the_model_with_a_tool() {
         "a file with parse errors refuses every command, so the tool is withheld"
     );
     assert!(
-        !assistant::request("<ctx/>", "fix it", &[], assistant::actionable(&state))
+        !assistant::request("<ctx/>", "fix it", &[], assistant::actionable(&state), false)
             .contains(assistant::TOOL_NAME),
         "a withheld tool must not reach the request body"
     );

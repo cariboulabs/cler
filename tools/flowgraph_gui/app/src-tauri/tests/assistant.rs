@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use cler_flowgraph_gui::assistant::{self, Chunk, Proposal, Turn};
+use cler_flowgraph_gui::assistant::{self, Auth, Chunk, Proposal, Turn};
 use cler_graph::palette_types::{Direction, Port, PortCount};
 use cler_graph::{BlockSpec, Command};
 use serde_json::{json, Value};
@@ -117,12 +117,15 @@ fn the_environment_key_outranks_the_key_file() {
 
     assert_eq!(
         assistant::locate(Some("  sk-env  ".to_string()), &dir),
-        Ok("sk-env".to_string())
+        Ok(Auth::ApiKey("sk-env".to_string()))
     );
-    assert_eq!(assistant::locate(None, &dir), Ok("sk-file".to_string()));
+    assert_eq!(
+        assistant::locate(None, &dir),
+        Ok(Auth::ApiKey("sk-file".to_string()))
+    );
     assert_eq!(
         assistant::locate(Some("   ".to_string()), &dir),
-        Ok("sk-file".to_string()),
+        Ok(Auth::ApiKey("sk-file".to_string())),
         "a blank variable is not a key"
     );
 }
@@ -302,9 +305,14 @@ fn the_request_carries_the_model_the_context_and_the_history() {
         },
     ];
 
-    let body: Value =
-        serde_json::from_str(&assistant::request("<graph_model/>", "why?", &history, false))
-            .unwrap();
+    let body: Value = serde_json::from_str(&assistant::request(
+        "<graph_model/>",
+        "why?",
+        &history,
+        false,
+        false,
+    ))
+    .unwrap();
 
     assert_eq!(body["model"], assistant::MODEL);
     assert_eq!(body["stream"], true);
@@ -553,12 +561,22 @@ fn the_tool_schema_matches_the_command_enum_field_for_field() {
 
 #[test]
 fn the_tool_reaches_the_model_only_when_the_file_can_be_edited() {
-    let acting: Value =
-        serde_json::from_str(&assistant::request("<graph_model/>", "rename it", &[], true))
-            .unwrap();
-    let reading: Value =
-        serde_json::from_str(&assistant::request("<graph_model/>", "rename it", &[], false))
-            .unwrap();
+    let acting: Value = serde_json::from_str(&assistant::request(
+        "<graph_model/>",
+        "rename it",
+        &[],
+        true,
+        false,
+    ))
+    .unwrap();
+    let reading: Value = serde_json::from_str(&assistant::request(
+        "<graph_model/>",
+        "rename it",
+        &[],
+        false,
+        false,
+    ))
+    .unwrap();
 
     assert_eq!(acting["tools"][0]["name"], assistant::TOOL_NAME);
     assert_eq!(acting["tools"].as_array().unwrap().len(), 1);
@@ -648,7 +666,10 @@ fn store_key_normalizes_validates_and_locks_down() {
     assert!(assistant::store_key("not-a-key", &dir).is_err());
 
     assistant::store_key("  sk-ant-test123  ", &dir).expect("valid key stores");
-    assert_eq!(assistant::locate(None, &dir).expect("locate reads file"), "sk-ant-test123");
+    assert_eq!(
+        assistant::locate(None, &dir).expect("locate reads file"),
+        Auth::ApiKey("sk-ant-test123".to_string())
+    );
 
     #[cfg(unix)]
     {

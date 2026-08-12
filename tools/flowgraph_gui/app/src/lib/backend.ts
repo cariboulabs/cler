@@ -240,7 +240,12 @@ export function onTaskEnd(
   );
 }
 
-export type AssistantStatus = { available: boolean; model: string; reason: string | null };
+export type AssistantStatus = {
+  available: boolean;
+  model: string;
+  reason: string | null;
+  method: 'api_key' | 'oauth' | null;
+};
 
 export type AssistantDelta = { path: string; text: string };
 
@@ -256,6 +261,24 @@ export function assistantStatus(): Promise<AssistantStatus> {
 
 export function assistantSetKey(key: string): Promise<AssistantStatus> {
   return invoker('assistant_set_key', { key }) as Promise<AssistantStatus>;
+}
+
+export function assistantOauthStart(): Promise<string> {
+  return invoker('assistant_oauth_start', {}) as Promise<string>;
+}
+
+export function assistantOauthFinish(input: string): Promise<AssistantStatus> {
+  return invoker('assistant_oauth_finish', { input }) as Promise<AssistantStatus>;
+}
+
+export function assistantOauthLogout(): Promise<AssistantStatus> {
+  return invoker('assistant_oauth_logout', {}) as Promise<AssistantStatus>;
+}
+
+export function onAssistantAuthChanged(
+  handler: (status: AssistantStatus) => void
+): Promise<UnlistenFn> {
+  return listen<AssistantStatus>('assistant-auth-changed', (event) => handler(event.payload));
 }
 
 export function openKeyConsole(): Promise<void> {

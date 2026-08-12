@@ -155,6 +155,7 @@ fn dispatch(
             available: false,
             model: assistant::MODEL.to_string(),
             reason: assistant::locate(None, Path::new("/nonexistent/cler-e2e")).err(),
+            method: None,
         });
     }
     if cmd == "app_settings" {

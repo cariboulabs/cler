@@ -1,5 +1,5 @@
 {
-  "sha256": "1719754be6301b95c2fac19ac9bce95d837031574c72a56c91f5bb0d99b58091",
+  "sha256": "b824d6667982e17e4976d5e4867e3595012250287cedfa3f2ca034ed242b74de",
   "version": "0.3.0",
   "file": "desktop_examples/polyphase_channelizer.cpp",
   "has_errors": false,
@@ -7,10 +7,10 @@
   "sites": [
     {
       "function": "main",
-      "call_offset": 3971,
+      "call_offset": 3944,
       "span": {
-        "start": 3971,
-        "end": 4907
+        "start": 3944,
+        "end": 4880
       },
       "flowgraph_var": "flowgraph",
       "blocks": [
@@ -24,44 +24,44 @@
             {
               "text": "\"CW Source 0\"",
               "span": {
-                "start": 2835,
-                "end": 2848
+                "start": 2826,
+                "end": 2839
               }
             },
             {
-              "text": "1*1.0f",
+              "text": "1.0f",
               "span": {
-                "start": 2850,
-                "end": 2856
+                "start": 2841,
+                "end": 2845
               }
             },
             {
               "text": "0.01f",
               "span": {
-                "start": 2858,
-                "end": 2863
+                "start": 2847,
+                "end": 2852
               }
             },
             {
               "text": "ch0_freq",
               "span": {
-                "start": 2865,
-                "end": 2873
+                "start": 2854,
+                "end": 2862
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 2875,
-                "end": 2878
+                "start": 2864,
+                "end": 2867
               }
             }
           ],
           "display_name": "CW Source 0",
           "in_graph": true,
           "span": {
-            "start": 2806,
-            "end": 2880
+            "start": 2797,
+            "end": 2869
           },
           "editable": true,
           "read_only_reason": null
@@ -76,44 +76,44 @@
             {
               "text": "\"CW Source 1\"",
               "span": {
-                "start": 2914,
-                "end": 2927
+                "start": 2903,
+                "end": 2916
               }
             },
             {
-              "text": "1*10.0f",
+              "text": "3.0f",
               "span": {
-                "start": 2929,
-                "end": 2936
+                "start": 2918,
+                "end": 2922
               }
             },
             {
               "text": "0.01f",
               "span": {
-                "start": 2938,
-                "end": 2943
+                "start": 2924,
+                "end": 2929
               }
             },
             {
               "text": "ch1_freq",
               "span": {
-                "start": 2945,
-                "end": 2953
+                "start": 2931,
+                "end": 2939
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 2955,
-                "end": 2958
+                "start": 2941,
+                "end": 2944
               }
             }
           ],
           "display_name": "CW Source 1",
           "in_graph": true,
           "span": {
-            "start": 2885,
-            "end": 2960
+            "start": 2874,
+            "end": 2946
           },
           "editable": true,
           "read_only_reason": null
@@ -128,44 +128,44 @@
             {
               "text": "\"CW Source 2\"",
               "span": {
-                "start": 2994,
+                "start": 2980,
+                "end": 2993
+              }
+            },
+            {
+              "text": "10.0f",
+              "span": {
+                "start": 2995,
+                "end": 3000
+              }
+            },
+            {
+              "text": "0.01f",
+              "span": {
+                "start": 3002,
                 "end": 3007
               }
             },
             {
-              "text": "1*100.0f",
+              "text": "ch2_freq",
               "span": {
                 "start": 3009,
                 "end": 3017
               }
             },
             {
-              "text": "0.01f",
-              "span": {
-                "start": 3019,
-                "end": 3024
-              }
-            },
-            {
-              "text": "ch2_freq",
-              "span": {
-                "start": 3026,
-                "end": 3034
-              }
-            },
-            {
               "text": "SPS",
               "span": {
-                "start": 3036,
-                "end": 3039
+                "start": 3019,
+                "end": 3022
               }
             }
           ],
           "display_name": "CW Source 2",
           "in_graph": true,
           "span": {
-            "start": 2965,
-            "end": 3041
+            "start": 2951,
+            "end": 3024
           },
           "editable": true,
           "read_only_reason": null
@@ -180,44 +180,44 @@
             {
               "text": "\"CW Source 3\"",
               "span": {
-                "start": 3075,
-                "end": 3088
+                "start": 3058,
+                "end": 3071
               }
             },
             {
-              "text": "1*1000.0f",
+              "text": "30.0f",
               "span": {
-                "start": 3090,
-                "end": 3099
+                "start": 3073,
+                "end": 3078
               }
             },
             {
               "text": "0.01f",
               "span": {
-                "start": 3101,
-                "end": 3106
+                "start": 3080,
+                "end": 3085
               }
             },
             {
               "text": "ch3_freq",
               "span": {
-                "start": 3109,
-                "end": 3117
+                "start": 3087,
+                "end": 3095
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 3119,
-                "end": 3122
+                "start": 3097,
+                "end": 3100
               }
             }
           ],
           "display_name": "CW Source 3",
           "in_graph": true,
           "span": {
-            "start": 3046,
-            "end": 3124
+            "start": 3029,
+            "end": 3102
           },
           "editable": true,
           "read_only_reason": null
@@ -232,44 +232,44 @@
             {
               "text": "\"CW Source 4\"",
               "span": {
-                "start": 3158,
-                "end": 3171
+                "start": 3136,
+                "end": 3149
               }
             },
             {
-              "text": "1*10000.0f",
+              "text": "100.0f",
               "span": {
-                "start": 3173,
-                "end": 3183
+                "start": 3151,
+                "end": 3157
               }
             },
             {
               "text": "0.01f",
               "span": {
-                "start": 3185,
-                "end": 3190
+                "start": 3159,
+                "end": 3164
               }
             },
             {
               "text": "ch4_freq",
               "span": {
-                "start": 3193,
-                "end": 3201
+                "start": 3166,
+                "end": 3174
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 3203,
-                "end": 3206
+                "start": 3176,
+                "end": 3179
               }
             }
           ],
           "display_name": "CW Source 4",
           "in_graph": true,
           "span": {
-            "start": 3129,
-            "end": 3208
+            "start": 3107,
+            "end": 3181
           },
           "editable": true,
           "read_only_reason": null
@@ -284,16 +284,16 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 3224,
-                "end": 3243
+                "start": 3197,
+                "end": 3216
               }
             },
             {
               "text": "NUM_CHANNELS",
               "resolved": "5",
               "span": {
-                "start": 3245,
-                "end": 3257
+                "start": 3218,
+                "end": 3230
               }
             }
           ],
@@ -301,16 +301,16 @@
             {
               "text": "\"Adder\"",
               "span": {
-                "start": 3265,
-                "end": 3272
+                "start": 3238,
+                "end": 3245
               }
             }
           ],
           "display_name": "Adder",
           "in_graph": true,
           "span": {
-            "start": 3215,
-            "end": 3274
+            "start": 3188,
+            "end": 3247
           },
           "editable": true,
           "read_only_reason": null
@@ -325,8 +325,8 @@
               "text": "std::complex<float>",
               "resolved": null,
               "span": {
-                "start": 3296,
-                "end": 3315
+                "start": 3269,
+                "end": 3288
               }
             }
           ],
@@ -334,16 +334,16 @@
             {
               "text": "\"Throughput\"",
               "span": {
-                "start": 3328,
-                "end": 3340
+                "start": 3301,
+                "end": 3313
               }
             }
           ],
           "display_name": "Throughput",
           "in_graph": true,
           "span": {
-            "start": 3280,
-            "end": 3342
+            "start": 3253,
+            "end": 3315
           },
           "editable": true,
           "read_only_reason": null
@@ -358,16 +358,16 @@
               "text": "NUM_CHANNELS",
               "resolved": "5",
               "span": {
-                "start": 3374,
-                "end": 3386
+                "start": 3347,
+                "end": 3359
               }
             },
             {
               "text": "3",
               "resolved": "3",
               "span": {
-                "start": 3388,
-                "end": 3389
+                "start": 3361,
+                "end": 3362
               }
             }
           ],
@@ -375,23 +375,23 @@
             {
               "text": "\"Polyphase Channelizer\"",
               "span": {
-                "start": 3412,
-                "end": 3435
+                "start": 3385,
+                "end": 3408
               }
             },
             {
               "text": "80.0f",
               "span": {
-                "start": 3445,
-                "end": 3450
+                "start": 3418,
+                "end": 3423
               }
             }
           ],
           "display_name": "Polyphase Channelizer",
           "in_graph": true,
           "span": {
-            "start": 3348,
-            "end": 3479
+            "start": 3321,
+            "end": 3452
           },
           "editable": true,
           "read_only_reason": null
@@ -406,44 +406,44 @@
             {
               "text": "\"Plot Channelizer Spectrum\"",
               "span": {
-                "start": 3538,
-                "end": 3565
+                "start": 3511,
+                "end": 3538
               }
             },
             {
               "text": "{\"pfch 0\", \"pfch 1\", \"pfch 2\", \"pfch 3\", \"pfch 4\"}",
               "span": {
-                "start": 3575,
-                "end": 3625
+                "start": 3548,
+                "end": 3598
               }
             },
             {
               "text": "static_cast<size_t>(channel_BW)",
               "span": {
-                "start": 3635,
-                "end": 3666
+                "start": 3608,
+                "end": 3639
               }
             },
             {
               "text": "1024",
               "span": {
-                "start": 3676,
-                "end": 3680
+                "start": 3649,
+                "end": 3653
               }
             },
             {
               "text": "SpectralWindow::BlackmanHarris",
               "span": {
-                "start": 3690,
-                "end": 3720
+                "start": 3663,
+                "end": 3693
               }
             }
           ],
           "display_name": "Plot Channelizer Spectrum",
           "in_graph": true,
           "span": {
-            "start": 3485,
-            "end": 3727
+            "start": 3458,
+            "end": 3700
           },
           "editable": true,
           "read_only_reason": null
@@ -458,44 +458,44 @@
             {
               "text": "\"Plot Input Spectrum\"",
               "span": {
-                "start": 3782,
-                "end": 3803
+                "start": 3755,
+                "end": 3776
               }
             },
             {
               "text": "{\"source 0\", \"source 1\", \"source 2\", \"source 3\", \"source 4\"}",
               "span": {
-                "start": 3813,
-                "end": 3873
+                "start": 3786,
+                "end": 3846
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 3883,
-                "end": 3886
+                "start": 3856,
+                "end": 3859
               }
             },
             {
               "text": "1024",
               "span": {
-                "start": 3896,
-                "end": 3900
+                "start": 3869,
+                "end": 3873
               }
             },
             {
               "text": "SpectralWindow::BlackmanHarris",
               "span": {
-                "start": 3910,
-                "end": 3940
+                "start": 3883,
+                "end": 3913
               }
             }
           ],
           "display_name": "Plot Input Spectrum",
           "in_graph": true,
           "span": {
-            "start": 3733,
-            "end": 3947
+            "start": 3706,
+            "end": 3920
           },
           "editable": true,
           "read_only_reason": null
@@ -509,8 +509,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 4009,
-            "end": 4082
+            "start": 3982,
+            "end": 4055
           },
           "editable": true,
           "read_only_reason": null
@@ -522,8 +522,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 4092,
-            "end": 4165
+            "start": 4065,
+            "end": 4138
           },
           "editable": true,
           "read_only_reason": null
@@ -535,8 +535,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 4175,
-            "end": 4248
+            "start": 4148,
+            "end": 4221
           },
           "editable": true,
           "read_only_reason": null
@@ -548,8 +548,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 4258,
-            "end": 4331
+            "start": 4231,
+            "end": 4304
           },
           "editable": true,
           "read_only_reason": null
@@ -561,8 +561,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 4341,
-            "end": 4414
+            "start": 4314,
+            "end": 4387
           },
           "editable": true,
           "read_only_reason": null
@@ -574,8 +574,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 4424,
-            "end": 4465
+            "start": 4397,
+            "end": 4438
           },
           "editable": true,
           "read_only_reason": null
@@ -587,8 +587,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 4475,
-            "end": 4522
+            "start": 4448,
+            "end": 4495
           },
           "editable": true,
           "read_only_reason": null
@@ -600,8 +600,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 4532,
-            "end": 4797
+            "start": 4505,
+            "end": 4770
           },
           "editable": true,
           "read_only_reason": null
@@ -613,8 +613,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 4807,
-            "end": 4851
+            "start": 4780,
+            "end": 4824
           },
           "editable": true,
           "read_only_reason": null
@@ -626,8 +626,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 4861,
-            "end": 4901
+            "start": 4834,
+            "end": 4874
           },
           "editable": true,
           "read_only_reason": null
@@ -646,8 +646,8 @@
           "arg_index": 1,
           "text": "&adder.in[0]",
           "span": {
-            "start": 4040,
-            "end": 4052
+            "start": 4013,
+            "end": 4025
           },
           "editable": true,
           "read_only_reason": null,
@@ -667,8 +667,8 @@
           "arg_index": 2,
           "text": "&plot_input_cspectrum.in[0]",
           "span": {
-            "start": 4054,
-            "end": 4081
+            "start": 4027,
+            "end": 4054
           },
           "editable": true,
           "read_only_reason": null,
@@ -688,8 +688,8 @@
           "arg_index": 1,
           "text": "&adder.in[1]",
           "span": {
-            "start": 4123,
-            "end": 4135
+            "start": 4096,
+            "end": 4108
           },
           "editable": true,
           "read_only_reason": null,
@@ -709,8 +709,8 @@
           "arg_index": 2,
           "text": "&plot_input_cspectrum.in[1]",
           "span": {
-            "start": 4137,
-            "end": 4164
+            "start": 4110,
+            "end": 4137
           },
           "editable": true,
           "read_only_reason": null,
@@ -730,8 +730,8 @@
           "arg_index": 1,
           "text": "&adder.in[2]",
           "span": {
-            "start": 4206,
-            "end": 4218
+            "start": 4179,
+            "end": 4191
           },
           "editable": true,
           "read_only_reason": null,
@@ -751,8 +751,8 @@
           "arg_index": 2,
           "text": "&plot_input_cspectrum.in[2]",
           "span": {
-            "start": 4220,
-            "end": 4247
+            "start": 4193,
+            "end": 4220
           },
           "editable": true,
           "read_only_reason": null,
@@ -772,8 +772,8 @@
           "arg_index": 1,
           "text": "&adder.in[3]",
           "span": {
-            "start": 4289,
-            "end": 4301
+            "start": 4262,
+            "end": 4274
           },
           "editable": true,
           "read_only_reason": null,
@@ -793,8 +793,8 @@
           "arg_index": 2,
           "text": "&plot_input_cspectrum.in[3]",
           "span": {
-            "start": 4303,
-            "end": 4330
+            "start": 4276,
+            "end": 4303
           },
           "editable": true,
           "read_only_reason": null,
@@ -814,8 +814,8 @@
           "arg_index": 1,
           "text": "&adder.in[4]",
           "span": {
-            "start": 4372,
-            "end": 4384
+            "start": 4345,
+            "end": 4357
           },
           "editable": true,
           "read_only_reason": null,
@@ -835,8 +835,8 @@
           "arg_index": 2,
           "text": "&plot_input_cspectrum.in[4]",
           "span": {
-            "start": 4386,
-            "end": 4413
+            "start": 4359,
+            "end": 4386
           },
           "editable": true,
           "read_only_reason": null,
@@ -856,8 +856,8 @@
           "arg_index": 1,
           "text": "&throughput.in",
           "span": {
-            "start": 4450,
-            "end": 4464
+            "start": 4423,
+            "end": 4437
           },
           "editable": true,
           "read_only_reason": null,
@@ -877,8 +877,8 @@
           "arg_index": 1,
           "text": "&channelizer.in",
           "span": {
-            "start": 4506,
-            "end": 4521
+            "start": 4479,
+            "end": 4494
           },
           "editable": true,
           "read_only_reason": null,
@@ -898,8 +898,8 @@
           "arg_index": 1,
           "text": "&plot_polyphase_cspectrum.in[0]",
           "span": {
-            "start": 4576,
-            "end": 4607
+            "start": 4549,
+            "end": 4580
           },
           "editable": true,
           "read_only_reason": null,
@@ -919,8 +919,8 @@
           "arg_index": 2,
           "text": "&plot_polyphase_cspectrum.in[1]",
           "span": {
-            "start": 4621,
-            "end": 4652
+            "start": 4594,
+            "end": 4625
           },
           "editable": true,
           "read_only_reason": null,
@@ -940,8 +940,8 @@
           "arg_index": 3,
           "text": "&plot_polyphase_cspectrum.in[2]",
           "span": {
-            "start": 4666,
-            "end": 4697
+            "start": 4639,
+            "end": 4670
           },
           "editable": true,
           "read_only_reason": null,
@@ -961,8 +961,8 @@
           "arg_index": 4,
           "text": "&plot_polyphase_cspectrum.in[3]",
           "span": {
-            "start": 4711,
-            "end": 4742
+            "start": 4684,
+            "end": 4715
           },
           "editable": true,
           "read_only_reason": null,
@@ -982,8 +982,8 @@
           "arg_index": 5,
           "text": "&plot_polyphase_cspectrum.in[4]",
           "span": {
-            "start": 4756,
-            "end": 4787
+            "start": 4729,
+            "end": 4760
           },
           "editable": true,
           "read_only_reason": null,
@@ -1000,12 +1000,12 @@
             "path": "scheduler",
             "value": "cler::SchedulerType::FixedThreadPool",
             "span": {
-              "start": 4948,
-              "end": 5003
+              "start": 4921,
+              "end": 4976
             },
             "value_span": {
-              "start": 4967,
-              "end": 5003
+              "start": 4940,
+              "end": 4976
             },
             "editable": true,
             "read_only_reason": null
@@ -1014,20 +1014,20 @@
             "path": "collect_detailed_stats",
             "value": "true",
             "span": {
-              "start": 5009,
-              "end": 5045
+              "start": 4982,
+              "end": 5018
             },
             "value_span": {
-              "start": 5041,
-              "end": 5045
+              "start": 5014,
+              "end": 5018
             },
             "editable": true,
             "read_only_reason": null
           }
         ],
         "run_call_span": {
-          "start": 5051,
-          "end": 5072
+          "start": 5024,
+          "end": 5045
         },
         "editable": true,
         "read_only_reason": null
@@ -1035,8 +1035,8 @@
       "gui": {
         "var": "gui_manager",
         "span": {
-          "start": 5362,
-          "end": 5444
+          "start": 5335,
+          "end": 5417
         },
         "legacy": false
       },

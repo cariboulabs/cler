@@ -30,8 +30,12 @@
     assistantAsk,
     assistantStatus,
     assistantSetKey,
+    assistantOauthStart,
+    assistantOauthFinish,
+    assistantOauthLogout,
     openKeyConsole,
     assistantStop,
+    onAssistantAuthChanged,
     onAssistantDelta,
     onAssistantDone,
     onAssistantProposal,
@@ -489,8 +493,11 @@
       closeReply(payload.usage, payload.error);
     });
     const plans = onAssistantProposal((payload) => void attachProposal(payload));
+    const auth = onAssistantAuthChanged((next) => {
+      keyStatus = next;
+    });
     return () => {
-      void Promise.all([deltas, ends, plans]).then((pending) => {
+      void Promise.all([deltas, ends, plans, auth]).then((pending) => {
         for (const unlisten of pending) unlisten();
       });
     };
@@ -710,13 +717,13 @@
 
   async function refreshAssistant() {
     if (!desktop) {
-      keyStatus = { available: false, model: '—', reason: NO_SHELL };
+      keyStatus = { available: false, model: '—', reason: NO_SHELL, method: null };
       return;
     }
     try {
       keyStatus = await assistantStatus();
     } catch (error) {
-      keyStatus = { available: false, model: '—', reason: describeApplyError(error) };
+      keyStatus = { available: false, model: '—', reason: describeApplyError(error), method: null };
     }
   }
 
@@ -728,6 +735,37 @@
     } catch (error) {
       return describeApplyError(error);
     }
+  }
+
+  async function startOauth(): Promise<string | null> {
+    if (!desktop) return NO_SHELL;
+    try {
+      await assistantOauthStart();
+      return null;
+    } catch (error) {
+      return describeApplyError(error);
+    }
+  }
+
+  async function finishOauth(input: string): Promise<string | null> {
+    if (!desktop) return NO_SHELL;
+    try {
+      keyStatus = await assistantOauthFinish(input);
+      return null;
+    } catch (error) {
+      return describeApplyError(error);
+    }
+  }
+
+  async function logoutOauth() {
+    if (!desktop) return;
+    try {
+      keyStatus = await assistantOauthLogout();
+    } catch (error) {
+      keyStatus = { available: false, model: '—', reason: describeApplyError(error), method: null };
+    }
+    chat = [];
+    pendingReply = null;
   }
 
   function closeReply(usage: Usage | null, error: string | null) {
@@ -1789,9 +1827,11 @@
       ontab={pickRailTab}
       onask={(question) => void askAssistant(question)}
       onstop={stopAssistant}
-      onrecheck={() => void refreshAssistant()}
       onsetkey={saveAssistantKey}
       ongetkey={() => void openKeyConsole()}
+      onsignin={startOauth}
+      onfinish={finishOauth}
+      onlogout={() => void logoutOauth()}
       onaccept={(id) => void acceptProposal(id)}
       onreject={rejectProposal}
       onreplan={(id) => void replanProposal(id)}

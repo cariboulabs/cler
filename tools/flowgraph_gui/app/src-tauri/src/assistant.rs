@@ -90,6 +90,22 @@ pub struct Status {
     pub available: bool,
     pub model: String,
     pub reason: Option<String>,
+    pub method: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Auth {
+    ApiKey(String),
+    OAuth(String),
+}
+
+impl Auth {
+    pub fn method(&self) -> &'static str {
+        match self {
+            Auth::ApiKey(_) => "api_key",
+            Auth::OAuth(_) => "oauth",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,12 +178,15 @@ pub fn store_key(key: &str, config_dir: &Path) -> Result<Status, String> {
     Ok(status(config_dir))
 }
 
-pub fn locate(env_key: Option<String>, config_dir: &Path) -> Result<String, String> {
+pub fn locate(env_key: Option<String>, config_dir: &Path) -> Result<Auth, String> {
     if let Some(key) = env_key.map(|text| text.trim().to_string()).filter(|text| !text.is_empty()) {
-        return Ok(key);
+        return Ok(Auth::ApiKey(key));
     }
     let file = key_path(config_dir);
     let Ok(contents) = std::fs::read_to_string(&file) else {
+        if crate::oauth::signed_in(config_dir) {
+            return crate::oauth::access(config_dir).map(Auth::OAuth);
+        }
         return Err(missing(&file));
     };
     guard_permissions(&file)?;
@@ -175,27 +194,29 @@ pub fn locate(env_key: Option<String>, config_dir: &Path) -> Result<String, Stri
     if key.is_empty() {
         return Err(format!("{} is empty — put the API key in it", file.display()));
     }
-    Ok(key)
+    Ok(Auth::ApiKey(key))
 }
 
 pub fn status(config_dir: &Path) -> Status {
     match locate(std::env::var(KEY_ENV).ok(), config_dir) {
-        Ok(_) => Status {
+        Ok(auth) => Status {
             available: true,
             model: MODEL.to_string(),
             reason: None,
+            method: Some(auth.method().to_string()),
         },
         Err(reason) => Status {
             available: false,
             model: MODEL.to_string(),
             reason: Some(reason),
+            method: None,
         },
     }
 }
 
 fn missing(file: &Path) -> String {
     format!(
-        "no Anthropic API key — export {KEY_ENV} before starting the editor, or write the key into {} and chmod 600 it",
+        "no Anthropic API key — export {KEY_ENV} before starting the editor, write the key into {} and chmod 600 it, or sign in with Claude",
         file.display()
     )
 }
@@ -542,7 +563,9 @@ pub fn tool() -> Value {
     })
 }
 
-pub fn request(context: &str, question: &str, history: &[Turn], acting: bool) -> String {
+pub const OAUTH_PREFACE: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
+
+pub fn request(context: &str, question: &str, history: &[Turn], acting: bool, oauth: bool) -> String {
     let mut messages: Vec<Value> = history
         .iter()
         .map(|turn| {
@@ -555,15 +578,18 @@ pub fn request(context: &str, question: &str, history: &[Turn], acting: bool) ->
         })
         .collect();
     messages.push(json!({ "role": "user", "content": question }));
+    let mut system = Vec::new();
+    if oauth {
+        system.push(json!({ "type": "text", "text": OAUTH_PREFACE }));
+    }
+    system.push(json!({ "type": "text", "text": preamble(acting), "cache_control": { "type": "ephemeral" } }));
+    system.push(json!({ "type": "text", "text": context }));
     let mut body = json!({
         "model": MODEL,
         "max_tokens": MAX_TOKENS,
         "stream": true,
         "output_config": { "effort": EFFORT },
-        "system": [
-            { "type": "text", "text": preamble(acting), "cache_control": { "type": "ephemeral" } },
-            { "type": "text", "text": context }
-        ],
+        "system": system,
         "messages": messages
     });
     if acting {
@@ -743,7 +769,7 @@ pub fn ask(
     if question.trim().is_empty() {
         return Err("ask a question first".to_string());
     }
-    let key = locate(std::env::var(KEY_ENV).ok(), config_dir)?;
+    let auth = locate(std::env::var(KEY_ENV).ok(), config_dir)?;
     let state = document::open(docs, path)?;
     let specs = document::palette(docs, path).unwrap_or_default();
     let model_json = serde_json::to_string(&state.model).map_err(|cause| cause.to_string())?;
@@ -752,12 +778,13 @@ pub fn ask(
         question,
         &history,
         actionable(&state),
+        matches!(auth, Auth::OAuth(_)),
     );
 
     let flag = arm(talks, path);
     let path = path.to_string();
     thread::spawn(move || {
-        let reply = stream(&key, &body, &emit, &path, &flag);
+        let reply = stream(&auth, &body, &emit, &path, &flag);
         emit(
             DONE_EVENT,
             json!({
@@ -785,7 +812,7 @@ pub fn actionable(state: &DocumentState) -> bool {
     !state.model.has_errors && state.model.model.sites.iter().any(|site| site.editable)
 }
 
-fn stream(key: &str, body: &str, emit: &Emit, path: &str, flag: &AtomicBool) -> Reply {
+fn stream(auth: &Auth, body: &str, emit: &Emit, path: &str, flag: &AtomicBool) -> Reply {
     let client = match reqwest::blocking::Client::builder()
         .timeout(None)
         .connect_timeout(CONNECT_TIMEOUT)
@@ -794,13 +821,18 @@ fn stream(key: &str, body: &str, emit: &Emit, path: &str, flag: &AtomicBool) -> 
         Ok(client) => client,
         Err(cause) => return Reply::failed(format!("cannot start an HTTPS client: {cause}")),
     };
-    let sent = client
+    let prepared = client
         .post(ENDPOINT)
-        .header("x-api-key", key)
         .header("anthropic-version", API_VERSION)
-        .header("content-type", "application/json")
-        .body(body.to_string())
-        .send();
+        .header("content-type", "application/json");
+    let prepared = match auth {
+        Auth::ApiKey(key) => prepared.header("x-api-key", key),
+        Auth::OAuth(token) => prepared
+            .header("authorization", format!("Bearer {token}"))
+            .header("anthropic-beta", "claude-code-20250219,oauth-2025-04-20")
+            .header("user-agent", "claude-cli/2.0.0"),
+    };
+    let sent = prepared.body(body.to_string()).send();
     let response = match sent {
         Ok(response) => response,
         Err(cause) => return Reply::failed(unreachable(&cause)),

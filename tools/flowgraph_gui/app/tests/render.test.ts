@@ -221,6 +221,7 @@ function installFakeBackend(setup: FakeSetup) {
       state.cache = args.ui as Record<string, unknown>;
       return null;
     }
+    if (command === 'resolved_cler_root') return '/tmp/fake';
     calls.push(command);
     if (command === 'apply_commands') {
       const commands = args.commands as Command[];

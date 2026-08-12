@@ -159,6 +159,7 @@ function installFake(setup: Setup) {
   async function invoke(command: string, args: Record<string, unknown>): Promise<unknown> {
     if (command === 'plugin:event|listen') return args.handler;
     if (command === 'plugin:dialog|open') return state.path;
+    if (command === 'resolved_cler_root') return '/tmp/fake';
     if (command === 'save_cache') {
       state.cache = args.ui as Record<string, unknown>;
       localStorage.setItem('__fake_cfgc', JSON.stringify(state.cache));
