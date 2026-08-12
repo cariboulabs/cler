@@ -7,4 +7,5 @@ build-*
 test-docker-ci.sh
 perf-results/
 
-*.logimgui.ini
+*.log
+imgui.ini
