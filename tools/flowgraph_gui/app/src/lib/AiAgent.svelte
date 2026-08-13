@@ -74,17 +74,6 @@
     return model.name.replace(VENDOR, '');
   }
 
-  function priced(model: ListedModel): string {
-    const window =
-      model.context >= 1_000_000
-        ? `${model.context / 1_000_000}M`
-        : `${Math.round(model.context / 1000)}k`;
-    const cost = model.input_cost > 0 ? `$${model.input_cost}/$${model.output_cost} per Mtok` : '';
-    return [model.context > 0 ? `${window} context` : '', cost]
-      .filter((part) => part.length > 0)
-      .join(' · ');
-  }
-
   const STALE = 'the graph moved on since this was checked — re-check it before applying';
   const CEILING = 'one proposal per answer: further tool calls in that turn were dropped';
 
@@ -176,35 +165,22 @@
             {/each}
           </select>
         </span>
-        {#if status.available}
+        {#if models.length > 0}
           <span class="name">
-            {#if models.length > 0}
-              <select
-                class="model-select"
-                data-testid="ai-agent-model-select"
-                value={status.model}
-                onchange={(event) => onmodel(event.currentTarget.value)}
-              >
-                {#each models as model (model.id)}
-                  <option value={model.id}>{shortName(model)}</option>
-                {/each}
-                {#if !known}
-                  <option value={status.model}>{status.model}</option>
-                {/if}
-              </select>
-            {:else}
-              <input
-                class="model-input"
-                data-testid="ai-agent-model-input"
-                placeholder="model id"
-                value={status.model}
-                onchange={(event) => onmodel(event.currentTarget.value.trim())}
-              />
-            {/if}
+            <select
+              class="model-select"
+              data-testid="ai-agent-model-select"
+              value={status.model}
+              onchange={(event) => onmodel(event.currentTarget.value)}
+            >
+              {#each models as model (model.id)}
+                <option value={model.id}>{shortName(model)}</option>
+              {/each}
+              {#if !known}
+                <option value={status.model}>{status.model}</option>
+              {/if}
+            </select>
           </span>
-        {/if}
-        {#if chosen && priced(chosen)}
-          <span class="faint" data-testid="ai-agent-model-cost">{priced(chosen)}</span>
         {/if}
       </div>
     {/if}
@@ -463,17 +439,6 @@
   }
   .signout {
     margin-left: var(--sp-2);
-  }
-  .model-input {
-    width: 100%;
-    box-sizing: border-box;
-    font: inherit;
-    font-family: var(--mono);
-    color: var(--text);
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 1px var(--sp-2);
   }
   .model-select {
     width: 100%;

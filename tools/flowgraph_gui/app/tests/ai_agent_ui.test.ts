@@ -80,7 +80,7 @@ describe('the AI agent says what it needs before it costs anything', () => {
   );
 
   it(
-    'names the models the provider actually serves, and what they cost',
+    'names the models the provider actually serves, and nothing else',
     async () => {
       const page = await boot();
       await openAiAgent(page);
@@ -93,9 +93,7 @@ describe('the AI agent says what it needs before it costs anything', () => {
         .allTextContents();
       expect(labels).toEqual(['Opus 5', 'Sonnet 5']);
       expect(labels.join(' ')).not.toContain('Claude');
-      expect(await page.textContent('[data-testid="ai-agent-model-cost"]')).toBe(
-        '1M context · $5/$25 per Mtok'
-      );
+      expect(await page.locator('[data-testid="ai-agent-model-cost"]').count()).toBe(0);
       await page.close();
     },
     CASE
