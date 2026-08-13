@@ -97,6 +97,29 @@ describe('the AI agent says what it needs before it costs anything', () => {
   );
 
   it(
+    'a provider with no key still shows the picker, its reason, and no Claude sign-in',
+    async () => {
+      const page = await boot();
+      await openAiAgent(page);
+      await page.selectOption('[data-testid="ai-agent-provider-select"]', 'openai');
+
+      await page.waitForSelector('[data-testid="ai-agent-setup"]');
+      expect(
+        await page.locator('[data-testid="ai-agent-provider-select"]').inputValue()
+      ).toBe('openai');
+      expect(await page.locator('[data-testid="ai-agent-signin"]').count()).toBe(0);
+      expect(await page.textContent('[data-testid="ai-agent-reason"]')).toContain(
+        'OPENAI_API_KEY'
+      );
+
+      await page.selectOption('[data-testid="ai-agent-provider-select"]', 'anthropic');
+      await page.waitForSelector('[data-testid="ai-agent-model-select"]');
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
     'switching provider stores the choice, drops the stale model and stops the answer',
     async () => {
       const page = await boot();

@@ -407,7 +407,17 @@ function installFake(setup: Setup) {
       return (args as Loose).next;
     }
     if (command === 'run_target') runs.push(args.args);
-    if (command === 'ai_agent_status') return setup.aiAgent;
+    if (command === 'ai_agent_status') {
+      const chosen = (settings.at(-1) as Loose | undefined)?.aiAgentProvider ?? 'anthropic';
+      if (chosen === setup.aiAgent.provider) return setup.aiAgent;
+      return {
+        available: false,
+        provider: chosen,
+        model: 'gpt-5',
+        reason: 'no key for the OpenAI API — export OPENAI_API_KEY before starting the editor',
+        method: null
+      };
+    }
     if (command === 'ai_agent_set_key') {
       const key = String((args as Loose).key ?? '');
       if (!key.trim().startsWith('sk-ant-')) throw new Error('that does not look like an Anthropic API key (sk-ant-…)');

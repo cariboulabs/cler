@@ -145,7 +145,7 @@
   </div>
 
   <div class="body">
-    {#if status?.available === true}
+    {#if status !== null}
       <div class="model" data-testid="ai-agent-model">
         <span class="name">
           <select
@@ -159,49 +159,56 @@
             {/each}
           </select>
         </span>
-        <span class="name">
-          {#if tiers}
-            <select
-              class="model-select"
-              data-testid="ai-agent-model-select"
-              value={status.model}
-              onchange={(event) => onmodel(event.currentTarget.value)}
-            >
-              {#each tiers as tier (tier.id)}
-                <option value={tier.id}>{tier.label}</option>
-              {/each}
-              {#if !known}
-                <option value={status.model}>Custom</option>
-              {/if}
-            </select>
-          {:else}
-            <input
-              class="model-input"
-              data-testid="ai-agent-model-input"
-              placeholder="model id"
-              value={status.model}
-              onchange={(event) => onmodel(event.currentTarget.value.trim())}
-            />
-          {/if}
-        </span>
+        {#if status.available}
+          <span class="name">
+            {#if tiers}
+              <select
+                class="model-select"
+                data-testid="ai-agent-model-select"
+                value={status.model}
+                onchange={(event) => onmodel(event.currentTarget.value)}
+              >
+                {#each tiers as tier (tier.id)}
+                  <option value={tier.id}>{tier.label}</option>
+                {/each}
+                {#if !known}
+                  <option value={status.model}>Custom</option>
+                {/if}
+              </select>
+            {:else}
+              <input
+                class="model-input"
+                data-testid="ai-agent-model-input"
+                placeholder="model id"
+                value={status.model}
+                onchange={(event) => onmodel(event.currentTarget.value.trim())}
+              />
+            {/if}
+          </span>
+        {/if}
       </div>
     {/if}
 
     {#if status !== null && !status.available}
       <div class="setup" data-testid="ai-agent-setup">
-        <button
-          class="primary"
-          data-testid="ai-agent-signin"
-          onclick={() => {
-            oauthError = null;
-            void onsignin().then((error) => {
-              oauthError = error;
-              waiting = error === null;
-            });
-          }}
-        >
-          {waiting ? 'waiting for the browser…' : 'Sign in with Claude'}
-        </button>
+        {#if status.provider === 'anthropic'}
+          <button
+            class="primary"
+            data-testid="ai-agent-signin"
+            onclick={() => {
+              oauthError = null;
+              void onsignin().then((error) => {
+                oauthError = error;
+                waiting = error === null;
+              });
+            }}
+          >
+            {waiting ? 'waiting for the browser…' : 'Sign in with Claude'}
+          </button>
+        {/if}
+        {#if status.reason}
+          <p class="faint" data-testid="ai-agent-reason">{status.reason}</p>
+        {/if}
         {#if oauthError}
           <p class="key-error" data-testid="ai-agent-oauth-error">{oauthError}</p>
         {/if}
