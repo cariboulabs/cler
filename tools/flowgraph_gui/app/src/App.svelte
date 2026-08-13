@@ -21,7 +21,7 @@
   import FieldList from './lib/FieldList.svelte';
   import Inspector from './lib/Inspector.svelte';
   import Palette from './lib/Palette.svelte';
-  import { type RailTab } from './lib/RailTabs.svelte';
+  import RailTabs, { type RailTab } from './lib/RailTabs.svelte';
   import RoutedEdge from './lib/RoutedEdge.svelte';
   import TypeLegend from './lib/TypeLegend.svelte';
   import { diffLines, historyOf, type Message, type Proposal, type Usage } from './lib/agent';
@@ -163,6 +163,7 @@
   const RAIL_WIDTH = 44;
   const SIDEBAR_WIDTH = 280;
   const INSPECTOR_WIDTH = 320;
+  const AGENT_WIDTH = 320;
   const MINIMAP_MIN = 12;
   const BAR_HEIGHT = 40;
   const INSET = 12;
@@ -230,6 +231,7 @@
   let running = $state(false);
   let targetRefresh = $state(0);
   let rightTab = $state<RailTab>('inspector');
+  let leftTab = $state<RailTab>('settings');
   let runArgs = $state('');
   let libSettings = $state<AppSettings>({ clerRoot: null, blockLibraries: [], aiAgentModel: null, aiAgentProvider: null, aiAgentBaseUrl: null });
   let resolvedRoot = $state<string | null>(null);
@@ -279,11 +281,14 @@
     return { title: 'nothing to show yet', reason: NO_SITE };
   });
   const empty = $derived(failure !== null || doc.model.sites.length === 0);
+  const leftWidth = $derived(
+    !leftOpen ? RAIL_WIDTH : leftTab === 'ai-agent' ? AGENT_WIDTH : SIDEBAR_WIDTH
+  );
   const fitPadding = $derived<FitPadding>({
     top: `${BAR_HEIGHT + INSET + FIT_GAP}px`,
     right: `${(rightOpen ? INSPECTOR_WIDTH : RAIL_WIDTH) + INSET + FIT_GAP}px`,
     bottom: `${INSET + FIT_GAP}px`,
-    left: `${(leftOpen ? SIDEBAR_WIDTH : RAIL_WIDTH) + INSET + FIT_GAP}px`
+    left: `${leftWidth + INSET + FIT_GAP}px`
   });
   const shownSpecs = $derived(editable ? specs : specsFromSites(doc.model.sites, doc.path));
   const problems = $derived<Problem[]>(problemsOf(site, specs));
@@ -376,7 +381,9 @@
     untrack(storePanels);
   });
   $effect(() => {
-    if (rightTab) untrack(storePanels);
+    void rightTab;
+    void leftTab;
+    untrack(storePanels);
   });
 
   $effect(() => {
@@ -603,6 +610,7 @@
         drawer: drawerOpen,
         drawerHeight,
         rightTab,
+        leftTab,
         runArgs
       }
     };
@@ -667,13 +675,8 @@
       ) {
         drawerHeight = panels.drawerHeight;
       }
-      if (
-        panels.rightTab === 'inspector' ||
-        panels.rightTab === 'library' ||
-        panels.rightTab === 'ai-agent'
-      ) {
-        rightTab = panels.rightTab;
-      }
+      rightTab = panels.rightTab === 'library' ? 'library' : 'inspector';
+      leftTab = panels.leftTab === 'ai-agent' ? 'ai-agent' : 'settings';
       runArgs = typeof panels.runArgs === 'string' ? panels.runArgs : '';
       const cachedSite = siteViewIds(next.model.sites).indexOf(flowCache.activeView ?? '');
       siteIndex = cachedSite >= 0 ? cachedSite : 0;
@@ -940,16 +943,21 @@
   function pickRailTab(next: RailTab) {
     rightTab = next;
     rightOpen = true;
+  }
+
+  function pickLeftTab(next: RailTab) {
+    leftTab = next;
+    leftOpen = true;
     if (next === 'ai-agent' && agentModels.length === 0) void refreshModels();
   }
 
   function toggleAiAgent() {
-    if (rightOpen && rightTab === 'ai-agent') {
-      rightOpen = false;
+    if (leftOpen && leftTab === 'ai-agent') {
+      leftOpen = false;
       return;
     }
-    rightTab = 'ai-agent';
-    rightOpen = true;
+    leftTab = 'ai-agent';
+    leftOpen = true;
     if (agentModels.length === 0) void refreshModels();
   }
 
@@ -1479,13 +1487,38 @@
 
 <div
   class="shell"
-  style="--rail-left: {leftOpen ? SIDEBAR_WIDTH : RAIL_WIDTH}px; --rail-right: {rightOpen
+  style="--rail-left: {leftWidth}px; --rail-right: {rightOpen
     ? INSPECTOR_WIDTH
     : RAIL_WIDTH}px"
 >
+  {#if leftTab === 'ai-agent'}
+    <AiAgent
+      open={leftOpen}
+      status={keyStatus}
+      messages={chat}
+      pending={pendingReply}
+      enabled={editable}
+      note={viewerNote}
+      revision={doc.revision}
+      {selected}
+      models={agentModels}
+      ontoggle={() => (leftOpen = !leftOpen)}
+      ontab={pickLeftTab}
+      onask={(question) => void askAiAgent(question)}
+      onstop={stopAiAgent}
+      onsignin={startOauth}
+      onlogout={() => void logoutOauth()}
+      onmodel={(model) => void setAiAgentModel(model)}
+      onprovider={(provider) => void setAiAgentProvider(provider)}
+      onretry={retryAsk}
+      onaccept={(id) => void acceptProposal(id)}
+      onreject={rejectProposal}
+      onreplan={(id) => void replanProposal(id)}
+    />
+  {:else}
   <aside class="sidebar" class:collapsed={!leftOpen}>
     <div class="head">
-      <h1>Settings</h1>
+      <RailTabs tab="settings" side="left" ontab={pickLeftTab} />
       <button
         class="toggle"
         data-testid="toggle-left"
@@ -1644,10 +1677,9 @@
       {#if status}
         <p class="status" data-testid="status">{status}</p>
       {/if}
-
-      <span class="attribution">CaribouLabs</span>
     </div>
   </aside>
+  {/if}
 
   <main>
     {#if needsReload}
@@ -1848,31 +1880,7 @@
     </div>
   </main>
 
-  {#if rightTab === 'ai-agent'}
-    <AiAgent
-      open={rightOpen}
-      status={keyStatus}
-      messages={chat}
-      pending={pendingReply}
-      enabled={editable}
-      note={viewerNote}
-      revision={doc.revision}
-      {selected}
-      models={agentModels}
-      ontoggle={() => (rightOpen = !rightOpen)}
-      ontab={pickRailTab}
-      onask={(question) => void askAiAgent(question)}
-      onstop={stopAiAgent}
-      onsignin={startOauth}
-      onlogout={() => void logoutOauth()}
-      onmodel={(model) => void setAiAgentModel(model)}
-      onprovider={(provider) => void setAiAgentProvider(provider)}
-      onretry={retryAsk}
-      onaccept={(id) => void acceptProposal(id)}
-      onreject={rejectProposal}
-      onreplan={(id) => void replanProposal(id)}
-    />
-  {:else if rightTab === 'library'}
+  {#if rightTab === 'library'}
     <Palette
       specs={shownSpecs}
       documentPath={doc.path}
@@ -1929,15 +1937,7 @@
   .collapsed .head {
     padding: var(--sp-2);
   }
-  h1 {
-    margin: 0;
-    font-size: 11px;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--muted);
-    font-weight: 600;
-  }
-  .collapsed h1 {
+  .collapsed :global(.tabs) {
     display: none;
   }
   .toggle {
@@ -2119,13 +2119,6 @@
     border-radius: var(--radius-sm);
     font-size: 11px;
     color: var(--danger-fg);
-  }
-  .attribution {
-    margin-top: auto;
-    padding-top: var(--sp-2);
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    color: var(--muted);
   }
   main {
     position: absolute;

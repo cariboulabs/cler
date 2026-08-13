@@ -76,6 +76,7 @@ type Fake = {
   peeks: Peek[];
   bases: number[];
   source: () => string;
+  cache: () => Record<string, unknown>;
   refuse: (value: unknown) => void;
   hold: () => void;
   release: () => void;
@@ -593,6 +594,7 @@ function installFake(setup: Setup) {
     peeks,
     bases,
     source: () => state.source,
+    cache: () => state.cache,
     refuse: (value: unknown) => {
       refusal = value;
     },
@@ -825,7 +827,7 @@ export async function openLibrary(page: Page) {
   if (!(await tab.isVisible())) {
     await page
       .locator(
-        '[data-testid="toggle-right"], [data-testid="toggle-library"], [data-testid="toggle-ai-agent"]'
+        '[data-testid="toggle-right"], [data-testid="toggle-library"]'
       )
       .click();
   }

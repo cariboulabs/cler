@@ -12,7 +12,7 @@ test('j) the AI agent asks for a key before it can cost anything', async ({
   await page.goto('/');
   await openFile(file);
 
-  await test.step('Ctrl+J opens the AI agent on the inspector rail', async () => {
+  await test.step('Ctrl+J opens the AI agent in the left panel', async () => {
     await page.keyboard.press('Control+j');
     await expect(page.getByTestId('ai-agent-panel')).toBeVisible();
     await expect(page.getByTestId('rail-tab-ai-agent')).toHaveAttribute('aria-selected', 'true');
@@ -32,9 +32,9 @@ test('j) the AI agent asks for a key before it can cost anything', async ({
     expect((await calls('ai_agent_status')).length).toBeGreaterThan(0);
   });
 
-  await test.step('the rail goes back to the inspector', async () => {
-    await page.getByTestId('rail-tab-inspector').click();
-    await expect(page.locator('.inspector')).toBeVisible();
+  await test.step('the left panel goes back to settings', async () => {
+    await page.getByTestId('rail-tab-settings').click();
+    await expect(page.locator('.sidebar')).toBeVisible();
     await expect(page.getByTestId('ai-agent-panel')).toHaveCount(0);
   });
 });

@@ -78,7 +78,7 @@ describe('the palette lists what the crate found', () => {
     async () => {
       const page = await boot();
       await openLibrary(page);
-      expect(await page.locator('[data-testid="rail-tabs"] button').count()).toBe(3);
+      expect(await page.locator('[data-testid="rail-tabs"] button').count()).toBe(2);
       expect(await page.getAttribute('[data-testid="rail-tab-library"]', 'aria-selected')).toBe(
         'true'
       );

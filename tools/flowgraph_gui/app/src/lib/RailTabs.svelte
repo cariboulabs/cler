@@ -1,19 +1,25 @@
 <script lang="ts">
-  export type RailTab = 'inspector' | 'library' | 'ai-agent';
+  export type RailTab = 'inspector' | 'library' | 'settings' | 'ai-agent';
 
-  type Props = { tab: RailTab; ontab: (next: RailTab) => void };
+  type Props = { tab: RailTab; side?: 'left' | 'right'; ontab: (next: RailTab) => void };
 
-  const { tab, ontab }: Props = $props();
+  const { tab, side = 'right', ontab }: Props = $props();
 
-  const TABS: [RailTab, string, string][] = [
+  const RIGHT: [RailTab, string, string][] = [
     ['inspector', 'Inspector', 'Block parameters and ports  ]'],
-    ['library', 'Library', 'Search and place blocks'],
+    ['library', 'Library', 'Search and place blocks']
+  ];
+
+  const LEFT: [RailTab, string, string][] = [
+    ['settings', 'Settings', 'Document and session settings  ['],
     ['ai-agent', 'AI Agent', 'Ask about this flowgraph  Ctrl+J']
   ];
+
+  const tabs = $derived(side === 'left' ? LEFT : RIGHT);
 </script>
 
-<div class="tabs" role="tablist" data-testid="rail-tabs">
-  {#each TABS as [id, label, title] (id)}
+<div class="tabs" role="tablist" data-testid={side === 'left' ? 'left-tabs' : 'rail-tabs'}>
+  {#each tabs as [id, label, title] (id)}
     <button
       role="tab"
       data-testid="rail-tab-{id}"

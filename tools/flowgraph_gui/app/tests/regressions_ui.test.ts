@@ -1858,7 +1858,6 @@ describe('H. the inspector is readable', () => {
         ['file path', '.sidebar .path'],
         ['sidebar dt', '.sidebar dt'],
         ['tagline', '[data-testid="top-bar"] .tagline'],
-        ['attribution', '.sidebar .attribution'],
         ['node type line', '.svelte-flow__node .type'],
         ['node var line', '.svelte-flow__node .var'],
         ['node port label', '.svelte-flow__node .port-label']
