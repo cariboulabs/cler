@@ -99,7 +99,7 @@ fn the_two_flows_keep_separate_token_files() {
 }
 
 #[test]
-fn a_codex_answer_missing_rotation_fields_is_refused() {
+fn a_codex_answer_without_a_rotated_refresh_token_is_refused() {
     let whole = serde_json::json!({
         "access_token": "acc",
         "refresh_token": "ref",
@@ -110,15 +110,23 @@ fn a_codex_answer_missing_rotation_fields_is_refused() {
         Ok("ref".to_string())
     );
 
-    for lacking in [
-        serde_json::json!({ "access_token": "acc", "expires_in": 3600 }),
-        serde_json::json!({ "access_token": "acc", "refresh_token": "ref" }),
-    ] {
-        let refusal = oauth::tokens_of(&CODEX_FLOW, &lacking).expect_err("must refuse");
-        assert!(refusal.contains("sign in again"), "{refusal}");
-        // Claude's endpoint answers this way on purpose: the old refresh stands.
-        assert!(oauth::tokens_of(&ANTHROPIC_FLOW, &lacking).is_ok());
-    }
+    let lacking = serde_json::json!({ "access_token": "acc", "expires_in": 3600 });
+    let refusal = oauth::tokens_of(&CODEX_FLOW, &lacking).expect_err("must refuse");
+    assert!(refusal.contains("sign in again"), "{refusal}");
+    assert!(!refusal.contains("expires_in"), "{refusal}");
+    // Claude's endpoint answers this way on purpose: the old refresh stands.
+    assert!(oauth::tokens_of(&ANTHROPIC_FLOW, &lacking).is_ok());
+}
+
+// The rotated token is the only usable one left, so it must be kept even when
+// the answer says nothing about how long the access token lasts.
+#[test]
+fn a_codex_answer_without_expires_in_still_keeps_the_rotated_refresh_token() {
+    let dated = serde_json::json!({ "access_token": "acc", "refresh_token": "new" });
+    let kept = oauth::tokens_of(&CODEX_FLOW, &dated).expect("the rotation is worth keeping");
+
+    assert_eq!(kept.refresh, "new");
+    assert!(!oauth::fresh(&kept, oauth::now_ms()), "reads as stale");
 }
 
 #[test]

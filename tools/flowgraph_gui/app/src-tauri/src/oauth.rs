@@ -418,12 +418,13 @@ pub fn tokens_of(flow: &Flow, value: &Value) -> Result<Tokens, String> {
         .get("refresh_token")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    // A missing expires_in costs one round trip: the token reads as stale and is
+    // renewed on the next call. A missing refresh_token on a rotating flow costs
+    // the login, since the one that bought this answer is already spent.
     let expires_in = value.get("expires_in").and_then(Value::as_u64);
-    if !flow.carry_refresh && (refresh.is_empty() || expires_in.is_none()) {
-        // The refresh token that bought this answer is already spent, so an
-        // answer we cannot store whole leaves nothing to retry with.
+    if !flow.carry_refresh && refresh.is_empty() {
         return Err(format!(
-            "{} answered without a refresh_token and expires_in — sign in again",
+            "{} answered without a refresh_token — sign in again",
             flow.token
         ));
     }
