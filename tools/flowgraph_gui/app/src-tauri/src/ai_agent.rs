@@ -112,6 +112,9 @@ Answer from the material you are given: the parsed graph model, the source of \
 the open file, the block palette, and the cler guide below. Say plainly when \
 the answer is not in that material instead of guessing.
 
+When a <selected_block> is given, that is the block the user is looking \
+at — read \"this block\" and bare \"it\" as that one unless they name another.
+
 Be concise. A sentence or two for a simple question; short paragraphs or a \
 short list for a hard one. Cite a block by its display name and its variable, \
 like Chirp (chirp), and an edge as source -> target.port. Use plain text, \
@@ -386,6 +389,13 @@ fn ports<'a>(listed: impl Iterator<Item = &'a Port>) -> String {
         "none".to_string()
     } else {
         names.join(", ")
+    }
+}
+
+pub fn selection(context: String, selected: Option<String>) -> String {
+    match selected.filter(|block| !block.trim().is_empty()) {
+        Some(block) => format!("{context}\n\n<selected_block>{}</selected_block>", block.trim()),
+        None => context,
     }
 }
 
@@ -939,6 +949,7 @@ pub fn ask(
     path: &str,
     question: &str,
     history: Vec<Turn>,
+    selected: Option<String>,
     emit: Emit,
 ) -> Result<(), String> {
     if question.trim().is_empty() {
@@ -949,7 +960,7 @@ pub fn ask(
     let specs = document::palette(docs, path).unwrap_or_default();
     let model_json = serde_json::to_string(&state.model).map_err(|cause| cause.to_string())?;
     let body = request(
-        &context(path, &model_json, &state.source, &specs),
+        &selection(context(path, &model_json, &state.source, &specs), selected),
         question,
         &history,
         actionable(&state),
@@ -1163,6 +1174,17 @@ mod tests {
                     "new_text": "Chirp"
                 })]
             })
+        );
+    }
+
+    #[test]
+    fn the_selected_block_rides_along_only_when_there_is_one() {
+        let plain = "<graph/>".to_string();
+        assert_eq!(selection(plain.clone(), None), plain);
+        assert_eq!(selection(plain.clone(), Some("  ".to_string())), plain);
+        assert_eq!(
+            selection(plain, Some(" gain ".to_string())),
+            "<graph/>\n\n<selected_block>gain</selected_block>"
         );
     }
 

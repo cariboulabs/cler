@@ -772,8 +772,15 @@
         method: null
       };
     }
-    chat = [];
     pendingReply = null;
+  }
+
+  function retryAsk(id: number) {
+    const at = chat.findIndex((message) => message.id === id);
+    const asked = at > 0 ? chat[at - 1] : undefined;
+    if (!asked || asked.role !== 'user') return;
+    chat = chat.slice(0, at - 1);
+    void askAssistant(asked.text);
   }
 
   function closeReply(usage: Usage | null, error: string | null) {
@@ -809,7 +816,7 @@
     chat = [...chat, asked, reply];
     pendingReply = reply.id;
     try {
-      await assistantAsk(doc.path, question, history);
+      await assistantAsk(doc.path, question, history, selected);
     } catch (error) {
       closeReply(null, describeApplyError(error));
     }
@@ -1830,6 +1837,7 @@
       enabled={editable}
       note={viewerNote}
       revision={doc.revision}
+      {selected}
       ontoggle={() => (rightOpen = !rightOpen)}
       ontab={pickRailTab}
       onask={(question) => void askAssistant(question)}
@@ -1838,6 +1846,7 @@
       onlogout={() => void logoutOauth()}
       onmodel={(model) => void setAssistantModel(model)}
       onprovider={(provider) => void setAssistantProvider(provider)}
+      onretry={retryAsk}
       onaccept={(id) => void acceptProposal(id)}
       onreject={rejectProposal}
       onreplan={(id) => void replanProposal(id)}

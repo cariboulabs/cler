@@ -34,7 +34,12 @@ export type FakeAssistant = {
   method: 'api_key' | 'oauth' | null;
 };
 
-export type Ask = { path: string; question: string; history: { role: string; text: string }[] };
+export type Ask = {
+  path: string;
+  question: string;
+  history: { role: string; text: string }[];
+  selected: string | null;
+};
 
 export type Peek = { commands: unknown[]; baseRevision: number };
 
@@ -423,7 +428,13 @@ function installFake(setup: Setup) {
       throw new Error('Missing authorization code');
     }
     if (command === 'assistant_oauth_logout') {
-      return { available: false, model: 'claude-opus-5', reason: 'no key', method: null };
+      return {
+        available: false,
+        provider: 'anthropic',
+        model: 'claude-opus-5',
+        reason: 'no key',
+        method: null
+      };
     }
     if (command === 'open_key_console') return null;
     if (command === 'assistant_stop') return null;
@@ -431,7 +442,8 @@ function installFake(setup: Setup) {
       asks.push({
         path: args.path,
         question: args.question,
-        history: args.history
+        history: args.history,
+        selected: args.selected
       });
       if (setup.askError !== null) throw setup.askError;
       return null;

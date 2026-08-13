@@ -116,6 +116,58 @@ describe('the assistant says what it needs before it costs anything', () => {
   );
 });
 
+describe('the composer says what it is doing', () => {
+  it(
+    'a selected block is named in the composer and rides along with the question',
+    async () => {
+      const page = await boot();
+      await page.click('.svelte-flow__node[data-id="source1"]');
+      await openAssistant(page);
+
+      expect(await page.textContent('[data-testid="assistant-context"]')).toContain('source1');
+      await ask(page, 'what does this do?');
+      expect((await asks(page)).at(-1)?.selected).toBe('source1');
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'the input is closed while an answer streams, and says why',
+    async () => {
+      const page = await boot();
+      await openAssistant(page);
+      await ask(page, 'what is this graph?');
+      await stream(page, ['thinking']);
+
+      expect(await page.isDisabled(INPUT)).toBe(true);
+      expect(await page.textContent('[data-testid="assistant-hint"]')).toContain('Stop to interrupt');
+      await done(page);
+      expect(await page.isDisabled(INPUT)).toBe(false);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'a failed answer can be asked again without retyping it',
+    async () => {
+      const page = await boot();
+      await openAssistant(page);
+      await ask(page, 'what is this graph?');
+      await done(page, 'the Anthropic API is overloaded right now — try again in a moment');
+
+      await page.click('[data-testid="assistant-retry"]');
+      await expect.poll(async () => (await asks(page)).length).toBe(2);
+      const questions = (await asks(page)).map((one) => one.question);
+      expect(questions).toEqual(['what is this graph?', 'what is this graph?']);
+      expect(await page.locator(MESSAGE).count()).toBe(2);
+      await page.close();
+    },
+    CASE
+  );
+});
+
 /* ============================================================ oauth */
 
 describe('signing in with Claude is the front door', () => {
@@ -190,8 +242,12 @@ describe('signing in with Claude is the front door', () => {
         }
       });
       await openAssistant(page);
+      await ask(page, 'what is this graph?');
+      await done(page);
       await page.click('[data-testid="assistant-logout"]');
       await page.waitForSelector('[data-testid="assistant-setup"]');
+
+      expect(await page.locator(MESSAGE).count()).toBe(2);
 
       expect((await calls(page)).filter((name) => name === 'assistant_oauth_logout').length).toBe(
         1

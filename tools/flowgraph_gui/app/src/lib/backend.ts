@@ -295,9 +295,10 @@ export function openKeyConsole(): Promise<void> {
 export function assistantAsk(
   path: string,
   question: string,
-  history: { role: string; text: string }[]
+  history: { role: string; text: string }[],
+  selected: string | null
 ): Promise<void> {
-  return invoker('assistant_ask', { path, question, history }) as Promise<void>;
+  return invoker('assistant_ask', { path, question, history, selected }) as Promise<void>;
 }
 
 export function assistantStop(path: string): Promise<void> {

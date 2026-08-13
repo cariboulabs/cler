@@ -11,6 +11,7 @@
     enabled: boolean;
     note: string;
     revision: number;
+    selected: string | null;
     ontoggle: () => void;
     ontab: (next: RailTab) => void;
     onask: (question: string) => void;
@@ -19,6 +20,7 @@
     onlogout: () => void;
     onmodel: (model: string) => void;
     onprovider: (provider: string) => void;
+    onretry: (id: number) => void;
     onaccept: (id: number) => void;
     onreject: (id: number) => void;
     onreplan: (id: number) => void;
@@ -32,6 +34,7 @@
     enabled,
     note,
     revision,
+    selected,
     ontoggle,
     ontab,
     onask,
@@ -40,6 +43,7 @@
     onlogout,
     onmodel,
     onprovider,
+    onretry,
     onaccept,
     onreject,
     onreplan
@@ -71,12 +75,26 @@
     return proposal.state === 'ready' && proposal.baseRevision !== revision;
   }
 
+  function retryable(message: Message): boolean {
+    if (message.role !== 'assistant' || streaming) return false;
+    const state = message.proposal?.state;
+    return message.error !== null || state === 'refused' || state === 'rejected';
+  }
+
   let draft = $state('');
   let list = $state<HTMLDivElement | null>(null);
 
   const streaming = $derived(pending !== null);
   const ready = $derived(enabled && status?.available === true);
-  const hint = $derived(status === null ? 'looking for an API key…' : enabled ? '' : note);
+  const hint = $derived(
+    status === null
+      ? 'looking for an API key…'
+      : !enabled
+        ? note
+        : streaming
+          ? 'answering — Stop to interrupt'
+          : ''
+  );
   const showRecord = $derived(messages.length > 0 || status?.available === true);
   const showComposer = $derived(status === null || status.available);
 
@@ -213,6 +231,11 @@
             {#if message.error}
               <p class="failed" data-testid="assistant-error">{message.error}</p>
             {/if}
+            {#if retryable(message)}
+              <button data-testid="assistant-retry" onclick={() => onretry(message.id)}>
+                Try again
+              </button>
+            {/if}
             {#if message.proposal}
               {@const plan = message.proposal}
               <div class="plan" data-testid="assistant-proposal" data-state={plan.state}>
@@ -287,11 +310,14 @@
         {#if hint}
           <p class="faint" data-testid="assistant-hint">{hint}</p>
         {/if}
+        {#if selected}
+          <p class="faint" data-testid="assistant-context">about <code>{selected}</code></p>
+        {/if}
         <textarea
           data-testid="assistant-input"
           rows="3"
           placeholder="Ask about this flowgraph…"
-          disabled={!ready}
+          disabled={!ready || streaming}
           bind:value={draft}
           onkeydown={onKeydown}
         ></textarea>

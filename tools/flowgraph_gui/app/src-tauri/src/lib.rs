@@ -262,6 +262,7 @@ fn assistant_ask(
     path: String,
     question: String,
     history: Vec<Turn>,
+    selected: Option<String>,
     app: AppHandle,
     docs: State<'_, Documents>,
     talks: State<'_, Talks>,
@@ -274,6 +275,7 @@ fn assistant_ask(
         &path,
         &question,
         history,
+        selected,
         emitter(app),
     )
 }
