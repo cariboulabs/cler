@@ -744,3 +744,32 @@ fn a_base_url_override_never_redirects_chatgpt() {
     cler_flowgraph_gui::settings::init(&temp_dir("base-url-clear"));
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn the_responses_wire_reports_a_refusal_a_stall_and_a_flat_error() {
+    let refused = r#"data: {"type":"response.refusal.done","refusal":"I'm sorry, I can't help with that."}"#;
+    let Some(Chunk::Failed(sentence)) = ai_agent::chunk(Wire::Responses, refused) else {
+        panic!("a refusal must not read as an empty answer");
+    };
+    assert!(sentence.contains("declined"), "{sentence}");
+    assert!(sentence.contains("can't help"), "{sentence}");
+
+    let capped = r#"data: {"type":"response.incomplete","response":{"error":null,"incomplete_details":{"reason":"max_output_tokens"}}}"#;
+    let Some(Chunk::Failed(stalled)) = ai_agent::chunk(Wire::Responses, capped) else {
+        panic!("an incomplete turn is reported");
+    };
+    assert!(stalled.contains("max_output_tokens"), "{stalled}");
+
+    let flat = r#"data: {"type":"error","code":"rate_limit_exceeded","message":"Rate limit reached for gpt-5.4","param":null,"sequence_number":7}"#;
+    let Some(Chunk::Failed(reported)) = ai_agent::chunk(Wire::Responses, flat) else {
+        panic!("a mid-stream error is reported");
+    };
+    assert!(reported.contains("Rate limit reached"), "{reported}");
+    assert!(reported.contains("rate limit exceeded"), "{reported}");
+
+    let bare = r#"data: {"type":"error","code":null,"message":"something gave way"}"#;
+    let Some(Chunk::Failed(bare)) = ai_agent::chunk(Wire::Responses, bare) else {
+        panic!("a codeless error is still reported");
+    };
+    assert!(bare.contains("something gave way"), "{bare}");
+}

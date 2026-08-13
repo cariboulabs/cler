@@ -866,15 +866,36 @@ fn responses_chunk(line: &str) -> Option<Chunk> {
             counted(&value, "/response/usage/input_tokens"),
             counted(&value, "/response/usage/output_tokens"),
         )),
+        // A refusal is its own event here, never output_text. The whole
+        // sentence rides the .done frame, so the deltas are left alone: gather()
+        // ends the turn on the first failure and would keep only a fragment.
+        "response.refusal.done" => Some(Chunk::Failed(refusal(&value))),
         "response.failed" | "response.incomplete" => Some(Chunk::Failed(stalled(&value))),
-        "error" => Some(Chunk::Failed(describe(value.get("error")))),
+        // This event is flat: no nested error object to read a type off.
+        "error" => Some(Chunk::Failed(describe(Some(&json!({
+            "type": value.get("code"),
+            "message": value.get("message")
+        }))))),
         _ => None,
+    }
+}
+
+fn refusal(value: &Value) -> String {
+    match value
+        .get("refusal")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        Some(text) => format!("the model declined to answer that: {text}"),
+        None => declined(&json!({})),
     }
 }
 
 fn stalled(value: &Value) -> String {
     let detail = value
         .pointer("/response/error")
+        .filter(|error| !error.is_null())
         .or_else(|| value.pointer("/response/incomplete_details"))
         .and_then(|error| error.get("message").or_else(|| error.get("reason")))
         .and_then(Value::as_str)
@@ -991,11 +1012,11 @@ pub fn describe(error: Option<&Value>) -> String {
         .and_then(|value| value.get("type"))
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let detail = error
+    let said = error
         .and_then(|value| value.get("message"))
         .and_then(Value::as_str)
-        .filter(|text| !text.trim().is_empty())
-        .unwrap_or("no detail given");
+        .filter(|text| !text.trim().is_empty());
+    let detail = said.unwrap_or("no detail given");
     let provider = provider();
     let label = provider.label;
     let credential = if oauth_only(&provider) {
@@ -1022,6 +1043,8 @@ pub fn describe(error: Option<&Value>) -> String {
         }
         "api_error" => format!("{label} hit an internal error — try again"),
         "invalid_request_error" => format!("{label} refused the request: {detail}"),
+        // A typeless error still says something worth reading, when it says anything.
+        "" if said.is_some() => format!("{label}: {detail}"),
         "" => format!("{label} returned an error with no type"),
         other => format!("{}: {detail}", other.replace('_', " ")),
     }
