@@ -52,16 +52,20 @@
   let waiting = $state(false);
   let oauthError = $state<string | null>(null);
 
+  const PROVIDERS = [
+    { id: 'anthropic', label: 'Claude', oauth: true },
+    { id: 'openai', label: 'OpenAI', oauth: false },
+    { id: 'openai-codex', label: 'ChatGPT', oauth: true }
+  ];
+
+  const provider = $derived(PROVIDERS.find((one) => one.id === status?.provider) ?? null);
+
   $effect(() => {
-    if (status?.available !== true) return;
+    void status?.provider;
+    void status?.available;
     waiting = false;
     oauthError = null;
   });
-
-  const PROVIDERS = [
-    { id: 'anthropic', label: 'Claude' },
-    { id: 'openai', label: 'OpenAI' }
-  ];
 
   const TIERS: Record<string, { id: string; label: string }[]> = {
     anthropic: [
@@ -197,7 +201,7 @@
 
     {#if status !== null && !status.available}
       <div class="setup" data-testid="ai-agent-setup">
-        {#if status.provider === 'anthropic'}
+        {#if provider?.oauth}
           <button
             class="primary"
             data-testid="ai-agent-signin"
@@ -209,7 +213,7 @@
               });
             }}
           >
-            {waiting ? 'waiting for the browser…' : 'Sign in with Claude'}
+            {waiting ? 'waiting for the browser…' : `Sign in with ${provider.label}`}
           </button>
         {/if}
         {#if status.reason}
