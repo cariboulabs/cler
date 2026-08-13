@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::Duration;
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use cler_graph::palette_types::Port;
 use cler_graph::{BlockSpec, Command};
 use serde::{Deserialize, Serialize};
@@ -20,6 +22,7 @@ pub const TOOL_NAME: &str = "propose_commands";
 pub enum Wire {
     Anthropic,
     OpenAi,
+    Responses,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -33,7 +36,8 @@ pub struct Provider {
     pub key_prefix: &'static str,
     pub default_model: &'static str,
     pub wire: Wire,
-    pub oauth: bool,
+    // Brand the sign-in is offered under, empty when the provider has no oauth.
+    pub signin: &'static str,
 }
 
 pub const ANTHROPIC: Provider = Provider {
@@ -46,7 +50,7 @@ pub const ANTHROPIC: Provider = Provider {
     key_prefix: "sk-ant-",
     default_model: "claude-opus-5",
     wire: Wire::Anthropic,
-    oauth: true,
+    signin: "Claude",
 };
 
 pub const OPENAI: Provider = Provider {
@@ -59,12 +63,29 @@ pub const OPENAI: Provider = Provider {
     key_prefix: "sk-",
     default_model: "gpt-5",
     wire: Wire::OpenAi,
-    oauth: false,
+    signin: "",
 };
 
-pub const PROVIDERS: [Provider; 2] = [ANTHROPIC, OPENAI];
+// No key file and no key env var: the browser sign-in is the only way in, so
+// every key-shaped path below branches on the empty key_file rather than on
+// what a lookup of the empty string would return.
+pub const OPENAI_CODEX: Provider = Provider {
+    id: "openai-codex",
+    label: "ChatGPT",
+    endpoint: "https://chatgpt.com/backend-api/codex/responses",
+    models_endpoint: "https://chatgpt.com/backend-api/codex/models",
+    key_env: "",
+    key_file: "",
+    key_prefix: "",
+    default_model: "gpt-5.4",
+    wire: Wire::Responses,
+    signin: "ChatGPT",
+};
+
+pub const PROVIDERS: [Provider; 3] = [ANTHROPIC, OPENAI, OPENAI_CODEX];
 
 const API_VERSION: &str = "2023-06-01";
+const USER_AGENT: &str = concat!("cler/", env!("CARGO_PKG_VERSION"));
 const EFFORT: &str = "xhigh";
 const OPENAI_EFFORT: &str = "high";
 const MAX_TOKENS: u32 = 16000;
@@ -212,10 +233,30 @@ pub fn provider() -> Provider {
 }
 
 pub fn endpoint(provider: &Provider) -> String {
+    // ChatGPT tokens are only accepted at chatgpt.com/backend-api; a leftover
+    // api.openai.com base URL comes back as "Missing scopes: api.responses.write".
+    if provider.wire == Wire::Responses {
+        return provider.endpoint.to_string();
+    }
     crate::settings::current()
         .ai_agent_base_url
         .filter(|url| !url.trim().is_empty())
         .unwrap_or_else(|| provider.endpoint.to_string())
+}
+
+/// The account id lives in the access token's claims, so it follows refresh
+/// rotation with nothing stored. No signature check: it is our own token and the
+/// value only fills a header.
+pub fn account_of(access_token: &str) -> Option<String> {
+    let claims = access_token.split('.').nth(1)?;
+    let decoded = URL_SAFE_NO_PAD.decode(claims).ok()?;
+    let value: Value = serde_json::from_slice(&decoded).ok()?;
+    value
+        .get("https://api.openai.com/auth")
+        .and_then(|auth| auth.get("chatgpt_account_id"))
+        .or_else(|| value.get("chatgpt_account_id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 pub fn model() -> String {
@@ -230,11 +271,17 @@ pub fn key_path(config_dir: &Path) -> PathBuf {
 }
 
 pub fn store_key(key: &str, config_dir: &Path) -> Result<Status, String> {
+    let provider = provider();
+    if oauth_only(&provider) {
+        return Err(format!(
+            "{} signs in through the browser; there is no API key to store",
+            provider.label
+        ));
+    }
     let trimmed = key.trim();
     if trimmed.is_empty() {
         return Err("the key is empty".to_string());
     }
-    let provider = provider();
     if !trimmed.starts_with(provider.key_prefix) {
         return Err(format!(
             "that does not look like a key for {} ({}…)",
@@ -256,12 +303,22 @@ pub fn store_key(key: &str, config_dir: &Path) -> Result<Status, String> {
 }
 
 pub fn locate(env_key: Option<String>, config_dir: &Path) -> Result<Auth, String> {
+    let provider = provider();
+    if oauth_only(&provider) {
+        if !crate::oauth::signed_in(config_dir) {
+            return Err(format!(
+                "not signed in — sign in with {} to use it",
+                provider.signin
+            ));
+        }
+        return crate::oauth::access(config_dir).map(Auth::OAuth);
+    }
     if let Some(key) = env_key.map(|text| text.trim().to_string()).filter(|text| !text.is_empty()) {
         return Ok(Auth::ApiKey(key));
     }
     let file = key_path(config_dir);
     let Ok(contents) = std::fs::read_to_string(&file) else {
-        if provider().oauth && crate::oauth::signed_in(config_dir) {
+        if !provider.signin.is_empty() && crate::oauth::signed_in(config_dir) {
             return crate::oauth::access(config_dir).map(Auth::OAuth);
         }
         return Err(missing(&file));
@@ -274,8 +331,20 @@ pub fn locate(env_key: Option<String>, config_dir: &Path) -> Result<Auth, String
     Ok(Auth::ApiKey(key))
 }
 
+fn oauth_only(provider: &Provider) -> bool {
+    provider.key_file.is_empty()
+}
+
+fn env_key() -> Option<String> {
+    let provider = provider();
+    if provider.key_env.is_empty() {
+        return None;
+    }
+    std::env::var(provider.key_env).ok()
+}
+
 pub fn status(config_dir: &Path) -> Status {
-    match locate(std::env::var(provider().key_env).ok(), config_dir) {
+    match locate(env_key(), config_dir) {
         Ok(auth) => Status {
             available: true,
             provider: provider().id.to_string(),
@@ -295,10 +364,10 @@ pub fn status(config_dir: &Path) -> Status {
 
 fn missing(file: &Path) -> String {
     let provider = provider();
-    let signin = if provider.oauth {
-        ", or sign in with Claude"
+    let signin = if provider.signin.is_empty() {
+        String::new()
     } else {
-        ""
+        format!(", or sign in with {}", provider.signin)
     };
     format!(
         "no key for {} — export {} before starting the editor, write the key into {} and chmod 600 it{signin}",
@@ -704,8 +773,10 @@ pub fn request(context: &str, question: &str, history: &[Turn], acting: bool, oa
         })
         .collect();
     messages.push(json!({ "role": "user", "content": question }));
-    if provider().wire == Wire::OpenAi {
-        return openai_request(context, acting, messages);
+    match provider().wire {
+        Wire::OpenAi => return openai_request(context, acting, messages),
+        Wire::Responses => return responses_request(context, acting, messages),
+        Wire::Anthropic => {}
     }
     let mut system = Vec::new();
     if oauth {
@@ -747,11 +818,112 @@ fn openai_request(context: &str, acting: bool, turns: Vec<Value>) -> String {
     body.to_string()
 }
 
-pub fn chunk(line: &str) -> Option<Chunk> {
-    match provider().wire {
+// The Responses API refuses store:true and an empty instructions string, and
+// answers tool_choice without tools with a 400.
+fn responses_request(context: &str, acting: bool, turns: Vec<Value>) -> String {
+    let mut body = json!({
+        "model": model(),
+        "store": false,
+        "stream": true,
+        "instructions": format!("{}\n\n{context}", preamble(acting)),
+        "input": turns,
+        "parallel_tool_calls": true,
+        "reasoning": { "effort": OPENAI_EFFORT }
+    });
+    if acting {
+        body["tools"] = json!([responses_tool()]);
+        body["tool_choice"] = json!("auto");
+    }
+    body.to_string()
+}
+
+fn responses_tool() -> Value {
+    json!({
+        "type": "function",
+        "name": TOOL_NAME,
+        "description": TOOL_PURPOSE,
+        "parameters": tool_schema(),
+        // tool_schema() puts anyOf inside commands.items, which strict mode rejects.
+        "strict": false
+    })
+}
+
+pub fn chunk(wire: Wire, line: &str) -> Option<Chunk> {
+    match wire {
         Wire::Anthropic => anthropic_chunk(line),
         Wire::OpenAi => openai_chunk(line),
+        Wire::Responses => responses_chunk(line),
     }
+}
+
+fn responses_chunk(line: &str) -> Option<Chunk> {
+    let payload = line.strip_prefix("data:")?.trim();
+    let value: Value = serde_json::from_str(payload).ok()?;
+    match value.get("type").and_then(Value::as_str)? {
+        "response.output_text.delta" => value
+            .get("delta")
+            .and_then(Value::as_str)
+            .map(|text| Chunk::Text(text.to_string())),
+        "response.output_item.added"
+            if value.pointer("/item/type") == Some(&json!("function_call")) =>
+        {
+            Some(Chunk::ToolStart(
+                value
+                    .pointer("/item/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            ))
+        }
+        "response.function_call_arguments.delta" => value
+            .get("delta")
+            .and_then(Value::as_str)
+            .map(|piece| Chunk::ToolJson(piece.to_string())),
+        // Not output_item.done: that also fires for reasoning and message items,
+        // and a second BlockEnd would drop the proposal.
+        "response.function_call_arguments.done" => Some(Chunk::BlockEnd),
+        // Usage rides this terminal frame, and Chunk::Done would end gather()
+        // before it is read; the stream ends at EOF instead.
+        "response.completed" => Some(Chunk::Usage(
+            counted(&value, "/response/usage/input_tokens"),
+            counted(&value, "/response/usage/output_tokens"),
+        )),
+        // A refusal is its own event here, never output_text. The whole
+        // sentence rides the .done frame, so the deltas are left alone: gather()
+        // ends the turn on the first failure and would keep only a fragment.
+        "response.refusal.done" => Some(Chunk::Failed(refusal(&value))),
+        "response.failed" | "response.incomplete" => Some(Chunk::Failed(stalled(&value))),
+        // This event is flat: no nested error object to read a type off.
+        "error" => Some(Chunk::Failed(describe(Some(&json!({
+            "type": value.get("code"),
+            "message": value.get("message")
+        }))))),
+        _ => None,
+    }
+}
+
+fn refusal(value: &Value) -> String {
+    match value
+        .get("refusal")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        Some(text) => format!("the model declined to answer that: {text}"),
+        None => declined(&json!({})),
+    }
+}
+
+fn stalled(value: &Value) -> String {
+    let detail = value
+        .pointer("/response/error")
+        .filter(|error| !error.is_null())
+        .or_else(|| value.pointer("/response/incomplete_details"))
+        .and_then(|error| error.get("message").or_else(|| error.get("reason")))
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or("no detail given");
+    format!("{} ended the turn early: {detail}", provider().label)
 }
 
 fn openai_chunk(line: &str) -> Option<Chunk> {
@@ -862,22 +1034,30 @@ pub fn describe(error: Option<&Value>) -> String {
         .and_then(|value| value.get("type"))
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let detail = error
+    let said = error
         .and_then(|value| value.get("message"))
         .and_then(Value::as_str)
-        .filter(|text| !text.trim().is_empty())
-        .unwrap_or("no detail given");
+        .filter(|text| !text.trim().is_empty());
+    let detail = said.unwrap_or("no detail given");
     let provider = provider();
     let label = provider.label;
+    let credential = if oauth_only(&provider) {
+        "sign-in"
+    } else {
+        "API key"
+    };
     match kind {
+        "authentication_error" if oauth_only(&provider) => {
+            format!("{label} rejected the sign-in — sign out and sign in again")
+        }
         "authentication_error" => {
             format!(
                 "{label} rejected the key — check {} or the key file",
                 provider.key_env
             )
         }
-        "permission_error" => format!("this API key is not allowed to use {}", model()),
-        "not_found_error" => format!("{} is not available to this API key", model()),
+        "permission_error" => format!("this {credential} is not allowed to use {}", model()),
+        "not_found_error" => format!("{} is not available to this {credential}", model()),
         "rate_limit_error" => format!("rate limited by {label} — wait a moment and ask again"),
         "overloaded_error" => format!("{label} is overloaded right now — try again in a moment"),
         "request_too_large" => {
@@ -885,6 +1065,8 @@ pub fn describe(error: Option<&Value>) -> String {
         }
         "api_error" => format!("{label} hit an internal error — try again"),
         "invalid_request_error" => format!("{label} refused the request: {detail}"),
+        // A typeless error still says something worth reading, when it says anything.
+        "" if said.is_some() => format!("{label}: {detail}"),
         "" => format!("{label} returned an error with no type"),
         other => format!("{}: {detail}", other.replace('_', " ")),
     }
@@ -917,11 +1099,15 @@ fn proposed(name: &str, body: &str) -> Result<Proposal, String> {
     })
 }
 
-pub fn gather(lines: impl Iterator<Item = String>, mut spoken: impl FnMut(&str)) -> Reply {
+pub fn gather(
+    wire: Wire,
+    lines: impl Iterator<Item = String>,
+    mut spoken: impl FnMut(&str),
+) -> Reply {
     let mut reply = Reply::default();
     let mut open: Option<(String, String)> = None;
     for line in lines {
-        match chunk(&line) {
+        match chunk(wire, &line) {
             Some(Chunk::Text(text)) => spoken(&text),
             Some(Chunk::ToolStart(name)) => open = Some((name, String::new())),
             Some(Chunk::ToolJson(piece)) => {
@@ -980,6 +1166,12 @@ fn fetch_models(provider: &Provider, auth: &Auth) -> Option<Vec<String>> {
             .header("anthropic-version", API_VERSION)
             .header("x-api-key", key),
         (Wire::OpenAi, Auth::ApiKey(key)) => asked.header("authorization", format!("Bearer {key}")),
+        (Wire::Responses, Auth::ApiKey(_)) => return None,
+        (Wire::Responses, Auth::OAuth(token)) => asked
+            .header("authorization", format!("Bearer {token}"))
+            .header("chatgpt-account-id", account_of(token)?)
+            .header("originator", crate::oauth::ORIGINATOR)
+            .header("user-agent", USER_AGENT),
         (_, Auth::OAuth(token)) => asked
             .header("anthropic-version", API_VERSION)
             .header("authorization", format!("Bearer {token}"))
@@ -1020,7 +1212,7 @@ pub fn ask(
     if question.trim().is_empty() {
         return Err("ask a question first".to_string());
     }
-    let auth = locate(std::env::var(provider().key_env).ok(), config_dir)?;
+    let auth = locate(env_key(), config_dir)?;
     let state = document::open(docs, path)?;
     let specs = document::palette(docs, path).unwrap_or_default();
     let model_json = serde_json::to_string(&state.model).map_err(|cause| cause.to_string())?;
@@ -1083,6 +1275,26 @@ fn stream(auth: &Auth, body: &str, emit: &Emit, path: &str, flag: &AtomicBool) -
         (Wire::OpenAi, Auth::ApiKey(key)) => {
             prepared.header("authorization", format!("Bearer {key}"))
         }
+        (Wire::Responses, Auth::ApiKey(_)) => {
+            return Reply::failed(
+                "signing in with ChatGPT is the only way to use this provider".to_string(),
+            )
+        }
+        (Wire::Responses, Auth::OAuth(token)) => {
+            let Some(account) = account_of(token) else {
+                return Reply::failed(
+                    "this ChatGPT sign-in carries no account — sign out and sign in again"
+                        .to_string(),
+                );
+            };
+            prepared
+                .header("authorization", format!("Bearer {token}"))
+                .header("chatgpt-account-id", account)
+                .header("originator", crate::oauth::ORIGINATOR)
+                .header("user-agent", USER_AGENT)
+                .header("OpenAI-Beta", "responses=experimental")
+                .header("accept", "text/event-stream")
+        }
         (_, Auth::OAuth(token)) => prepared
             .header("anthropic-version", API_VERSION)
             .header("authorization", format!("Bearer {token}"))
@@ -1104,7 +1316,7 @@ fn stream(auth: &Auth, body: &str, emit: &Emit, path: &str, flag: &AtomicBool) -
         .lines()
         .map_while(Result::ok)
         .take_while(|_| !flag.load(Ordering::Relaxed));
-    gather(lines, |text| {
+    gather(provider.wire, lines, |text| {
         emit(DELTA_EVENT, json!({ "path": path, "text": text }));
     })
 }
@@ -1118,6 +1330,14 @@ fn unreachable(cause: &reqwest::Error) -> String {
 }
 
 fn refused(status: u16, text: &str) -> String {
+    // A stale ChatGPT token answers 401 with whatever body it likes, and none of
+    // its error types are the Anthropic ones describe() knows.
+    if status == 401 && oauth_only(&provider()) {
+        return format!(
+            "{} rejected the sign-in — sign out and sign in again",
+            provider().label
+        );
+    }
     match serde_json::from_str::<Value>(text) {
         Ok(value) if value.get("error").is_some() => describe(value.get("error")),
         _ => format!("{} answered HTTP {status}", provider().label),
@@ -1171,6 +1391,11 @@ mod tests {
         assert_eq!(model(), OPENAI.default_model);
         assert_eq!(key_path(&dir), dir.join(OPENAI.key_file));
 
+        choose(&dir, Some("openai-codex"));
+        assert_eq!(provider().id, OPENAI_CODEX.id);
+        assert_eq!(provider().wire, Wire::Responses);
+        assert_eq!(model(), OPENAI_CODEX.default_model);
+
         assert!(settings::store(
             &dir,
             &AppSettings {
@@ -1220,13 +1445,83 @@ mod tests {
             "data: [DONE]",
         ];
         let mut said = String::new();
-        let reply = gather(transcript.iter().map(|line| line.to_string()), |text| {
-            said.push_str(text)
-        });
+        let reply = gather(
+            Wire::OpenAi,
+            transcript.iter().map(|line| line.to_string()),
+            |text| said.push_str(text),
+        );
         choose(&dir, None);
 
         assert_eq!(said, "Renaming it.");
         assert_eq!(reply.failure, None);
+        assert_eq!((reply.input, reply.output), (4211, 98));
+        assert_eq!(
+            reply.proposal,
+            Some(Proposal {
+                rationale: "rename".to_string(),
+                commands: vec![json!({
+                    "command": "set_display_name",
+                    "site": 0,
+                    "block": "source1",
+                    "new_text": "Chirp"
+                })]
+            })
+        );
+    }
+
+    #[test]
+    fn the_responses_wire_sends_a_flat_tool_and_none_of_the_chat_body() {
+        let _guard = settings::test_guard();
+        let turns = vec![json!({ "role": "user", "content": "add a gain" })];
+        let body: Value = serde_json::from_str(&responses_request("<graph/>", true, turns.clone()))
+            .expect("json");
+
+        assert_eq!(body["store"], false);
+        assert!(body["instructions"]
+            .as_str()
+            .is_some_and(|text| !text.trim().is_empty()));
+        assert!(body["instructions"]
+            .as_str()
+            .is_some_and(|text| text.contains("<graph/>")));
+        assert!(body.get("system").is_none());
+        assert!(body.get("messages").is_none());
+        assert!(body.get("max_completion_tokens").is_none());
+        assert_eq!(body["input"][0]["content"], "add a gain");
+        assert_eq!(body["parallel_tool_calls"], true);
+        assert_eq!(body["reasoning"]["effort"], OPENAI_EFFORT);
+        assert_eq!(body["tools"][0]["name"], TOOL_NAME);
+        assert_eq!(body["tools"][0]["strict"], false);
+        assert!(body["tools"][0].get("function").is_none());
+        assert_eq!(body["tool_choice"], "auto");
+
+        let read_only: Value =
+            serde_json::from_str(&responses_request("<graph/>", false, turns)).expect("json");
+        assert!(read_only.get("tools").is_none());
+        assert!(read_only.get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn a_responses_stream_yields_the_same_text_proposal_and_usage() {
+        let transcript = [
+            r#"data: {"type":"response.output_text.delta","delta":"Renaming it."}"#,
+            r#"data: {"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1"}}"#,
+            r#"data: {"type":"response.output_item.added","item":{"type":"function_call","name":"propose_commands","call_id":"call_1"}}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","delta":"{\"rationale\":\"rename\",\"commands\":[{\"command\":\"set_display_name\","}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","delta":"\"site\":0,\"block\":\"source1\",\"new_text\":\"Chirp\"}]}"}"#,
+            r#"data: {"type":"response.function_call_arguments.done","arguments":"{}"}"#,
+            r#"data: {"type":"response.output_item.done","item":{"type":"function_call","name":"propose_commands"}}"#,
+            r#"data: {"type":"response.completed","response":{"usage":{"input_tokens":4211,"output_tokens":98}}}"#,
+        ];
+        let mut said = String::new();
+        let reply = gather(
+            Wire::Responses,
+            transcript.iter().map(|line| line.to_string()),
+            |text| said.push_str(text),
+        );
+
+        assert_eq!(said, "Renaming it.");
+        assert_eq!(reply.failure, None);
+        assert_eq!(reply.dropped, 0);
         assert_eq!((reply.input, reply.output), (4211, 98));
         assert_eq!(
             reply.proposal,
@@ -1254,16 +1549,56 @@ mod tests {
     }
 
     #[test]
+    fn chatgpt_has_no_key_file_no_env_var_and_no_key_sentences() {
+        let _guard = settings::test_guard();
+        let dir = temp("codex-keyless");
+        choose(&dir, Some("openai-codex"));
+        let refusal = locate(None, &dir).expect_err("not signed in");
+        let stored = store_key("sk-anything", &dir).expect_err("nowhere to store a key");
+        let rejected: Value =
+            serde_json::from_str(r#"{"type":"authentication_error","message":"nope"}"#)
+                .expect("json");
+        let sentence = describe(Some(&rejected));
+        let expired = refused(401, r#"{"detail":"missing token"}"#);
+        choose(&dir, None);
+
+        assert!(refusal.contains("ChatGPT"), "{refusal}");
+        assert!(!refusal.contains("  "), "{refusal}");
+        assert!(!refusal.contains("export"), "{refusal}");
+        assert!(
+            !refusal.contains(&dir.display().to_string()),
+            "no key path: {refusal}"
+        );
+        assert!(stored.contains("no API key to store"), "{stored}");
+        assert!(sentence.contains("sign in again"), "{sentence}");
+        assert!(!sentence.contains("  "), "{sentence}");
+        assert!(expired.contains("sign in again"), "{expired}");
+    }
+
+    #[test]
     fn a_claude_sign_in_is_never_used_for_another_provider() {
         let _guard = settings::test_guard();
         let dir = temp("oauth-gate");
-        std::fs::write(dir.join(crate::oauth::TOKEN_FILE), "{}").expect("fake token file");
+        std::fs::write(dir.join(crate::oauth::ANTHROPIC_FLOW.token_file), "{}")
+            .expect("fake token file");
 
         choose(&dir, Some("openai"));
         let refusal = locate(None, &dir).expect_err("no openai key");
         assert!(refusal.contains(OPENAI.key_env), "{refusal}");
         assert!(refusal.contains(OPENAI.key_file), "{refusal}");
         assert!(!refusal.contains("sign in"), "{refusal}");
+
+        choose(&dir, Some("openai-codex"));
+        let claude_only = locate(None, &dir).expect_err("a Claude token is not a ChatGPT sign-in");
+        assert!(claude_only.contains("not signed in"), "{claude_only}");
+        assert!(claude_only.contains("ChatGPT"), "{claude_only}");
+
+        std::fs::write(dir.join(crate::oauth::CODEX_FLOW.token_file), "{}")
+            .expect("fake token file");
+        choose(&dir, Some("openai"));
+        let codex_only = locate(None, &dir).expect_err("a ChatGPT token is not an openai key");
+        assert!(codex_only.contains(OPENAI.key_env), "{codex_only}");
+        assert!(!codex_only.contains("sign in"), "{codex_only}");
 
         choose(&dir, None);
         let anthropic = locate(None, &dir).expect_err("token file is not a real token");

@@ -22,7 +22,16 @@ fn catalog() -> &'static HashMap<String, Vec<CatalogModel>> {
 }
 
 pub fn models(provider: &str) -> &'static [CatalogModel] {
-    catalog().get(provider).map_or(&[], Vec::as_slice)
+    catalog().get(vendor_of(provider)).map_or(&[], Vec::as_slice)
+}
+
+/// A ChatGPT subscription serves OpenAI's models through a different endpoint, so it
+/// reads the same shelf of the catalog rather than carrying a duplicate of it.
+fn vendor_of(provider: &str) -> &str {
+    match provider {
+        "openai-codex" => "openai",
+        other => other,
+    }
 }
 
 pub fn find(provider: &str, model: &str) -> Option<&'static CatalogModel> {
@@ -123,6 +132,13 @@ mod tests {
     fn without_a_live_list_the_catalog_stands_in() {
         let listed = merge("anthropic", Vec::new());
         assert_eq!(listed.len(), models("anthropic").len());
+    }
+
+    #[test]
+    fn chatgpt_reads_openais_shelf() {
+        assert_eq!(models("openai-codex"), models("openai"));
+        assert!(!models("openai-codex").is_empty());
+        assert_eq!(name_of("openai-codex", "gpt-5"), name_of("openai", "gpt-5"));
     }
 
     #[test]

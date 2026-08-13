@@ -280,6 +280,43 @@ describe('signing in with Claude is the front door', () => {
   );
 
   it(
+    'ChatGPT offers its own sign-in, never an API key, and clears the wait on the way out',
+    async () => {
+      const page = await boot();
+      await openAiAgent(page);
+      await page.selectOption('[data-testid="ai-agent-provider-select"]', 'openai-codex');
+      await page.waitForSelector('[data-testid="ai-agent-signin"]');
+
+      expect(await page.textContent('[data-testid="ai-agent-signin"]')).toBe(
+        'Sign in with ChatGPT'
+      );
+      const reason = (await page.textContent('[data-testid="ai-agent-reason"]')) ?? '';
+      expect(reason).toContain('sign in');
+      expect(reason).not.toContain('ANTHROPIC_API_KEY');
+      expect(reason).not.toContain('OPENAI_API_KEY');
+
+      await page.click('[data-testid="ai-agent-signin"]');
+      await expect
+        .poll(() => page.textContent('[data-testid="ai-agent-signin"]'))
+        .toContain('waiting for the browser');
+      expect((await calls(page)).filter((name) => name === 'ai_agent_oauth_start').length).toBe(1);
+
+      await page.selectOption('[data-testid="ai-agent-provider-select"]', 'openai');
+      await expect
+        .poll(() => page.textContent('[data-testid="ai-agent-reason"]'))
+        .toContain('OPENAI_API_KEY');
+      expect(await page.locator('[data-testid="ai-agent-signin"]').count()).toBe(0);
+
+      await page.selectOption('[data-testid="ai-agent-provider-select"]', 'openai-codex');
+      await expect
+        .poll(() => page.textContent('[data-testid="ai-agent-signin"]'))
+        .toBe('Sign in with ChatGPT');
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
     'sign out shows only for oauth and tells the backend to forget the tokens',
     async () => {
       const keyed = await boot();

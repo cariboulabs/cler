@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use cler_flowgraph_gui::ai_agent::{self, Auth, Chunk, Proposal, Turn};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use cler_flowgraph_gui::ai_agent::{self, Auth, Chunk, Proposal, Turn, Wire};
 use cler_graph::palette_types::{Direction, Port, PortCount};
 use cler_graph::{BlockSpec, Command};
 use serde_json::{json, Value};
@@ -60,7 +62,10 @@ fn write_key(dir: &Path, key: &str, mode: u32) -> PathBuf {
 }
 
 fn played(transcript: &str) -> Vec<Chunk> {
-    transcript.lines().filter_map(ai_agent::chunk).collect()
+    transcript
+        .lines()
+        .filter_map(|line| ai_agent::chunk(Wire::Anthropic, line))
+        .collect()
 }
 
 fn spec(name: &str) -> BlockSpec {
@@ -273,7 +278,7 @@ fn every_error_shape_reads_as_a_sentence() {
 fn a_refused_turn_is_reported_instead_of_an_empty_answer() {
     let refused = r#"data: {"type":"message_delta","delta":{"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber"}},"usage":{"output_tokens":3}}"#;
 
-    let Some(Chunk::Failed(sentence)) = ai_agent::chunk(refused) else {
+    let Some(Chunk::Failed(sentence)) = ai_agent::chunk(Wire::Anthropic, refused) else {
         panic!("a refusal must not read as an empty answer");
     };
 
@@ -284,7 +289,11 @@ fn a_refused_turn_is_reported_instead_of_an_empty_answer() {
 #[test]
 fn noise_between_events_is_ignored() {
     for line in ["", "event: message_start", ": ping", "data: not json"] {
-        assert_eq!(ai_agent::chunk(line), None, "{line} should be ignored");
+        assert_eq!(
+            ai_agent::chunk(Wire::Anthropic, line),
+            None,
+            "{line} should be ignored"
+        );
     }
 }
 
@@ -421,9 +430,13 @@ data: {"type":"message_stop"}
 
 fn spoken(transcript: &str) -> (ai_agent::Reply, String) {
     let mut said = String::new();
-    let reply = ai_agent::gather(transcript.lines().map(str::to_string), |text| {
-        said.push_str(text);
-    });
+    let reply = ai_agent::gather(
+        Wire::Anthropic,
+        transcript.lines().map(str::to_string),
+        |text| {
+            said.push_str(text);
+        },
+    );
     (reply, said)
 }
 
@@ -682,4 +695,81 @@ fn store_key_normalizes_validates_and_locks_down() {
     }
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+fn jwt(claims: Value) -> String {
+    let body = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).expect("claims"));
+    format!("header.{body}.signature")
+}
+
+#[test]
+fn account_comes_off_the_access_token() {
+    assert_eq!(
+        ai_agent::account_of(&jwt(json!({
+            "https://api.openai.com/auth": { "chatgpt_account_id": "acct-42" }
+        }))),
+        Some("acct-42".to_string())
+    );
+    assert_eq!(
+        ai_agent::account_of(&jwt(json!({ "chatgpt_account_id": "acct-7" }))),
+        Some("acct-7".to_string())
+    );
+    assert_eq!(ai_agent::account_of(&jwt(json!({ "sub": "user" }))), None);
+    assert_eq!(ai_agent::account_of("garbage"), None);
+    assert_eq!(ai_agent::account_of("a.!!not-base64!!.c"), None);
+    assert_eq!(ai_agent::account_of(""), None);
+}
+
+#[test]
+fn a_base_url_override_never_redirects_chatgpt() {
+    let dir = temp_dir("base-url");
+    std::fs::write(
+        dir.join("settings.json"),
+        r#"{"aiAgentBaseUrl":"https://api.openai.com/v1/chat/completions"}"#,
+    )
+    .expect("settings file");
+    cler_flowgraph_gui::settings::init(&dir);
+
+    let chatgpt = ai_agent::Provider {
+        wire: Wire::Responses,
+        endpoint: "https://chatgpt.com/backend-api/codex/responses",
+        ..ai_agent::OPENAI
+    };
+    assert_eq!(ai_agent::endpoint(&chatgpt), chatgpt.endpoint);
+    assert_eq!(
+        ai_agent::endpoint(&ai_agent::OPENAI),
+        "https://api.openai.com/v1/chat/completions"
+    );
+
+    cler_flowgraph_gui::settings::init(&temp_dir("base-url-clear"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_responses_wire_reports_a_refusal_a_stall_and_a_flat_error() {
+    let refused = r#"data: {"type":"response.refusal.done","refusal":"I'm sorry, I can't help with that."}"#;
+    let Some(Chunk::Failed(sentence)) = ai_agent::chunk(Wire::Responses, refused) else {
+        panic!("a refusal must not read as an empty answer");
+    };
+    assert!(sentence.contains("declined"), "{sentence}");
+    assert!(sentence.contains("can't help"), "{sentence}");
+
+    let capped = r#"data: {"type":"response.incomplete","response":{"error":null,"incomplete_details":{"reason":"max_output_tokens"}}}"#;
+    let Some(Chunk::Failed(stalled)) = ai_agent::chunk(Wire::Responses, capped) else {
+        panic!("an incomplete turn is reported");
+    };
+    assert!(stalled.contains("max_output_tokens"), "{stalled}");
+
+    let flat = r#"data: {"type":"error","code":"rate_limit_exceeded","message":"Rate limit reached for gpt-5.4","param":null,"sequence_number":7}"#;
+    let Some(Chunk::Failed(reported)) = ai_agent::chunk(Wire::Responses, flat) else {
+        panic!("a mid-stream error is reported");
+    };
+    assert!(reported.contains("Rate limit reached"), "{reported}");
+    assert!(reported.contains("rate limit exceeded"), "{reported}");
+
+    let bare = r#"data: {"type":"error","code":null,"message":"something gave way"}"#;
+    let Some(Chunk::Failed(bare)) = ai_agent::chunk(Wire::Responses, bare) else {
+        panic!("a codeless error is still reported");
+    };
+    assert!(bare.contains("something gave way"), "{bare}");
 }

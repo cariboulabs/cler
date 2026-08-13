@@ -54,16 +54,20 @@
   let waiting = $state(false);
   let oauthError = $state<string | null>(null);
 
+  const PROVIDERS = [
+    { id: 'anthropic', name: 'Claude', label: 'Claude — key or subscription', oauth: true },
+    { id: 'openai', name: 'OpenAI', label: 'OpenAI — API key only', oauth: false },
+    { id: 'openai-codex', name: 'ChatGPT', label: 'ChatGPT — subscription only', oauth: true }
+  ];
+
+  const provider = $derived(PROVIDERS.find((one) => one.id === status?.provider) ?? null);
+
   $effect(() => {
-    if (status?.available !== true) return;
+    void status?.provider;
+    void status?.available;
     waiting = false;
     oauthError = null;
   });
-
-  const PROVIDERS = [
-    { id: 'anthropic', label: 'Claude' },
-    { id: 'openai', label: 'OpenAI' }
-  ];
 
   const chosen = $derived(models.find((one) => one.id === status?.model) ?? null);
   const known = $derived(chosen !== null);
@@ -187,7 +191,7 @@
 
     {#if status !== null && !status.available}
       <div class="setup" data-testid="ai-agent-setup">
-        {#if status.provider === 'anthropic'}
+        {#if provider?.oauth}
           <button
             class="primary"
             data-testid="ai-agent-signin"
@@ -199,7 +203,7 @@
               });
             }}
           >
-            {waiting ? 'waiting for the browser…' : 'Sign in with Claude'}
+            {waiting ? 'waiting for the browser…' : `Sign in with ${provider.name}`}
           </button>
         {/if}
         {#if status.reason}

@@ -418,6 +418,15 @@ function installFake(setup: Setup) {
     if (command === 'ai_agent_status') {
       const chosen = (settings.at(-1) as Loose | undefined)?.aiAgentProvider ?? 'anthropic';
       if (chosen === setup.aiAgent.provider) return setup.aiAgent;
+      if (chosen === 'openai-codex') {
+        return {
+          available: false,
+          provider: chosen,
+          model: 'gpt-5.4',
+          reason: 'not signed in — sign in with ChatGPT to use it',
+          method: null
+        };
+      }
       return {
         available: false,
         provider: chosen,
