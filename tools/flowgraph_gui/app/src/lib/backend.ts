@@ -103,7 +103,11 @@ export function newDocument(path: string): Promise<DocumentState> {
   return documentCall('new_document', { path });
 }
 
-export type AppSettings = { clerRoot: string | null; blockLibraries: string[] };
+export type AppSettings = {
+  clerRoot: string | null;
+  blockLibraries: string[];
+  assistantModel: string | null;
+};
 
 export function appSettings(): Promise<AppSettings> {
   return invoker('app_settings', {}) as Promise<AppSettings>;

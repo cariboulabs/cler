@@ -152,6 +152,13 @@ impl Reply {
 #[derive(Default, Clone)]
 pub struct Talks(Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>);
 
+pub fn model() -> String {
+    crate::settings::current()
+        .assistant_model
+        .filter(|choice| !choice.trim().is_empty())
+        .unwrap_or_else(|| MODEL.to_string())
+}
+
 pub fn key_path(config_dir: &Path) -> PathBuf {
     config_dir.join(KEY_FILE)
 }
@@ -201,13 +208,13 @@ pub fn status(config_dir: &Path) -> Status {
     match locate(std::env::var(KEY_ENV).ok(), config_dir) {
         Ok(auth) => Status {
             available: true,
-            model: MODEL.to_string(),
+            model: model(),
             reason: None,
             method: Some(auth.method().to_string()),
         },
         Err(reason) => Status {
             available: false,
-            model: MODEL.to_string(),
+            model: model(),
             reason: Some(reason),
             method: None,
         },
@@ -585,7 +592,7 @@ pub fn request(context: &str, question: &str, history: &[Turn], acting: bool, oa
     system.push(json!({ "type": "text", "text": preamble(acting), "cache_control": { "type": "ephemeral" } }));
     system.push(json!({ "type": "text", "text": context }));
     let mut body = json!({
-        "model": MODEL,
+        "model": model(),
         "max_tokens": MAX_TOKENS,
         "stream": true,
         "output_config": { "effort": EFFORT },
@@ -666,8 +673,8 @@ pub fn describe(error: Option<&Value>) -> String {
         "authentication_error" => {
             format!("the Anthropic API rejected the key — check {KEY_ENV} or the key file")
         }
-        "permission_error" => format!("this API key is not allowed to use {MODEL}"),
-        "not_found_error" => format!("{MODEL} is not available to this API key"),
+        "permission_error" => format!("this API key is not allowed to use {}", model()),
+        "not_found_error" => format!("{} is not available to this API key", model()),
         "rate_limit_error" => {
             "rate limited by the Anthropic API — wait a moment and ask again".to_string()
         }

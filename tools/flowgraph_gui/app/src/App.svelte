@@ -29,11 +29,8 @@
     applyCommands,
     assistantAsk,
     assistantStatus,
-    assistantSetKey,
     assistantOauthStart,
-    assistantOauthFinish,
     assistantOauthLogout,
-    openKeyConsole,
     assistantStop,
     onAssistantAuthChanged,
     onAssistantDelta,
@@ -232,7 +229,7 @@
   let targetRefresh = $state(0);
   let rightTab = $state<RailTab>('inspector');
   let runArgs = $state('');
-  let libSettings = $state<AppSettings>({ clerRoot: null, blockLibraries: [] });
+  let libSettings = $state<AppSettings>({ clerRoot: null, blockLibraries: [], assistantModel: null });
   let resolvedRoot = $state<string | null>(null);
 
   $effect(() => {
@@ -727,13 +724,12 @@
     }
   }
 
-  async function saveAssistantKey(key: string): Promise<string | null> {
-    if (!desktop) return NO_SHELL;
+  async function setAssistantModel(model: string) {
     try {
-      keyStatus = await assistantSetKey(key);
-      return null;
+      libSettings = await setAppSettings({ ...libSettings, assistantModel: model });
+      await refreshAssistant();
     } catch (error) {
-      return describeApplyError(error);
+      announce(describeApplyError(error));
     }
   }
 
@@ -741,16 +737,6 @@
     if (!desktop) return NO_SHELL;
     try {
       await assistantOauthStart();
-      return null;
-    } catch (error) {
-      return describeApplyError(error);
-    }
-  }
-
-  async function finishOauth(input: string): Promise<string | null> {
-    if (!desktop) return NO_SHELL;
-    try {
-      keyStatus = await assistantOauthFinish(input);
       return null;
     } catch (error) {
       return describeApplyError(error);
@@ -1015,7 +1001,7 @@
     try {
       libSettings = await appSettings();
     } catch {
-      libSettings = { clerRoot: null, blockLibraries: [] };
+      libSettings = { clerRoot: null, blockLibraries: [], assistantModel: null };
     }
   }
 
@@ -1827,11 +1813,9 @@
       ontab={pickRailTab}
       onask={(question) => void askAssistant(question)}
       onstop={stopAssistant}
-      onsetkey={saveAssistantKey}
-      ongetkey={() => void openKeyConsole()}
       onsignin={startOauth}
-      onfinish={finishOauth}
       onlogout={() => void logoutOauth()}
+      onmodel={(model) => void setAssistantModel(model)}
       onaccept={(id) => void acceptProposal(id)}
       onreject={rejectProposal}
       onreplan={(id) => void replanProposal(id)}

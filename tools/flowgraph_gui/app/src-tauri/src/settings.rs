@@ -12,11 +12,13 @@ const PALETTE_DIR: &str = "desktop_blocks";
 pub struct AppSettings {
     pub cler_root: Option<String>,
     pub block_libraries: Vec<String>,
+    pub assistant_model: Option<String>,
 }
 
 static CURRENT: RwLock<AppSettings> = RwLock::new(AppSettings {
     cler_root: None,
     block_libraries: Vec::new(),
+    assistant_model: None,
 });
 
 pub fn current() -> AppSettings {
@@ -83,6 +85,9 @@ fn prune(settings: AppSettings) -> AppSettings {
             .into_iter()
             .map(|dir| dir.display().to_string())
             .collect(),
+        assistant_model: settings
+            .assistant_model
+            .filter(|model| !model.trim().is_empty()),
     }
 }
 
@@ -151,6 +156,7 @@ mod tests {
         let library = temp("library");
 
         let wanted = AppSettings {
+            assistant_model: None,
             cler_root: Some(fake_repo.display().to_string()),
             block_libraries: vec![library.display().to_string()],
         };
@@ -158,6 +164,7 @@ mod tests {
         assert_eq!(read(&dir), wanted);
 
         let bogus = AppSettings {
+            assistant_model: None,
             cler_root: Some("/nonexistent/never".to_string()),
             block_libraries: Vec::new(),
         };
@@ -165,6 +172,7 @@ mod tests {
         assert_eq!(read(&dir), wanted);
 
         let inside = AppSettings {
+            assistant_model: None,
             cler_root: Some(fake_repo.join("include").display().to_string()),
             block_libraries: Vec::new(),
         };
@@ -173,6 +181,7 @@ mod tests {
         store(&dir, &wanted).expect("restore wanted");
 
         let redundant = AppSettings {
+            assistant_model: None,
             cler_root: Some(fake_repo.display().to_string()),
             block_libraries: vec![
                 fake_repo.join(PALETTE_DIR).display().to_string(),

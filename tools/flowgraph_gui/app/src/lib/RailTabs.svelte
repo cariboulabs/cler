@@ -8,7 +8,7 @@
   const TABS: [RailTab, string, string][] = [
     ['inspector', 'Inspector', 'Block parameters and ports  ]'],
     ['library', 'Library', 'Search and place blocks'],
-    ['assistant', 'Assistant', 'Ask about this flowgraph  Ctrl+J']
+    ['assistant', 'AI Agent', 'Ask about this flowgraph  Ctrl+J']
   ];
 </script>
 

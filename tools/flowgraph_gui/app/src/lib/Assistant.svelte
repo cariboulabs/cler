@@ -16,11 +16,9 @@
     ontab: (next: RailTab) => void;
     onask: (question: string) => void;
     onstop: () => void;
-    onsetkey: (key: string) => Promise<string | null>;
-    ongetkey: () => void;
     onsignin: () => Promise<string | null>;
-    onfinish: (input: string) => Promise<string | null>;
     onlogout: () => void;
+    onmodel: (model: string) => void;
     onaccept: (id: number) => void;
     onreject: (id: number) => void;
     onreplan: (id: number) => void;
@@ -39,26 +37,24 @@
     ontab,
     onask,
     onstop,
-    onsetkey,
-    ongetkey,
     onsignin,
-    onfinish,
     onlogout,
+    onmodel,
     onaccept,
     onreject,
     onreplan
   }: Props = $props();
 
-  let keyDraft = $state('');
-  let keyError = $state<string | null>(null);
-  let showKeyForm = $state(false);
   let waiting = $state(false);
-  let oauthDraft = $state('');
   let oauthError = $state<string | null>(null);
 
+  const MODELS = [
+    { id: 'claude-opus-5', label: 'Opus 5' },
+    { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' }
+  ];
+
   const TRANSIENT = 'this conversation is not saved — it goes when the file closes';
-  const EXPLAINS = 'explains only — this file is open read-only';
-  const PROPOSES = 'proposes changes — nothing is applied until you accept';
   const STALE = 'the graph moved on since this was checked — re-check it before applying';
   const CEILING = 'one proposal per answer: further tool calls in that turn were dropped';
 
@@ -126,14 +122,29 @@
   <div class="body">
     <div class="model" data-testid="assistant-model">
       <span class="name">
-        {status?.model ?? '—'}
+        {#if status?.available === true}
+          <select
+            class="model-select"
+            data-testid="assistant-model-select"
+            value={status.model}
+            onchange={(event) => onmodel(event.currentTarget.value)}
+          >
+            {#each MODELS as choice (choice.id)}
+              <option value={choice.id}>{choice.label}</option>
+            {/each}
+            {#if !MODELS.some((choice) => choice.id === status.model)}
+              <option value={status.model}>{status.model}</option>
+            {/if}
+          </select>
+        {:else}
+          {status?.model ?? '—'}
+        {/if}
         {#if status?.available === true && status.method === 'oauth'}
           <button class="linkish signout" data-testid="assistant-logout" onclick={onlogout}>
             Sign out
           </button>
         {/if}
       </span>
-      <span class="faint">{enabled ? PROPOSES : EXPLAINS}</span>
     </div>
 
     {#if status !== null && !status.available}
@@ -141,7 +152,6 @@
         <button
           class="primary"
           data-testid="assistant-signin"
-          disabled={waiting}
           onclick={() => {
             oauthError = null;
             void onsignin().then((error) => {
@@ -150,82 +160,10 @@
             });
           }}
         >
-          Sign in with Claude
+          {waiting ? 'waiting for the browser…' : 'Sign in with Claude'}
         </button>
-        <p class="faint">pay per answer, from your subscription's extra usage</p>
-        {#if waiting}
-          <p class="faint" data-testid="assistant-oauth-waiting">waiting for the browser…</p>
-          <form
-            class="keyform"
-            onsubmit={(event) => {
-              event.preventDefault();
-              const trimmed = oauthDraft.trim();
-              if (!trimmed) return;
-              oauthError = null;
-              void onfinish(trimmed).then((error) => {
-                oauthError = error;
-                if (!error) oauthDraft = '';
-              });
-            }}
-          >
-            <input
-              type="text"
-              data-testid="assistant-oauth-code"
-              placeholder="paste the redirect URL or code…"
-              autocomplete="off"
-              bind:value={oauthDraft}
-            />
-            <button
-              type="submit"
-              data-testid="assistant-oauth-finish"
-              disabled={oauthDraft.trim() === ''}
-            >
-              Finish
-            </button>
-          </form>
-        {/if}
         {#if oauthError}
           <p class="key-error" data-testid="assistant-oauth-error">{oauthError}</p>
-        {/if}
-        <button
-          class="linkish"
-          data-testid="assistant-key-toggle"
-          aria-expanded={showKeyForm}
-          onclick={() => (showKeyForm = !showKeyForm)}
-        >
-          use an API key instead
-        </button>
-        {#if showKeyForm}
-          <form
-            class="keyform"
-            onsubmit={(event) => {
-              event.preventDefault();
-              const trimmed = keyDraft.trim();
-              if (!trimmed) return;
-              keyError = null;
-              void onsetkey(trimmed).then((error) => {
-                keyError = error;
-                if (!error) keyDraft = '';
-              });
-            }}
-          >
-            <input
-              type="password"
-              data-testid="assistant-key"
-              placeholder="sk-ant-…"
-              autocomplete="off"
-              bind:value={keyDraft}
-            />
-            <button type="submit" data-testid="assistant-key-save" disabled={keyDraft.trim() === ''}>
-              Save key
-            </button>
-          </form>
-          {#if keyError}
-            <p class="key-error" data-testid="assistant-key-error">{keyError}</p>
-          {/if}
-          <button class="linkish" data-testid="assistant-get-key" onclick={ongetkey}>
-            get a key from the console…
-          </button>
         {/if}
       </div>
     {/if}
@@ -452,10 +390,6 @@
     background: var(--bg-2);
     border-radius: var(--radius-sm);
   }
-  .keyrow {
-    display: flex;
-    gap: var(--sp-1);
-  }
   .linkish {
     align-self: flex-start;
     padding: 0;
@@ -469,15 +403,13 @@
   .signout {
     margin-left: var(--sp-2);
   }
-  .keyform {
-    display: flex;
-    gap: var(--sp-1);
-    margin: var(--sp-2) 0;
-  }
-  .keyform input {
-    flex: 1;
-    min-width: 0;
-    font-family: var(--mono);
+  .model-select {
+    background: var(--bg-2);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font: inherit;
+    padding: 1px var(--sp-1);
   }
   .key-error {
     color: var(--danger);

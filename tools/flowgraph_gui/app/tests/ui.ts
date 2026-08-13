@@ -385,7 +385,7 @@ function installFake(setup: Setup) {
     }
     if (command === 'resolved_cler_root') return '/tmp/fake';
     calls.push(command);
-    if (command === 'app_settings') return { clerRoot: null, blockLibraries: [] };
+    if (command === 'app_settings') return { clerRoot: null, blockLibraries: [], assistantModel: null };
     if (command === 'set_app_settings') return (args as Loose).next;
     if (command === 'run_target') runs.push(args.args);
     if (command === 'assistant_status') return setup.assistant;

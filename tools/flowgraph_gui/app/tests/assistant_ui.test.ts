@@ -58,10 +58,8 @@ describe('the assistant says what it needs before it costs anything', () => {
       await openAssistant(page);
 
       expect(await page.locator('[data-testid="assistant-signin"]').count()).toBe(1);
-      expect(await page.locator('[data-testid="assistant-key-toggle"]').count()).toBe(1);
       expect(await page.locator(INPUT).count()).toBe(0);
       expect(await page.locator(CHIP).count()).toBe(0);
-      expect(await page.textContent('[data-testid="assistant-setup"]')).toContain('extra usage');
       await shot(page, 'assistant-setup');
       await page.close();
     },
@@ -73,30 +71,9 @@ describe('the assistant says what it needs before it costs anything', () => {
     async () => {
       const page = await boot({ assistant: NO_KEY });
       await openAssistant(page);
-      await page.click('[data-testid="assistant-key-toggle"]');
 
       expect((await calls(page)).filter((name) => name === 'assistant_status').length).toBe(1);
       expect(await asks(page)).toEqual([]);
-      await page.close();
-    },
-    CASE
-  );
-
-  it(
-    'saves a pasted key and comes alive without a restart',
-    async () => {
-      const page = await boot({ assistant: NO_KEY });
-      await openAssistant(page);
-
-      await page.click('[data-testid="assistant-key-toggle"]');
-      await page.fill('[data-testid="assistant-key"]', 'nonsense');
-      await page.click('[data-testid="assistant-key-save"]');
-      await page.waitForSelector('[data-testid="assistant-key-error"]');
-
-      await page.fill('[data-testid="assistant-key"]', 'sk-ant-test123');
-      await page.click('[data-testid="assistant-key-save"]');
-      await page.waitForSelector('[data-testid="assistant-setup"]', { state: 'detached' });
-      expect((await calls(page)).filter((name) => name === 'assistant_set_key').length).toBe(2);
       await page.close();
     },
     CASE
@@ -108,9 +85,9 @@ describe('the assistant says what it needs before it costs anything', () => {
       const page = await boot();
       await openAssistant(page);
 
-      expect(await page.textContent('[data-testid="assistant-model"]')).toContain(
-        'claude-opus-5'
-      );
+      expect(
+        await page.locator('[data-testid="assistant-model-select"]').inputValue()
+      ).toBe('claude-opus-5');
       expect(await page.textContent('[data-testid="assistant-empty"]')).toContain('not saved');
       await page.close();
     },
@@ -122,24 +99,17 @@ describe('the assistant says what it needs before it costs anything', () => {
 
 describe('signing in with Claude is the front door', () => {
   it(
-    'the sign-in button starts the browser flow and shows the paste fallback',
+    'the sign-in button starts the browser flow and shows it is waiting',
     async () => {
       const page = await boot({ assistant: NO_KEY });
       await openAssistant(page);
 
-      expect(await page.locator('[data-testid="assistant-key"]').count()).toBe(0);
       await page.click('[data-testid="assistant-signin"]');
-      await page.waitForSelector('[data-testid="assistant-oauth-waiting"]');
-
+      await expect
+        .poll(() => page.textContent('[data-testid="assistant-signin"]'))
+        .toContain('waiting for the browser');
       expect((await calls(page)).filter((name) => name === 'assistant_oauth_start').length).toBe(
         1
-      );
-      expect(await page.textContent('[data-testid="assistant-oauth-waiting"]')).toContain(
-        'waiting for the browser'
-      );
-      expect(await page.locator('[data-testid="assistant-oauth-code"]').count()).toBe(1);
-      expect(await page.textContent('[data-testid="assistant-setup"]')).toContain(
-        "pay per answer, from your subscription's extra usage"
       );
       await shot(page, 'assistant-oauth-waiting');
       await page.close();
@@ -148,31 +118,15 @@ describe('signing in with Claude is the front door', () => {
   );
 
   it(
-    'pasting the redirect URL finishes the flow and the panel comes alive',
+    'the model can be switched and the choice goes to settings',
     async () => {
-      const page = await boot({ assistant: NO_KEY });
+      const page = await boot();
       await openAssistant(page);
-      await page.click('[data-testid="assistant-signin"]');
-      await page.waitForSelector('[data-testid="assistant-oauth-code"]');
 
-      await page.fill('[data-testid="assistant-oauth-code"]', 'short');
-      await page.click('[data-testid="assistant-oauth-finish"]');
-      await page.waitForSelector('[data-testid="assistant-oauth-error"]');
-      expect(await page.textContent('[data-testid="assistant-oauth-error"]')).toContain(
-        'Missing authorization code'
-      );
-
-      await page.fill(
-        '[data-testid="assistant-oauth-code"]',
-        'https://claude.ai/oauth/redirect?code=abc123&state=xyz'
-      );
-      await page.click('[data-testid="assistant-oauth-finish"]');
-      await page.waitForSelector('[data-testid="assistant-setup"]', { state: 'detached' });
-
-      expect((await calls(page)).filter((name) => name === 'assistant_oauth_finish').length).toBe(
-        2
-      );
-      expect(await page.locator(INPUT).count()).toBe(1);
+      await page.selectOption('[data-testid="assistant-model-select"]', 'claude-sonnet-5');
+      await expect
+        .poll(async () => (await calls(page)).filter((name) => name === 'set_app_settings').length)
+        .toBe(1);
       await page.close();
     },
     CASE
@@ -220,24 +174,6 @@ describe('signing in with Claude is the front door', () => {
     CASE
   );
 
-  it(
-    'the API-key form hides behind the toggle and still works',
-    async () => {
-      const page = await boot({ assistant: NO_KEY });
-      await openAssistant(page);
-
-      expect(await page.locator('[data-testid="assistant-key"]').count()).toBe(0);
-      await page.click('[data-testid="assistant-key-toggle"]');
-      await page.waitForSelector('[data-testid="assistant-key"]');
-      expect(await page.locator('[data-testid="assistant-get-key"]').count()).toBe(1);
-
-      await page.fill('[data-testid="assistant-key"]', 'sk-ant-test123');
-      await page.click('[data-testid="assistant-key-save"]');
-      await page.waitForSelector('[data-testid="assistant-setup"]', { state: 'detached' });
-      await page.close();
-    },
-    CASE
-  );
 });
 
 /* ============================================================ starters */
@@ -697,17 +633,4 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
     CASE
   );
 
-  it(
-    'says it proposes changes, not that it only explains',
-    async () => {
-      const page = await boot();
-      await openAssistant(page);
-
-      expect(await page.textContent('[data-testid="assistant-model"]')).toContain(
-        'nothing is applied until you accept'
-      );
-      await page.close();
-    },
-    CASE
-  );
 });
