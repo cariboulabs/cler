@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use cler_flowgraph_gui::ai_agent::{self, Auth, Chunk, Proposal, Turn};
+use cler_flowgraph_gui::ai_agent::{self, Auth, Chunk, Proposal, Turn, Wire};
 use cler_graph::palette_types::{Direction, Port, PortCount};
 use cler_graph::{BlockSpec, Command};
 use serde_json::{json, Value};
@@ -60,7 +60,10 @@ fn write_key(dir: &Path, key: &str, mode: u32) -> PathBuf {
 }
 
 fn played(transcript: &str) -> Vec<Chunk> {
-    transcript.lines().filter_map(ai_agent::chunk).collect()
+    transcript
+        .lines()
+        .filter_map(|line| ai_agent::chunk(Wire::Anthropic, line))
+        .collect()
 }
 
 fn spec(name: &str) -> BlockSpec {
@@ -273,7 +276,7 @@ fn every_error_shape_reads_as_a_sentence() {
 fn a_refused_turn_is_reported_instead_of_an_empty_answer() {
     let refused = r#"data: {"type":"message_delta","delta":{"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber"}},"usage":{"output_tokens":3}}"#;
 
-    let Some(Chunk::Failed(sentence)) = ai_agent::chunk(refused) else {
+    let Some(Chunk::Failed(sentence)) = ai_agent::chunk(Wire::Anthropic, refused) else {
         panic!("a refusal must not read as an empty answer");
     };
 
@@ -284,7 +287,11 @@ fn a_refused_turn_is_reported_instead_of_an_empty_answer() {
 #[test]
 fn noise_between_events_is_ignored() {
     for line in ["", "event: message_start", ": ping", "data: not json"] {
-        assert_eq!(ai_agent::chunk(line), None, "{line} should be ignored");
+        assert_eq!(
+            ai_agent::chunk(Wire::Anthropic, line),
+            None,
+            "{line} should be ignored"
+        );
     }
 }
 
@@ -421,9 +428,13 @@ data: {"type":"message_stop"}
 
 fn spoken(transcript: &str) -> (ai_agent::Reply, String) {
     let mut said = String::new();
-    let reply = ai_agent::gather(transcript.lines().map(str::to_string), |text| {
-        said.push_str(text);
-    });
+    let reply = ai_agent::gather(
+        Wire::Anthropic,
+        transcript.lines().map(str::to_string),
+        |text| {
+            said.push_str(text);
+        },
+    );
     (reply, said)
 }
 

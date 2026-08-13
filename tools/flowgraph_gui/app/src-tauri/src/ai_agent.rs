@@ -20,6 +20,7 @@ pub const TOOL_NAME: &str = "propose_commands";
 pub enum Wire {
     Anthropic,
     OpenAi,
+    Responses,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -683,8 +684,10 @@ pub fn request(context: &str, question: &str, history: &[Turn], acting: bool, oa
         })
         .collect();
     messages.push(json!({ "role": "user", "content": question }));
-    if provider().wire == Wire::OpenAi {
-        return openai_request(context, acting, messages);
+    match provider().wire {
+        Wire::OpenAi => return openai_request(context, acting, messages),
+        Wire::Responses => return responses_request(context, acting, messages),
+        Wire::Anthropic => {}
     }
     let mut system = Vec::new();
     if oauth {
@@ -726,11 +729,91 @@ fn openai_request(context: &str, acting: bool, turns: Vec<Value>) -> String {
     body.to_string()
 }
 
-pub fn chunk(line: &str) -> Option<Chunk> {
-    match provider().wire {
+// The Responses API refuses store:true and an empty instructions string, and
+// answers tool_choice without tools with a 400.
+fn responses_request(context: &str, acting: bool, turns: Vec<Value>) -> String {
+    let mut body = json!({
+        "model": model(),
+        "store": false,
+        "stream": true,
+        "instructions": format!("{}\n\n{context}", preamble(acting)),
+        "input": turns,
+        "parallel_tool_calls": true,
+        "reasoning": { "effort": OPENAI_EFFORT }
+    });
+    if acting {
+        body["tools"] = json!([responses_tool()]);
+        body["tool_choice"] = json!("auto");
+    }
+    body.to_string()
+}
+
+fn responses_tool() -> Value {
+    json!({
+        "type": "function",
+        "name": TOOL_NAME,
+        "description": TOOL_PURPOSE,
+        "parameters": tool_schema(),
+        // tool_schema() puts anyOf inside commands.items, which strict mode rejects.
+        "strict": false
+    })
+}
+
+pub fn chunk(wire: Wire, line: &str) -> Option<Chunk> {
+    match wire {
         Wire::Anthropic => anthropic_chunk(line),
         Wire::OpenAi => openai_chunk(line),
+        Wire::Responses => responses_chunk(line),
     }
+}
+
+fn responses_chunk(line: &str) -> Option<Chunk> {
+    let payload = line.strip_prefix("data:")?.trim();
+    let value: Value = serde_json::from_str(payload).ok()?;
+    match value.get("type").and_then(Value::as_str)? {
+        "response.output_text.delta" => value
+            .get("delta")
+            .and_then(Value::as_str)
+            .map(|text| Chunk::Text(text.to_string())),
+        "response.output_item.added"
+            if value.pointer("/item/type") == Some(&json!("function_call")) =>
+        {
+            Some(Chunk::ToolStart(
+                value
+                    .pointer("/item/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            ))
+        }
+        "response.function_call_arguments.delta" => value
+            .get("delta")
+            .and_then(Value::as_str)
+            .map(|piece| Chunk::ToolJson(piece.to_string())),
+        // Not output_item.done: that also fires for reasoning and message items,
+        // and a second BlockEnd would drop the proposal.
+        "response.function_call_arguments.done" => Some(Chunk::BlockEnd),
+        // Usage rides this terminal frame, and Chunk::Done would end gather()
+        // before it is read; the stream ends at EOF instead.
+        "response.completed" => Some(Chunk::Usage(
+            counted(&value, "/response/usage/input_tokens"),
+            counted(&value, "/response/usage/output_tokens"),
+        )),
+        "response.failed" | "response.incomplete" => Some(Chunk::Failed(stalled(&value))),
+        "error" => Some(Chunk::Failed(describe(value.get("error")))),
+        _ => None,
+    }
+}
+
+fn stalled(value: &Value) -> String {
+    let detail = value
+        .pointer("/response/error")
+        .or_else(|| value.pointer("/response/incomplete_details"))
+        .and_then(|error| error.get("message").or_else(|| error.get("reason")))
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or("no detail given");
+    format!("{} ended the turn early: {detail}", provider().label)
 }
 
 fn openai_chunk(line: &str) -> Option<Chunk> {
@@ -896,11 +979,15 @@ fn proposed(name: &str, body: &str) -> Result<Proposal, String> {
     })
 }
 
-pub fn gather(lines: impl Iterator<Item = String>, mut spoken: impl FnMut(&str)) -> Reply {
+pub fn gather(
+    wire: Wire,
+    lines: impl Iterator<Item = String>,
+    mut spoken: impl FnMut(&str),
+) -> Reply {
     let mut reply = Reply::default();
     let mut open: Option<(String, String)> = None;
     for line in lines {
-        match chunk(&line) {
+        match chunk(wire, &line) {
             Some(Chunk::Text(text)) => spoken(&text),
             Some(Chunk::ToolStart(name)) => open = Some((name, String::new())),
             Some(Chunk::ToolJson(piece)) => {
@@ -1018,6 +1105,11 @@ fn stream(auth: &Auth, body: &str, emit: &Emit, path: &str, flag: &AtomicBool) -
         (Wire::OpenAi, Auth::ApiKey(key)) => {
             prepared.header("authorization", format!("Bearer {key}"))
         }
+        (Wire::Responses, Auth::ApiKey(_)) => {
+            return Reply::failed(
+                "signing in with ChatGPT is the only way to use this provider".to_string(),
+            )
+        }
         (_, Auth::OAuth(token)) => prepared
             .header("anthropic-version", API_VERSION)
             .header("authorization", format!("Bearer {token}"))
@@ -1039,7 +1131,7 @@ fn stream(auth: &Auth, body: &str, emit: &Emit, path: &str, flag: &AtomicBool) -
         .lines()
         .map_while(Result::ok)
         .take_while(|_| !flag.load(Ordering::Relaxed));
-    gather(lines, |text| {
+    gather(provider.wire, lines, |text| {
         emit(DELTA_EVENT, json!({ "path": path, "text": text }));
     })
 }
@@ -1155,13 +1247,83 @@ mod tests {
             "data: [DONE]",
         ];
         let mut said = String::new();
-        let reply = gather(transcript.iter().map(|line| line.to_string()), |text| {
-            said.push_str(text)
-        });
+        let reply = gather(
+            Wire::OpenAi,
+            transcript.iter().map(|line| line.to_string()),
+            |text| said.push_str(text),
+        );
         choose(&dir, None);
 
         assert_eq!(said, "Renaming it.");
         assert_eq!(reply.failure, None);
+        assert_eq!((reply.input, reply.output), (4211, 98));
+        assert_eq!(
+            reply.proposal,
+            Some(Proposal {
+                rationale: "rename".to_string(),
+                commands: vec![json!({
+                    "command": "set_display_name",
+                    "site": 0,
+                    "block": "source1",
+                    "new_text": "Chirp"
+                })]
+            })
+        );
+    }
+
+    #[test]
+    fn the_responses_wire_sends_a_flat_tool_and_none_of_the_chat_body() {
+        let _guard = settings::test_guard();
+        let turns = vec![json!({ "role": "user", "content": "add a gain" })];
+        let body: Value = serde_json::from_str(&responses_request("<graph/>", true, turns.clone()))
+            .expect("json");
+
+        assert_eq!(body["store"], false);
+        assert!(body["instructions"]
+            .as_str()
+            .is_some_and(|text| !text.trim().is_empty()));
+        assert!(body["instructions"]
+            .as_str()
+            .is_some_and(|text| text.contains("<graph/>")));
+        assert!(body.get("system").is_none());
+        assert!(body.get("messages").is_none());
+        assert!(body.get("max_completion_tokens").is_none());
+        assert_eq!(body["input"][0]["content"], "add a gain");
+        assert_eq!(body["parallel_tool_calls"], true);
+        assert_eq!(body["reasoning"]["effort"], OPENAI_EFFORT);
+        assert_eq!(body["tools"][0]["name"], TOOL_NAME);
+        assert_eq!(body["tools"][0]["strict"], false);
+        assert!(body["tools"][0].get("function").is_none());
+        assert_eq!(body["tool_choice"], "auto");
+
+        let read_only: Value =
+            serde_json::from_str(&responses_request("<graph/>", false, turns)).expect("json");
+        assert!(read_only.get("tools").is_none());
+        assert!(read_only.get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn a_responses_stream_yields_the_same_text_proposal_and_usage() {
+        let transcript = [
+            r#"data: {"type":"response.output_text.delta","delta":"Renaming it."}"#,
+            r#"data: {"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1"}}"#,
+            r#"data: {"type":"response.output_item.added","item":{"type":"function_call","name":"propose_commands","call_id":"call_1"}}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","delta":"{\"rationale\":\"rename\",\"commands\":[{\"command\":\"set_display_name\","}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","delta":"\"site\":0,\"block\":\"source1\",\"new_text\":\"Chirp\"}]}"}"#,
+            r#"data: {"type":"response.function_call_arguments.done","arguments":"{}"}"#,
+            r#"data: {"type":"response.output_item.done","item":{"type":"function_call","name":"propose_commands"}}"#,
+            r#"data: {"type":"response.completed","response":{"usage":{"input_tokens":4211,"output_tokens":98}}}"#,
+        ];
+        let mut said = String::new();
+        let reply = gather(
+            Wire::Responses,
+            transcript.iter().map(|line| line.to_string()),
+            |text| said.push_str(text),
+        );
+
+        assert_eq!(said, "Renaming it.");
+        assert_eq!(reply.failure, None);
+        assert_eq!(reply.dropped, 0);
         assert_eq!((reply.input, reply.output), (4211, 98));
         assert_eq!(
             reply.proposal,
