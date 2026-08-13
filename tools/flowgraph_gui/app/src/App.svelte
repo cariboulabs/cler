@@ -710,6 +710,8 @@
     alert = { text: message, at: alerted, tone: 'note' };
   }
 
+  // Asked for when the panel is first opened, not at startup: it is a network call for
+  // a rail tab most sessions never reach.
   async function refreshModels() {
     if (!desktop) {
       agentModels = [];
@@ -729,7 +731,6 @@
     }
     try {
       keyStatus = await aiAgentStatus();
-      await refreshModels();
     } catch (error) {
       keyStatus = {
         available: false,
@@ -760,6 +761,7 @@
         aiAgentModel: null
       });
       await refreshAiAgent();
+      await refreshModels();
     } catch (error) {
       announce(describeApplyError(error));
     }
@@ -938,6 +940,7 @@
   function pickRailTab(next: RailTab) {
     rightTab = next;
     rightOpen = true;
+    if (next === 'ai-agent' && agentModels.length === 0) void refreshModels();
   }
 
   function toggleAiAgent() {
@@ -947,6 +950,7 @@
     }
     rightTab = 'ai-agent';
     rightOpen = true;
+    if (agentModels.length === 0) void refreshModels();
   }
 
   function toggleChrome() {
