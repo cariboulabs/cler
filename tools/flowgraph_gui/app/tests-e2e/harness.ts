@@ -196,10 +196,13 @@ export const test = base.extend<Cler>({
           ).__CLER_E2E__.answerDialog(answer),
         path
       );
-      await page.getByTestId('open').click();
-      const shown = page.locator('aside.sidebar .path');
+      await page.getByTestId('file-menu').click();
+      await page.getByTestId('file-open').click();
+      const shown = page.getByTestId('doc-path');
       await expect(shown).toHaveAttribute('title', resolve(path), { timeout: 30_000 });
       await expect(page.locator('.svelte-flow__node').first()).toBeVisible({ timeout: 30_000 });
+      const inspector = page.getByTestId('rail-tab-inspector');
+      if ((await inspector.getAttribute('aria-selected')) !== 'true') await inspector.click();
       return resolve(path);
     });
   },
@@ -243,14 +246,14 @@ export const test = base.extend<Cler>({
   }
 });
 
+export async function saveFile(page: Page): Promise<void> {
+  await page.getByTestId('file-menu').click();
+  await page.getByTestId('file-save').click();
+}
+
 async function centre(locator: Locator): Promise<{ x: number; y: number }> {
   await expect(locator).toBeVisible();
   const box = await locator.boundingBox();
   if (!box) throw new Error('handle has no box');
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-}
-
-export async function revision(page: Page): Promise<number> {
-  const text = await page.locator('aside.sidebar dl dd').nth(1).textContent();
-  return Number(text);
 }

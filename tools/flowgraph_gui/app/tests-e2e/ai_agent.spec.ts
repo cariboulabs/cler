@@ -1,4 +1,4 @@
-import { expect, test } from './harness';
+import { expect, saveFile, test } from './harness';
 
 test('j) the AI agent asks for a key before it can cost anything', async ({
   page,
@@ -16,14 +16,14 @@ test('j) the AI agent asks for a key before it can cost anything', async ({
     await page.keyboard.press('Control+j');
     await expect(page.getByTestId('ai-agent-panel')).toBeVisible();
     await expect(page.getByTestId('rail-tab-ai-agent')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByTestId('ai-agent-model')).toHaveCount(0);
+    await expect(page.getByTestId('ai-agent-provider-select')).toBeVisible();
   });
 
   await test.step('the real backend reports no key and offers sign-in', async () => {
     await expect(page.getByTestId('ai-agent-setup')).toBeVisible();
     await expect(page.getByTestId('ai-agent-signin')).toBeVisible();
     await expect(page.getByTestId('ai-agent-input')).toHaveCount(0);
-    await expect(page.getByTestId('ai-agent-chip')).toHaveCount(0);
+    await expect(page.getByTestId('ai-agent-reason')).toContainText('ANTHROPIC_API_KEY');
     await shot('ai-agent-setup');
   });
 
@@ -79,7 +79,7 @@ test('k) an accepted proposal is checked, drafted, then saved to the file', asyn
 
     expect(work.bytes(opened)).toBe(original);
     await expect(page.getByTestId('draft-chip')).toBeVisible();
-    await page.getByTestId('save').click();
+    await saveFile(page);
     await expect
       .poll(() => work.bytes(opened), { timeout: 20_000 })
       .toContain('SourceCWBlock<float> source1("Chirp"');
@@ -91,7 +91,7 @@ test('k) an accepted proposal is checked, drafted, then saved to the file', asyn
   await test.step('the whole proposal is one undo step', async () => {
     await page.getByTestId('undo').click();
     expect(work.bytes(opened)).not.toBe(original);
-    await page.getByTestId('save').click();
+    await saveFile(page);
     await expect.poll(() => work.bytes(opened), { timeout: 20_000 }).toBe(original);
     await expect(page.getByTestId('undo')).toBeDisabled();
     await expect(page.getByTestId('ai-agent-proposal')).toBeVisible();

@@ -23,6 +23,10 @@ test('h) F7 checks the temporary draft and blames the right block without saving
     await field.blur();
 
     await page.keyboard.press('F7');
+    await expect(page.getByTestId('problems')).toHaveAttribute('data-count', '1', {
+      timeout: 90_000
+    });
+    await page.getByTestId('tab-diagnostics').click();
     await expect(rows.first()).toBeVisible({ timeout: 90_000 });
     await expect(rows.first()).toContainText('numeric literal');
     await expect(page.locator('[data-diagnostic-block]').first()).toHaveText('source1');
@@ -39,9 +43,8 @@ test('h) F7 checks the temporary draft and blames the right block without saving
       .toContain('1.0ff');
   });
 
-  await test.step('a copy outside desktop_examples has no cmake target', async () => {
-    await expect(page.getByTestId('build')).toBeDisabled();
+  await test.step('a copy outside desktop_examples builds as a draft target', async () => {
+    await expect(page.getByTestId('build')).toBeEnabled();
     await expect(page.getByTestId('run')).toBeDisabled();
-    await expect(page.getByTestId('build-tooltip')).toContainText('only files under desktop_examples');
   });
 });

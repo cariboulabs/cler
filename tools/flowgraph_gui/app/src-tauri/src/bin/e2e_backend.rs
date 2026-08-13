@@ -159,6 +159,9 @@ fn dispatch(
             method: None,
         });
     }
+    if cmd == "ai_agent_stop" {
+        return Reply::Value(Value::Null);
+    }
     if cmd == "app_settings" {
         return Reply::Value(serde_json::to_value(settings::current()).unwrap_or(Value::Null));
     }
@@ -215,6 +218,17 @@ fn dispatch(
                     outcome(document::preview(docs, &path, base, commands))
                 }
                 _ => Reply::Loud("preview_commands needs baseRevision and commands".to_string()),
+            }
+        }
+        "move_nodes" => {
+            let view = args.get("view").and_then(Value::as_str).map(str::to_string);
+            let moves = args
+                .get("moves")
+                .cloned()
+                .and_then(|listed| serde_json::from_value::<Vec<document::NodeMove>>(listed).ok());
+            match (view, moves) {
+                (Some(view), Some(moves)) => outcome(document::move_nodes(docs, &path, view, moves)),
+                _ => Reply::Loud("move_nodes needs view and moves".to_string()),
             }
         }
         "undo" => outcome(document::undo(docs, &path)),
