@@ -266,6 +266,18 @@ export function aiAgentStatus(): Promise<AiAgentStatus> {
   return invoker('ai_agent_status', {}) as Promise<AiAgentStatus>;
 }
 
+export type ListedModel = {
+  id: string;
+  name: string;
+  context: number;
+  input_cost: number;
+  output_cost: number;
+};
+
+export function aiAgentModels(): Promise<ListedModel[]> {
+  return invoker('ai_agent_models', {}) as Promise<ListedModel[]>;
+}
+
 export function aiAgentSetKey(key: string): Promise<AiAgentStatus> {
   return invoker('ai_agent_set_key', { key }) as Promise<AiAgentStatus>;
 }

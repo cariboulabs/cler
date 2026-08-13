@@ -28,7 +28,8 @@
   import {
     applyCommands,
     aiAgentAsk,
-    aiAgentStatus,
+    aiAgentModels,
+  aiAgentStatus,
     aiAgentOauthStart,
     aiAgentOauthLogout,
     aiAgentStop,
@@ -39,6 +40,7 @@
     previewCommands,
     type AiAgentProposal,
     type AiAgentStatus,
+  type ListedModel,
     buildTarget,
     checkDocument,
     closeDocument,
@@ -244,6 +246,7 @@
     );
   });
   let pathsMenuOpen = $state(false);
+  let agentModels = $state<ListedModel[]>([]);
   let keyStatus = $state.raw<AiAgentStatus | null>(null);
   let chat = $state.raw<Message[]>([]);
   let pendingReply = $state<number | null>(null);
@@ -707,6 +710,18 @@
     alert = { text: message, at: alerted, tone: 'note' };
   }
 
+  async function refreshModels() {
+    if (!desktop) {
+      agentModels = [];
+      return;
+    }
+    try {
+      agentModels = await aiAgentModels();
+    } catch {
+      agentModels = [];
+    }
+  }
+
   async function refreshAiAgent() {
     if (!desktop) {
       keyStatus = { available: false, provider: 'anthropic', model: '—', reason: NO_SHELL, method: null };
@@ -714,6 +729,7 @@
     }
     try {
       keyStatus = await aiAgentStatus();
+      await refreshModels();
     } catch (error) {
       keyStatus = {
         available: false,
@@ -1838,6 +1854,7 @@
       note={viewerNote}
       revision={doc.revision}
       {selected}
+      models={agentModels}
       ontoggle={() => (rightOpen = !rightOpen)}
       ontab={pickRailTab}
       onask={(question) => void askAiAgent(question)}

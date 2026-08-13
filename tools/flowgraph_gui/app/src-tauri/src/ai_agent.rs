@@ -27,6 +27,7 @@ pub struct Provider {
     pub id: &'static str,
     pub label: &'static str,
     pub endpoint: &'static str,
+    pub models_endpoint: &'static str,
     pub key_env: &'static str,
     pub key_file: &'static str,
     pub key_prefix: &'static str,
@@ -39,6 +40,7 @@ pub const ANTHROPIC: Provider = Provider {
     id: "anthropic",
     label: "the Anthropic API",
     endpoint: "https://api.anthropic.com/v1/messages",
+    models_endpoint: "https://api.anthropic.com/v1/models?limit=100",
     key_env: "ANTHROPIC_API_KEY",
     key_file: "anthropic-key",
     key_prefix: "sk-ant-",
@@ -51,6 +53,7 @@ pub const OPENAI: Provider = Provider {
     id: "openai",
     label: "the OpenAI API",
     endpoint: "https://api.openai.com/v1/chat/completions",
+    models_endpoint: "https://api.openai.com/v1/models",
     key_env: "OPENAI_API_KEY",
     key_file: "openai-key",
     key_prefix: "sk-",
@@ -77,6 +80,7 @@ const GUIDE_SECTIONS: [&str; 4] = ["## 1. ", "## 4. ", "## 5. ", "## 6. "];
 const MODEL_BUDGET: usize = 16_000;
 const SOURCE_BUDGET: usize = 32_000;
 const PALETTE_BUDGET: usize = 8_000;
+const BUDGET_CONTEXT: usize = 200_000;
 
 const EXPLAIN: &str = "\
 You are the cler flowgraph assistant, embedded in the cler flowgraph editor.
@@ -400,12 +404,29 @@ pub fn selection(context: String, selected: Option<String>) -> String {
 }
 
 pub fn context(path: &str, model_json: &str, source: &str, specs: &[BlockSpec]) -> String {
+    let room = budget_scale();
     format!(
         "<open_file>{path}</open_file>\n\n<graph_model>\n{}\n</graph_model>\n\n<source>\n{}\n</source>\n\n<palette>\n{}\n</palette>",
-        clamp(model_json, MODEL_BUDGET),
-        clamp(source, SOURCE_BUDGET),
-        clamp(&palette_list(specs), PALETTE_BUDGET)
+        clamp(model_json, scaled(MODEL_BUDGET, room)),
+        clamp(source, scaled(SOURCE_BUDGET, room)),
+        clamp(&palette_list(specs), scaled(PALETTE_BUDGET, room))
     )
+}
+
+/// The budgets below were sized for a 200k-token context. A model with less room
+/// overflows on a file these numbers happily allow, so they follow the catalog when it
+/// knows the model, and stay as written when it does not.
+fn budget_scale() -> f64 {
+    let provider = provider();
+    match crate::catalog::context_of(provider.id, &model()) {
+        Some(context) => context as f64 / BUDGET_CONTEXT as f64,
+        None => 1.0,
+    }
+}
+
+fn scaled(budget: usize, room: f64) -> usize {
+    let wanted = (budget as f64 * room.clamp(0.1, 1.0)) as usize;
+    wanted.max(budget / 8)
 }
 
 fn preamble(acting: bool) -> String {
@@ -934,6 +955,50 @@ pub fn gather(lines: impl Iterator<Item = String>, mut spoken: impl FnMut(&str))
         }
     }
     reply
+}
+
+/// What the provider says it serves today, merged with the vendored catalog. A failure
+/// here is not worth an error in the panel — the catalog alone is a usable list, so the
+/// picker keeps working offline, on a proxy, or behind an expired key.
+pub fn listed_models(config_dir: &Path) -> Vec<crate::catalog::Listed> {
+    let provider = provider();
+    let live = locate(std::env::var(provider.key_env).ok(), config_dir)
+        .ok()
+        .and_then(|auth| fetch_models(&provider, &auth))
+        .unwrap_or_default();
+    crate::catalog::merge(provider.id, live)
+}
+
+fn fetch_models(provider: &Provider, auth: &Auth) -> Option<Vec<String>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(CONNECT_TIMEOUT)
+        .build()
+        .ok()?;
+    let asked = client.get(provider.models_endpoint);
+    let asked = match (provider.wire, auth) {
+        (Wire::Anthropic, Auth::ApiKey(key)) => asked
+            .header("anthropic-version", API_VERSION)
+            .header("x-api-key", key),
+        (Wire::OpenAi, Auth::ApiKey(key)) => asked.header("authorization", format!("Bearer {key}")),
+        (_, Auth::OAuth(token)) => asked
+            .header("anthropic-version", API_VERSION)
+            .header("authorization", format!("Bearer {token}"))
+            .header("anthropic-beta", "claude-code-20250219,oauth-2025-04-20")
+            .header("user-agent", "claude-cli/2.0.0"),
+    };
+    let answered = asked.send().ok()?;
+    if !answered.status().is_success() {
+        return None;
+    }
+    let body: Value = serde_json::from_str(&answered.text().ok()?).ok()?;
+    let listed: Vec<String> = body
+        .get("data")?
+        .as_array()?
+        .iter()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect();
+    (!listed.is_empty()).then_some(listed)
 }
 
 pub fn stop(talks: &Talks, path: &str) {

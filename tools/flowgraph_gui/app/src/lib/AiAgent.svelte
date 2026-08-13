@@ -1,7 +1,7 @@
 <script lang="ts">
   import RailTabs, { type RailTab } from './RailTabs.svelte';
   import { describeCommand, render, type Message, type Proposal } from './agent';
-  import type { AiAgentStatus } from './backend';
+  import type { AiAgentStatus, ListedModel } from './backend';
 
   type Props = {
     open: boolean;
@@ -12,6 +12,7 @@
     note: string;
     revision: number;
     selected: string | null;
+    models: ListedModel[];
     ontoggle: () => void;
     ontab: (next: RailTab) => void;
     onask: (question: string) => void;
@@ -35,6 +36,7 @@
     note,
     revision,
     selected,
+    models,
     ontoggle,
     ontab,
     onask,
@@ -63,16 +65,25 @@
     { id: 'openai', label: 'OpenAI' }
   ];
 
-  const TIERS: Record<string, { id: string; label: string }[]> = {
-    anthropic: [
-      { id: 'claude-haiku-4-5-20251001', label: 'Fast — cheapest' },
-      { id: 'claude-sonnet-5', label: 'Balanced' },
-      { id: 'claude-opus-5', label: 'Deep — most capable' }
-    ]
-  };
+  const chosen = $derived(models.find((one) => one.id === status?.model) ?? null);
+  const known = $derived(chosen !== null);
 
-  const tiers = $derived(TIERS[status?.provider ?? 'anthropic'] ?? null);
-  const known = $derived(tiers?.some((tier) => tier.id === status?.model) === true);
+  const VENDOR = /^(Claude|OpenAI)\s+/;
+
+  function shortName(model: ListedModel): string {
+    return model.name.replace(VENDOR, '');
+  }
+
+  function priced(model: ListedModel): string {
+    const window =
+      model.context >= 1_000_000
+        ? `${model.context / 1_000_000}M`
+        : `${Math.round(model.context / 1000)}k`;
+    const cost = model.input_cost > 0 ? `$${model.input_cost}/$${model.output_cost} per Mtok` : '';
+    return [model.context > 0 ? `${window} context` : '', cost]
+      .filter((part) => part.length > 0)
+      .join(' · ');
+  }
 
   const STALE = 'the graph moved on since this was checked — re-check it before applying';
   const CEILING = 'one proposal per answer: further tool calls in that turn were dropped';
@@ -167,18 +178,18 @@
         </span>
         {#if status.available}
           <span class="name">
-            {#if tiers}
+            {#if models.length > 0}
               <select
                 class="model-select"
                 data-testid="ai-agent-model-select"
                 value={status.model}
                 onchange={(event) => onmodel(event.currentTarget.value)}
               >
-                {#each tiers as tier (tier.id)}
-                  <option value={tier.id}>{tier.label}</option>
+                {#each models as model (model.id)}
+                  <option value={model.id}>{shortName(model)}</option>
                 {/each}
                 {#if !known}
-                  <option value={status.model}>Custom</option>
+                  <option value={status.model}>{status.model}</option>
                 {/if}
               </select>
             {:else}
@@ -191,6 +202,9 @@
               />
             {/if}
           </span>
+        {/if}
+        {#if chosen && priced(chosen)}
+          <span class="faint" data-testid="ai-agent-model-cost">{priced(chosen)}</span>
         {/if}
       </div>
     {/if}
@@ -411,9 +425,12 @@
   .model {
     display: flex;
     flex-direction: column;
-    gap: var(--sp-0);
+    gap: var(--sp-1);
     padding-bottom: var(--sp-2);
     border-bottom: 1px solid var(--border);
+  }
+  .model .name {
+    display: block;
   }
   .name {
     font-family: var(--mono);
@@ -448,6 +465,8 @@
     margin-left: var(--sp-2);
   }
   .model-input {
+    width: 100%;
+    box-sizing: border-box;
     font: inherit;
     font-family: var(--mono);
     color: var(--text);
@@ -455,9 +474,11 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 1px var(--sp-2);
-    width: 12ch;
   }
   .model-select {
+    width: 100%;
+    min-width: 0;
+    text-overflow: ellipsis;
     background: var(--bg-2);
     color: var(--fg);
     border: 1px solid var(--border);

@@ -80,7 +80,7 @@ describe('the AI agent says what it needs before it costs anything', () => {
   );
 
   it(
-    'offers speed and cost, never a vendor model name',
+    'names the models the provider actually serves, and what they cost',
     async () => {
       const page = await boot();
       await openAiAgent(page);
@@ -88,9 +88,14 @@ describe('the AI agent says what it needs before it costs anything', () => {
       expect(
         await page.locator('[data-testid="ai-agent-model-select"]').inputValue()
       ).toBe('claude-opus-5');
-      const labels = await page.locator('[data-testid="ai-agent-model-select"] option').allTextContents();
-      expect(labels).toEqual(['Fast — cheapest', 'Balanced', 'Deep — most capable']);
-      expect(labels.join(' ')).not.toContain('claude');
+      const labels = await page
+        .locator('[data-testid="ai-agent-model-select"] option')
+        .allTextContents();
+      expect(labels).toEqual(['Opus 5', 'Sonnet 5']);
+      expect(labels.join(' ')).not.toContain('Claude');
+      expect(await page.textContent('[data-testid="ai-agent-model-cost"]')).toBe(
+        '1M context · $5/$25 per Mtok'
+      );
       await page.close();
     },
     CASE

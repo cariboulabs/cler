@@ -1,5 +1,6 @@
 pub mod ai_agent;
 pub mod build;
+pub mod catalog;
 pub mod document;
 pub mod oauth;
 pub mod provenance;
@@ -253,6 +254,11 @@ fn ai_agent_status(app: AppHandle) -> Status {
 }
 
 #[tauri::command]
+fn ai_agent_models(app: AppHandle) -> Vec<catalog::Listed> {
+    ai_agent::listed_models(&config_dir(&app))
+}
+
+#[tauri::command]
 fn ai_agent_set_key(key: String, app: AppHandle) -> Result<Status, String> {
     ai_agent::store_key(&key, &config_dir(&app))
 }
@@ -443,6 +449,7 @@ pub fn run() {
             stop_target,
             ai_agent_status,
             ai_agent_set_key,
+            ai_agent_models,
             ai_agent_ask,
             ai_agent_stop,
             ai_agent_oauth_start,

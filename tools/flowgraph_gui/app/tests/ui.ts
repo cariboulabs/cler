@@ -407,6 +407,14 @@ function installFake(setup: Setup) {
       return (args as Loose).next;
     }
     if (command === 'run_target') runs.push(args.args);
+    if (command === 'ai_agent_models') {
+      return setup.aiAgent.provider === 'anthropic'
+        ? [
+            { id: 'claude-opus-5', name: 'Claude Opus 5', context: 1000000, input_cost: 5, output_cost: 25 },
+            { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', context: 1000000, input_cost: 3, output_cost: 15 }
+          ]
+        : [];
+    }
     if (command === 'ai_agent_status') {
       const chosen = (settings.at(-1) as Loose | undefined)?.aiAgentProvider ?? 'anthropic';
       if (chosen === setup.aiAgent.provider) return setup.aiAgent;
