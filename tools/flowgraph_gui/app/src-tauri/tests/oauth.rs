@@ -69,6 +69,12 @@ fn tokens_round_trip_and_lock_down() {
             .mode();
         assert_eq!(mode & 0o777, 0o600);
     }
+    let leftovers: Vec<_> = std::fs::read_dir(&dir)
+        .expect("read dir")
+        .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+        .filter(|name| name.to_string_lossy().ends_with(".tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -92,6 +98,76 @@ fn a_stale_token_refreshes_and_the_rotated_refresh_is_persisted() {
         Some(tokens("new-access", "rotated-refresh", now + 3_600_000)),
         "the rotated refresh token must be persisted"
     );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn racing_threads_renew_once_and_share_the_new_access_token() {
+    let dir = temp_dir("race");
+    let now = 1_000_000_000_000u64;
+    oauth::store(&dir, &tokens("old-access", "old-refresh", now + 60_000)).expect("store stale");
+
+    let renewals = AtomicUsize::new(0);
+    let (entered, started) = std::sync::mpsc::channel();
+    let (first, second) = std::thread::scope(|scope| {
+        let one = scope.spawn(|| {
+            oauth::access_via(&dir, now, |_| {
+                renewals.fetch_add(1, Ordering::SeqCst);
+                entered.send(()).ok();
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                Ok(tokens("new-access", "rotated-refresh", now + 3_600_000))
+            })
+        });
+        started.recv().expect("the first renew starts");
+        let two = scope.spawn(|| {
+            oauth::access_via(&dir, now, |_| {
+                renewals.fetch_add(1, Ordering::SeqCst);
+                Ok(tokens("other-access", "other-refresh", now + 3_600_000))
+            })
+        });
+        (one.join().expect("thread one"), two.join().expect("thread two"))
+    });
+
+    assert_eq!(renewals.load(Ordering::SeqCst), 1, "a single-use refresh may be spent once");
+    assert_eq!(first.as_deref(), Ok("new-access"));
+    assert_eq!(second.as_deref(), Ok("new-access"));
+    assert_eq!(
+        oauth::load(&dir),
+        Some(tokens("new-access", "rotated-refresh", now + 3_600_000))
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_failed_store_or_renew_leaves_the_previous_tokens_complete() {
+    let dir = temp_dir("survives");
+    let now = 1_000_000_000_000u64;
+    let previous = tokens("old-access", "old-refresh", now + 60_000);
+    oauth::store(&dir, &previous).expect("store stale");
+
+    // A directory where the temp file belongs makes the write fail without
+    // ever touching the real token file.
+    let mut name = oauth::token_path(&dir)
+        .file_name()
+        .expect("token file name")
+        .to_os_string();
+    name.push(".tmp");
+    let blocker = dir.join(&name);
+    std::fs::create_dir(&blocker).expect("blocker directory");
+
+    let refusal = oauth::access_via(&dir, now, |_| {
+        Ok(tokens("new-access", "rotated-refresh", now + 3_600_000))
+    })
+    .expect_err("the store must fail");
+    assert!(refusal.contains("cannot write"), "{refusal}");
+    assert_eq!(oauth::load(&dir), Some(previous.clone()));
+
+    std::fs::remove_dir(&blocker).expect("clear blocker");
+    let refusal = oauth::access_via(&dir, now, |_| Err("the network is down".to_string()))
+        .expect_err("the renew must fail");
+    assert_eq!(refusal, "the network is down");
+    assert!(oauth::token_path(&dir).is_file());
+    assert_eq!(oauth::load(&dir), Some(previous));
     std::fs::remove_dir_all(&dir).ok();
 }
 

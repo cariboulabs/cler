@@ -72,20 +72,47 @@ pub fn load(config_dir: &Path) -> Option<Tokens> {
     serde_json::from_str(&text).ok()
 }
 
+// A refresh token is single use: a truncated file is a permanent brick, so the
+// new tokens land in a sibling file and reach the real path by rename only.
 pub fn store(config_dir: &Path, tokens: &Tokens) -> Result<(), String> {
     std::fs::create_dir_all(config_dir)
         .map_err(|cause| format!("cannot create {}: {cause}", config_dir.display()))?;
     let file = token_path(config_dir);
+    let mut name = file.file_name().unwrap_or_default().to_os_string();
+    name.push(".tmp");
+    let temp = file.with_file_name(name);
     let text = serde_json::to_string(tokens).map_err(|cause| cause.to_string())?;
-    std::fs::write(&file, text)
-        .map_err(|cause| format!("cannot write {}: {cause}", file.display()))?;
+
+    let written = (|| -> std::io::Result<()> {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut handle = options.open(&temp)?;
+        handle.write_all(text.as_bytes())?;
+        handle.sync_all()
+    })();
+    if let Err(cause) = written {
+        std::fs::remove_file(&temp).ok();
+        return Err(format!("cannot write {}: {cause}", temp.display()));
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600))
-            .map_err(|cause| format!("cannot chmod {}: {cause}", file.display()))?;
+        if let Err(cause) =
+            std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o600))
+        {
+            std::fs::remove_file(&temp).ok();
+            return Err(format!("cannot chmod {}: {cause}", temp.display()));
+        }
     }
-    Ok(())
+    std::fs::rename(&temp, &file).map_err(|cause| {
+        std::fs::remove_file(&temp).ok();
+        format!("cannot replace {}: {cause}", file.display())
+    })
 }
 
 pub fn now_ms() -> u64 {
@@ -99,14 +126,26 @@ pub fn fresh(tokens: &Tokens, now_ms: u64) -> bool {
     now_ms + REFRESH_MARGIN_MS < tokens.expires_unix_ms
 }
 
+// ponytail: one process-wide lock, not one per token file — a login refreshes
+// once every few hours, so contention is not a thing worth modelling.
+static RENEWING: Mutex<()> = Mutex::new(());
+
 pub fn access_via(
     config_dir: &Path,
     now: u64,
     renew: impl FnOnce(&str) -> Result<Tokens, String>,
 ) -> Result<String, String> {
-    let tokens = load(config_dir).ok_or_else(|| {
+    let missing = || {
         format!("not signed in with Claude — no {}", token_path(config_dir).display())
-    })?;
+    };
+    let tokens = load(config_dir).ok_or_else(missing)?;
+    if fresh(&tokens, now) {
+        return Ok(tokens.access);
+    }
+    let _turn = RENEWING.lock().unwrap_or_else(PoisonError::into_inner);
+    // A sibling thread may have rotated while we waited; its refresh token is
+    // the only usable one left, so re-read rather than renew from ours.
+    let tokens = load(config_dir).ok_or_else(missing)?;
     if fresh(&tokens, now) {
         return Ok(tokens.access);
     }
@@ -285,6 +324,8 @@ fn exchange(code: &str, state: &str, verifier: &str) -> Result<Tokens, String> {
     }))
 }
 
+// Anthropic-shaped: this endpoint may answer without a refresh_token, meaning
+// the old one still stands. Carrying it forward is per-flow, not universal.
 fn refresh_http(refresh: &str) -> Result<Tokens, String> {
     let mut renewed = token_request(json!({
         "grant_type": "refresh_token",
