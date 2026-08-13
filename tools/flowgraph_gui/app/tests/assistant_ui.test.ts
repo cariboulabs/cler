@@ -174,55 +174,6 @@ describe('signing in with Claude is the front door', () => {
 
 });
 
-/* ============================================================ starters */
-
-describe('the starter chips follow the canvas', () => {
-  it(
-    'offers three starters and lights the third one only with a selection',
-    async () => {
-      const page = await boot();
-      await openAssistant(page);
-
-      expect(await page.locator(CHIP).count()).toBe(3);
-      expect(await page.locator(`${CHIP}[data-chip="0"]`).textContent()).toContain(
-        'Explain this flowgraph'
-      );
-      const third = page.locator(`${CHIP}[data-chip="2"]`);
-      expect(await third.isDisabled()).toBe(true);
-      expect(await third.getAttribute('title')).toContain('select a block');
-
-      await page.click('.svelte-flow__node[data-id="source1"]');
-      await expect.poll(() => third.textContent()).toBe('What does CWSource do?');
-      expect(await third.isDisabled()).toBe(false);
-
-      await page.click('.svelte-flow__node[data-id="throttle"]');
-      await expect.poll(() => third.textContent()).toBe('What does Throttle do?');
-
-      await shot(page, 'assistant-chips');
-      await page.close();
-    },
-    CASE
-  );
-
-  it(
-    'sends the selected block as the question when the third chip is taken',
-    async () => {
-      const page = await boot();
-      await openAssistant(page);
-      await page.click('.svelte-flow__node[data-id="source1"]');
-      await page.click(`${CHIP}[data-chip="2"]`);
-      await page.waitForSelector(MESSAGE);
-
-      const sent = (await asks(page)) as { path: string; question: string }[];
-      expect(sent.length).toBe(1);
-      expect(sent[0]?.path).toBe(FAKE_PATH);
-      expect(sent[0]?.question).toContain('CWSource');
-      expect(sent[0]?.question).toContain('var source1');
-      await page.close();
-    },
-    CASE
-  );
-});
 
 /* ============================================================ streaming */
 
@@ -398,7 +349,6 @@ describe('the assistant shares the inspector rail', () => {
       await page.click('[data-testid="file-menu"]');
       await page.click('[data-testid="file-open"]');
       await expect.poll(() => page.locator(MESSAGE).count()).toBe(0);
-      expect(await page.locator('[data-testid="assistant-chip"]').count()).toBeGreaterThan(0);
       await page.close();
     },
     CASE

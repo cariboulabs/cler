@@ -33,14 +33,12 @@ export type Piece = { text: string; code: boolean; strong: boolean };
 
 export type Line = { kind: 'text' | 'bullet' | 'number'; marker: string; pieces: Piece[] };
 
-export type Chip = { label: string; question: string; enabled: boolean; hint: string };
 
 const SPANS = /(`[^`]+`|\*\*[^*]+\*\*)/;
 const BULLET = /^\s*[-*+]\s+(.*)$/;
 const NUMBER = /^\s*(\d{1,3})[.)]\s+(.*)$/;
 const HEADING = /^#{1,6}\s+(.*)$/;
 
-const NO_SELECTION = 'select a block on the canvas first';
 
 export function inline(text: string): Piece[] {
   return text
@@ -81,32 +79,6 @@ export function render(text: string): Line[] {
 
 function strong(text: string): Piece[] {
   return [{ text, code: false, strong: true }];
-}
-
-export function chips(selection: { label: string; var: string } | null): Chip[] {
-  return [
-    {
-      label: 'Explain this flowgraph',
-      question: 'Explain this flowgraph: what does it do, block by block?',
-      enabled: true,
-      hint: ''
-    },
-    {
-      label: 'Why is this edge red?',
-      question:
-        'One of the edges is drawn red. Which edge is it, why is it a type conflict, and what would fix it?',
-      enabled: true,
-      hint: ''
-    },
-    {
-      label: selection ? `What does ${selection.label} do?` : 'What does the selected block do?',
-      question: selection
-        ? `What does the block ${selection.label} (var ${selection.var}) do in this flowgraph, and how is it wired?`
-        : '',
-      enabled: selection !== null,
-      hint: selection ? '' : NO_SELECTION
-    }
-  ];
 }
 
 export function diffLines(text: string): DiffLine[] {

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use cler_flowgraph_gui::assistant::{self, Auth, Chunk, Proposal, Turn};
+use cler_flowgraph_gui::ai_agent::{self, Auth, Chunk, Proposal, Turn};
 use cler_graph::palette_types::{Direction, Port, PortCount};
 use cler_graph::{BlockSpec, Command};
 use serde_json::{json, Value};
@@ -48,7 +48,7 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 fn write_key(dir: &Path, key: &str, mode: u32) -> PathBuf {
-    let file = assistant::key_path(dir);
+    let file = ai_agent::key_path(dir);
     std::fs::write(&file, key).expect("key file");
     #[cfg(unix)]
     {
@@ -60,7 +60,7 @@ fn write_key(dir: &Path, key: &str, mode: u32) -> PathBuf {
 }
 
 fn played(transcript: &str) -> Vec<Chunk> {
-    transcript.lines().filter_map(assistant::chunk).collect()
+    transcript.lines().filter_map(ai_agent::chunk).collect()
 }
 
 fn spec(name: &str) -> BlockSpec {
@@ -95,16 +95,16 @@ fn spec(name: &str) -> BlockSpec {
 #[test]
 fn without_a_key_the_assistant_is_unavailable_and_says_what_to_do() {
     let dir = temp_dir("absent");
-    std::env::remove_var(assistant::KEY_ENV);
+    std::env::remove_var(ai_agent::KEY_ENV);
 
-    let status = assistant::status(&dir);
+    let status = ai_agent::status(&dir);
 
     assert!(!status.available, "no key means no assistant");
-    assert_eq!(status.model, assistant::MODEL);
+    assert_eq!(status.model, ai_agent::MODEL);
     let reason = status.reason.expect("a reason");
-    assert!(reason.contains(assistant::KEY_ENV), "{reason}");
+    assert!(reason.contains(ai_agent::KEY_ENV), "{reason}");
     assert!(
-        reason.contains(&assistant::key_path(&dir).display().to_string()),
+        reason.contains(&ai_agent::key_path(&dir).display().to_string()),
         "{reason}"
     );
     assert!(reason.contains("chmod 600"), "{reason}");
@@ -116,15 +116,15 @@ fn the_environment_key_outranks_the_key_file() {
     write_key(&dir, "sk-file\n", 0o600);
 
     assert_eq!(
-        assistant::locate(Some("  sk-env  ".to_string()), &dir),
+        ai_agent::locate(Some("  sk-env  ".to_string()), &dir),
         Ok(Auth::ApiKey("sk-env".to_string()))
     );
     assert_eq!(
-        assistant::locate(None, &dir),
+        ai_agent::locate(None, &dir),
         Ok(Auth::ApiKey("sk-file".to_string()))
     );
     assert_eq!(
-        assistant::locate(Some("   ".to_string()), &dir),
+        ai_agent::locate(Some("   ".to_string()), &dir),
         Ok(Auth::ApiKey("sk-file".to_string())),
         "a blank variable is not a key"
     );
@@ -136,7 +136,7 @@ fn a_key_file_other_users_can_read_is_refused() {
     let dir = temp_dir("loose");
     write_key(&dir, "sk-file", 0o644);
 
-    let refusal = assistant::locate(None, &dir).expect_err("loose permissions");
+    let refusal = ai_agent::locate(None, &dir).expect_err("loose permissions");
 
     assert!(refusal.contains("chmod 600"), "{refusal}");
     assert!(refusal.contains("644"), "{refusal}");
@@ -147,14 +147,14 @@ fn an_empty_key_file_is_refused_by_name() {
     let dir = temp_dir("empty");
     write_key(&dir, "\n\n", 0o600);
 
-    let refusal = assistant::locate(None, &dir).expect_err("empty file");
+    let refusal = ai_agent::locate(None, &dir).expect_err("empty file");
 
     assert!(refusal.contains("is empty"), "{refusal}");
 }
 
 #[test]
 fn the_guide_carries_only_the_sections_the_assistant_needs() {
-    let guide = assistant::guide();
+    let guide = ai_agent::guide();
 
     for wanted in ["## 1. ", "## 4. ", "## 5. ", "## 6. "] {
         assert!(guide.contains(wanted), "guide is missing {wanted}");
@@ -177,7 +177,7 @@ fn a_huge_file_is_clamped_and_the_source_is_elided_middle_out() {
     );
     let model = format!("{{\"blocks\":\"{}\"}}", "x".repeat(200_000));
 
-    let built = assistant::context("/tmp/big.cpp", &model, &source, &[spec("CWSource")]);
+    let built = ai_agent::context("/tmp/big.cpp", &model, &source, &[spec("CWSource")]);
 
     assert!(source.len() > 500_000, "the fixture must exceed the budget");
     assert!(
@@ -195,7 +195,7 @@ fn a_huge_file_is_clamped_and_the_source_is_elided_middle_out() {
 fn a_small_file_reaches_the_assistant_whole() {
     let source = "int main() { return 0; }\n";
 
-    let built = assistant::context("/tmp/small.cpp", "{\"sites\":[]}", source, &[]);
+    let built = ai_agent::context("/tmp/small.cpp", "{\"sites\":[]}", source, &[]);
 
     assert!(built.contains(source), "the source was rewritten");
     assert!(!built.contains("characters elided"), "nothing to elide");
@@ -203,7 +203,7 @@ fn a_small_file_reaches_the_assistant_whole() {
 
 #[test]
 fn the_palette_reaches_the_assistant_as_names_and_ports() {
-    let listed = assistant::palette_list(&[spec("CWSource")]);
+    let listed = ai_agent::palette_list(&[spec("CWSource")]);
 
     assert_eq!(
         listed,
@@ -254,26 +254,26 @@ fn every_error_shape_reads_as_a_sentence() {
     let sentence = |kind: &str| {
         let error: Value =
             serde_json::from_str(&format!(r#"{{"type":"{kind}","message":"nope"}}"#)).unwrap();
-        assistant::describe(Some(&error))
+        ai_agent::describe(Some(&error))
     };
 
-    assert!(sentence("authentication_error").contains(assistant::KEY_ENV));
+    assert!(sentence("authentication_error").contains(ai_agent::KEY_ENV));
     assert!(sentence("rate_limit_error").contains("rate limited"));
-    assert!(sentence("not_found_error").contains(assistant::MODEL));
+    assert!(sentence("not_found_error").contains(ai_agent::MODEL));
     assert!(sentence("invalid_request_error").contains("nope"));
     assert_eq!(
         sentence("teapot_error"),
         "teapot error: nope",
         "an unknown shape still reads as prose"
     );
-    assert!(assistant::describe(None).contains("no type"));
+    assert!(ai_agent::describe(None).contains("no type"));
 }
 
 #[test]
 fn a_refused_turn_is_reported_instead_of_an_empty_answer() {
     let refused = r#"data: {"type":"message_delta","delta":{"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber"}},"usage":{"output_tokens":3}}"#;
 
-    let Some(Chunk::Failed(sentence)) = assistant::chunk(refused) else {
+    let Some(Chunk::Failed(sentence)) = ai_agent::chunk(refused) else {
         panic!("a refusal must not read as an empty answer");
     };
 
@@ -284,7 +284,7 @@ fn a_refused_turn_is_reported_instead_of_an_empty_answer() {
 #[test]
 fn noise_between_events_is_ignored() {
     for line in ["", "event: message_start", ": ping", "data: not json"] {
-        assert_eq!(assistant::chunk(line), None, "{line} should be ignored");
+        assert_eq!(ai_agent::chunk(line), None, "{line} should be ignored");
     }
 }
 
@@ -305,7 +305,7 @@ fn the_request_carries_the_model_the_context_and_the_history() {
         },
     ];
 
-    let body: Value = serde_json::from_str(&assistant::request(
+    let body: Value = serde_json::from_str(&ai_agent::request(
         "<graph_model/>",
         "why?",
         &history,
@@ -314,7 +314,7 @@ fn the_request_carries_the_model_the_context_and_the_history() {
     ))
     .unwrap();
 
-    assert_eq!(body["model"], assistant::MODEL);
+    assert_eq!(body["model"], ai_agent::MODEL);
     assert_eq!(body["stream"], true);
     assert_eq!(body["messages"].as_array().unwrap().len(), 4);
     assert_eq!(body["messages"][1]["role"], "assistant");
@@ -419,16 +419,16 @@ event: message_stop
 data: {"type":"message_stop"}
 "#;
 
-fn spoken(transcript: &str) -> (assistant::Reply, String) {
+fn spoken(transcript: &str) -> (ai_agent::Reply, String) {
     let mut said = String::new();
-    let reply = assistant::gather(transcript.lines().map(str::to_string), |text| {
+    let reply = ai_agent::gather(transcript.lines().map(str::to_string), |text| {
         said.push_str(text);
     });
     (reply, said)
 }
 
 fn tool_variants() -> Vec<Value> {
-    assistant::tool()["input_schema"]["properties"]["commands"]["items"]["anyOf"]
+    ai_agent::tool()["input_schema"]["properties"]["commands"]["items"]["anyOf"]
         .as_array()
         .expect("the tool offers a list of command variants")
         .clone()
@@ -561,7 +561,7 @@ fn the_tool_schema_matches_the_command_enum_field_for_field() {
 
 #[test]
 fn the_tool_reaches_the_model_only_when_the_file_can_be_edited() {
-    let acting: Value = serde_json::from_str(&assistant::request(
+    let acting: Value = serde_json::from_str(&ai_agent::request(
         "<graph_model/>",
         "rename it",
         &[],
@@ -569,7 +569,7 @@ fn the_tool_reaches_the_model_only_when_the_file_can_be_edited() {
         false,
     ))
     .unwrap();
-    let reading: Value = serde_json::from_str(&assistant::request(
+    let reading: Value = serde_json::from_str(&ai_agent::request(
         "<graph_model/>",
         "rename it",
         &[],
@@ -578,7 +578,7 @@ fn the_tool_reaches_the_model_only_when_the_file_can_be_edited() {
     ))
     .unwrap();
 
-    assert_eq!(acting["tools"][0]["name"], assistant::TOOL_NAME);
+    assert_eq!(acting["tools"][0]["name"], ai_agent::TOOL_NAME);
     assert_eq!(acting["tools"].as_array().unwrap().len(), 1);
     assert!(reading.get("tools").is_none(), "example mode offers no tool");
 
@@ -662,19 +662,19 @@ fn store_key_normalizes_validates_and_locks_down() {
     let dir = std::env::temp_dir().join(format!("cler-key-{}", std::process::id()));
     std::fs::remove_dir_all(&dir).ok();
 
-    assert!(assistant::store_key("   ", &dir).is_err());
-    assert!(assistant::store_key("not-a-key", &dir).is_err());
+    assert!(ai_agent::store_key("   ", &dir).is_err());
+    assert!(ai_agent::store_key("not-a-key", &dir).is_err());
 
-    assistant::store_key("  sk-ant-test123  ", &dir).expect("valid key stores");
+    ai_agent::store_key("  sk-ant-test123  ", &dir).expect("valid key stores");
     assert_eq!(
-        assistant::locate(None, &dir).expect("locate reads file"),
+        ai_agent::locate(None, &dir).expect("locate reads file"),
         Auth::ApiKey("sk-ant-test123".to_string())
     );
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(assistant::key_path(&dir))
+        let mode = std::fs::metadata(ai_agent::key_path(&dir))
             .expect("key file exists")
             .permissions()
             .mode();

@@ -1,6 +1,6 @@
 <script lang="ts">
   import RailTabs, { type RailTab } from './RailTabs.svelte';
-  import { chips, describeCommand, render, type Message, type Proposal } from './assistant';
+  import { describeCommand, render, type Message, type Proposal } from './agent';
   import type { AssistantStatus } from './backend';
 
   type Props = {
@@ -8,7 +8,6 @@
     status: AssistantStatus | null;
     messages: Message[];
     pending: number | null;
-    selection: { label: string; var: string } | null;
     enabled: boolean;
     note: string;
     revision: number;
@@ -29,7 +28,6 @@
     status,
     messages,
     pending,
-    selection,
     enabled,
     note,
     revision,
@@ -66,7 +64,6 @@
 
   const streaming = $derived(pending !== null);
   const ready = $derived(enabled && status?.available === true);
-  const starters = $derived(chips(selection));
   const hint = $derived(status === null ? 'looking for an API key…' : enabled ? '' : note);
   const showRecord = $derived(messages.length > 0 || status?.available === true);
   const showComposer = $derived(status === null || status.available);
@@ -248,20 +245,6 @@
           </div>
         {/each}
 
-        {#if messages.length === 0}
-          <div class="chips">
-            {#each starters as chip, index (chip.label)}
-              <button
-                class="chip"
-                data-testid="assistant-chip"
-                data-chip={index}
-                disabled={!ready || !chip.enabled}
-                title={chip.enabled ? chip.label : chip.hint}
-                onclick={() => send(chip.question)}>{chip.label}</button
-              >
-            {/each}
-          </div>
-        {/if}
       </div>
     {/if}
 
@@ -565,19 +548,6 @@
     margin: 0;
     font-size: 11px;
     color: var(--faint);
-  }
-  .chips {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-1);
-    align-items: flex-start;
-  }
-  .chip {
-    max-width: 100%;
-    padding: var(--sp-0) var(--sp-2);
-    font-size: 11px;
-    text-align: left;
-    color: var(--muted);
   }
   .composer {
     flex: none;

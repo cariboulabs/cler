@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use cler_flowgraph_gui::settings;
-use cler_flowgraph_gui::assistant;
+use cler_flowgraph_gui::ai_agent;
 use cler_flowgraph_gui::build::{self, Emit, Jobs, RecordArtifact};
 use cler_flowgraph_gui::document::{self, Documents};
 use cler_flowgraph_gui::provenance::ArtifactRecord;
@@ -151,10 +151,10 @@ fn dispatch(
     jobs: &Jobs,
 ) -> Reply {
     if cmd == "assistant_status" {
-        return carry(assistant::Status {
+        return carry(ai_agent::Status {
             available: false,
-            model: assistant::MODEL.to_string(),
-            reason: assistant::locate(None, Path::new("/nonexistent/cler-e2e")).err(),
+            model: ai_agent::MODEL.to_string(),
+            reason: ai_agent::locate(None, Path::new("/nonexistent/cler-e2e")).err(),
             method: None,
         });
     }

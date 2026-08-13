@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use cler_flowgraph_gui::assistant::{self, Auth};
+use cler_flowgraph_gui::ai_agent::{self, Auth};
 use cler_flowgraph_gui::oauth::{self, Tokens};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -121,27 +121,27 @@ fn without_any_tokens_access_says_not_signed_in() {
 #[test]
 fn status_names_the_auth_method_and_the_key_file_outranks_oauth() {
     let dir = temp_dir("status");
-    std::env::remove_var(assistant::KEY_ENV);
+    std::env::remove_var(ai_agent::KEY_ENV);
 
     let far = oauth::now_ms() + 3_600_000;
     oauth::store(&dir, &tokens("oauth-access", "oauth-refresh", far)).expect("store");
-    let status = assistant::status(&dir);
+    let status = ai_agent::status(&dir);
     assert!(status.available);
     assert_eq!(status.method.as_deref(), Some("oauth"));
     assert_eq!(
-        assistant::locate(None, &dir),
+        ai_agent::locate(None, &dir),
         Ok(Auth::OAuth("oauth-access".to_string()))
     );
 
-    assistant::store_key("sk-ant-status-test", &dir).expect("key stores");
-    let status = assistant::status(&dir);
+    ai_agent::store_key("sk-ant-status-test", &dir).expect("key stores");
+    let status = ai_agent::status(&dir);
     assert_eq!(status.method.as_deref(), Some("api_key"));
     assert_eq!(
-        assistant::locate(None, &dir),
+        ai_agent::locate(None, &dir),
         Ok(Auth::ApiKey("sk-ant-status-test".to_string()))
     );
 
-    std::fs::remove_file(assistant::key_path(&dir)).expect("drop key");
+    std::fs::remove_file(ai_agent::key_path(&dir)).expect("drop key");
     let status = oauth::logout(&dir);
     assert!(!status.available);
     assert_eq!(status.method, None);
@@ -154,10 +154,10 @@ fn status_names_the_auth_method_and_the_key_file_outranks_oauth() {
 #[test]
 fn an_oauth_request_opens_with_the_claude_code_preface() {
     let body: serde_json::Value =
-        serde_json::from_str(&assistant::request("<graph_model/>", "why?", &[], false, true))
+        serde_json::from_str(&ai_agent::request("<graph_model/>", "why?", &[], false, true))
             .unwrap();
 
-    assert_eq!(body["system"][0]["text"], assistant::OAUTH_PREFACE);
+    assert_eq!(body["system"][0]["text"], ai_agent::OAUTH_PREFACE);
     assert_eq!(body["system"][2]["text"], "<graph_model/>");
     assert_eq!(
         body["system"][1]["cache_control"]["type"], "ephemeral",
@@ -165,9 +165,9 @@ fn an_oauth_request_opens_with_the_claude_code_preface() {
     );
 
     let keyed: serde_json::Value =
-        serde_json::from_str(&assistant::request("<graph_model/>", "why?", &[], false, false))
+        serde_json::from_str(&ai_agent::request("<graph_model/>", "why?", &[], false, false))
             .unwrap();
-    assert_ne!(keyed["system"][0]["text"], assistant::OAUTH_PREFACE);
+    assert_ne!(keyed["system"][0]["text"], ai_agent::OAUTH_PREFACE);
     assert_eq!(keyed["system"].as_array().unwrap().len(), 2);
 }
 

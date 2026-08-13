@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use cler_flowgraph_gui::assistant;
+use cler_flowgraph_gui::ai_agent;
 use cler_flowgraph_gui::document::{self, Documents, NodeMove, Point};
 use serde_json::{json, Value};
 
@@ -463,7 +463,7 @@ fn a_file_no_command_could_edit_never_reaches_the_model_with_a_tool() {
     let docs = Documents::default();
     let sound = document::open(&docs, as_str(&path)).expect("open");
     assert!(
-        assistant::actionable(&sound),
+        ai_agent::actionable(&sound),
         "a parsed, editable file can be proposed against"
     );
 
@@ -472,12 +472,12 @@ fn a_file_no_command_could_edit_never_reaches_the_model_with_a_tool() {
     let state = document::open(&docs, as_str(&broken)).expect("open");
 
     assert!(
-        !assistant::actionable(&state),
+        !ai_agent::actionable(&state),
         "a file with parse errors refuses every command, so the tool is withheld"
     );
     assert!(
-        !assistant::request("<ctx/>", "fix it", &[], assistant::actionable(&state), false)
-            .contains(assistant::TOOL_NAME),
+        !ai_agent::request("<ctx/>", "fix it", &[], ai_agent::actionable(&state), false)
+            .contains(ai_agent::TOOL_NAME),
         "a withheld tool must not reach the request body"
     );
 }

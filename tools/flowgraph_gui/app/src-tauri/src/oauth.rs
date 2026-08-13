@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::assistant::{self, Status};
+use crate::ai_agent::{self, Status};
 use crate::build::Emit;
 
 pub const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
@@ -369,7 +369,7 @@ fn wait_for_callback(
                     *slot = None;
                 }
                 drop(slot);
-                emit(AUTH_CHANGED_EVENT, json!(assistant::status(&config_dir)));
+                emit(AUTH_CHANGED_EVENT, json!(ai_agent::status(&config_dir)));
                 return;
             }
             Err(_) => {
@@ -418,10 +418,10 @@ pub fn finish_login(input: &str, config_dir: &Path) -> Result<Status, String> {
         login.cancel.store(true, Ordering::Relaxed);
     }
     drop(slot);
-    Ok(assistant::status(config_dir))
+    Ok(ai_agent::status(config_dir))
 }
 
 pub fn logout(config_dir: &Path) -> Status {
     std::fs::remove_file(token_path(config_dir)).ok();
-    assistant::status(config_dir)
+    ai_agent::status(config_dir)
 }

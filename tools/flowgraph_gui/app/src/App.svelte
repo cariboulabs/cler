@@ -16,7 +16,7 @@
     type Tasks
   } from './lib/Actions.svelte';
   import AddBlock from './lib/AddBlock.svelte';
-  import Assistant from './lib/Assistant.svelte';
+  import AiAgent from './lib/AiAgent.svelte';
   import BlockNode from './lib/BlockNode.svelte';
   import FieldList from './lib/FieldList.svelte';
   import Inspector from './lib/Inspector.svelte';
@@ -24,7 +24,7 @@
   import { type RailTab } from './lib/RailTabs.svelte';
   import RoutedEdge from './lib/RoutedEdge.svelte';
   import TypeLegend from './lib/TypeLegend.svelte';
-  import { diffLines, historyOf, type Message, type Proposal, type Usage } from './lib/assistant';
+  import { diffLines, historyOf, type Message, type Proposal, type Usage } from './lib/agent';
   import {
     applyCommands,
     assistantAsk,
@@ -286,11 +286,6 @@
   const problems = $derived<Problem[]>(problemsOf(site, specs));
   const declared = $derived(site ? site.blocks.map((block) => block.var) : []);
   const selectedBlock = $derived(site?.blocks.find((block) => block.var === selected) ?? null);
-  const chatSelection = $derived(
-    selectedBlock
-      ? { label: selectedBlock.display_name ?? selectedBlock.var, var: selectedBlock.var }
-      : null
-  );
   const selectedSpec = $derived.by(() => {
     const block = site?.blocks.find((candidate) => candidate.var === selected);
     return block ? specOfBlock(specs, block) : undefined;
@@ -1800,12 +1795,11 @@
   </main>
 
   {#if rightTab === 'assistant'}
-    <Assistant
+    <AiAgent
       open={rightOpen}
       status={keyStatus}
       messages={chat}
       pending={pendingReply}
-      selection={chatSelection}
       enabled={editable}
       note={viewerNote}
       revision={doc.revision}

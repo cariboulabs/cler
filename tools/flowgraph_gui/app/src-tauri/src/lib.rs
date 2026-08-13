@@ -1,4 +1,4 @@
-pub mod assistant;
+pub mod ai_agent;
 pub mod build;
 pub mod document;
 pub mod oauth;
@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use assistant::{Status, Talks, Turn};
+use ai_agent::{Status, Talks, Turn};
 use build::{Emit, Jobs, RecordArtifact, Started, Target};
 use cler_graph::BlockSpec;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -249,12 +249,12 @@ fn config_dir(app: &AppHandle) -> PathBuf {
 
 #[tauri::command]
 fn assistant_status(app: AppHandle) -> Status {
-    assistant::status(&config_dir(&app))
+    ai_agent::status(&config_dir(&app))
 }
 
 #[tauri::command]
 fn assistant_set_key(key: String, app: AppHandle) -> Result<Status, String> {
-    assistant::store_key(&key, &config_dir(&app))
+    ai_agent::store_key(&key, &config_dir(&app))
 }
 
 #[tauri::command]
@@ -267,7 +267,7 @@ fn assistant_ask(
     talks: State<'_, Talks>,
 ) -> Result<(), String> {
     let dir = config_dir(&app);
-    assistant::ask(
+    ai_agent::ask(
         talks.inner(),
         docs.inner(),
         &dir,
@@ -280,7 +280,7 @@ fn assistant_ask(
 
 #[tauri::command]
 fn assistant_stop(path: String, talks: State<'_, Talks>) {
-    assistant::stop(talks.inner(), &path);
+    ai_agent::stop(talks.inner(), &path);
 }
 
 #[tauri::command]
