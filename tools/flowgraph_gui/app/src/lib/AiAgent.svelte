@@ -130,6 +130,7 @@
 
 <aside class="panel" class:collapsed={!open} data-testid="ai-agent-panel">
   <div class="head">
+    <RailTabs tab="ai-agent" side="left" {ontab} />
     <button
       class="toggle"
       data-testid="toggle-ai-agent"
@@ -139,7 +140,7 @@
       onclick={ontoggle}
     >
       {#if open}
-        ›
+        ‹
       {:else}
         <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
           <path
@@ -151,7 +152,6 @@
         </svg>
       {/if}
     </button>
-    <RailTabs tab="ai-agent" {ontab} />
   </div>
 
   <div class="body">
@@ -349,9 +349,9 @@
     position: absolute;
     z-index: 8;
     top: calc(var(--bar-h) + var(--sp-3));
-    right: var(--sp-3);
+    left: var(--sp-3);
     bottom: var(--sp-3);
-    width: var(--rail-right);
+    width: var(--rail-left);
     background: var(--glass);
     backdrop-filter: blur(12px);
     border: 1px solid var(--border);
@@ -372,6 +372,7 @@
     padding: var(--sp-2);
   }
   .toggle {
+    margin-left: auto;
     flex: none;
     width: 26px;
     padding: var(--sp-0) 0;
@@ -385,6 +386,9 @@
   }
   .collapsed :global(.tabs) {
     display: none;
+  }
+  .collapsed .toggle {
+    margin-left: 0;
   }
   .body {
     flex: 1;

@@ -825,6 +825,16 @@
     border-radius: var(--radius-sm);
     flex: none;
   }
+  /* Centring flex boxes centres line boxes, not glyphs: half-leading and the
+     font's descent push the ink of the 14px wordmark and the 12px bar text
+     above the bar's axis, so they never line up with the mark or the path
+     field. Trimming each text box down to cap-height/baseline makes the box
+     the glyphs, so plain centring puts every centre on one line. */
+  .bar .wordmark,
+  .bar .file,
+  .bar .doc-path {
+    text-box: trim-both cap alphabetic;
+  }
   .wordmark {
     font-size: 14px;
     font-weight: 600;

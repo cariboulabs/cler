@@ -13,7 +13,8 @@ import {
   peeks,
   settings,
   shot,
-  useBrowser
+  useBrowser,
+  type FakeWindow
 } from './ui';
 
 useBrowser();
@@ -488,14 +489,33 @@ describe('failures read as sentences', () => {
 
 /* ============================================================ the rail */
 
-describe('the AI agent shares the inspector rail', () => {
+describe('the AI agent shares the settings panel', () => {
+  it(
+    'remembers the chosen left tab in the layout cache',
+    async () => {
+      const page = await boot();
+      await page.click('[data-testid="rail-tab-ai-agent"]');
+      await page.waitForSelector('[data-testid="ai-agent-panel"]');
+      await expect
+        .poll(async () => {
+          const cache = await page.evaluate(
+            () => (window as unknown as FakeWindow).__fake.cache() as { panels?: { leftTab?: string } }
+          );
+          return cache.panels?.leftTab;
+        })
+        .toBe('ai-agent');
+      await page.close();
+    },
+    CASE
+  );
+
   it(
     'Ctrl+J opens the AI agent tab and closes the rail again',
     async () => {
       const page = await boot();
       await page.keyboard.press('Control+j');
       await page.waitForSelector('[data-testid="ai-agent-panel"]');
-      expect(await page.locator('.inspector').count()).toBe(0);
+      expect(await page.locator('.sidebar').count()).toBe(0);
       expect(
         await page.locator('[data-testid="rail-tab-ai-agent"]').getAttribute('aria-selected')
       ).toBe('true');
@@ -510,7 +530,7 @@ describe('the AI agent shares the inspector rail', () => {
   );
 
   it(
-    'keeps the conversation while the inspector is used, and drops it with the file',
+    'keeps the conversation while settings are used, and drops it with the file',
     async () => {
       const page = await boot();
       await openAiAgent(page);
@@ -518,8 +538,8 @@ describe('the AI agent shares the inspector rail', () => {
       await stream(page, ['remembered']);
       await done(page);
 
-      await page.click('[data-testid="rail-tab-inspector"]');
-      await page.waitForSelector('.inspector');
+      await page.click('[data-testid="rail-tab-settings"]');
+      await page.waitForSelector('.sidebar');
       await page.click('[data-testid="rail-tab-ai-agent"]');
       expect(await page.locator(MESSAGE).count()).toBe(2);
 

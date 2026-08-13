@@ -8,7 +8,7 @@ export type CachedView = {
   [key: string]: unknown;
 };
 
-export type RailTabName = 'inspector' | 'library' | 'ai-agent';
+export type RailTabName = 'inspector' | 'library' | 'settings' | 'ai-agent';
 
 export type UiCache = {
   version: number;
@@ -20,6 +20,7 @@ export type UiCache = {
     drawer?: boolean;
     drawerHeight?: number;
     rightTab?: RailTabName;
+    leftTab?: RailTabName;
     runArgs?: string;
     [key: string]: unknown;
   };

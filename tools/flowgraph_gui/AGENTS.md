@@ -34,12 +34,13 @@ in two places under two names, one of them is wrong.
 - **Top bar**: identity (cler mark), File menu, document path (readonly,
   full real path, monospace), problems chip, task actions (check/build/run),
   history, view controls. Nothing else.
-- **Left panel — Settings**: everything about *this document and session*:
-  file identity, run arguments (argv), flowgraph config, block search paths,
-  sample-type legend. No canvas duplicates, no statistics without a decision
-  the user could take from them.
+- **Left panel — Settings | AI Agent**: two tabs. Settings holds everything
+  about *this document and session*: file identity, run arguments (argv),
+  flowgraph config, block search paths, sample-type legend. No canvas
+  duplicates, no statistics without a decision the user could take from them.
+  AI Agent is the chat over this flowgraph (Ctrl+J).
 - **Right rail**: what the *selection* needs — Inspector (selected block),
-  Library (palette to place from), AI Agent.
+  Library (palette to place from).
 - **Bottom drawer**: code, diagnostics, output.
 - One home per concept. The palette browser is "Library" (right); the search
   paths that feed it are "Block paths" (left). Never reuse a name.
