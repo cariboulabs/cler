@@ -18,6 +18,7 @@
     onsignin: () => Promise<string | null>;
     onlogout: () => void;
     onmodel: (model: string) => void;
+    onprovider: (provider: string) => void;
     onaccept: (id: number) => void;
     onreject: (id: number) => void;
     onreplan: (id: number) => void;
@@ -38,6 +39,7 @@
     onsignin,
     onlogout,
     onmodel,
+    onprovider,
     onaccept,
     onreject,
     onreplan
@@ -46,11 +48,21 @@
   let waiting = $state(false);
   let oauthError = $state<string | null>(null);
 
-  const MODELS = [
-    { id: 'claude-opus-5', label: 'Opus 5' },
-    { id: 'claude-sonnet-5', label: 'Sonnet 5' },
-    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' }
+  const PROVIDERS = [
+    { id: 'anthropic', label: 'Claude' },
+    { id: 'openai', label: 'OpenAI' }
   ];
+
+  const TIERS: Record<string, { id: string; label: string }[]> = {
+    anthropic: [
+      { id: 'claude-haiku-4-5-20251001', label: 'Fast — cheapest' },
+      { id: 'claude-sonnet-5', label: 'Balanced' },
+      { id: 'claude-opus-5', label: 'Deep — most capable' }
+    ]
+  };
+
+  const tiers = $derived(TIERS[status?.provider ?? 'anthropic'] ?? null);
+  const known = $derived(tiers?.some((tier) => tier.id === status?.model) === true);
 
   const STALE = 'the graph moved on since this was checked — re-check it before applying';
   const CEILING = 'one proposal per answer: further tool calls in that turn were dropped';
@@ -120,17 +132,39 @@
         <span class="name">
           <select
             class="model-select"
-            data-testid="assistant-model-select"
-            value={status.model}
-            onchange={(event) => onmodel(event.currentTarget.value)}
+            data-testid="assistant-provider-select"
+            value={status.provider}
+            onchange={(event) => onprovider(event.currentTarget.value)}
           >
-            {#each MODELS as choice (choice.id)}
+            {#each PROVIDERS as choice (choice.id)}
               <option value={choice.id}>{choice.label}</option>
             {/each}
-            {#if !MODELS.some((choice) => choice.id === status.model)}
-              <option value={status.model}>{status.model}</option>
-            {/if}
           </select>
+        </span>
+        <span class="name">
+          {#if tiers}
+            <select
+              class="model-select"
+              data-testid="assistant-model-select"
+              value={status.model}
+              onchange={(event) => onmodel(event.currentTarget.value)}
+            >
+              {#each tiers as tier (tier.id)}
+                <option value={tier.id}>{tier.label}</option>
+              {/each}
+              {#if !known}
+                <option value={status.model}>Custom</option>
+              {/if}
+            </select>
+          {:else}
+            <input
+              class="model-input"
+              data-testid="assistant-model-input"
+              placeholder="model id"
+              value={status.model}
+              onchange={(event) => onmodel(event.currentTarget.value.trim())}
+            />
+          {/if}
         </span>
       </div>
     {/if}
@@ -373,6 +407,16 @@
   }
   .signout {
     margin-left: var(--sp-2);
+  }
+  .model-input {
+    font: inherit;
+    font-family: var(--mono);
+    color: var(--text);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 1px var(--sp-2);
+    width: 12ch;
   }
   .model-select {
     background: var(--bg-2);

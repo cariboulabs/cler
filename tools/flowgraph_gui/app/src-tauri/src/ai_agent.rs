@@ -130,6 +130,7 @@ in the same call.";
 #[derive(Debug, Serialize)]
 pub struct Status {
     pub available: bool,
+    pub provider: String,
     pub model: String,
     pub reason: Option<String>,
     pub method: Option<String>,
@@ -270,12 +271,14 @@ pub fn status(config_dir: &Path) -> Status {
     match locate(std::env::var(provider().key_env).ok(), config_dir) {
         Ok(auth) => Status {
             available: true,
+            provider: provider().id.to_string(),
             model: model(),
             reason: None,
             method: Some(auth.method().to_string()),
         },
         Err(reason) => Status {
             available: false,
+            provider: provider().id.to_string(),
             model: model(),
             reason: Some(reason),
             method: None,

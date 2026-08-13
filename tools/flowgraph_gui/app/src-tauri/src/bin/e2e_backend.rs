@@ -153,6 +153,7 @@ fn dispatch(
     if cmd == "assistant_status" {
         return carry(ai_agent::Status {
             available: false,
+            provider: ai_agent::provider().id.to_string(),
             model: ai_agent::ANTHROPIC.default_model.to_string(),
             reason: ai_agent::locate(None, Path::new("/nonexistent/cler-e2e")).err(),
             method: None,

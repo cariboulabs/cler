@@ -28,6 +28,7 @@ export type FakeTarget = {
 
 export type FakeAssistant = {
   available: boolean;
+  provider: string;
   model: string;
   reason: string | null;
   method: 'api_key' | 'oauth' | null;
@@ -64,6 +65,7 @@ type Fake = {
   log: Command[][];
   calls: string[];
   runs: unknown[];
+  settings: unknown[];
   editors: { path: string; line: number }[];
   asks: Ask[];
   peeks: Peek[];
@@ -116,6 +118,7 @@ function installFake(setup: Setup) {
   const log: unknown[][] = [];
   const calls: string[] = [];
   const runs: unknown[] = [];
+  const settings: unknown[] = [];
   const editors: { path: string; line: number }[] = [];
   const pristine = structuredClone({ model: setup.model, source: setup.source });
   const asks: unknown[] = [];
@@ -385,14 +388,31 @@ function installFake(setup: Setup) {
     }
     if (command === 'resolved_cler_root') return '/tmp/fake';
     calls.push(command);
-    if (command === 'app_settings') return { clerRoot: null, blockLibraries: [], assistantModel: null };
-    if (command === 'set_app_settings') return (args as Loose).next;
+    if (command === 'app_settings') {
+      return {
+        clerRoot: null,
+        blockLibraries: [],
+        assistantModel: null,
+        aiAgentProvider: null,
+        aiAgentBaseUrl: null
+      };
+    }
+    if (command === 'set_app_settings') {
+      settings.push((args as Loose).next);
+      return (args as Loose).next;
+    }
     if (command === 'run_target') runs.push(args.args);
     if (command === 'assistant_status') return setup.assistant;
     if (command === 'assistant_set_key') {
       const key = String((args as Loose).key ?? '');
       if (!key.trim().startsWith('sk-ant-')) throw new Error('that does not look like an Anthropic API key (sk-ant-…)');
-      return { available: true, model: 'claude-opus-5', reason: null, method: 'api_key' };
+      return {
+        available: true,
+        provider: 'anthropic',
+        model: 'claude-opus-5',
+        reason: null,
+        method: 'api_key'
+      };
     }
     if (command === 'assistant_oauth_start') return 'https://claude.ai/oauth/authorize?fake=1';
     if (command === 'assistant_oauth_finish') {
@@ -528,6 +548,7 @@ function installFake(setup: Setup) {
     log,
     calls,
     runs,
+    settings,
     editors,
     asks,
     peeks,
@@ -609,6 +630,7 @@ export type BootOptions = {
 
 export const ASSISTANT_READY: FakeAssistant = {
   available: true,
+  provider: 'anthropic',
   model: 'claude-opus-5',
   reason: null,
   method: 'api_key'
@@ -616,6 +638,7 @@ export const ASSISTANT_READY: FakeAssistant = {
 
 export const NO_KEY: FakeAssistant = {
   available: false,
+  provider: 'anthropic',
   model: 'claude-opus-5',
   reason:
     'no Anthropic API key — export ANTHROPIC_API_KEY before starting the editor, or write the key into /home/pilot/.config/dev.cler.flowgraph-gui/anthropic-key and chmod 600 it',
@@ -679,6 +702,9 @@ export async function boot(options: BootOptions = {}): Promise<Page> {
 export const sent = (page: Page) => page.evaluate(() => (window as unknown as FakeWindow).__fake.log);
 
 export const commands = async (page: Page) => (await sent(page)).flat();
+
+export const settings = (page: Page) =>
+  page.evaluate(() => (window as unknown as FakeWindow).__fake.settings);
 
 export const calls = (page: Page) =>
   page.evaluate(() => (window as unknown as FakeWindow).__fake.calls);

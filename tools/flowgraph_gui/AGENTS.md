@@ -39,7 +39,7 @@ in two places under two names, one of them is wrong.
   sample-type legend. No canvas duplicates, no statistics without a decision
   the user could take from them.
 - **Right rail**: what the *selection* needs — Inspector (selected block),
-  Library (palette to place from), Assistant.
+  Library (palette to place from), AI Agent.
 - **Bottom drawer**: code, diagnostics, output.
 - One home per concept. The palette browser is "Library" (right); the search
   paths that feed it are "Block paths" (left). Never reuse a name.

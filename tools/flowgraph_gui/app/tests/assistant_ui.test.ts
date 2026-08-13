@@ -11,6 +11,7 @@ import {
   FAKE_PATH,
   NO_KEY,
   peeks,
+  settings,
   shot,
   useBrowser
 } from './ui';
@@ -79,7 +80,7 @@ describe('the assistant says what it needs before it costs anything', () => {
   );
 
   it(
-    'names the model it will spend money on',
+    'offers speed and cost, never a vendor model name',
     async () => {
       const page = await boot();
       await openAssistant(page);
@@ -87,6 +88,28 @@ describe('the assistant says what it needs before it costs anything', () => {
       expect(
         await page.locator('[data-testid="assistant-model-select"]').inputValue()
       ).toBe('claude-opus-5');
+      const labels = await page.locator('[data-testid="assistant-model-select"] option').allTextContents();
+      expect(labels).toEqual(['Fast — cheapest', 'Balanced', 'Deep — most capable']);
+      expect(labels.join(' ')).not.toContain('claude');
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'switching provider stores the choice, drops the stale model and stops the answer',
+    async () => {
+      const page = await boot();
+      await openAssistant(page);
+      await ask(page, 'what is this graph?');
+
+      await page.selectOption('[data-testid="assistant-provider-select"]', 'openai');
+      await expect
+        .poll(async () => (await calls(page)).filter((name) => name === 'assistant_stop').length)
+        .toBe(1);
+      const stored = (await settings(page)).at(-1) as Record<string, unknown>;
+      expect(stored.aiAgentProvider).toBe('openai');
+      expect(stored.assistantModel).toBe(null);
       await page.close();
     },
     CASE
@@ -158,7 +181,13 @@ describe('signing in with Claude is the front door', () => {
       await keyed.close();
 
       const page = await boot({
-        assistant: { available: true, model: 'claude-opus-5', reason: null, method: 'oauth' }
+        assistant: {
+          available: true,
+          provider: 'anthropic',
+          model: 'claude-opus-5',
+          reason: null,
+          method: 'oauth'
+        }
       });
       await openAssistant(page);
       await page.click('[data-testid="assistant-logout"]');

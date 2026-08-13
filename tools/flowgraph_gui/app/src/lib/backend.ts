@@ -248,6 +248,7 @@ export function onTaskEnd(
 
 export type AssistantStatus = {
   available: boolean;
+  provider: string;
   model: string;
   reason: string | null;
   method: 'api_key' | 'oauth' | null;

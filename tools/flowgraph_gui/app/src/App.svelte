@@ -709,19 +709,40 @@
 
   async function refreshAssistant() {
     if (!desktop) {
-      keyStatus = { available: false, model: '—', reason: NO_SHELL, method: null };
+      keyStatus = { available: false, provider: 'anthropic', model: '—', reason: NO_SHELL, method: null };
       return;
     }
     try {
       keyStatus = await assistantStatus();
     } catch (error) {
-      keyStatus = { available: false, model: '—', reason: describeApplyError(error), method: null };
+      keyStatus = {
+        available: false,
+        provider: 'anthropic',
+        model: '—',
+        reason: describeApplyError(error),
+        method: null
+      };
     }
   }
 
   async function setAssistantModel(model: string) {
     try {
       libSettings = await setAppSettings({ ...libSettings, assistantModel: model });
+      await refreshAssistant();
+    } catch (error) {
+      announce(describeApplyError(error));
+    }
+  }
+
+  async function setAssistantProvider(provider: string) {
+    if (provider === libSettings.aiAgentProvider) return;
+    stopAssistant();
+    try {
+      libSettings = await setAppSettings({
+        ...libSettings,
+        aiAgentProvider: provider,
+        assistantModel: null
+      });
       await refreshAssistant();
     } catch (error) {
       announce(describeApplyError(error));
@@ -743,7 +764,13 @@
     try {
       keyStatus = await assistantOauthLogout();
     } catch (error) {
-      keyStatus = { available: false, model: '—', reason: describeApplyError(error), method: null };
+      keyStatus = {
+        available: false,
+        provider: 'anthropic',
+        model: '—',
+        reason: describeApplyError(error),
+        method: null
+      };
     }
     chat = [];
     pendingReply = null;
@@ -1810,6 +1837,7 @@
       onsignin={startOauth}
       onlogout={() => void logoutOauth()}
       onmodel={(model) => void setAssistantModel(model)}
+      onprovider={(provider) => void setAssistantProvider(provider)}
       onaccept={(id) => void acceptProposal(id)}
       onreject={rejectProposal}
       onreplan={(id) => void replanProposal(id)}
