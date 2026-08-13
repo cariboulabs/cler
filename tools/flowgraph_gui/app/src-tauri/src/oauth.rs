@@ -463,6 +463,11 @@ fn respond(stream: &mut TcpStream, status: &str, page: &str) {
 }
 
 fn request_query(flow: &Flow, stream: &TcpStream) -> Option<String> {
+    // The listener is non-blocking and some platforms hand that down to the
+    // accepted socket; a peer that connects and says nothing would otherwise
+    // hold the login thread, and the port, until cler quits.
+    let _ = stream.set_nonblocking(false);
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line).ok()?;
     let path = line.split_whitespace().nth(1)?;
@@ -532,9 +537,15 @@ fn wait_for_callback(
             respond(&mut stream, "400 Bad Request", FAIL_PAGE);
             continue;
         };
-        let finished = parse_callback(&query).and_then(|(code, seen)| {
-            complete(flow, &config_dir, &code, &seen, &state, &verifier)
-        });
+        let finished = match parse_callback(&query) {
+            // A tab left over from an earlier attempt must not end this one.
+            Ok((_, seen)) if seen != state => {
+                respond(&mut stream, "400 Bad Request", FAIL_PAGE);
+                continue;
+            }
+            Ok((code, seen)) => complete(flow, &config_dir, &code, &seen, &state, &verifier),
+            Err(message) => Err(message),
+        };
         match finished {
             Ok(()) => {
                 respond(&mut stream, "200 OK", DONE_PAGE);
@@ -616,4 +627,73 @@ pub fn finish_login(input: &str, config_dir: &Path) -> Result<Status, String> {
 pub fn logout(config_dir: &Path) -> Status {
     std::fs::remove_file(token_path(flow(), config_dir)).ok();
     ai_agent::status(config_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+    use std::sync::mpsc;
+
+    // Answers on an ephemeral port, never the flow's own: a running cler or a
+    // codex CLI holds the real ones.
+    fn serving() -> (u16, Arc<AtomicBool>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral port");
+        let port = listener.local_addr().expect("port").port();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        let emit: Emit = Arc::new(|_, _| {});
+        thread::spawn(move || {
+            wait_for_callback(
+                &ANTHROPIC_FLOW,
+                listener,
+                flag,
+                "verifier".to_string(),
+                "the-live-state".to_string(),
+                std::env::temp_dir(),
+                emit,
+            )
+        });
+        (port, cancel)
+    }
+
+    fn ask(port: u16, request: Option<&str>) -> Option<String> {
+        let (sent, heard) = mpsc::channel();
+        let request = request.map(str::to_string);
+        thread::spawn(move || {
+            let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) else {
+                return;
+            };
+            match request {
+                // A peer that says nothing: the wedge this guards against.
+                None => thread::sleep(Duration::from_secs(60)),
+                Some(text) => {
+                    let _ = stream.write_all(text.as_bytes());
+                    let mut answer = String::new();
+                    let _ = stream.read_to_string(&mut answer);
+                    let _ = sent.send(answer);
+                }
+            }
+        });
+        heard.recv_timeout(Duration::from_secs(5)).ok()
+    }
+
+    #[test]
+    fn a_silent_peer_and_a_stale_tab_leave_the_listener_serving() {
+        let (port, cancel) = serving();
+        ask(port, None);
+        thread::sleep(POLL * 2);
+
+        let stale = ask(
+            port,
+            Some("GET /callback?code=abc&state=an-older-state HTTP/1.1\r\n\r\n"),
+        )
+        .expect("a stale callback is answered, not swallowed");
+        assert!(stale.starts_with("HTTP/1.1 400"), "{stale}");
+
+        let after = ask(port, Some("GET /nope HTTP/1.1\r\n\r\n"))
+            .expect("the listener still serves after a foreign callback");
+        assert!(after.starts_with("HTTP/1.1 400"), "{after}");
+        cancel.store(true, Ordering::Relaxed);
+    }
 }
