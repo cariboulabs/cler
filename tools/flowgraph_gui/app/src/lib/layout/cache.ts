@@ -8,7 +8,7 @@ export type CachedView = {
   [key: string]: unknown;
 };
 
-export type RailTabName = 'inspector' | 'library' | 'assistant';
+export type RailTabName = 'inspector' | 'library' | 'ai-agent';
 
 export type UiCache = {
   version: number;

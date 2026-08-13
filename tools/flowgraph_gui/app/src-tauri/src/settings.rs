@@ -12,7 +12,8 @@ const PALETTE_DIR: &str = "desktop_blocks";
 pub struct AppSettings {
     pub cler_root: Option<String>,
     pub block_libraries: Vec<String>,
-    pub assistant_model: Option<String>,
+    #[serde(alias = "assistantModel")]
+    pub ai_agent_model: Option<String>,
     pub ai_agent_provider: Option<String>,
     pub ai_agent_base_url: Option<String>,
 }
@@ -20,7 +21,7 @@ pub struct AppSettings {
 static CURRENT: RwLock<AppSettings> = RwLock::new(AppSettings {
     cler_root: None,
     block_libraries: Vec::new(),
-    assistant_model: None,
+    ai_agent_model: None,
     ai_agent_provider: None,
     ai_agent_base_url: None,
 });
@@ -99,8 +100,8 @@ fn prune(settings: AppSettings) -> AppSettings {
             .into_iter()
             .map(|dir| dir.display().to_string())
             .collect(),
-        assistant_model: settings
-            .assistant_model
+        ai_agent_model: settings
+            .ai_agent_model
             .filter(|model| !model.trim().is_empty()),
         ai_agent_provider: settings
             .ai_agent_provider
@@ -165,6 +166,14 @@ mod tests {
     }
 
     #[test]
+    fn a_settings_file_written_before_the_rename_keeps_its_model() {
+        let _guard = test_guard();
+        let dir = temp("legacy-key");
+        std::fs::write(dir.join(FILE), r#"{"assistantModel":"claude-sonnet-5"}"#).expect("write");
+        assert_eq!(read(&dir).ai_agent_model, Some("claude-sonnet-5".to_string()));
+    }
+
+    #[test]
     fn settings_round_trip_and_validation() {
         let _guard = test_guard();
         let dir = temp("roundtrip");
@@ -176,7 +185,7 @@ mod tests {
         let library = temp("library");
 
         let wanted = AppSettings {
-            assistant_model: None,
+            ai_agent_model: None,
             ai_agent_provider: None,
             ai_agent_base_url: None,
             cler_root: Some(fake_repo.display().to_string()),
@@ -186,7 +195,7 @@ mod tests {
         assert_eq!(read(&dir), wanted);
 
         let bogus = AppSettings {
-            assistant_model: None,
+            ai_agent_model: None,
             ai_agent_provider: None,
             ai_agent_base_url: None,
             cler_root: Some("/nonexistent/never".to_string()),
@@ -196,7 +205,7 @@ mod tests {
         assert_eq!(read(&dir), wanted);
 
         let inside = AppSettings {
-            assistant_model: None,
+            ai_agent_model: None,
             ai_agent_provider: None,
             ai_agent_base_url: None,
             cler_root: Some(fake_repo.join("include").display().to_string()),
@@ -207,7 +216,7 @@ mod tests {
         store(&dir, &wanted).expect("restore wanted");
 
         let redundant = AppSettings {
-            assistant_model: None,
+            ai_agent_model: None,
             ai_agent_provider: None,
             ai_agent_base_url: None,
             cler_root: Some(fake_repo.display().to_string()),

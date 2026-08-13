@@ -26,7 +26,7 @@ export type FakeTarget = {
     | { state: 'ready'; artifactPath: string };
 };
 
-export type FakeAssistant = {
+export type FakeAiAgent = {
   available: boolean;
   provider: string;
   model: string;
@@ -60,7 +60,7 @@ type Setup = {
   refusal: unknown;
   openError: string | null;
   target: FakeTarget | null;
-  assistant: FakeAssistant;
+  aiAgent: FakeAiAgent;
   askError: string | null;
   previewError: string | null;
   diff: string;
@@ -397,7 +397,7 @@ function installFake(setup: Setup) {
       return {
         clerRoot: null,
         blockLibraries: [],
-        assistantModel: null,
+        aiAgentModel: null,
         aiAgentProvider: null,
         aiAgentBaseUrl: null
       };
@@ -407,8 +407,8 @@ function installFake(setup: Setup) {
       return (args as Loose).next;
     }
     if (command === 'run_target') runs.push(args.args);
-    if (command === 'assistant_status') return setup.assistant;
-    if (command === 'assistant_set_key') {
+    if (command === 'ai_agent_status') return setup.aiAgent;
+    if (command === 'ai_agent_set_key') {
       const key = String((args as Loose).key ?? '');
       if (!key.trim().startsWith('sk-ant-')) throw new Error('that does not look like an Anthropic API key (sk-ant-…)');
       return {
@@ -419,15 +419,15 @@ function installFake(setup: Setup) {
         method: 'api_key'
       };
     }
-    if (command === 'assistant_oauth_start') return 'https://claude.ai/oauth/authorize?fake=1';
-    if (command === 'assistant_oauth_finish') {
+    if (command === 'ai_agent_oauth_start') return 'https://claude.ai/oauth/authorize?fake=1';
+    if (command === 'ai_agent_oauth_finish') {
       const input = String((args as Loose).input ?? '');
       if (input.startsWith('http') || input.includes('code=') || input.length > 8) {
         return { available: true, model: 'claude-opus-5', reason: null, method: 'oauth' };
       }
       throw new Error('Missing authorization code');
     }
-    if (command === 'assistant_oauth_logout') {
+    if (command === 'ai_agent_oauth_logout') {
       return {
         available: false,
         provider: 'anthropic',
@@ -437,8 +437,8 @@ function installFake(setup: Setup) {
       };
     }
     if (command === 'open_key_console') return null;
-    if (command === 'assistant_stop') return null;
-    if (command === 'assistant_ask') {
+    if (command === 'ai_agent_stop') return null;
+    if (command === 'ai_agent_ask') {
       asks.push({
         path: args.path,
         question: args.question,
@@ -634,13 +634,13 @@ export type BootOptions = {
   openError?: string;
   empty?: boolean;
   target?: FakeTarget | null;
-  assistant?: FakeAssistant;
+  aiAgent?: FakeAiAgent;
   askError?: string;
   previewError?: string;
   diff?: string;
 };
 
-export const ASSISTANT_READY: FakeAssistant = {
+export const AI_AGENT_READY: FakeAiAgent = {
   available: true,
   provider: 'anthropic',
   model: 'claude-opus-5',
@@ -648,7 +648,7 @@ export const ASSISTANT_READY: FakeAssistant = {
   method: 'api_key'
 };
 
-export const NO_KEY: FakeAssistant = {
+export const NO_KEY: FakeAiAgent = {
   available: false,
   provider: 'anthropic',
   model: 'claude-opus-5',
@@ -695,7 +695,7 @@ export async function boot(options: BootOptions = {}): Promise<Page> {
     refusal: options.refusal ?? null,
     openError: options.openError ?? null,
     target: options.target === undefined ? NO_TARGET : options.target,
-    assistant: options.assistant ?? ASSISTANT_READY,
+    aiAgent: options.aiAgent ?? AI_AGENT_READY,
     askError: options.askError ?? null,
     previewError: options.previewError ?? null,
     diff: options.diff ?? SAMPLE_DIFF
@@ -798,7 +798,7 @@ export async function openLibrary(page: Page) {
   if (!(await tab.isVisible())) {
     await page
       .locator(
-        '[data-testid="toggle-right"], [data-testid="toggle-library"], [data-testid="toggle-assistant"]'
+        '[data-testid="toggle-right"], [data-testid="toggle-library"], [data-testid="toggle-ai-agent"]'
       )
       .click();
   }

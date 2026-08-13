@@ -67,9 +67,9 @@ const OPENAI_EFFORT: &str = "high";
 const MAX_TOKENS: u32 = 16000;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
-const DELTA_EVENT: &str = "assistant-delta";
-const DONE_EVENT: &str = "assistant-done";
-const PROPOSAL_EVENT: &str = "assistant-proposal";
+const DELTA_EVENT: &str = "ai-agent-delta";
+const DONE_EVENT: &str = "ai-agent-done";
+const PROPOSAL_EVENT: &str = "ai-agent-proposal";
 
 const GUIDE: &str = include_str!("../../../../../AGENTS.md");
 const GUIDE_SECTIONS: [&str; 4] = ["## 1. ", "## 4. ", "## 5. ", "## 6. "];
@@ -216,7 +216,7 @@ pub fn endpoint(provider: &Provider) -> String {
 
 pub fn model() -> String {
     crate::settings::current()
-        .assistant_model
+        .ai_agent_model
         .filter(|choice| !choice.trim().is_empty())
         .unwrap_or_else(|| provider().default_model.to_string())
 }

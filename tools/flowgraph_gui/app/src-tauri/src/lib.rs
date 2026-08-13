@@ -248,17 +248,17 @@ fn config_dir(app: &AppHandle) -> PathBuf {
 }
 
 #[tauri::command]
-fn assistant_status(app: AppHandle) -> Status {
+fn ai_agent_status(app: AppHandle) -> Status {
     ai_agent::status(&config_dir(&app))
 }
 
 #[tauri::command]
-fn assistant_set_key(key: String, app: AppHandle) -> Result<Status, String> {
+fn ai_agent_set_key(key: String, app: AppHandle) -> Result<Status, String> {
     ai_agent::store_key(&key, &config_dir(&app))
 }
 
 #[tauri::command]
-fn assistant_ask(
+fn ai_agent_ask(
     path: String,
     question: String,
     history: Vec<Turn>,
@@ -281,12 +281,12 @@ fn assistant_ask(
 }
 
 #[tauri::command]
-fn assistant_stop(path: String, talks: State<'_, Talks>) {
+fn ai_agent_stop(path: String, talks: State<'_, Talks>) {
     ai_agent::stop(talks.inner(), &path);
 }
 
 #[tauri::command]
-fn assistant_oauth_start(app: AppHandle) -> Result<String, String> {
+fn ai_agent_oauth_start(app: AppHandle) -> Result<String, String> {
     let dir = config_dir(&app);
     let url = oauth::start_login(&dir, emitter(app))?;
     let _ = spawn_detached(OPENER, std::slice::from_ref(&url));
@@ -294,12 +294,12 @@ fn assistant_oauth_start(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn assistant_oauth_finish(input: String, app: AppHandle) -> Result<Status, String> {
+fn ai_agent_oauth_finish(input: String, app: AppHandle) -> Result<Status, String> {
     oauth::finish_login(&input, &config_dir(&app))
 }
 
 #[tauri::command]
-fn assistant_oauth_logout(app: AppHandle) -> Status {
+fn ai_agent_oauth_logout(app: AppHandle) -> Status {
     oauth::logout(&config_dir(&app))
 }
 
@@ -441,13 +441,13 @@ pub fn run() {
             build_target,
             run_target,
             stop_target,
-            assistant_status,
-            assistant_set_key,
-            assistant_ask,
-            assistant_stop,
-            assistant_oauth_start,
-            assistant_oauth_finish,
-            assistant_oauth_logout
+            ai_agent_status,
+            ai_agent_set_key,
+            ai_agent_ask,
+            ai_agent_stop,
+            ai_agent_oauth_start,
+            ai_agent_oauth_finish,
+            ai_agent_oauth_logout
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

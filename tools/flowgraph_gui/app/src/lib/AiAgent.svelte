@@ -1,11 +1,11 @@
 <script lang="ts">
   import RailTabs, { type RailTab } from './RailTabs.svelte';
   import { describeCommand, render, type Message, type Proposal } from './agent';
-  import type { AssistantStatus } from './backend';
+  import type { AiAgentStatus } from './backend';
 
   type Props = {
     open: boolean;
-    status: AssistantStatus | null;
+    status: AiAgentStatus | null;
     messages: Message[];
     pending: number | null;
     enabled: boolean;
@@ -118,14 +118,14 @@
   }
 </script>
 
-<aside class="panel" class:collapsed={!open} data-testid="assistant-panel">
+<aside class="panel" class:collapsed={!open} data-testid="ai-agent-panel">
   <div class="head">
     <button
       class="toggle"
-      data-testid="toggle-assistant"
+      data-testid="toggle-ai-agent"
       aria-expanded={open}
-      aria-label={open ? 'Collapse assistant' : 'Expand assistant'}
-      title={open ? 'Collapse assistant  Ctrl+J' : 'Expand assistant  Ctrl+J'}
+      aria-label={open ? 'Collapse AI agent' : 'Expand AI agent'}
+      title={open ? 'Collapse AI agent  Ctrl+J' : 'Expand AI agent  Ctrl+J'}
       onclick={ontoggle}
     >
       {#if open}
@@ -141,16 +141,16 @@
         </svg>
       {/if}
     </button>
-    <RailTabs tab="assistant" {ontab} />
+    <RailTabs tab="ai-agent" {ontab} />
   </div>
 
   <div class="body">
     {#if status?.available === true}
-      <div class="model" data-testid="assistant-model">
+      <div class="model" data-testid="ai-agent-model">
         <span class="name">
           <select
             class="model-select"
-            data-testid="assistant-provider-select"
+            data-testid="ai-agent-provider-select"
             value={status.provider}
             onchange={(event) => onprovider(event.currentTarget.value)}
           >
@@ -163,7 +163,7 @@
           {#if tiers}
             <select
               class="model-select"
-              data-testid="assistant-model-select"
+              data-testid="ai-agent-model-select"
               value={status.model}
               onchange={(event) => onmodel(event.currentTarget.value)}
             >
@@ -177,7 +177,7 @@
           {:else}
             <input
               class="model-input"
-              data-testid="assistant-model-input"
+              data-testid="ai-agent-model-input"
               placeholder="model id"
               value={status.model}
               onchange={(event) => onmodel(event.currentTarget.value.trim())}
@@ -188,10 +188,10 @@
     {/if}
 
     {#if status !== null && !status.available}
-      <div class="setup" data-testid="assistant-setup">
+      <div class="setup" data-testid="ai-agent-setup">
         <button
           class="primary"
-          data-testid="assistant-signin"
+          data-testid="ai-agent-signin"
           onclick={() => {
             oauthError = null;
             void onsignin().then((error) => {
@@ -203,16 +203,16 @@
           {waiting ? 'waiting for the browser…' : 'Sign in with Claude'}
         </button>
         {#if oauthError}
-          <p class="key-error" data-testid="assistant-oauth-error">{oauthError}</p>
+          <p class="key-error" data-testid="ai-agent-oauth-error">{oauthError}</p>
         {/if}
       </div>
     {/if}
 
     {#if showRecord}
-      <div class="list" data-testid="assistant-messages" bind:this={list}>
+      <div class="list" data-testid="ai-agent-messages" bind:this={list}>
         {#each messages as message (message.id)}
           {@const lines = render(message.text)}
-          <div class="turn {message.role}" data-testid="assistant-message" data-role={message.role}>
+          <div class="turn {message.role}" data-testid="ai-agent-message" data-role={message.role}>
             <div class="bubble">
               {#each lines as line, at (at)}
                 <div class="line {line.kind}">
@@ -222,23 +222,23 @@
                           >{piece.text}</code
                         >{:else if piece.strong}<strong>{piece.text}</strong>{:else}{piece.text}{/if}{/each}{#if pending === message.id && at === lines.length - 1}<span
                         class="caret"
-                        data-testid="assistant-caret"
+                        data-testid="ai-agent-caret"
                         aria-hidden="true"></span>{/if}</span
                   >
                 </div>
               {/each}
             </div>
             {#if message.error}
-              <p class="failed" data-testid="assistant-error">{message.error}</p>
+              <p class="failed" data-testid="ai-agent-error">{message.error}</p>
             {/if}
             {#if retryable(message)}
-              <button data-testid="assistant-retry" onclick={() => onretry(message.id)}>
+              <button data-testid="ai-agent-retry" onclick={() => onretry(message.id)}>
                 Try again
               </button>
             {/if}
             {#if message.proposal}
               {@const plan = message.proposal}
-              <div class="plan" data-testid="assistant-proposal" data-state={plan.state}>
+              <div class="plan" data-testid="ai-agent-proposal" data-state={plan.state}>
                 <p class="rationale" data-testid="proposal-rationale">{plan.rationale}</p>
                 <ul class="commands" data-testid="proposal-commands">
                   {#each plan.commands as command, at (at)}
@@ -295,7 +295,7 @@
               </div>
             {/if}
             {#if message.usage}
-              <p class="usage" data-testid="assistant-usage">
+              <p class="usage" data-testid="ai-agent-usage">
                 {message.usage.input_tokens} tokens in · {message.usage.output_tokens} out
               </p>
             {/if}
@@ -308,13 +308,13 @@
     {#if showComposer}
       <div class="composer">
         {#if hint}
-          <p class="faint" data-testid="assistant-hint">{hint}</p>
+          <p class="faint" data-testid="ai-agent-hint">{hint}</p>
         {/if}
         {#if selected}
-          <p class="faint" data-testid="assistant-context">about <code>{selected}</code></p>
+          <p class="faint" data-testid="ai-agent-context">about <code>{selected}</code></p>
         {/if}
         <textarea
-          data-testid="assistant-input"
+          data-testid="ai-agent-input"
           rows="3"
           placeholder="Ask about this flowgraph…"
           disabled={!ready || streaming}
@@ -323,13 +323,13 @@
         ></textarea>
         <div class="row">
           {#if status?.available === true && status.method === 'oauth'}
-            <button class="linkish signout" data-testid="assistant-logout" onclick={onlogout}>
+            <button class="linkish signout" data-testid="ai-agent-logout" onclick={onlogout}>
               Sign out
             </button>
           {/if}
           <span class="grow"></span>
           {#if streaming}
-            <button class="stop" data-testid="assistant-stop" onclick={onstop}>Stop</button>
+            <button class="stop" data-testid="ai-agent-stop" onclick={onstop}>Stop</button>
           {/if}
         </div>
       </div>

@@ -150,7 +150,7 @@ fn dispatch(
     events: &Events,
     jobs: &Jobs,
 ) -> Reply {
-    if cmd == "assistant_status" {
+    if cmd == "ai_agent_status" {
         return carry(ai_agent::Status {
             available: false,
             provider: ai_agent::provider().id.to_string(),

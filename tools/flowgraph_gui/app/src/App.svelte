@@ -27,18 +27,18 @@
   import { diffLines, historyOf, type Message, type Proposal, type Usage } from './lib/agent';
   import {
     applyCommands,
-    assistantAsk,
-    assistantStatus,
-    assistantOauthStart,
-    assistantOauthLogout,
-    assistantStop,
-    onAssistantAuthChanged,
-    onAssistantDelta,
-    onAssistantDone,
-    onAssistantProposal,
+    aiAgentAsk,
+    aiAgentStatus,
+    aiAgentOauthStart,
+    aiAgentOauthLogout,
+    aiAgentStop,
+    onAiAgentAuthChanged,
+    onAiAgentDelta,
+    onAiAgentDone,
+    onAiAgentProposal,
     previewCommands,
-    type AssistantProposal,
-    type AssistantStatus,
+    type AiAgentProposal,
+    type AiAgentStatus,
     buildTarget,
     checkDocument,
     closeDocument,
@@ -156,7 +156,7 @@
   const DISK_NOTE = 'this file changed on disk — reload before building or running';
   const NO_SITE = 'no flowgraph site found in this file';
   const DROP_HINT = 'dropped — release on an input port to connect';
-  const NO_SHELL = 'the assistant runs on your machine — open the desktop shell to use it';
+  const NO_SHELL = 'the AI agent runs on your machine — open the desktop shell to use it';
   const MOVED_ON = 'the graph moved on since that proposal — re-check it before applying';
   const RAIL_WIDTH = 44;
   const SIDEBAR_WIDTH = 280;
@@ -229,7 +229,7 @@
   let targetRefresh = $state(0);
   let rightTab = $state<RailTab>('inspector');
   let runArgs = $state('');
-  let libSettings = $state<AppSettings>({ clerRoot: null, blockLibraries: [], assistantModel: null, aiAgentProvider: null, aiAgentBaseUrl: null });
+  let libSettings = $state<AppSettings>({ clerRoot: null, blockLibraries: [], aiAgentModel: null, aiAgentProvider: null, aiAgentBaseUrl: null });
   let resolvedRoot = $state<string | null>(null);
 
   $effect(() => {
@@ -244,7 +244,7 @@
     );
   });
   let pathsMenuOpen = $state(false);
-  let keyStatus = $state.raw<AssistantStatus | null>(null);
+  let keyStatus = $state.raw<AiAgentStatus | null>(null);
   let chat = $state.raw<Message[]>([]);
   let pendingReply = $state<number | null>(null);
   let turns = 0;
@@ -464,7 +464,7 @@
   });
 
   $effect(() => {
-    void refreshAssistant();
+    void refreshAiAgent();
   });
 
   $effect(() => {
@@ -473,19 +473,19 @@
 
   $effect(() => {
     if (!desktop) return;
-    const deltas = onAssistantDelta((payload) => {
+    const deltas = onAiAgentDelta((payload) => {
       if (payload.path !== doc.path || pendingReply === null) return;
       const target = pendingReply;
       chat = chat.map((message) =>
         message.id === target ? { ...message, text: message.text + payload.text } : message
       );
     });
-    const ends = onAssistantDone((payload) => {
+    const ends = onAiAgentDone((payload) => {
       if (payload.path !== doc.path) return;
       closeReply(payload.usage, payload.error);
     });
-    const plans = onAssistantProposal((payload) => void attachProposal(payload));
-    const auth = onAssistantAuthChanged((next) => {
+    const plans = onAiAgentProposal((payload) => void attachProposal(payload));
+    const auth = onAiAgentAuthChanged((next) => {
       keyStatus = next;
     });
     return () => {
@@ -643,7 +643,7 @@
   }
 
   function install(next: DocumentState, fresh: boolean) {
-    if (fresh && pendingReply !== null) void assistantStop(doc.path).catch(() => undefined);
+    if (fresh && pendingReply !== null) void aiAgentStop(doc.path).catch(() => undefined);
     doc = next;
     generation += 1;
     changedOnDisk = false;
@@ -667,7 +667,7 @@
       if (
         panels.rightTab === 'inspector' ||
         panels.rightTab === 'library' ||
-        panels.rightTab === 'assistant'
+        panels.rightTab === 'ai-agent'
       ) {
         rightTab = panels.rightTab;
       }
@@ -707,13 +707,13 @@
     alert = { text: message, at: alerted, tone: 'note' };
   }
 
-  async function refreshAssistant() {
+  async function refreshAiAgent() {
     if (!desktop) {
       keyStatus = { available: false, provider: 'anthropic', model: '—', reason: NO_SHELL, method: null };
       return;
     }
     try {
-      keyStatus = await assistantStatus();
+      keyStatus = await aiAgentStatus();
     } catch (error) {
       keyStatus = {
         available: false,
@@ -725,25 +725,25 @@
     }
   }
 
-  async function setAssistantModel(model: string) {
+  async function setAiAgentModel(model: string) {
     try {
-      libSettings = await setAppSettings({ ...libSettings, assistantModel: model });
-      await refreshAssistant();
+      libSettings = await setAppSettings({ ...libSettings, aiAgentModel: model });
+      await refreshAiAgent();
     } catch (error) {
       announce(describeApplyError(error));
     }
   }
 
-  async function setAssistantProvider(provider: string) {
+  async function setAiAgentProvider(provider: string) {
     if (provider === libSettings.aiAgentProvider) return;
-    stopAssistant();
+    stopAiAgent();
     try {
       libSettings = await setAppSettings({
         ...libSettings,
         aiAgentProvider: provider,
-        assistantModel: null
+        aiAgentModel: null
       });
-      await refreshAssistant();
+      await refreshAiAgent();
     } catch (error) {
       announce(describeApplyError(error));
     }
@@ -752,7 +752,7 @@
   async function startOauth(): Promise<string | null> {
     if (!desktop) return NO_SHELL;
     try {
-      await assistantOauthStart();
+      await aiAgentOauthStart();
       return null;
     } catch (error) {
       return describeApplyError(error);
@@ -762,7 +762,7 @@
   async function logoutOauth() {
     if (!desktop) return;
     try {
-      keyStatus = await assistantOauthLogout();
+      keyStatus = await aiAgentOauthLogout();
     } catch (error) {
       keyStatus = {
         available: false,
@@ -780,7 +780,7 @@
     const asked = at > 0 ? chat[at - 1] : undefined;
     if (!asked || asked.role !== 'user') return;
     chat = chat.slice(0, at - 1);
-    void askAssistant(asked.text);
+    void askAiAgent(asked.text);
   }
 
   function closeReply(usage: Usage | null, error: string | null) {
@@ -790,7 +790,7 @@
     chat = [...chat.slice(0, -1), { ...last, usage: usage ?? last.usage, error: error ?? last.error }];
   }
 
-  async function askAssistant(question: string) {
+  async function askAiAgent(question: string) {
     if (!editable) {
       announce(viewerNote);
       return;
@@ -816,7 +816,7 @@
     chat = [...chat, asked, reply];
     pendingReply = reply.id;
     try {
-      await assistantAsk(doc.path, question, history, selected);
+      await aiAgentAsk(doc.path, question, history, selected);
     } catch (error) {
       closeReply(null, describeApplyError(error));
     }
@@ -849,7 +849,7 @@
     }
   }
 
-  async function attachProposal(payload: AssistantProposal) {
+  async function attachProposal(payload: AiAgentProposal) {
     if (!editable || payload.path !== doc.path) return;
     const planned = doc.revision;
     const plan = await vetted(
@@ -914,9 +914,9 @@
     setProposal(id, await vetted(plan, doc.revision));
   }
 
-  function stopAssistant() {
+  function stopAiAgent() {
     pendingReply = null;
-    void assistantStop(doc.path).catch(() => undefined);
+    void aiAgentStop(doc.path).catch(() => undefined);
   }
 
   function pickRailTab(next: RailTab) {
@@ -924,12 +924,12 @@
     rightOpen = true;
   }
 
-  function toggleAssistant() {
-    if (rightOpen && rightTab === 'assistant') {
+  function toggleAiAgent() {
+    if (rightOpen && rightTab === 'ai-agent') {
       rightOpen = false;
       return;
     }
-    rightTab = 'assistant';
+    rightTab = 'ai-agent';
     rightOpen = true;
   }
 
@@ -1030,7 +1030,7 @@
     try {
       libSettings = await appSettings();
     } catch {
-      libSettings = { clerRoot: null, blockLibraries: [], assistantModel: null, aiAgentProvider: null, aiAgentBaseUrl: null };
+      libSettings = { clerRoot: null, blockLibraries: [], aiAgentModel: null, aiAgentProvider: null, aiAgentBaseUrl: null };
     }
   }
 
@@ -1720,7 +1720,7 @@
             ontoggleleft={() => (leftOpen = !leftOpen)}
             ontoggleright={() => (rightOpen = !rightOpen)}
             ontoggledrawer={() => (drawerOpen = !drawerOpen)}
-            ontoggleassistant={toggleAssistant}
+            ontoggleaiagent={toggleAiAgent}
             ontogglechrome={toggleChrome}
             onviewsource={viewSource}
             oncopydeclaration={(block) => void copyDeclaration(block)}
@@ -1828,7 +1828,7 @@
     </div>
   </main>
 
-  {#if rightTab === 'assistant'}
+  {#if rightTab === 'ai-agent'}
     <AiAgent
       open={rightOpen}
       status={keyStatus}
@@ -1840,12 +1840,12 @@
       {selected}
       ontoggle={() => (rightOpen = !rightOpen)}
       ontab={pickRailTab}
-      onask={(question) => void askAssistant(question)}
-      onstop={stopAssistant}
+      onask={(question) => void askAiAgent(question)}
+      onstop={stopAiAgent}
       onsignin={startOauth}
       onlogout={() => void logoutOauth()}
-      onmodel={(model) => void setAssistantModel(model)}
-      onprovider={(provider) => void setAssistantProvider(provider)}
+      onmodel={(model) => void setAiAgentModel(model)}
+      onprovider={(provider) => void setAiAgentProvider(provider)}
       onretry={retryAsk}
       onaccept={(id) => void acceptProposal(id)}
       onreject={rejectProposal}

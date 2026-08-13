@@ -106,7 +106,7 @@ export function newDocument(path: string): Promise<DocumentState> {
 export type AppSettings = {
   clerRoot: string | null;
   blockLibraries: string[];
-  assistantModel: string | null;
+  aiAgentModel: string | null;
   aiAgentProvider: string | null;
   aiAgentBaseUrl: string | null;
 };
@@ -246,7 +246,7 @@ export function onTaskEnd(
   );
 }
 
-export type AssistantStatus = {
+export type AiAgentStatus = {
   available: boolean;
   provider: string;
   model: string;
@@ -254,78 +254,78 @@ export type AssistantStatus = {
   method: 'api_key' | 'oauth' | null;
 };
 
-export type AssistantDelta = { path: string; text: string };
+export type AiAgentDelta = { path: string; text: string };
 
-export type AssistantDone = {
+export type AiAgentDone = {
   path: string;
   usage: { input_tokens: number; output_tokens: number };
   error: string | null;
 };
 
-export function assistantStatus(): Promise<AssistantStatus> {
-  return invoker('assistant_status', {}) as Promise<AssistantStatus>;
+export function aiAgentStatus(): Promise<AiAgentStatus> {
+  return invoker('ai_agent_status', {}) as Promise<AiAgentStatus>;
 }
 
-export function assistantSetKey(key: string): Promise<AssistantStatus> {
-  return invoker('assistant_set_key', { key }) as Promise<AssistantStatus>;
+export function aiAgentSetKey(key: string): Promise<AiAgentStatus> {
+  return invoker('ai_agent_set_key', { key }) as Promise<AiAgentStatus>;
 }
 
-export function assistantOauthStart(): Promise<string> {
-  return invoker('assistant_oauth_start', {}) as Promise<string>;
+export function aiAgentOauthStart(): Promise<string> {
+  return invoker('ai_agent_oauth_start', {}) as Promise<string>;
 }
 
-export function assistantOauthFinish(input: string): Promise<AssistantStatus> {
-  return invoker('assistant_oauth_finish', { input }) as Promise<AssistantStatus>;
+export function aiAgentOauthFinish(input: string): Promise<AiAgentStatus> {
+  return invoker('ai_agent_oauth_finish', { input }) as Promise<AiAgentStatus>;
 }
 
-export function assistantOauthLogout(): Promise<AssistantStatus> {
-  return invoker('assistant_oauth_logout', {}) as Promise<AssistantStatus>;
+export function aiAgentOauthLogout(): Promise<AiAgentStatus> {
+  return invoker('ai_agent_oauth_logout', {}) as Promise<AiAgentStatus>;
 }
 
-export function onAssistantAuthChanged(
-  handler: (status: AssistantStatus) => void
+export function onAiAgentAuthChanged(
+  handler: (status: AiAgentStatus) => void
 ): Promise<UnlistenFn> {
-  return listen<AssistantStatus>('assistant-auth-changed', (event) => handler(event.payload));
+  return listen<AiAgentStatus>('ai-agent-auth-changed', (event) => handler(event.payload));
 }
 
 export function openKeyConsole(): Promise<void> {
   return invoker('open_key_console', {}) as Promise<void>;
 }
 
-export function assistantAsk(
+export function aiAgentAsk(
   path: string,
   question: string,
   history: { role: string; text: string }[],
   selected: string | null
 ): Promise<void> {
-  return invoker('assistant_ask', { path, question, history, selected }) as Promise<void>;
+  return invoker('ai_agent_ask', { path, question, history, selected }) as Promise<void>;
 }
 
-export function assistantStop(path: string): Promise<void> {
-  return invoker('assistant_stop', { path }) as Promise<void>;
+export function aiAgentStop(path: string): Promise<void> {
+  return invoker('ai_agent_stop', { path }) as Promise<void>;
 }
 
-export function onAssistantDelta(
-  handler: (payload: AssistantDelta) => void
+export function onAiAgentDelta(
+  handler: (payload: AiAgentDelta) => void
 ): Promise<UnlistenFn> {
-  return listen<AssistantDelta>('assistant-delta', (event) => handler(event.payload));
+  return listen<AiAgentDelta>('ai-agent-delta', (event) => handler(event.payload));
 }
 
-export function onAssistantDone(handler: (payload: AssistantDone) => void): Promise<UnlistenFn> {
-  return listen<AssistantDone>('assistant-done', (event) => handler(event.payload));
+export function onAiAgentDone(handler: (payload: AiAgentDone) => void): Promise<UnlistenFn> {
+  return listen<AiAgentDone>('ai-agent-done', (event) => handler(event.payload));
 }
 
-export type AssistantProposal = {
+export type AiAgentProposal = {
   path: string;
   rationale: string;
   commands: Command[];
   dropped: number;
 };
 
-export function onAssistantProposal(
-  handler: (payload: AssistantProposal) => void
+export function onAiAgentProposal(
+  handler: (payload: AiAgentProposal) => void
 ): Promise<UnlistenFn> {
-  return listen<AssistantProposal>('assistant-proposal', (event) => handler(event.payload));
+  return listen<AiAgentProposal>('ai-agent-proposal', (event) => handler(event.payload));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -353,7 +353,7 @@ describe('editing against a fake backend', () => {
 
   const sent = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.log);
   const rawCalls = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.calls);
-  const quiet = ['palette', 'find_target', 'assistant_status', 'app_settings'];
+  const quiet = ['palette', 'find_target', 'ai_agent_status', 'app_settings'];
   const calls = async () => (await rawCalls()).filter((name) => !quiet.includes(name));
 
   async function select(blockVar: string) {
@@ -552,7 +552,7 @@ describe('top bar, context menu and shortcuts', () => {
   const PANE_SPOT = { x: 660, y: 760 };
 
   const rawCalls = () => editor.evaluate(() => (window as unknown as FakeWindow).__fake.calls);
-  const quiet = ['palette', 'find_target', 'assistant_status', 'app_settings'];
+  const quiet = ['palette', 'find_target', 'ai_agent_status', 'app_settings'];
   const calls = async () => (await rawCalls()).filter((name) => !quiet.includes(name));
   const menu = () => editor.locator('[data-testid="context-menu"]');
   const param = () => editor.locator('input[data-field="source1.ctor.1"]');
@@ -601,7 +601,7 @@ describe('top bar, context menu and shortcuts', () => {
       expect(await editor.locator('[data-testid="save"]').count()).toBe(0);
       expect(await editor.textContent('[data-testid="undo-tooltip"]')).toBe('nothing to undo');
       expect(await editor.textContent('[data-testid="redo-tooltip"]')).toBe('nothing to redo');
-      for (const id of ['drawer', 'assistant', 'chrome']) {
+      for (const id of ['drawer', 'ai-agent', 'chrome']) {
         expect(await editor.locator(`[data-testid="${id}"]`).count()).toBe(0);
       }
 

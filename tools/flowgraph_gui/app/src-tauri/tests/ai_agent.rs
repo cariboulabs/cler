@@ -40,7 +40,7 @@ data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}
 fn temp_dir(name: &str) -> PathBuf {
     let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
-        "cler-gui-assistant-{}-{name}-{unique}",
+        "cler-gui-ai-agent-{}-{name}-{unique}",
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).expect("temp directory");
@@ -93,7 +93,7 @@ fn spec(name: &str) -> BlockSpec {
 }
 
 #[test]
-fn without_a_key_the_assistant_is_unavailable_and_says_what_to_do() {
+fn without_a_key_the_ai_agent_is_unavailable_and_says_what_to_do() {
     let dir = temp_dir("absent");
     std::env::remove_var(ai_agent::ANTHROPIC.key_env);
 
@@ -153,7 +153,7 @@ fn an_empty_key_file_is_refused_by_name() {
 }
 
 #[test]
-fn the_guide_carries_only_the_sections_the_assistant_needs() {
+fn the_guide_carries_only_the_sections_the_ai_agent_needs() {
     let guide = ai_agent::guide();
 
     for wanted in ["## 1. ", "## 4. ", "## 5. ", "## 6. "] {
@@ -192,7 +192,7 @@ fn a_huge_file_is_clamped_and_the_source_is_elided_middle_out() {
 }
 
 #[test]
-fn a_small_file_reaches_the_assistant_whole() {
+fn a_small_file_reaches_the_ai_agent_whole() {
     let source = "int main() { return 0; }\n";
 
     let built = ai_agent::context("/tmp/small.cpp", "{\"sites\":[]}", source, &[]);
@@ -202,7 +202,7 @@ fn a_small_file_reaches_the_assistant_whole() {
 }
 
 #[test]
-fn the_palette_reaches_the_assistant_as_names_and_ports() {
+fn the_palette_reaches_the_ai_agent_as_names_and_ports() {
     let listed = ai_agent::palette_list(&[spec("CWSource")]);
 
     assert_eq!(

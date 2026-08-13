@@ -18,24 +18,24 @@ import {
 
 useBrowser();
 
-const CARET = '[data-testid="assistant-caret"]';
-const CHIP = '[data-testid="assistant-chip"]';
-const INPUT = '[data-testid="assistant-input"]';
-const MESSAGE = '[data-testid="assistant-message"]';
-const STOP = '[data-testid="assistant-stop"]';
-const USAGE = '[data-testid="assistant-usage"]';
+const CARET = '[data-testid="ai-agent-caret"]';
+const CHIP = '[data-testid="ai-agent-chip"]';
+const INPUT = '[data-testid="ai-agent-input"]';
+const MESSAGE = '[data-testid="ai-agent-message"]';
+const STOP = '[data-testid="ai-agent-stop"]';
+const USAGE = '[data-testid="ai-agent-usage"]';
 
-async function openAssistant(page: Page): Promise<void> {
-  await page.click('[data-testid="rail-tab-assistant"]');
-  await page.waitForSelector('[data-testid="assistant-panel"]');
+async function openAiAgent(page: Page): Promise<void> {
+  await page.click('[data-testid="rail-tab-ai-agent"]');
+  await page.waitForSelector('[data-testid="ai-agent-panel"]');
 }
 
 async function stream(page: Page, pieces: string[]): Promise<void> {
-  for (const text of pieces) await emit(page, 'assistant-delta', { path: FAKE_PATH, text });
+  for (const text of pieces) await emit(page, 'ai-agent-delta', { path: FAKE_PATH, text });
 }
 
 async function done(page: Page, error: string | null = null): Promise<void> {
-  await emit(page, 'assistant-done', {
+  await emit(page, 'ai-agent-done', {
     path: FAKE_PATH,
     usage: { input_tokens: 4211, output_tokens: 57 },
     error
@@ -50,17 +50,17 @@ async function ask(page: Page, question: string): Promise<void> {
 
 /* ============================================================ setup */
 
-describe('the assistant says what it needs before it costs anything', () => {
+describe('the AI agent says what it needs before it costs anything', () => {
   it(
     'shows a setup card with the two ways to give it a key, and no composer',
     async () => {
-      const page = await boot({ assistant: NO_KEY });
-      await openAssistant(page);
+      const page = await boot({ aiAgent: NO_KEY });
+      await openAiAgent(page);
 
-      expect(await page.locator('[data-testid="assistant-signin"]').count()).toBe(1);
+      expect(await page.locator('[data-testid="ai-agent-signin"]').count()).toBe(1);
       expect(await page.locator(INPUT).count()).toBe(0);
       expect(await page.locator(CHIP).count()).toBe(0);
-      await shot(page, 'assistant-setup');
+      await shot(page, 'ai-agent-setup');
       await page.close();
     },
     CASE
@@ -69,10 +69,10 @@ describe('the assistant says what it needs before it costs anything', () => {
   it(
     'never reaches the backend for an answer while it has no key',
     async () => {
-      const page = await boot({ assistant: NO_KEY });
-      await openAssistant(page);
+      const page = await boot({ aiAgent: NO_KEY });
+      await openAiAgent(page);
 
-      expect((await calls(page)).filter((name) => name === 'assistant_status').length).toBe(1);
+      expect((await calls(page)).filter((name) => name === 'ai_agent_status').length).toBe(1);
       expect(await asks(page)).toEqual([]);
       await page.close();
     },
@@ -83,12 +83,12 @@ describe('the assistant says what it needs before it costs anything', () => {
     'offers speed and cost, never a vendor model name',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
 
       expect(
-        await page.locator('[data-testid="assistant-model-select"]').inputValue()
+        await page.locator('[data-testid="ai-agent-model-select"]').inputValue()
       ).toBe('claude-opus-5');
-      const labels = await page.locator('[data-testid="assistant-model-select"] option').allTextContents();
+      const labels = await page.locator('[data-testid="ai-agent-model-select"] option').allTextContents();
       expect(labels).toEqual(['Fast — cheapest', 'Balanced', 'Deep — most capable']);
       expect(labels.join(' ')).not.toContain('claude');
       await page.close();
@@ -100,16 +100,16 @@ describe('the assistant says what it needs before it costs anything', () => {
     'switching provider stores the choice, drops the stale model and stops the answer',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await ask(page, 'what is this graph?');
 
-      await page.selectOption('[data-testid="assistant-provider-select"]', 'openai');
+      await page.selectOption('[data-testid="ai-agent-provider-select"]', 'openai');
       await expect
-        .poll(async () => (await calls(page)).filter((name) => name === 'assistant_stop').length)
+        .poll(async () => (await calls(page)).filter((name) => name === 'ai_agent_stop').length)
         .toBe(1);
       const stored = (await settings(page)).at(-1) as Record<string, unknown>;
       expect(stored.aiAgentProvider).toBe('openai');
-      expect(stored.assistantModel).toBe(null);
+      expect(stored.aiAgentModel).toBe(null);
       await page.close();
     },
     CASE
@@ -122,9 +122,9 @@ describe('the composer says what it is doing', () => {
     async () => {
       const page = await boot();
       await page.click('.svelte-flow__node[data-id="source1"]');
-      await openAssistant(page);
+      await openAiAgent(page);
 
-      expect(await page.textContent('[data-testid="assistant-context"]')).toContain('source1');
+      expect(await page.textContent('[data-testid="ai-agent-context"]')).toContain('source1');
       await ask(page, 'what does this do?');
       expect((await asks(page)).at(-1)?.selected).toBe('source1');
       await page.close();
@@ -136,12 +136,12 @@ describe('the composer says what it is doing', () => {
     'the input is closed while an answer streams, and says why',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await ask(page, 'what is this graph?');
       await stream(page, ['thinking']);
 
       expect(await page.isDisabled(INPUT)).toBe(true);
-      expect(await page.textContent('[data-testid="assistant-hint"]')).toContain('Stop to interrupt');
+      expect(await page.textContent('[data-testid="ai-agent-hint"]')).toContain('Stop to interrupt');
       await done(page);
       expect(await page.isDisabled(INPUT)).toBe(false);
       await page.close();
@@ -153,11 +153,11 @@ describe('the composer says what it is doing', () => {
     'a failed answer can be asked again without retyping it',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await ask(page, 'what is this graph?');
       await done(page, 'the Anthropic API is overloaded right now — try again in a moment');
 
-      await page.click('[data-testid="assistant-retry"]');
+      await page.click('[data-testid="ai-agent-retry"]');
       await expect.poll(async () => (await asks(page)).length).toBe(2);
       const questions = (await asks(page)).map((one) => one.question);
       expect(questions).toEqual(['what is this graph?', 'what is this graph?']);
@@ -174,17 +174,17 @@ describe('signing in with Claude is the front door', () => {
   it(
     'the sign-in button starts the browser flow and shows it is waiting',
     async () => {
-      const page = await boot({ assistant: NO_KEY });
-      await openAssistant(page);
+      const page = await boot({ aiAgent: NO_KEY });
+      await openAiAgent(page);
 
-      await page.click('[data-testid="assistant-signin"]');
+      await page.click('[data-testid="ai-agent-signin"]');
       await expect
-        .poll(() => page.textContent('[data-testid="assistant-signin"]'))
+        .poll(() => page.textContent('[data-testid="ai-agent-signin"]'))
         .toContain('waiting for the browser');
-      expect((await calls(page)).filter((name) => name === 'assistant_oauth_start').length).toBe(
+      expect((await calls(page)).filter((name) => name === 'ai_agent_oauth_start').length).toBe(
         1
       );
-      await shot(page, 'assistant-oauth-waiting');
+      await shot(page, 'ai-agent-oauth-waiting');
       await page.close();
     },
     CASE
@@ -194,9 +194,9 @@ describe('signing in with Claude is the front door', () => {
     'the model can be switched and the choice goes to settings',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
 
-      await page.selectOption('[data-testid="assistant-model-select"]', 'claude-sonnet-5');
+      await page.selectOption('[data-testid="ai-agent-model-select"]', 'claude-sonnet-5');
       await expect
         .poll(async () => (await calls(page)).filter((name) => name === 'set_app_settings').length)
         .toBe(1);
@@ -208,17 +208,17 @@ describe('signing in with Claude is the front door', () => {
   it(
     'the browser completing on its own flips the panel through the auth event',
     async () => {
-      const page = await boot({ assistant: NO_KEY });
-      await openAssistant(page);
+      const page = await boot({ aiAgent: NO_KEY });
+      await openAiAgent(page);
 
-      await emit(page, 'assistant-auth-changed', {
+      await emit(page, 'ai-agent-auth-changed', {
         available: true,
         model: 'claude-opus-5',
         reason: null,
         method: 'oauth'
       });
-      await page.waitForSelector('[data-testid="assistant-setup"]', { state: 'detached' });
-      expect(await page.locator('[data-testid="assistant-logout"]').count()).toBe(1);
+      await page.waitForSelector('[data-testid="ai-agent-setup"]', { state: 'detached' });
+      expect(await page.locator('[data-testid="ai-agent-logout"]').count()).toBe(1);
       await page.close();
     },
     CASE
@@ -228,12 +228,12 @@ describe('signing in with Claude is the front door', () => {
     'sign out shows only for oauth and tells the backend to forget the tokens',
     async () => {
       const keyed = await boot();
-      await openAssistant(keyed);
-      expect(await keyed.locator('[data-testid="assistant-logout"]').count()).toBe(0);
+      await openAiAgent(keyed);
+      expect(await keyed.locator('[data-testid="ai-agent-logout"]').count()).toBe(0);
       await keyed.close();
 
       const page = await boot({
-        assistant: {
+        aiAgent: {
           available: true,
           provider: 'anthropic',
           model: 'claude-opus-5',
@@ -241,15 +241,15 @@ describe('signing in with Claude is the front door', () => {
           method: 'oauth'
         }
       });
-      await openAssistant(page);
+      await openAiAgent(page);
       await ask(page, 'what is this graph?');
       await done(page);
-      await page.click('[data-testid="assistant-logout"]');
-      await page.waitForSelector('[data-testid="assistant-setup"]');
+      await page.click('[data-testid="ai-agent-logout"]');
+      await page.waitForSelector('[data-testid="ai-agent-setup"]');
 
       expect(await page.locator(MESSAGE).count()).toBe(2);
 
-      expect((await calls(page)).filter((name) => name === 'assistant_oauth_logout').length).toBe(
+      expect((await calls(page)).filter((name) => name === 'ai_agent_oauth_logout').length).toBe(
         1
       );
       await page.close();
@@ -267,7 +267,7 @@ describe('an answer streams in and is paid for in the open', () => {
     'renders deltas as they arrive, then the token cost',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await ask(page, 'what does this graph do?');
 
       expect(await page.locator(MESSAGE).count()).toBe(2);
@@ -283,7 +283,7 @@ describe('an answer streams in and is paid for in the open', () => {
       await done(page);
       await expect.poll(() => page.locator(CARET).count()).toBe(0);
       expect(await page.textContent(USAGE)).toBe('4211 tokens in · 57 out');
-      await shot(page, 'assistant-answer');
+      await shot(page, 'ai-agent-answer');
       await page.close();
     },
     CASE
@@ -293,7 +293,7 @@ describe('an answer streams in and is paid for in the open', () => {
     'renders bold, code and lists without a markdown dependency',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await ask(page, 'how do I wire it?');
       await stream(page, ['**Wire** the `chirp` block:\n- to the throttle\n- then the plot\n']);
       const answer = page.locator(`${MESSAGE}[data-role="assistant"]`);
@@ -313,7 +313,7 @@ describe('an answer streams in and is paid for in the open', () => {
     'shows stop while streaming and carries the history on the next question',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await ask(page, 'first question');
 
       expect(await page.locator(STOP).count()).toBe(1);
@@ -337,7 +337,7 @@ describe('an answer streams in and is paid for in the open', () => {
     'stop ends the answer and tells the backend to hang up',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await ask(page, 'explain everything');
       await stream(page, ['it starts with ']);
 
@@ -345,7 +345,7 @@ describe('an answer streams in and is paid for in the open', () => {
 
       await expect.poll(() => page.locator(STOP).count()).toBe(0);
       expect(await page.locator(CARET).count()).toBe(0);
-      expect((await calls(page)).filter((name) => name === 'assistant_stop').length).toBe(1);
+      expect((await calls(page)).filter((name) => name === 'ai_agent_stop').length).toBe(1);
 
       await stream(page, ['LATE TEXT']);
       expect(await page.textContent(`${MESSAGE}[data-role="assistant"]`)).not.toContain(
@@ -364,11 +364,11 @@ describe('failures read as sentences', () => {
     'shows a streamed failure under the answer it belongs to',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await ask(page, 'why is this edge red?');
       await done(page, 'the Anthropic API is overloaded right now — try again in a moment');
 
-      expect(await page.textContent('[data-testid="assistant-error"]')).toBe(
+      expect(await page.textContent('[data-testid="ai-agent-error"]')).toBe(
         'the Anthropic API is overloaded right now — try again in a moment'
       );
       expect(await page.locator(STOP).count()).toBe(0);
@@ -381,11 +381,11 @@ describe('failures read as sentences', () => {
     'shows a refused request as a sentence and frees the panel',
     async () => {
       const page = await boot({ askError: 'ask a question first' });
-      await openAssistant(page);
+      await openAiAgent(page);
       await ask(page, 'anything');
 
       await expect
-        .poll(() => page.textContent('[data-testid="assistant-error"]'))
+        .poll(() => page.textContent('[data-testid="ai-agent-error"]'))
         .toBe('ask a question first');
       expect(await page.locator(STOP).count()).toBe(0);
       await page.close();
@@ -396,21 +396,21 @@ describe('failures read as sentences', () => {
 
 /* ============================================================ the rail */
 
-describe('the assistant shares the inspector rail', () => {
+describe('the AI agent shares the inspector rail', () => {
   it(
-    'Ctrl+J opens the assistant tab and closes the rail again',
+    'Ctrl+J opens the AI agent tab and closes the rail again',
     async () => {
       const page = await boot();
       await page.keyboard.press('Control+j');
-      await page.waitForSelector('[data-testid="assistant-panel"]');
+      await page.waitForSelector('[data-testid="ai-agent-panel"]');
       expect(await page.locator('.inspector').count()).toBe(0);
       expect(
-        await page.locator('[data-testid="rail-tab-assistant"]').getAttribute('aria-selected')
+        await page.locator('[data-testid="rail-tab-ai-agent"]').getAttribute('aria-selected')
       ).toBe('true');
 
       await page.keyboard.press('Control+j');
       await expect
-        .poll(() => page.locator('[data-testid="assistant-panel"].collapsed').count())
+        .poll(() => page.locator('[data-testid="ai-agent-panel"].collapsed').count())
         .toBe(1);
       await page.close();
     },
@@ -421,14 +421,14 @@ describe('the assistant shares the inspector rail', () => {
     'keeps the conversation while the inspector is used, and drops it with the file',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await ask(page, 'remember this');
       await stream(page, ['remembered']);
       await done(page);
 
       await page.click('[data-testid="rail-tab-inspector"]');
       await page.waitForSelector('.inspector');
-      await page.click('[data-testid="rail-tab-assistant"]');
+      await page.click('[data-testid="rail-tab-ai-agent"]');
       expect(await page.locator(MESSAGE).count()).toBe(2);
 
       await page.click('[data-testid="file-menu"]');
@@ -443,7 +443,7 @@ describe('the assistant shares the inspector rail', () => {
 /* ============================================================ proposals */
 
 const ACCEPT = '[data-testid="proposal-accept"]';
-const CARD = '[data-testid="assistant-proposal"]';
+const CARD = '[data-testid="ai-agent-proposal"]';
 const DIFF = '[data-testid="proposal-diff"]';
 const REJECT = '[data-testid="proposal-reject"]';
 
@@ -467,7 +467,7 @@ async function propose(
   dropped = 0
 ): Promise<void> {
   const before = await page.locator(CARD).count();
-  await emit(page, 'assistant-proposal', {
+  await emit(page, 'ai-agent-proposal', {
     path: FAKE_PATH,
     rationale,
     commands: sent,
@@ -481,7 +481,7 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
     'renders the rationale, the commands in words, and the checked diff',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await ask(page, 'rename the first source');
       await stream(page, ['Renaming source1.']);
       await done(page);
@@ -506,7 +506,7 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
 
       expect(await page.locator(ACCEPT).count()).toBe(1);
       expect(await page.locator(REJECT).count()).toBe(1);
-      await shot(page, 'assistant-proposal');
+      await shot(page, 'ai-agent-proposal');
       await page.close();
     },
     CASE
@@ -516,7 +516,7 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
     'says every command of a multi-command change in the vocabulary of the editor',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await propose(page, REWIRE, 'route the adder straight into the plot');
 
       expect(await page.locator('[data-testid="proposal-command"]').allTextContents()).toEqual([
@@ -532,7 +532,7 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
     'reads commands whose optional fields the model left out',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await propose(page, SPARSE, 'add a gui, wire the adder, define a gain block');
 
       expect(await page.locator('[data-testid="proposal-command"]').allTextContents()).toEqual([
@@ -550,7 +550,7 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
     'accept applies exactly those commands at the revision it was checked against',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await propose(page);
 
       await page.click(ACCEPT);
@@ -561,7 +561,7 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
       expect(await page.textContent('[data-testid="proposal-applied"]')).toContain('revision 2');
       expect(await page.locator(ACCEPT).count()).toBe(0);
       expect(await page.locator(REJECT).count()).toBe(0);
-      await shot(page, 'assistant-proposal-applied');
+      await shot(page, 'ai-agent-proposal-applied');
       await page.close();
     },
     CASE
@@ -571,7 +571,7 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
     'reject settles the card in the history and sends nothing',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await propose(page);
 
       await page.click(REJECT);
@@ -599,7 +599,7 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
           ]
         })
       });
-      await openAssistant(page);
+      await openAiAgent(page);
       await propose(page, [{ command: 'delete_block', site: 0, block: 'plot' }], 'drop the plot');
 
       const reason = await page.textContent('[data-testid="proposal-refusal"]');
@@ -613,7 +613,7 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
       const listed = page.locator('[data-testid="delete-refusal"]');
       expect(await listed.locator('button[data-reference]').count()).toBe(2);
       expect(await listed.textContent()).toContain('plot cannot be deleted');
-      await shot(page, 'assistant-proposal-refused');
+      await shot(page, 'ai-agent-proposal-refused');
       await page.close();
     },
     CASE
@@ -623,7 +623,7 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
     'a card whose graph moved on goes stale, blocks accept, and re-checks on demand',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await propose(page);
       await propose(page, REWIRE, 'route the adder straight into the plot');
 
@@ -654,7 +654,7 @@ describe('a proposal is a checked diff the user accepts or rejects', () => {
     'names the one-proposal-per-answer ceiling when the model called the tool twice',
     async () => {
       const page = await boot();
-      await openAssistant(page);
+      await openAiAgent(page);
       await propose(page, RENAME, 'rename source1', 1);
 
       expect(await page.textContent('[data-testid="proposal-dropped"]')).toContain(

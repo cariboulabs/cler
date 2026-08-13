@@ -17,7 +17,7 @@ use crate::build::Emit;
 
 pub const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 pub const TOKEN_FILE: &str = "anthropic-oauth.json";
-pub const AUTH_CHANGED_EVENT: &str = "assistant-auth-changed";
+pub const AUTH_CHANGED_EVENT: &str = "ai-agent-auth-changed";
 
 const AUTHORIZE_ENDPOINT: &str = "https://claude.ai/oauth/authorize";
 const TOKEN_ENDPOINT: &str = "https://platform.claude.com/v1/oauth/token";

@@ -67,7 +67,7 @@
     ontoggleleft: () => void;
     ontoggleright: () => void;
     ontoggledrawer: () => void;
-    ontoggleassistant: () => void;
+    ontoggleaiagent: () => void;
     ontogglechrome: () => void;
     onviewsource: (block: string) => void;
     oncopydeclaration: (block: string) => void;
@@ -131,7 +131,7 @@
     ontoggleleft,
     ontoggleright,
     ontoggledrawer,
-    ontoggleassistant,
+    ontoggleaiagent,
     ontogglechrome,
     onviewsource,
     oncopydeclaration,
@@ -168,7 +168,7 @@
     _: 'zoom-out',
     '0': 'fit',
     '`': 'drawer',
-    j: 'assistant',
+    j: 'ai-agent',
     '\\': 'chrome'
   };
 
@@ -304,12 +304,12 @@
       run: ontoggledrawer
     },
     {
-      id: 'assistant',
-      label: 'Toggle assistant',
+      id: 'ai-agent',
+      label: 'Toggle AI agent',
       shortcut: 'Ctrl+J',
       enabled: true,
       hint: 'ask about this flowgraph (Ctrl+J)',
-      run: ontoggleassistant
+      run: ontoggleaiagent
     },
     {
       id: 'chrome',
