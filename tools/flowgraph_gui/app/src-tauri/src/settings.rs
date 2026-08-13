@@ -13,12 +13,16 @@ pub struct AppSettings {
     pub cler_root: Option<String>,
     pub block_libraries: Vec<String>,
     pub assistant_model: Option<String>,
+    pub ai_agent_provider: Option<String>,
+    pub ai_agent_base_url: Option<String>,
 }
 
 static CURRENT: RwLock<AppSettings> = RwLock::new(AppSettings {
     cler_root: None,
     block_libraries: Vec::new(),
     assistant_model: None,
+    ai_agent_provider: None,
+    ai_agent_base_url: None,
 });
 
 pub fn current() -> AppSettings {
@@ -66,6 +70,16 @@ fn validate(settings: &AppSettings) -> Result<AppSettings, String> {
             return Err(format!("{library} is not a directory"));
         }
     }
+    if let Some(id) = settings
+        .ai_agent_provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        if !crate::ai_agent::PROVIDERS.iter().any(|known| known.id == id) {
+            return Err(format!("{id} is not a known AI provider"));
+        }
+    }
     Ok(validated)
 }
 
@@ -88,6 +102,12 @@ fn prune(settings: AppSettings) -> AppSettings {
         assistant_model: settings
             .assistant_model
             .filter(|model| !model.trim().is_empty()),
+        ai_agent_provider: settings
+            .ai_agent_provider
+            .filter(|id| !id.trim().is_empty()),
+        ai_agent_base_url: settings
+            .ai_agent_base_url
+            .filter(|url| !url.trim().is_empty()),
     }
 }
 
@@ -157,6 +177,8 @@ mod tests {
 
         let wanted = AppSettings {
             assistant_model: None,
+            ai_agent_provider: None,
+            ai_agent_base_url: None,
             cler_root: Some(fake_repo.display().to_string()),
             block_libraries: vec![library.display().to_string()],
         };
@@ -165,6 +187,8 @@ mod tests {
 
         let bogus = AppSettings {
             assistant_model: None,
+            ai_agent_provider: None,
+            ai_agent_base_url: None,
             cler_root: Some("/nonexistent/never".to_string()),
             block_libraries: Vec::new(),
         };
@@ -173,6 +197,8 @@ mod tests {
 
         let inside = AppSettings {
             assistant_model: None,
+            ai_agent_provider: None,
+            ai_agent_base_url: None,
             cler_root: Some(fake_repo.join("include").display().to_string()),
             block_libraries: Vec::new(),
         };
@@ -182,6 +208,8 @@ mod tests {
 
         let redundant = AppSettings {
             assistant_model: None,
+            ai_agent_provider: None,
+            ai_agent_base_url: None,
             cler_root: Some(fake_repo.display().to_string()),
             block_libraries: vec![
                 fake_repo.join(PALETTE_DIR).display().to_string(),

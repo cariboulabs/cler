@@ -229,7 +229,7 @@
   let targetRefresh = $state(0);
   let rightTab = $state<RailTab>('inspector');
   let runArgs = $state('');
-  let libSettings = $state<AppSettings>({ clerRoot: null, blockLibraries: [], assistantModel: null });
+  let libSettings = $state<AppSettings>({ clerRoot: null, blockLibraries: [], assistantModel: null, aiAgentProvider: null, aiAgentBaseUrl: null });
   let resolvedRoot = $state<string | null>(null);
 
   $effect(() => {
@@ -996,7 +996,7 @@
     try {
       libSettings = await appSettings();
     } catch {
-      libSettings = { clerRoot: null, blockLibraries: [], assistantModel: null };
+      libSettings = { clerRoot: null, blockLibraries: [], assistantModel: null, aiAgentProvider: null, aiAgentBaseUrl: null };
     }
   }
 

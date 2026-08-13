@@ -121,7 +121,7 @@ fn without_any_tokens_access_says_not_signed_in() {
 #[test]
 fn status_names_the_auth_method_and_the_key_file_outranks_oauth() {
     let dir = temp_dir("status");
-    std::env::remove_var(ai_agent::KEY_ENV);
+    std::env::remove_var(ai_agent::ANTHROPIC.key_env);
 
     let far = oauth::now_ms() + 3_600_000;
     oauth::store(&dir, &tokens("oauth-access", "oauth-refresh", far)).expect("store");

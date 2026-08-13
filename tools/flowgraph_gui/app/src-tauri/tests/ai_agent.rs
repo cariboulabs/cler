@@ -95,14 +95,14 @@ fn spec(name: &str) -> BlockSpec {
 #[test]
 fn without_a_key_the_assistant_is_unavailable_and_says_what_to_do() {
     let dir = temp_dir("absent");
-    std::env::remove_var(ai_agent::KEY_ENV);
+    std::env::remove_var(ai_agent::ANTHROPIC.key_env);
 
     let status = ai_agent::status(&dir);
 
     assert!(!status.available, "no key means no assistant");
-    assert_eq!(status.model, ai_agent::MODEL);
+    assert_eq!(status.model, ai_agent::ANTHROPIC.default_model);
     let reason = status.reason.expect("a reason");
-    assert!(reason.contains(ai_agent::KEY_ENV), "{reason}");
+    assert!(reason.contains(ai_agent::ANTHROPIC.key_env), "{reason}");
     assert!(
         reason.contains(&ai_agent::key_path(&dir).display().to_string()),
         "{reason}"
@@ -257,9 +257,9 @@ fn every_error_shape_reads_as_a_sentence() {
         ai_agent::describe(Some(&error))
     };
 
-    assert!(sentence("authentication_error").contains(ai_agent::KEY_ENV));
+    assert!(sentence("authentication_error").contains(ai_agent::ANTHROPIC.key_env));
     assert!(sentence("rate_limit_error").contains("rate limited"));
-    assert!(sentence("not_found_error").contains(ai_agent::MODEL));
+    assert!(sentence("not_found_error").contains(ai_agent::ANTHROPIC.default_model));
     assert!(sentence("invalid_request_error").contains("nope"));
     assert_eq!(
         sentence("teapot_error"),
@@ -314,7 +314,7 @@ fn the_request_carries_the_model_the_context_and_the_history() {
     ))
     .unwrap();
 
-    assert_eq!(body["model"], ai_agent::MODEL);
+    assert_eq!(body["model"], ai_agent::ANTHROPIC.default_model);
     assert_eq!(body["stream"], true);
     assert_eq!(body["messages"].as_array().unwrap().len(), 4);
     assert_eq!(body["messages"][1]["role"], "assistant");

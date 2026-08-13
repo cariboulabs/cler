@@ -14,14 +14,56 @@ use serde_json::{json, Value};
 use crate::build::Emit;
 use crate::document::{self, DocumentState, Documents};
 
-pub const MODEL: &str = "claude-opus-5";
-pub const KEY_ENV: &str = "ANTHROPIC_API_KEY";
-pub const KEY_FILE: &str = "anthropic-key";
 pub const TOOL_NAME: &str = "propose_commands";
 
-const ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wire {
+    Anthropic,
+    OpenAi,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Provider {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub endpoint: &'static str,
+    pub key_env: &'static str,
+    pub key_file: &'static str,
+    pub key_prefix: &'static str,
+    pub default_model: &'static str,
+    pub wire: Wire,
+    pub oauth: bool,
+}
+
+pub const ANTHROPIC: Provider = Provider {
+    id: "anthropic",
+    label: "the Anthropic API",
+    endpoint: "https://api.anthropic.com/v1/messages",
+    key_env: "ANTHROPIC_API_KEY",
+    key_file: "anthropic-key",
+    key_prefix: "sk-ant-",
+    default_model: "claude-opus-5",
+    wire: Wire::Anthropic,
+    oauth: true,
+};
+
+pub const OPENAI: Provider = Provider {
+    id: "openai",
+    label: "the OpenAI API",
+    endpoint: "https://api.openai.com/v1/chat/completions",
+    key_env: "OPENAI_API_KEY",
+    key_file: "openai-key",
+    key_prefix: "sk-",
+    default_model: "gpt-5",
+    wire: Wire::OpenAi,
+    oauth: false,
+};
+
+pub const PROVIDERS: [Provider; 2] = [ANTHROPIC, OPENAI];
+
 const API_VERSION: &str = "2023-06-01";
 const EFFORT: &str = "xhigh";
+const OPENAI_EFFORT: &str = "high";
 const MAX_TOKENS: u32 = 16000;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -152,15 +194,31 @@ impl Reply {
 #[derive(Default, Clone)]
 pub struct Talks(Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>);
 
+pub fn provider() -> Provider {
+    let chosen = crate::settings::current().ai_agent_provider;
+    let wanted = chosen.as_deref().unwrap_or(ANTHROPIC.id).trim().to_string();
+    PROVIDERS
+        .into_iter()
+        .find(|known| known.id == wanted)
+        .unwrap_or(ANTHROPIC)
+}
+
+pub fn endpoint(provider: &Provider) -> String {
+    crate::settings::current()
+        .ai_agent_base_url
+        .filter(|url| !url.trim().is_empty())
+        .unwrap_or_else(|| provider.endpoint.to_string())
+}
+
 pub fn model() -> String {
     crate::settings::current()
         .assistant_model
         .filter(|choice| !choice.trim().is_empty())
-        .unwrap_or_else(|| MODEL.to_string())
+        .unwrap_or_else(|| provider().default_model.to_string())
 }
 
 pub fn key_path(config_dir: &Path) -> PathBuf {
-    config_dir.join(KEY_FILE)
+    config_dir.join(provider().key_file)
 }
 
 pub fn store_key(key: &str, config_dir: &Path) -> Result<Status, String> {
@@ -168,8 +226,12 @@ pub fn store_key(key: &str, config_dir: &Path) -> Result<Status, String> {
     if trimmed.is_empty() {
         return Err("the key is empty".to_string());
     }
-    if !trimmed.starts_with("sk-ant-") {
-        return Err("that does not look like an Anthropic API key (sk-ant-…)".to_string());
+    let provider = provider();
+    if !trimmed.starts_with(provider.key_prefix) {
+        return Err(format!(
+            "that does not look like a key for {} ({}…)",
+            provider.label, provider.key_prefix
+        ));
     }
     std::fs::create_dir_all(config_dir)
         .map_err(|cause| format!("cannot create {}: {cause}", config_dir.display()))?;
@@ -191,7 +253,7 @@ pub fn locate(env_key: Option<String>, config_dir: &Path) -> Result<Auth, String
     }
     let file = key_path(config_dir);
     let Ok(contents) = std::fs::read_to_string(&file) else {
-        if crate::oauth::signed_in(config_dir) {
+        if provider().oauth && crate::oauth::signed_in(config_dir) {
             return crate::oauth::access(config_dir).map(Auth::OAuth);
         }
         return Err(missing(&file));
@@ -205,7 +267,7 @@ pub fn locate(env_key: Option<String>, config_dir: &Path) -> Result<Auth, String
 }
 
 pub fn status(config_dir: &Path) -> Status {
-    match locate(std::env::var(KEY_ENV).ok(), config_dir) {
+    match locate(std::env::var(provider().key_env).ok(), config_dir) {
         Ok(auth) => Status {
             available: true,
             model: model(),
@@ -222,8 +284,16 @@ pub fn status(config_dir: &Path) -> Status {
 }
 
 fn missing(file: &Path) -> String {
+    let provider = provider();
+    let signin = if provider.oauth {
+        ", or sign in with Claude"
+    } else {
+        ""
+    };
     format!(
-        "no Anthropic API key — export {KEY_ENV} before starting the editor, write the key into {} and chmod 600 it, or sign in with Claude",
+        "no key for {} — export {} before starting the editor, write the key into {} and chmod 600 it{signin}",
+        provider.label,
+        provider.key_env,
         file.display()
     )
 }
@@ -546,26 +616,41 @@ fn commands() -> Vec<Value> {
     ]
 }
 
+fn tool_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rationale", "commands"],
+        "properties": {
+            "rationale": {
+                "type": "string",
+                "description": "One sentence, shown to the user above the diff, saying what this change does and why."
+            },
+            "commands": {
+                "type": "array",
+                "minItems": 1,
+                "description": "Every command of the change, in the order they should be applied.",
+                "items": { "anyOf": commands() }
+            }
+        }
+    })
+}
+
 pub fn tool() -> Value {
     json!({
         "name": TOOL_NAME,
         "description": TOOL_PURPOSE,
-        "input_schema": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["rationale", "commands"],
-            "properties": {
-                "rationale": {
-                    "type": "string",
-                    "description": "One sentence, shown to the user above the diff, saying what this change does and why."
-                },
-                "commands": {
-                    "type": "array",
-                    "minItems": 1,
-                    "description": "Every command of the change, in the order they should be applied.",
-                    "items": { "anyOf": commands() }
-                }
-            }
+        "input_schema": tool_schema()
+    })
+}
+
+pub fn openai_tool() -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": TOOL_NAME,
+            "description": TOOL_PURPOSE,
+            "parameters": tool_schema()
         }
     })
 }
@@ -585,6 +670,9 @@ pub fn request(context: &str, question: &str, history: &[Turn], acting: bool, oa
         })
         .collect();
     messages.push(json!({ "role": "user", "content": question }));
+    if provider().wire == Wire::OpenAi {
+        return openai_request(context, acting, messages);
+    }
     let mut system = Vec::new();
     if oauth {
         system.push(json!({ "type": "text", "text": OAUTH_PREFACE }));
@@ -605,7 +693,83 @@ pub fn request(context: &str, question: &str, history: &[Turn], acting: bool, oa
     body.to_string()
 }
 
+fn openai_request(context: &str, acting: bool, turns: Vec<Value>) -> String {
+    let mut messages = vec![
+        json!({ "role": "system", "content": preamble(acting) }),
+        json!({ "role": "system", "content": context }),
+    ];
+    messages.extend(turns);
+    let mut body = json!({
+        "model": model(),
+        "max_completion_tokens": MAX_TOKENS,
+        "stream": true,
+        "stream_options": { "include_usage": true },
+        "reasoning_effort": OPENAI_EFFORT,
+        "messages": messages
+    });
+    if acting {
+        body["tools"] = json!([openai_tool()]);
+    }
+    body.to_string()
+}
+
 pub fn chunk(line: &str) -> Option<Chunk> {
+    match provider().wire {
+        Wire::Anthropic => anthropic_chunk(line),
+        Wire::OpenAi => openai_chunk(line),
+    }
+}
+
+fn openai_chunk(line: &str) -> Option<Chunk> {
+    let payload = line.strip_prefix("data:")?.trim();
+    if payload == "[DONE]" {
+        return Some(Chunk::Done);
+    }
+    let value: Value = serde_json::from_str(payload).ok()?;
+    if value.get("error").is_some() {
+        return Some(Chunk::Failed(describe(value.get("error"))));
+    }
+    let call = value.pointer("/choices/0/delta/tool_calls/0");
+    if let Some(name) = call
+        .and_then(|call| call.pointer("/function/name"))
+        .and_then(Value::as_str)
+    {
+        return Some(Chunk::ToolStart(name.to_string()));
+    }
+    if let Some(piece) = call
+        .and_then(|call| call.pointer("/function/arguments"))
+        .and_then(Value::as_str)
+    {
+        return Some(Chunk::ToolJson(piece.to_string()));
+    }
+    if let Some(text) = value
+        .pointer("/choices/0/delta/content")
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+    {
+        return Some(Chunk::Text(text.to_string()));
+    }
+    match value
+        .pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str)
+    {
+        Some("tool_calls") => return Some(Chunk::BlockEnd),
+        Some("content_filter") => {
+            return Some(Chunk::Failed(declined(&json!({
+                "stop_details": { "category": "content_filter" }
+            }))))
+        }
+        _ => {}
+    }
+    value.get("usage").filter(|usage| !usage.is_null()).map(|usage| {
+        Chunk::Usage(
+            counted(usage, "/prompt_tokens"),
+            counted(usage, "/completion_tokens"),
+        )
+    })
+}
+
+fn anthropic_chunk(line: &str) -> Option<Chunk> {
     let payload = line.strip_prefix("data:")?.trim();
     let value: Value = serde_json::from_str(payload).ok()?;
     match value.get("type").and_then(Value::as_str)? {
@@ -669,24 +833,25 @@ pub fn describe(error: Option<&Value>) -> String {
         .and_then(Value::as_str)
         .filter(|text| !text.trim().is_empty())
         .unwrap_or("no detail given");
+    let provider = provider();
+    let label = provider.label;
     match kind {
         "authentication_error" => {
-            format!("the Anthropic API rejected the key — check {KEY_ENV} or the key file")
+            format!(
+                "{label} rejected the key — check {} or the key file",
+                provider.key_env
+            )
         }
         "permission_error" => format!("this API key is not allowed to use {}", model()),
         "not_found_error" => format!("{} is not available to this API key", model()),
-        "rate_limit_error" => {
-            "rate limited by the Anthropic API — wait a moment and ask again".to_string()
-        }
-        "overloaded_error" => {
-            "the Anthropic API is overloaded right now — try again in a moment".to_string()
-        }
+        "rate_limit_error" => format!("rate limited by {label} — wait a moment and ask again"),
+        "overloaded_error" => format!("{label} is overloaded right now — try again in a moment"),
         "request_too_large" => {
             "the request was too large for the API — this file may be too big to send".to_string()
         }
-        "api_error" => "the Anthropic API hit an internal error — try again".to_string(),
-        "invalid_request_error" => format!("the Anthropic API refused the request: {detail}"),
-        "" => "the Anthropic API returned an error with no type".to_string(),
+        "api_error" => format!("{label} hit an internal error — try again"),
+        "invalid_request_error" => format!("{label} refused the request: {detail}"),
+        "" => format!("{label} returned an error with no type"),
         other => format!("{}: {detail}", other.replace('_', " ")),
     }
 }
@@ -776,7 +941,7 @@ pub fn ask(
     if question.trim().is_empty() {
         return Err("ask a question first".to_string());
     }
-    let auth = locate(std::env::var(KEY_ENV).ok(), config_dir)?;
+    let auth = locate(std::env::var(provider().key_env).ok(), config_dir)?;
     let state = document::open(docs, path)?;
     let specs = document::palette(docs, path).unwrap_or_default();
     let model_json = serde_json::to_string(&state.model).map_err(|cause| cause.to_string())?;
@@ -828,13 +993,19 @@ fn stream(auth: &Auth, body: &str, emit: &Emit, path: &str, flag: &AtomicBool) -
         Ok(client) => client,
         Err(cause) => return Reply::failed(format!("cannot start an HTTPS client: {cause}")),
     };
+    let provider = provider();
     let prepared = client
-        .post(ENDPOINT)
-        .header("anthropic-version", API_VERSION)
+        .post(endpoint(&provider))
         .header("content-type", "application/json");
-    let prepared = match auth {
-        Auth::ApiKey(key) => prepared.header("x-api-key", key),
-        Auth::OAuth(token) => prepared
+    let prepared = match (provider.wire, auth) {
+        (Wire::Anthropic, Auth::ApiKey(key)) => prepared
+            .header("anthropic-version", API_VERSION)
+            .header("x-api-key", key),
+        (Wire::OpenAi, Auth::ApiKey(key)) => {
+            prepared.header("authorization", format!("Bearer {key}"))
+        }
+        (_, Auth::OAuth(token)) => prepared
+            .header("anthropic-version", API_VERSION)
             .header("authorization", format!("Bearer {token}"))
             .header("anthropic-beta", "claude-code-20250219,oauth-2025-04-20")
             .header("user-agent", "claude-cli/2.0.0"),
@@ -860,16 +1031,17 @@ fn stream(auth: &Auth, body: &str, emit: &Emit, path: &str, flag: &AtomicBool) -
 }
 
 fn unreachable(cause: &reqwest::Error) -> String {
+    let label = provider().label;
     if cause.is_timeout() {
-        return "the Anthropic API did not answer in time".to_string();
+        return format!("{label} did not answer in time");
     }
-    format!("cannot reach the Anthropic API: {cause}")
+    format!("cannot reach {label}: {cause}")
 }
 
 fn refused(status: u16, text: &str) -> String {
     match serde_json::from_str::<Value>(text) {
         Ok(value) if value.get("error").is_some() => describe(value.get("error")),
-        _ => format!("the Anthropic API answered HTTP {status}"),
+        _ => format!("{} answered HTTP {status}", provider().label),
     }
 }
 
@@ -881,4 +1053,130 @@ fn arm(talks: &Talks, path: &str) -> Arc<AtomicBool> {
     let flag = Arc::new(AtomicBool::new(false));
     held(talks).insert(path.to_string(), flag.clone());
     flag
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::{self, AppSettings};
+
+    fn temp(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("cler-provider-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    fn choose(dir: &Path, id: Option<&str>) {
+        settings::store(
+            dir,
+            &AppSettings {
+                ai_agent_provider: id.map(str::to_string),
+                ..AppSettings::default()
+            },
+        )
+        .expect("store settings");
+    }
+
+    #[test]
+    fn the_provider_defaults_to_anthropic_and_follows_the_setting() {
+        let _guard = settings::test_guard();
+        let dir = temp("choice");
+        choose(&dir, None);
+        assert_eq!(provider().id, ANTHROPIC.id);
+        assert_eq!(model(), ANTHROPIC.default_model);
+
+        choose(&dir, Some("openai"));
+        assert_eq!(provider().id, OPENAI.id);
+        assert_eq!(provider().wire, Wire::OpenAi);
+        assert_eq!(model(), OPENAI.default_model);
+        assert_eq!(key_path(&dir), dir.join(OPENAI.key_file));
+
+        assert!(settings::store(
+            &dir,
+            &AppSettings {
+                ai_agent_provider: Some("mistral".to_string()),
+                ..AppSettings::default()
+            }
+        )
+        .is_err());
+        choose(&dir, None);
+    }
+
+    #[test]
+    fn the_openai_wire_sends_its_own_body_shape_and_never_the_claude_code_preface() {
+        let _guard = settings::test_guard();
+        let dir = temp("openai-body");
+        choose(&dir, Some("openai"));
+        let body: Value =
+            serde_json::from_str(&request("<graph/>", "add a gain", &[], true, true)).expect("json");
+        choose(&dir, None);
+
+        assert_eq!(body["model"], OPENAI.default_model);
+        assert!(body.get("system").is_none());
+        assert!(body.get("output_config").is_none());
+        assert_eq!(body["max_completion_tokens"], MAX_TOKENS);
+        assert_eq!(body["stream_options"]["include_usage"], true);
+        assert_eq!(body["reasoning_effort"], OPENAI_EFFORT);
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["messages"][2]["content"], "add a gain");
+        assert_eq!(body["tools"][0]["type"], "function");
+        assert_eq!(body["tools"][0]["function"]["name"], TOOL_NAME);
+        assert!(body["tools"][0]["function"]["parameters"].is_object());
+        assert!(!body.to_string().contains(OAUTH_PREFACE));
+    }
+
+    #[test]
+    fn an_openai_stream_yields_the_same_text_proposal_and_usage() {
+        let _guard = settings::test_guard();
+        let dir = temp("openai-stream");
+        choose(&dir, Some("openai"));
+        let transcript = [
+            r#"data: {"choices":[{"delta":{"content":"Renaming it."},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"propose_commands","arguments":""}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"rationale\":\"rename\",\"commands\":[{\"command\":\"set_display_name\","}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"site\":0,\"block\":\"source1\",\"new_text\":\"Chirp\"}]}"}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+            r#"data: {"choices":[],"usage":{"prompt_tokens":4211,"completion_tokens":98}}"#,
+            "data: [DONE]",
+        ];
+        let mut said = String::new();
+        let reply = gather(transcript.iter().map(|line| line.to_string()), |text| {
+            said.push_str(text)
+        });
+        choose(&dir, None);
+
+        assert_eq!(said, "Renaming it.");
+        assert_eq!(reply.failure, None);
+        assert_eq!((reply.input, reply.output), (4211, 98));
+        assert_eq!(
+            reply.proposal,
+            Some(Proposal {
+                rationale: "rename".to_string(),
+                commands: vec![json!({
+                    "command": "set_display_name",
+                    "site": 0,
+                    "block": "source1",
+                    "new_text": "Chirp"
+                })]
+            })
+        );
+    }
+
+    #[test]
+    fn a_claude_sign_in_is_never_used_for_another_provider() {
+        let _guard = settings::test_guard();
+        let dir = temp("oauth-gate");
+        std::fs::write(dir.join(crate::oauth::TOKEN_FILE), "{}").expect("fake token file");
+
+        choose(&dir, Some("openai"));
+        let refusal = locate(None, &dir).expect_err("no openai key");
+        assert!(refusal.contains(OPENAI.key_env), "{refusal}");
+        assert!(refusal.contains(OPENAI.key_file), "{refusal}");
+        assert!(!refusal.contains("sign in"), "{refusal}");
+
+        choose(&dir, None);
+        let anthropic = locate(None, &dir).expect_err("token file is not a real token");
+        assert!(!anthropic.contains(ANTHROPIC.key_file), "{anthropic}");
+    }
 }

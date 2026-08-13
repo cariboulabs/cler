@@ -107,6 +107,8 @@ export type AppSettings = {
   clerRoot: string | null;
   blockLibraries: string[];
   assistantModel: string | null;
+  aiAgentProvider: string | null;
+  aiAgentBaseUrl: string | null;
 };
 
 export function appSettings(): Promise<AppSettings> {
