@@ -1,7 +1,19 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { codeLines, type CodeMark } from './code';
+  import type { EditorView } from '@codemirror/view';
+  import {
+    createEditor,
+    jumpTo,
+    lineOf,
+    replaceText,
+    revealOffset,
+    setEditable,
+    showSpans,
+    type CodeMark
+  } from './editor';
+  import type { ParseFault } from './backend';
   import type { Placed } from './diagnostics';
+  import type { ReadOnlyNote } from './project';
   import type { Span } from './schema';
 
   export type Tab = 'code' | 'diagnostics' | 'output';
@@ -12,6 +24,9 @@
     path: string;
     revision: number;
     readOnly: number;
+    writable: boolean;
+    unparsed: boolean;
+    fault: ParseFault | null;
     hits: Span[];
     marks: CodeMark[];
     anchors: Span[];
@@ -19,13 +34,16 @@
     height: number;
     tab: Tab;
     diagnostics: Placed[];
+    notes: ReadOnlyNote[];
     output: string[];
     busy: string | null;
     onpick: (offset: number) => void;
+    onedit: (source: string) => void;
     ontoggle: () => void;
     onheight: (height: number) => void;
     ontab: (tab: Tab) => void;
     ondiagnostic: (entry: Placed) => void;
+    ondiscard: () => void;
   };
 
   const {
@@ -34,6 +52,9 @@
     path,
     revision,
     readOnly,
+    writable,
+    unparsed,
+    fault,
     hits,
     marks,
     anchors,
@@ -41,28 +62,38 @@
     height,
     tab,
     diagnostics,
+    notes,
     output,
     busy,
     onpick,
+    onedit,
     ontoggle,
     onheight,
     ontab,
-    ondiagnostic
+    ondiagnostic,
+    ondiscard
   }: Props = $props();
 
   const TABS: Tab[] = ['code', 'diagnostics', 'output'];
 
+  const VIEWER = 'this is an example, opened for reading — use File ▸ Open file… to edit a real file';
+
+  const DISCARD = 'throw this edit away and go back to the last version that parsed';
+
+  const UNPARSED =
+    'this text does not parse yet, so the canvas, saving and building wait on it';
+
   const MIN_HEIGHT = 90;
   const TOP_GUTTER = 120;
-  const REVEAL_FRACTION = 3;
 
   let body = $state<HTMLElement | null>(null);
   let stream = $state<HTMLElement | null>(null);
   let stuck = $state(true);
   let shown = $state(false);
   let dragged = $state<number | null>(null);
+  let view: EditorView | null = null;
+  let sent = source;
 
-  const lines = $derived(codeLines(source, hits, marks, anchors));
   const basename = $derived(path.split('/').pop() ?? path);
   const anchor = $derived(hits[0]?.start ?? siteAnchor?.start ?? null);
   const tall = $derived(dragged ?? height);
@@ -80,6 +111,52 @@
   });
 
   $effect(() => {
+    const host = stream;
+    if (output.length === 0 || !host || !stuck) return;
+    host.scrollTop = host.scrollHeight;
+  });
+
+  $effect(() => {
+    const host = body;
+    if (!host) return;
+    const editor = createEditor(host, untrack(() => source), untrack(() => writable), {
+      onedit: (next) => {
+        sent = next;
+        onedit(next);
+      },
+      onpick
+    });
+    view = editor;
+    return () => {
+      view = null;
+      editor.destroy();
+    };
+  });
+
+  $effect(() => {
+    const next = source;
+    void revision;
+    const editor = view;
+    if (!editor) return;
+    // A buffer the user has typed into since our last report outranks the model's
+    // copy, and text the model refused outranks it too — committing is what
+    // reconciles them, never a silent revert of what was typed.
+    if (unparsed || editor.state.doc.toString() !== sent) return;
+    replaceText(editor, next);
+    sent = next;
+  });
+
+  $effect(() => {
+    const spans = { hits, marks, faults: unparsed && fault ? [fault.span] : [] };
+    if (view) showSpans(view, spans);
+  });
+
+  const faultLine = $derived.by(() => {
+    void source;
+    return unparsed && fault && view ? lineOf(view, fault.span.start) : null;
+  });
+
+  $effect(() => {
     const at = anchor;
     const visible = shown && tab === 'code';
     if (at === null || !visible) return;
@@ -87,9 +164,7 @@
   });
 
   $effect(() => {
-    const host = stream;
-    if (output.length === 0 || !host || !stuck) return;
-    host.scrollTop = host.scrollHeight;
+    if (view) setEditable(view, writable);
   });
 
   function trackScroll(event: Event) {
@@ -106,24 +181,15 @@
     return Math.max(MIN_HEIGHT, window.innerHeight - TOP_GUTTER);
   }
 
-  function lineIndexOf(offset: number): number {
-    let index = 0;
-    while (index + 1 < lines.length && (lines[index + 1]?.start ?? 0) <= offset) index++;
-    return index;
-  }
-
-  function rowOf(offset: number): HTMLElement | null {
-    const row = body?.children[lineIndexOf(offset)];
-    return row instanceof HTMLElement ? row : null;
-  }
-
   function reveal(offset: number) {
-    const host = body;
-    const row = rowOf(offset);
-    if (!host || !row) return;
-    const above = row.offsetTop < host.scrollTop;
-    const below = row.offsetTop + row.offsetHeight > host.scrollTop + host.clientHeight;
-    if (above || below) host.scrollTop = row.offsetTop - host.clientHeight / REVEAL_FRACTION;
+    if (view) revealOffset(view, offset);
+  }
+
+  // The code body is hidden on the other tabs, so a jump has to bring its tab back
+  // before the editor can scroll anywhere the user would see.
+  function jumpToOffset(offset: number) {
+    if (tab !== 'code') ontab('code');
+    requestAnimationFrame(() => view && jumpTo(view, offset));
   }
 
   function startDrag(event: PointerEvent) {
@@ -148,15 +214,6 @@
     grip.addEventListener('pointermove', move);
     grip.addEventListener('pointerup', stop);
     grip.addEventListener('pointercancel', stop);
-  }
-
-  function pickFrom(event: MouseEvent) {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const piece = target.closest('[data-at]');
-    if (!(piece instanceof HTMLElement)) return;
-    const at = Number(piece.dataset.at);
-    if (Number.isFinite(at)) onpick(at);
   }
 
   async function copyDiagnostics() {
@@ -199,10 +256,27 @@
         </button>
       {/each}
     </div>
+    {#if !writable}
+      <span class="chip locked" data-testid="drawer-viewer" title={VIEWER}>viewer</span>
+    {/if}
     {#if readOnly > 0}
       <span class="chip locked" data-testid="drawer-readonly">
         {readOnly} read-only
       </span>
+    {/if}
+    {#if unparsed}
+      <button
+        class="chip broken"
+        data-testid="drawer-unparsed"
+        title={UNPARSED}
+        onclick={() => fault && jumpToOffset(fault.span.start)}
+      >
+        syntax error{#if faultLine !== null}
+          · line {faultLine}{/if}{#if fault} · {fault.hint}{/if}
+      </button>
+      <button class="chip" data-testid="drawer-discard" title={DISCARD} onclick={ondiscard}>
+        discard edit
+      </button>
     {/if}
     {#if busy}
       <span class="chip" data-testid="drawer-busy">{busy}…</span>
@@ -216,29 +290,7 @@
       onclick={ontoggle}>▾</button
     >
   </header>
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
-    class="body"
-    class:away={tab !== 'code'}
-    bind:this={body}
-    data-testid="drawer-body"
-    onclick={pickFrom}
-  >
-    {#each lines as line (line.number)}
-      <div class="row" data-line={line.number}>
-        <span class="num">{line.number}</span><code
-          >{#each line.pieces as piece, index (index)}<span
-              data-at={piece.at}
-              class={piece.kind}
-              class:hit={piece.hit}
-              class:ro={piece.reason !== null}
-              title={piece.reason ?? undefined}>{piece.text}</span
-            >{/each}</code
-        >
-      </div>
-    {/each}
-  </div>
+  <div class="body" class:away={tab !== 'code'} bind:this={body} data-testid="drawer-body"></div>
 
   {#if tab === 'diagnostics'}
     <div class="panel" data-testid="diagnostics-list">
@@ -262,6 +314,19 @@
           {busy === 'check' ? 'checking…' : 'nothing from the compiler — press F7 to check'}
         </span>
       {/each}
+      {#if notes.length > 0}
+        <h3 data-testid="readonly-heading">read-only ({notes.length})</h3>
+        {#each notes as note (note.element + note.reason)}
+          <button
+            data-readonly-note={note.element}
+            onclick={() => jumpToOffset(note.span.start)}
+          >
+            <span class="dot locked"></span>
+            <span class="what">{note.reason.replace(/_/g, ' ')}</span>
+            <span class="owner">{note.element}</span>
+          </button>
+        {/each}
+      {/if}
     </div>
   {/if}
 
@@ -367,6 +432,20 @@
   .chip.locked {
     border-color: var(--faint);
   }
+  button.chip {
+    width: auto;
+    cursor: pointer;
+  }
+  button.chip.broken {
+    width: auto;
+    border-color: var(--danger);
+    color: var(--danger-fg);
+    background: var(--bg-2);
+    cursor: pointer;
+  }
+  button.chip.broken:hover {
+    border-color: var(--danger-fg);
+  }
   .grow {
     flex: 1;
   }
@@ -381,11 +460,8 @@
   .body {
     flex: 1;
     min-height: 0;
-    overflow: auto;
-    padding-bottom: var(--sp-2);
-    font-family: var(--mono);
-    font-size: 12px;
-    line-height: 1.5;
+    overflow: hidden;
+    padding: 0 var(--sp-2) var(--sp-2);
   }
   .collapsed .body {
     visibility: hidden;
@@ -434,6 +510,18 @@
   .dot.warning {
     background: var(--warn-border);
   }
+  .dot.locked {
+    background: var(--faint);
+  }
+  h3 {
+    margin: var(--sp-2) 0 var(--sp-0);
+    padding: 0 var(--sp-2);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
   .what {
     flex: 0 1 auto;
     min-width: 0;
@@ -478,50 +566,6 @@
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--fg);
-  }
-  .row {
-    display: flex;
-    align-items: flex-start;
-    white-space: pre;
-  }
-  .num {
-    flex: none;
-    width: 46px;
-    padding-right: var(--sp-3);
-    text-align: right;
-    color: var(--faint);
-    user-select: none;
-  }
-  code {
-    font: inherit;
-    white-space: pre;
-  }
-  .hit {
-    background: color-mix(in srgb, var(--accent) 30%, transparent);
-    border-radius: var(--radius-xs);
-  }
-  .ro {
-    text-decoration: underline wavy var(--faint);
-    text-underline-offset: 3px;
-  }
-  .kw {
-    color: var(--type-5);
-  }
-  .typ {
-    color: var(--type-1);
-  }
-  .str {
-    color: var(--type-2);
-  }
-  .lit {
-    color: var(--type-3);
-  }
-  .cmt {
-    color: var(--faint);
-    font-style: italic;
-  }
-  .pre {
-    color: var(--type-3);
   }
   @media (prefers-reduced-motion: reduce) {
     .drawer {

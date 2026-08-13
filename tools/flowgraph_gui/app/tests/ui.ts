@@ -538,6 +538,28 @@ function installFake(setup: Setup) {
       record(HistoryKind.Position, before);
       return snapshot();
     }
+    if (command === 'edit_source') {
+      const next = String((args as Loose).source);
+      // The real backend gates on tree-sitter; the fake gates on balance, which is
+      // enough to drive the "graph paused" path from a test.
+      const balanced = [
+        ['{', '}'],
+        ['(', ')']
+      ].every(([open, close]) => next.split(open ?? '').length === next.split(close ?? '').length);
+      if (balanced) {
+        const before = historicalState();
+        state.source = next;
+        state.revision += 1;
+        state.dirty = true;
+        record(HistoryKind.Source, before);
+      }
+      const at = next.lastIndexOf('{');
+      return {
+        state: snapshot(),
+        unparsed: !balanced,
+        fault: balanced ? null : { span: { start: at, end: at + 1 }, hint: 'expected `}`' }
+      };
+    }
     if (command === 'undo') step('undo');
     if (command === 'redo') step('redo');
     if (command === 'save_document') state.dirty = false;

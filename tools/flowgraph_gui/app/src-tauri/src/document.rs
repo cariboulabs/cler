@@ -7,8 +7,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use cler_graph::{
-    block_requirements, extract_specs, palette_specs, ActionQueue, ApplyError, BlockSpec, Command,
-    DocumentSession, FileModel, PatchDirection, SourcePatch, Splice, Transaction, SCHEMA_VERSION,
+    block_requirements, extract_specs, first_fault, palette_specs, ActionQueue, ApplyError,
+    BlockSpec, Command, DocumentSession, FileModel, ParseFault, PatchDirection, SourcePatch,
+    Splice, Transaction, SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -135,6 +136,14 @@ pub struct DocumentState {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditOutcome {
+    pub state: DocumentState,
+    pub unparsed: bool,
+    pub fault: Option<ParseFault>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct Summary {
     pub splices: usize,
 }
@@ -240,6 +249,53 @@ pub fn apply(
         doc.session.commit(pending);
     }
     Ok(snapshot(&target, doc))
+}
+
+pub fn edit(
+    docs: &Documents,
+    path: &str,
+    base_revision: u64,
+    source: String,
+) -> Result<EditOutcome, String> {
+    let mut map = lock(docs);
+    let (target, doc) = document(&mut map, path)?;
+    refuse_external(doc, &target)?;
+    if base_revision != doc.session.revision() {
+        return Err(ApplyError::RevisionMismatch {
+            base_revision,
+            current_revision: doc.session.revision(),
+        }
+        .to_string());
+    }
+
+    let pending = match doc.session.preview_text(source.clone()) {
+        Ok(pending) => pending,
+        Err(ApplyError::ProducesParseError) => {
+            write_working(doc, &source)?;
+            return Ok(EditOutcome {
+                unparsed: true,
+                fault: first_fault(&source),
+                state: snapshot(&target, doc),
+            });
+        }
+        Err(cause) => return Err(cause.to_string()),
+    };
+    if pending.changes() {
+        let patch = pending
+            .patch()
+            .cloned()
+            .ok_or_else(|| ApplyError::HistoryMismatch.to_string())?;
+        write_working(doc, pending.source())?;
+        doc.session.commit(pending);
+        doc.history.push(Action::Source(patch));
+    } else {
+        doc.session.commit(pending);
+    }
+    Ok(EditOutcome {
+        unparsed: false,
+        fault: None,
+        state: snapshot(&target, doc),
+    })
 }
 
 pub fn preview(
@@ -748,11 +804,20 @@ fn step(
     Ok(snapshot(&target, doc))
 }
 
+fn adopts_draft(session: &mut DocumentSession, draft: String) -> bool {
+    session.reload(draft).is_ok() && !session.has_errors()
+}
+
 fn fresh(target: &Path, spelling: &str) -> Result<Document, String> {
     let mut session = DocumentSession::open(target).map_err(|cause| cause.to_string())?;
     let saved = session.source().to_string();
     let (working, cache_path, mut cache, draft) = create_working(target, &saved)?;
-    if draft != saved && session.reload(draft).is_err() {
+    // The working copy also holds text that was typed but never parsed, so a draft
+    // is adopted only when it still parses; otherwise the saved file stands.
+    if draft != saved && !adopts_draft(&mut session, draft) {
+        session
+            .reload(saved.clone())
+            .map_err(|cause| cause.to_string())?;
         std::fs::write(&working, &saved)
             .map_err(|cause| format!("cannot write {}: {cause}", working.display()))?;
     }
@@ -1111,6 +1176,21 @@ mod tests {
         let removed = expired_snapshots(snapshots, &current, now);
 
         assert_eq!(removed, vec![PathBuf::from("18.cpp")]);
+    }
+
+    #[test]
+    fn a_draft_that_no_longer_parses_is_not_adopted() {
+        let saved = "int main() { return 0; }\n";
+        let mut session = DocumentSession::load(saved).expect("loads");
+
+        assert!(
+            adopts_draft(&mut session, "int main() { return 1; }\n".to_string()),
+            "a parseable draft is adopted"
+        );
+        assert!(
+            !adopts_draft(&mut session, "int main() { return 1;\n".to_string()),
+            "typed-but-unfinished text must not become the session"
+        );
     }
 }
 

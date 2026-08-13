@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { fixtures, fixtureSources } from '../fixtures';
 import type { BlockSpec } from './palette';
-import type { Command, DocumentState } from './schema';
+import type { Command, DocumentState, Span } from './schema';
 
 export type Invoker = (command: string, args: Record<string, unknown>) => Promise<unknown>;
 
@@ -133,6 +133,22 @@ export function applyCommands(
   baseRevision: number
 ): Promise<DocumentState> {
   return documentCall('apply_commands', { path, commands, baseRevision });
+}
+
+export type ParseFault = { span: Span; hint: string };
+
+export type EditOutcome = {
+  state: DocumentState;
+  unparsed: boolean;
+  fault: ParseFault | null;
+};
+
+export function editSource(
+  path: string,
+  source: string,
+  baseRevision: number
+): Promise<EditOutcome> {
+  return invoker('edit_source', { path, source, baseRevision }) as Promise<EditOutcome>;
 }
 
 export type PreviewResult = { diff: string; summary: { splices: number } };

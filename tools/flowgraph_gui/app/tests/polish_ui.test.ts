@@ -109,7 +109,7 @@ describe('the chrome gets out of the way', () => {
     async () => {
       const page = await boot();
       await page.keyboard.press('Control+`');
-      await page.waitForSelector('[data-testid="drawer-body"] .row');
+      await page.waitForSelector('[data-testid="drawer-body"] .cm-line');
       await expect.poll(() => widthOf(page, '.sidebar')).toBeCloseTo(SIDEBAR, 0);
       await expect.poll(() => widthOf(page, '.inspector')).toBeCloseTo(INSPECTOR, 0);
 
@@ -363,13 +363,13 @@ describe('the cheap repaints', () => {
     async () => {
       const page = await boot({ fixture: 'adsb_receiver' });
       await page.keyboard.press('Control+`');
-      await page.waitForSelector('[data-testid="drawer-body"] .row');
+      await page.waitForSelector('[data-testid="drawer-body"] .cm-line');
       await expect
         .poll(
           () =>
             page.evaluate(() => {
-              const body = document.querySelector('[data-testid="drawer-body"]');
-              return body instanceof HTMLElement ? body.scrollTop : -1;
+              const scroller = document.querySelector('[data-testid="drawer-body"] .cm-scroller');
+              return scroller instanceof HTMLElement ? scroller.scrollTop : -1;
             }),
           { timeout: 3000 }
         )

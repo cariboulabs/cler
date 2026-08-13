@@ -253,6 +253,36 @@ impl fmt::Display for ApplyError {
 
 impl std::error::Error for ApplyError {}
 
+fn edit_splice(before: &str, after: &str) -> Splice {
+    let mut head = before
+        .bytes()
+        .zip(after.bytes())
+        .take_while(|(left, right)| left == right)
+        .count();
+    while head > 0 && !before.is_char_boundary(head) {
+        head -= 1;
+    }
+    let room = before.len().min(after.len()) - head;
+    let mut tail = before
+        .bytes()
+        .rev()
+        .zip(after.bytes().rev())
+        .take_while(|(left, right)| left == right)
+        .count()
+        .min(room);
+    while tail > 0
+        && (!before.is_char_boundary(before.len() - tail)
+            || !after.is_char_boundary(after.len() - tail))
+    {
+        tail -= 1;
+    }
+    Splice {
+        start: head,
+        end: before.len() - tail,
+        text: after[head..after.len() - tail].to_string(),
+    }
+}
+
 impl DocumentSession {
     pub fn apply(&mut self, transaction: Transaction) -> Result<ApplyOutcome, ApplyError> {
         let pending = self.preview(transaction)?;
@@ -320,6 +350,20 @@ impl DocumentSession {
             splices,
             changed: true,
             patch: Some(patch),
+        })
+    }
+
+    pub fn preview_text(&self, source: String) -> Result<PendingApply, ApplyError> {
+        let pending = self.preview_source(source)?;
+        if !pending.changed {
+            return Ok(pending);
+        }
+        let splices = vec![edit_splice(&self.source, &pending.source)];
+        let patch = SourcePatch::new(&self.source, &pending.source, splices.clone())?;
+        Ok(PendingApply {
+            splices,
+            patch: Some(patch),
+            ..pending
         })
     }
 

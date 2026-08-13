@@ -11,8 +11,8 @@
   ];
 
   const LEFT: [RailTab, string, string][] = [
-    ['settings', 'Settings', 'Document and session settings  ['],
-    ['ai-agent', 'AI Agent', 'Ask about this flowgraph  Ctrl+J']
+    ['ai-agent', 'AI Agent', 'Ask about this flowgraph  Ctrl+J'],
+    ['settings', 'Settings', 'Document and session settings  [']
   ];
 
   const tabs = $derived(side === 'left' ? LEFT : RIGHT);

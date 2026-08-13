@@ -59,6 +59,55 @@ pub(crate) fn parse_source(source: &str) -> Result<Tree, Error> {
     parser.parse(source, None).ok_or(Error::Unparsable)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParseFault {
+    pub span: model::Span,
+    pub hint: String,
+}
+
+/// Where the parser first lost the thread, and what it was looking for there.
+pub fn first_fault(source: &str) -> Option<ParseFault> {
+    let tree = parse_source(source).ok()?;
+    let node = earliest_fault(tree.root_node())?;
+    let hint = if node.is_missing() {
+        format!("expected `{}`", node.kind())
+    } else {
+        let rest = source.get(node.start_byte()..).unwrap_or("").trim_start();
+        let token: String = rest.split_whitespace().next().unwrap_or("").chars().take(16).collect();
+        if token.is_empty() {
+            "the file ends before this is finished".to_string()
+        } else {
+            format!("unexpected `{token}`")
+        }
+    };
+    Some(ParseFault {
+        span: model::Span {
+            start: node.start_byte(),
+            end: node.end_byte(),
+        },
+        hint,
+    })
+}
+
+fn earliest_fault(node: tree_sitter::Node<'_>) -> Option<tree_sitter::Node<'_>> {
+    if node.is_missing() || node.is_error() {
+        // A missing token inside the error names what the parser wanted; prefer it.
+        let mut cursor = node.walk();
+        let inner = node
+            .children(&mut cursor)
+            .filter_map(earliest_fault)
+            .find(|found| found.is_missing());
+        return Some(inner.unwrap_or(node));
+    }
+    if !node.has_error() {
+        return None;
+    }
+    let mut cursor = node.walk();
+    let found = node.children(&mut cursor).find_map(earliest_fault);
+    found
+}
+
 impl DocumentSession {
     pub fn load(text: impl Into<String>) -> Result<Self, Error> {
         let source = text.into();

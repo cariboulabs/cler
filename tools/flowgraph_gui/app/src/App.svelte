@@ -45,6 +45,8 @@
     checkDocument,
     closeDocument,
     describeApplyError,
+    editSource,
+    type ParseFault,
     errorRecord,
     findTarget,
     inTauri,
@@ -131,7 +133,7 @@
     type Site,
     type Span
   } from './lib/schema';
-  import type { CodeMark } from './lib/code';
+  import type { CodeMark } from './lib/editor';
   import CodeDrawer from './lib/CodeDrawer.svelte';
   import type { Tab } from './lib/CodeDrawer.svelte';
   import { fixtureNames } from './fixtures';
@@ -159,6 +161,10 @@
   const NO_SITE = 'no flowgraph site found in this file';
   const DROP_HINT = 'dropped — release on an input port to connect';
   const NO_SHELL = 'the AI agent runs on your machine — open the desktop shell to use it';
+  const UNSAVEABLE = 'the code has a syntax error — fix it before saving';
+  const UNPARSED_LOCK =
+    'the code has a syntax error — fix it in the drawer, or discard the edit, before the graph moves again';
+  const TEXT_DELAY = 300;
   const MOVED_ON = 'the graph moved on since that proposal — re-check it before applying';
   const RAIL_WIDTH = 44;
   const SIDEBAR_WIDTH = 280;
@@ -260,6 +266,11 @@
   let flowCache = $state.raw<UiCache>(cacheOf({}));
   const activeJobs = new Map<TaskKind, number>();
   const latestJobs = new Map<TaskKind, number>();
+
+  let unparsed = $state(false);
+  let fault = $state.raw<ParseFault | null>(null);
+  let pendingText: string | null = null;
+  let textTimer: ReturnType<typeof setTimeout> | null = null;
 
   const editable = $derived(desktop && opened !== null);
   const site = $derived<Site | undefined>(doc.model.sites[siteIndex]);
@@ -654,6 +665,13 @@
   }
 
   function install(next: DocumentState, fresh: boolean) {
+    // A burst still inside the debounce window was never sent anywhere, so leaving
+    // the document drops it; flushing here would await the queue this may run in.
+    if (textTimer !== null) clearTimeout(textTimer);
+    textTimer = null;
+    pendingText = null;
+    unparsed = false;
+    fault = null;
     if (fresh && pendingReply !== null) void aiAgentStop(doc.path).catch(() => undefined);
     doc = next;
     generation += 1;
@@ -1000,18 +1018,60 @@
   }
 
   function run(action: (path: string) => Promise<DocumentState>): Promise<Outcome> {
+    // The buffer is ahead of the model and cannot be reconciled while it does not
+    // parse; a gesture applied now would be spliced away by the next commit.
+    if (unparsed) return Promise.resolve(refuse(UNPARSED_LOCK));
     const path = doc.path;
     return queued(path, () => attempt(action, adopt));
   }
 
-  function runHistory(action: (path: string) => Promise<DocumentState>): Promise<Outcome> {
+  async function runHistory(action: (path: string) => Promise<DocumentState>): Promise<Outcome> {
     cancelCacheWrite();
+    await flushText();
+    if (unparsed) return refuse(UNPARSED_LOCK);
     const path = doc.path;
     return queued(path, () =>
       attempt(action, (next) => {
         syncPositionCache(next.cache);
         adopt(next);
       })
+    );
+  }
+
+  function discardEdit() {
+    if (textTimer !== null) clearTimeout(textTimer);
+    textTimer = null;
+    pendingText = null;
+    unparsed = false;
+    fault = null;
+    status = 'edit discarded, the code is back to the last version that parsed';
+  }
+
+  function noteEdit(next: string) {
+    if (textTimer !== null) clearTimeout(textTimer);
+    pendingText = next;
+    textTimer = setTimeout(() => void flushText(), TEXT_DELAY);
+  }
+
+  // Text lands before any gesture that reads or rewrites the model, so the two
+  // never race for the same revision.
+  function flushText(): Promise<Outcome> {
+    if (textTimer !== null) {
+      clearTimeout(textTimer);
+      textTimer = null;
+    }
+    const text = pendingText;
+    if (text === null) return Promise.resolve({ ok: true });
+    pendingText = null;
+    return queued(doc.path, () =>
+      // The base is read here, inside the queue: an earlier flush may still have
+      // been in flight when this one was armed.
+      attempt(async (path) => {
+        const outcome = await editSource(path, text, doc.revision);
+        unparsed = outcome.unparsed;
+        fault = outcome.fault;
+        return outcome.state;
+      }, adopt)
     );
   }
 
@@ -1112,6 +1172,11 @@
 
   async function save() {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    if (!(await flushText()).ok) return;
+    if (unparsed) {
+      announce(UNSAVEABLE);
+      return;
+    }
     const outcome = await run(saveDocument);
     if (outcome.ok) hint('saved to source');
   }
@@ -1123,6 +1188,7 @@
 
   async function submitAll(commands: Command[]): Promise<Outcome> {
     if (commands.length === 0) return { ok: true };
+    await flushText();
     const planned = doc.revision;
     const outcome = await run((path) => applyCommands(path, commands, planned));
     if (!outcome.ok && outcome.record?.error === 'revision_mismatch') {
@@ -1314,6 +1380,11 @@
   }
 
   async function task(kind: TaskKind, action: (path: string) => Promise<TaskStarted>) {
+    await flushText();
+    if (unparsed) {
+      announce(UNPARSED_LOCK);
+      return;
+    }
     output = [];
     if (kind !== 'run') diagLines = [];
     if (kind === 'run') running = true;
@@ -1587,23 +1658,6 @@
         </section>
       {/if}
 
-      {#if site && notes.length > 0}
-        <section>
-          <h2>Read-only ({notes.length})</h2>
-          {#if notes.length > 0}
-            <ul class="notes">
-              {#each notes as note (note.element + note.reason)}
-                <li>
-                  <span class="el">{note.element}</span><span class="reason"
-                    >{readable(note.reason)}</span
-                  >
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </section>
-      {/if}
-
       {#if desktop}
         <section data-testid="libraries">
           <h2>
@@ -1861,6 +1915,11 @@
           path={doc.path}
           revision={doc.revision}
           readOnly={notes.length}
+          writable={editable}
+          {unparsed}
+          {fault}
+          {notes}
+          ondiscard={discardEdit}
           {hits}
           {marks}
           {anchors}
@@ -1871,6 +1930,7 @@
           {output}
           {busy}
           onpick={pickInCode}
+          onedit={noteEdit}
           ontoggle={() => (drawerOpen = !drawerOpen)}
           onheight={(next) => (drawerHeight = next)}
           ontab={(next: Tab) => (tab = next)}

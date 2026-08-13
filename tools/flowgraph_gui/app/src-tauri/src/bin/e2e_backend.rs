@@ -207,6 +207,19 @@ fn dispatch(
                 _ => Reply::Loud("apply_commands needs baseRevision and commands".to_string()),
             }
         }
+        "edit_source" => {
+            let base = args
+                .get("base_revision")
+                .or_else(|| args.get("baseRevision"))
+                .and_then(Value::as_u64);
+            let source = args.get("source").and_then(Value::as_str);
+            match (base, source) {
+                (Some(base), Some(source)) => {
+                    outcome(document::edit(docs, &path, base, source.to_string()))
+                }
+                _ => Reply::Loud("edit_source needs baseRevision and source".to_string()),
+            }
+        }
         "preview_commands" => {
             let base = args
                 .get("base_revision")

@@ -75,6 +75,16 @@ fn apply_commands(
 }
 
 #[tauri::command]
+fn edit_source(
+    path: String,
+    base_revision: u64,
+    source: String,
+    docs: State<'_, Documents>,
+) -> Result<document::EditOutcome, String> {
+    document::edit(&docs, &path, base_revision, source)
+}
+
+#[tauri::command]
 fn preview_commands(
     path: String,
     base_revision: u64,
@@ -426,6 +436,7 @@ pub fn run() {
             open_document,
             close_document,
             apply_commands,
+            edit_source,
             preview_commands,
             move_nodes,
             undo,

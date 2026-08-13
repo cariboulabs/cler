@@ -1,7 +1,9 @@
 use std::time::{Duration, Instant};
 
 use cler_graph::model::{Site, Span};
-use cler_graph::{ApplyError, Command, DocumentSession, Splice, Transaction, SCHEMA_VERSION};
+use cler_graph::{
+    ApplyError, Command, DocumentSession, PatchDirection, Splice, Transaction, SCHEMA_VERSION,
+};
 
 const CORPUS: &str = "../../../desktop_examples";
 
@@ -1757,4 +1759,62 @@ int main() {
         detail,
         "this site has a hand-written gui loop; the editor will not modify it"
     );
+}
+
+#[test]
+fn a_text_edit_becomes_one_tight_splice_that_undoes() {
+    let mut session = session("hello_world.cpp");
+    let before = session.source().to_string();
+    let edited = before.replacen("flowgraph.run()", "flowgraph.run() /* typed */", 1);
+
+    let pending = session
+        .preview_text(edited.clone())
+        .expect("a parseable edit previews");
+    let splices = pending.splices().to_vec();
+    let patch = pending.patch().cloned().expect("a text edit carries a patch");
+    assert_eq!(splices.len(), 1);
+    assert!(
+        splices[0].end - splices[0].start < before.len() / 2,
+        "the splice should cover the edit, not the whole file"
+    );
+    assert_untouched_bytes(&before, &edited, &splices);
+
+    session.commit(pending);
+    assert_eq!(session.source(), edited);
+    assert_eq!(
+        patch
+            .apply(session.source(), PatchDirection::Reverse)
+            .expect("the patch reverses"),
+        before
+    );
+}
+
+#[test]
+fn a_text_edit_that_does_not_parse_is_refused() {
+    let session = session("hello_world.cpp");
+    let broken = format!("{}\nvoid dangling(", session.source());
+    let refused = session.preview_text(broken).err();
+    assert!(
+        matches!(refused, Some(ApplyError::ProducesParseError)),
+        "broken source never enters the session"
+    );
+}
+
+#[test]
+fn a_parse_fault_names_where_it_broke_and_what_was_wanted() {
+    let missing = "int main() {\n    int x = 1;\n";
+    let fault = cler_graph::first_fault(missing).expect("an unclosed body faults");
+    assert_eq!(fault.hint, "expected `}`");
+    assert!(
+        missing[..fault.span.start].lines().count() >= 2,
+        "the fault points past the opening line, at {}",
+        fault.span.start
+    );
+
+    let unexpected = "int main() {\n    int x = 1;\n}\n} }\n";
+    let stray = cler_graph::first_fault(unexpected).expect("a stray brace faults");
+    assert_eq!(stray.hint, "unexpected `}`");
+    assert!(unexpected[stray.span.start..].starts_with('}'));
+
+    assert_eq!(cler_graph::first_fault("int main() { return 0; }\n"), None);
 }

@@ -8,9 +8,22 @@ framework itself.
 
 A projection-editor over real C++ files. The `.cpp` file is the only source of
 truth: tree-sitter parses it into a model, the GUI renders the model, and every
-edit is a validated text splice back into the file. There is no project file
-and no export step. Anything the model cannot prove stays read-only with its
-reason attached.
+graph gesture is a validated text splice back into the file. There is no
+project file and no export step. Anything the model cannot prove is marked in
+the code with its reason attached — a mark the canvas obeys and the text
+editor only shows.
+
+The code drawer is a real editor (CodeMirror 6), so the same file can be
+changed by hand. Typed text settles into one `edit_source` commit: it becomes
+a single tight splice, one undo step, the same history as any graph gesture.
+Text that tree-sitter cannot parse never enters the session — it stays in the
+buffer and in the working copy, and the drawer says where the parser lost the
+thread and what it expected. While it does not parse the buffer is ahead of a
+model that cannot follow it, so **every gesture that would move the model is
+refused with that reason** — save, build, undo, canvas edits alike — and the
+way out is to fix the syntax or press *discard edit*. Every gesture also
+flushes pending text first, so the two never race for a revision. A draft in
+the working copy is adopted on open only if it still parses.
 
 ## Architecture map
 
@@ -34,14 +47,14 @@ in two places under two names, one of them is wrong.
 - **Top bar**: identity (cler mark), File menu, document path (readonly,
   full real path, monospace), problems chip, task actions (check/build/run),
   history, view controls. Nothing else.
-- **Left panel — Settings | AI Agent**: two tabs. Settings holds everything
+- **Left panel — AI Agent | Settings**: two tabs. Settings holds everything
   about *this document and session*: file identity, run arguments (argv),
   flowgraph config, block search paths, sample-type legend. No canvas
   duplicates, no statistics without a decision the user could take from them.
   AI Agent is the chat over this flowgraph (Ctrl+J).
 - **Right rail**: what the *selection* needs — Inspector (selected block),
   Library (palette to place from).
-- **Bottom drawer**: code, diagnostics, output.
+- **Bottom drawer**: code (editable), diagnostics, output.
 - One home per concept. The palette browser is "Library" (right); the search
   paths that feed it are "Block paths" (left). Never reuse a name.
 

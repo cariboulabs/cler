@@ -2,7 +2,6 @@ import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer, type ViteDevServer } from 'vite';
 import { fixtures, fixtureSources } from '../src/fixtures';
-import { codeLines } from '../src/lib/code';
 import { blockSpans, targetAt } from '../src/lib/project';
 import { lineOfOffset, type FileModel, type Span } from '../src/lib/schema';
 import { openInspector } from './ui';
@@ -111,6 +110,23 @@ function installFake(setup: Setup) {
     }
     calls.push({ name: command, args });
     if (command === 'apply_commands') apply(args.commands as Record<string, unknown>[]);
+    if (command === 'edit_source') {
+      const next = String(args.source);
+      // The real backend gates on tree-sitter; balanced braces are enough here to
+      // drive both the accepted and the "graph paused" path.
+      const unparsed = next.split('{').length !== next.split('}').length;
+      if (!unparsed) {
+        state.source = next;
+        state.revision += 1;
+        state.dirty = true;
+      }
+      const at = next.lastIndexOf('{');
+      return {
+        state: snapshot(),
+        unparsed,
+        fault: unparsed ? { span: { start: at, end: at + 1 }, hint: 'expected `}`' } : null
+      };
+    }
     if (command === 'save_document') state.dirty = false;
     if (command === 'reload_document') {
       state.dirty = false;
@@ -191,7 +207,7 @@ async function boot(name = 'hello_world'): Promise<Page> {
 
 async function openDrawer(page: Page): Promise<void> {
   await page.click('[data-testid="drawer-toggle"]');
-  await page.waitForSelector('[data-testid="drawer-body"] .row');
+  await page.waitForSelector('[data-testid="drawer-body"] .cm-line');
   await page.waitForTimeout(250);
 }
 
@@ -206,8 +222,8 @@ function drawerHeight(page: Page): Promise<number> {
 
 function scrollTop(page: Page): Promise<number> {
   return page.evaluate(() => {
-    const body = document.querySelector('[data-testid="drawer-body"]');
-    return body instanceof HTMLElement ? body.scrollTop : -1;
+    const scroller = document.querySelector('[data-testid="drawer-body"] .cm-scroller');
+    return scroller instanceof HTMLElement ? scroller.scrollTop : -1;
   });
 }
 
@@ -238,8 +254,88 @@ function offsetOf(source: string, needle: string): number {
   return at;
 }
 
-async function clickOffset(page: Page, offset: number): Promise<void> {
-  await page.click(`[data-testid="drawer-body"] [data-at="${offset}"]`);
+// The editor draws a window well past the viewport and re-renders as it scrolls,
+// so a click at a source offset means: scroll until that line is really on screen,
+// then re-find it and aim at its character box.
+async function clickOffset(page: Page, source: string, offset: number): Promise<void> {
+  const head = source.slice(0, offset);
+  const line = head.split('\n').length;
+  const column = offset - (head.lastIndexOf('\n') + 1);
+  const total = source.split('\n').length;
+
+  const settled = await page.evaluate(
+    async ([line, total]) => {
+      const scroller = document.querySelector('[data-testid="drawer-body"] .cm-scroller');
+      if (!(scroller instanceof HTMLElement)) return false;
+      const gutterFor = (wanted: number) =>
+        Array.from(
+          document.querySelectorAll('[data-testid="drawer-body"] .cm-gutterElement')
+        ).find(
+          (element) =>
+            element.textContent?.trim() === String(wanted) &&
+            element.getBoundingClientRect().height > 0
+        );
+      for (let tries = 0; tries < 25; tries++) {
+        const box = scroller.getBoundingClientRect();
+        const found = gutterFor(line)?.getBoundingClientRect();
+        if (found && found.top >= box.top && found.bottom <= box.bottom) return true;
+        const height = scroller.scrollHeight / total;
+        scroller.scrollTop = found
+          ? scroller.scrollTop + (found.top - box.top) - box.height / 3
+          : Math.max(0, (line - 1) * height - box.height / 3);
+        await new Promise((wake) => setTimeout(wake, 60));
+      }
+      return false;
+    },
+    [line, total] as const
+  );
+  if (!settled) throw new Error(`line ${line} never came into view`);
+  await page.waitForTimeout(120);
+
+  const point = await page.evaluate(
+    ([line, column]) => {
+      const content = document.querySelector('[data-testid="drawer-body"] .cm-content');
+      const numbered = Array.from(
+        document.querySelectorAll('[data-testid="drawer-body"] .cm-gutterElement')
+      ).find(
+        (element) =>
+          element.textContent?.trim() === String(line) &&
+          element.getBoundingClientRect().height > 0
+      );
+      if (!numbered || !(content instanceof HTMLElement)) return null;
+      const middle = numbered.getBoundingClientRect().top + 1;
+      const row = Array.from(content.children).find((element) => {
+        const box = element.getBoundingClientRect();
+        return box.top <= middle && box.bottom > middle;
+      });
+      if (!(row instanceof HTMLElement)) return null;
+
+      const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+      let seen = 0;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node as Text;
+        if (seen + text.length <= column) {
+          seen += text.length;
+          continue;
+        }
+        const range = document.createRange();
+        range.setStart(text, column - seen);
+        range.setEnd(text, column - seen + 1);
+        const box = range.getBoundingClientRect();
+        return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+      }
+      const box = row.getBoundingClientRect();
+      return { x: box.right - 1, y: box.top + box.height / 2 };
+    },
+    [line, column] as const
+  );
+  if (!point) throw new Error(`line ${line} never rendered`);
+  // Click through the content locator so Playwright does its own hit test rather
+  // than firing at raw viewport coordinates.
+  const content = page.locator('[data-testid="drawer-body"] .cm-content');
+  const box = await content.boundingBox();
+  if (!box) throw new Error('the editor has no box');
+  await content.click({ position: { x: point.x - box.x, y: point.y - box.y } });
   await page.waitForTimeout(200);
 }
 
@@ -276,46 +372,6 @@ describe('the bundled fixture sources stay in step with the parsed models', () =
   }
 });
 
-describe('codeLines decorates exactly the spans it is given', () => {
-  it('marks every byte of a hit span and nothing beyond it', () => {
-    const site = siteOf('hello_world', 0);
-    const source = fixtureSource('hello_world');
-    const spans = blockSpans(site, 'adder');
-    const lines = codeLines(source, spans, []);
-    const pieces = lines
-      .flatMap((line) => line.pieces)
-      .filter((piece) => piece.hit)
-      .map((piece) => ({ at: piece.at, length: piece.text.length }));
-
-    expect(merged(source, pieces)).toEqual(spans);
-  });
-
-  it('carries the read-only reason on the marked span only', () => {
-    const source = fixtureSource('adsb_receiver');
-    const locked = siteOf('adsb_receiver', 0).blocks.find(
-      (block) => block.read_only_reason !== null
-    );
-    if (!locked?.read_only_reason) throw new Error('adsb_receiver has no read-only block');
-    const mark = { span: locked.span, reason: locked.read_only_reason };
-    const reasons = codeLines(source, [], [mark])
-      .flatMap((line) => line.pieces)
-      .filter((piece) => piece.reason === mark.reason)
-      .map((piece) => ({ at: piece.at, length: piece.text.length }));
-
-    expect(merged(source, reasons)).toEqual([mark.span]);
-  });
-
-  it('numbers every line of the source', () => {
-    const source = fixtureSource('uhd_device');
-    const lines = codeLines(source, [], []);
-    expect(lines).toHaveLength(source.split('\n').length);
-    expect(lines.map((line) => line.number)).toEqual(lines.map((_, index) => index + 1));
-    expect(lines.map((line) => line.pieces.map((piece) => piece.text).join(''))).toEqual(
-      source.split('\n')
-    );
-  });
-});
-
 describe('the code drawer opens, persists and resizes', () => {
   it(
     'toggles from the canvas edge and remembers its state and height across a reload',
@@ -328,7 +384,7 @@ describe('the code drawer opens, persists and resizes', () => {
       expect(await page.locator('[data-testid="tab-code"]').count()).toBe(1);
 
       await page.reload({ waitUntil: 'load' });
-      await page.waitForSelector('[data-testid="drawer-body"] .row');
+      await page.waitForSelector('[data-testid="drawer-body"] .cm-line');
       await page.waitForTimeout(250);
       expect(await drawerHeight(page)).toBeCloseTo(DEFAULT_HEIGHT, 0);
 
@@ -359,7 +415,7 @@ describe('the code drawer opens, persists and resizes', () => {
       expect(await drawerHeight(page)).toBeCloseTo(DEFAULT_HEIGHT + 120, -1);
 
       await page.reload({ waitUntil: 'load' });
-      await page.waitForSelector('[data-testid="drawer-body"] .row');
+      await page.waitForSelector('[data-testid="drawer-body"] .cm-line');
       await page.waitForTimeout(300);
       expect(await drawerHeight(page)).toBeCloseTo(DEFAULT_HEIGHT + 120, -1);
       await page.close();
@@ -373,8 +429,14 @@ describe('the code drawer opens, persists and resizes', () => {
       const page = await boot('adsb_receiver');
       await openDrawer(page);
       const reported = await page.textContent('[data-testid="drawer-readonly"]');
-      const sidebar = await page.locator('.sidebar h2', { hasText: 'Read-only' }).textContent();
-      expect(sidebar).toContain(`(${reported?.trim().split(' ')[0] ?? ''})`);
+      const counted = reported?.trim().split(' ')[0] ?? '';
+      await page.click('[data-testid="tab-diagnostics"]');
+      const heading = await page.textContent('[data-testid="readonly-heading"]');
+      expect(heading).toContain(`(${counted})`);
+      expect(await page.locator('[data-diagnostic-note], [data-readonly-note]').count()).toBe(
+        Number(counted)
+      );
+      await page.click('[data-testid="tab-code"]');
       expect(await page.locator('[data-testid="drawer-body"] .ro').count()).toBeGreaterThan(0);
       await page.close();
     },
@@ -417,16 +479,16 @@ describe('selection and the code stay in sync both ways', () => {
 
       const declaration = site.blocks.find((block) => block.var === 'throttle');
       if (!declaration) throw new Error('no throttle');
-      await clickOffset(page, declaration.span.start);
+      await clickOffset(page, source, declaration.span.start);
       await expect.poll(() => page.textContent('.inspector dd')).toBe('throttle');
 
       const runner = site.runners.find((entry) => entry.block === 'plot');
       if (!runner) throw new Error('no plot runner');
-      await clickOffset(page, runner.span.start);
+      await clickOffset(page, source, runner.span.start);
       await expect.poll(() => page.textContent('.inspector dd')).toBe('plot');
 
       const outside = offsetOf(source, '#include');
-      await clickOffset(page, outside);
+      await clickOffset(page, source, outside);
       expect(await page.textContent('.inspector dd')).toBe('plot');
       await page.close();
     },
@@ -438,6 +500,7 @@ describe('selection and the code stay in sync both ways', () => {
     async () => {
       const page = await boot('uhd_device');
       await openDrawer(page);
+      const source = fixtureSource('uhd_device');
       const chirp = siteOf('uhd_device', 1).blocks.find((block) => block.var === 'chirp');
       if (!chirp) throw new Error('no chirp');
       expect(targetAt(fixtures.uhd_device?.sites ?? [], chirp.span.start)).toEqual({
@@ -445,7 +508,7 @@ describe('selection and the code stay in sync both ways', () => {
         block: 'chirp'
       });
 
-      await clickOffset(page, chirp.span.start);
+      await clickOffset(page, source, chirp.span.start);
       await page.waitForTimeout(400);
       await expect.poll(() => page.textContent('.inspector dd')).toBe('chirp');
       await expect
@@ -465,17 +528,19 @@ describe('selection and the code stay in sync both ways', () => {
       await pickNode(page, 'spectrogram');
 
       await page.evaluate(() => {
-        const body = document.querySelector('[data-testid="drawer-body"]');
-        if (body instanceof HTMLElement) body.scrollTop = 0;
+        const scroller = document.querySelector('[data-testid="drawer-body"] .cm-scroller');
+        if (scroller instanceof HTMLElement) scroller.scrollTop = 0;
       });
       await page.waitForTimeout(150);
 
       const field = page.locator('input[data-field="spectrogram.ctor.0"]');
       await field.fill('"Waterfall Of A Very Different Length"');
       await field.blur();
-      await expect.poll(() => page.textContent('[data-testid="drawer-body"]')).toContain(
-        'Waterfall Of A Very Different Length'
-      );
+      // The editor renders only what is in view, so the moved text is read from the
+      // document rather than from the visible lines.
+      await expect
+        .poll(() => page.evaluate(() => (window as unknown as FakeWindow).__fake.source()))
+        .toContain('Waterfall Of A Very Different Length');
       await page.waitForTimeout(250);
       expect(await scrollTop(page)).toBe(0);
 
@@ -529,7 +594,7 @@ describe('the node context menu reaches the code', () => {
       const page = await boot('uhd_device');
       await page.locator('.svelte-flow__node[data-id="spectrogram"]').click({ button: 'right' });
       await page.click('[data-testid="menu-view-source"]');
-      await page.waitForSelector('[data-testid="drawer-body"] .row');
+      await page.waitForSelector('[data-testid="drawer-body"] .cm-line');
       await page.waitForTimeout(400);
 
       expect(await scrollTop(page)).toBeGreaterThan(0);
@@ -621,9 +686,9 @@ describe('the drawer in fixture mode', () => {
 
       await openDrawer(page);
       expect(await page.textContent('[data-testid="drawer-body"]')).toContain('cler::BlockRunner');
-      expect(await page.locator('[data-testid="drawer-body"] .row').count()).toBe(
-        source.split('\n').length
-      );
+      expect(
+        await page.getAttribute('[data-testid="drawer-body"] .cm-content', 'contenteditable')
+      ).toBe('false');
 
       await page.locator('.svelte-flow__node[data-id="adder"]').dispatchEvent('contextmenu');
       await page.waitForSelector('[data-testid="context-menu"]');
@@ -645,7 +710,7 @@ describe('the drawer shortcut respects a field with focus', () => {
       const page = await boot();
       await page.locator('.svelte-flow__pane').click({ position: { x: 660, y: 760 } });
       await page.keyboard.press('Control+`');
-      await page.waitForSelector('[data-testid="drawer-body"] .row');
+      await page.waitForSelector('[data-testid="drawer-body"] .cm-line');
       await page.waitForTimeout(250);
       expect(await drawerHeight(page)).toBeCloseTo(DEFAULT_HEIGHT, 0);
 
@@ -659,6 +724,75 @@ describe('the drawer shortcut respects a field with focus', () => {
       await page.waitForTimeout(400);
       expect(await drawerHeight(page)).toBeLessThanOrEqual(1);
       expect(await field.inputValue()).toBe('1.0f');
+      await page.close();
+    },
+    CASE
+  );
+});
+
+describe('the code drawer edits the file', () => {
+  it(
+    'commits what was typed, once the typing settles',
+    async () => {
+      const page = await boot();
+      await openDrawer(page);
+      const source = fixtureSource('hello_world');
+      await clickOffset(page, source, offsetOf(source, 'int main()'));
+      await page.keyboard.type('// typed by hand');
+
+      await expect
+        .poll(() => page.evaluate(() => (window as unknown as FakeWindow).__fake.source()))
+        .toContain('// typed by hand');
+      const commits = (await calls(page)).filter((call) => call.name === 'edit_source');
+      expect(commits, 'one commit for the burst, not one per keystroke').toHaveLength(1);
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
+    'says the graph is paused while the text does not parse, and refuses to save',
+    async () => {
+      const page = await boot();
+      await openDrawer(page);
+      const source = fixtureSource('hello_world');
+      await clickOffset(page, source, offsetOf(source, 'int main()'));
+      await page.keyboard.type('{');
+
+      await page.waitForSelector('[data-testid="drawer-unparsed"]');
+      const chip = await page.textContent('[data-testid="drawer-unparsed"]');
+      expect(chip, 'the chip names where and what').toMatch(/line \d+/);
+      expect(chip).toContain('expected `}`');
+      expect(
+        await page.locator('[data-testid="drawer-body"] .bad').count(),
+        'the offending line is marked in the code'
+      ).toBeGreaterThan(0);
+      expect(
+        await page.textContent('[data-testid="drawer-body"] .cm-content'),
+        'the refused text stays in the buffer'
+      ).toContain('{int main()');
+      expect(await page.getAttribute('[data-testid="drawer-unparsed"]', 'title')).toContain(
+        'does not parse'
+      );
+
+      await page.click('[data-testid="file-menu"]');
+      await page.click('[data-testid="file-save"]');
+      await expect.poll(() => page.textContent('[data-testid="status"]')).toContain('syntax error');
+      expect((await calls(page)).filter((call) => call.name === 'save_document')).toHaveLength(0);
+
+      // The graph must not move while the buffer it came from does not parse.
+      await page.locator('.svelte-flow__node[data-id="adder"]').dispatchEvent('click');
+      await page.fill('input[data-field="adder.display_name"]', 'Renamed');
+      await page.keyboard.press('Enter');
+      await expect.poll(() => page.textContent('[data-testid="status"]')).toContain('syntax error');
+      expect((await calls(page)).filter((call) => call.name === 'apply_commands')).toHaveLength(0);
+
+      await page.click('[data-testid="drawer-discard"]');
+      await expect.poll(() => page.locator('[data-testid="drawer-unparsed"]').count()).toBe(0);
+      expect(
+        await page.textContent('[data-testid="drawer-body"] .cm-content'),
+        'discarding puts the last parseable version back'
+      ).not.toContain('{int main()');
       await page.close();
     },
     CASE
