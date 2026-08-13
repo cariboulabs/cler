@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use cler_flowgraph_gui::ai_agent::{self, Auth, Chunk, Proposal, Turn, Wire};
 use cler_graph::palette_types::{Direction, Port, PortCount};
 use cler_graph::{BlockSpec, Command};
@@ -692,5 +694,53 @@ fn store_key_normalizes_validates_and_locks_down() {
         assert_eq!(mode & 0o777, 0o600);
     }
 
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+fn jwt(claims: Value) -> String {
+    let body = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).expect("claims"));
+    format!("header.{body}.signature")
+}
+
+#[test]
+fn account_comes_off_the_access_token() {
+    assert_eq!(
+        ai_agent::account_of(&jwt(json!({
+            "https://api.openai.com/auth": { "chatgpt_account_id": "acct-42" }
+        }))),
+        Some("acct-42".to_string())
+    );
+    assert_eq!(
+        ai_agent::account_of(&jwt(json!({ "chatgpt_account_id": "acct-7" }))),
+        Some("acct-7".to_string())
+    );
+    assert_eq!(ai_agent::account_of(&jwt(json!({ "sub": "user" }))), None);
+    assert_eq!(ai_agent::account_of("garbage"), None);
+    assert_eq!(ai_agent::account_of("a.!!not-base64!!.c"), None);
+    assert_eq!(ai_agent::account_of(""), None);
+}
+
+#[test]
+fn a_base_url_override_never_redirects_chatgpt() {
+    let dir = temp_dir("base-url");
+    std::fs::write(
+        dir.join("settings.json"),
+        r#"{"aiAgentBaseUrl":"https://api.openai.com/v1/chat/completions"}"#,
+    )
+    .expect("settings file");
+    cler_flowgraph_gui::settings::init(&dir);
+
+    let chatgpt = ai_agent::Provider {
+        wire: Wire::Responses,
+        endpoint: "https://chatgpt.com/backend-api/codex/responses",
+        ..ai_agent::OPENAI
+    };
+    assert_eq!(ai_agent::endpoint(&chatgpt), chatgpt.endpoint);
+    assert_eq!(
+        ai_agent::endpoint(&ai_agent::OPENAI),
+        "https://api.openai.com/v1/chat/completions"
+    );
+
+    cler_flowgraph_gui::settings::init(&temp_dir("base-url-clear"));
     std::fs::remove_dir_all(&dir).ok();
 }

@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::Duration;
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use cler_graph::palette_types::Port;
 use cler_graph::{BlockSpec, Command};
 use serde::{Deserialize, Serialize};
@@ -63,6 +65,7 @@ pub const OPENAI: Provider = Provider {
 pub const PROVIDERS: [Provider; 2] = [ANTHROPIC, OPENAI];
 
 const API_VERSION: &str = "2023-06-01";
+const USER_AGENT: &str = concat!("cler/", env!("CARGO_PKG_VERSION"));
 const EFFORT: &str = "xhigh";
 const OPENAI_EFFORT: &str = "high";
 const MAX_TOKENS: u32 = 16000;
@@ -209,10 +212,30 @@ pub fn provider() -> Provider {
 }
 
 pub fn endpoint(provider: &Provider) -> String {
+    // ChatGPT tokens are only accepted at chatgpt.com/backend-api; a leftover
+    // api.openai.com base URL comes back as "Missing scopes: api.responses.write".
+    if provider.wire == Wire::Responses {
+        return provider.endpoint.to_string();
+    }
     crate::settings::current()
         .ai_agent_base_url
         .filter(|url| !url.trim().is_empty())
         .unwrap_or_else(|| provider.endpoint.to_string())
+}
+
+/// The account id lives in the access token's claims, so it follows refresh
+/// rotation with nothing stored. No signature check: it is our own token and the
+/// value only fills a header.
+pub fn account_of(access_token: &str) -> Option<String> {
+    let claims = access_token.split('.').nth(1)?;
+    let decoded = URL_SAFE_NO_PAD.decode(claims).ok()?;
+    let value: Value = serde_json::from_slice(&decoded).ok()?;
+    value
+        .get("https://api.openai.com/auth")
+        .and_then(|auth| auth.get("chatgpt_account_id"))
+        .or_else(|| value.get("chatgpt_account_id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 pub fn model() -> String {
@@ -1109,6 +1132,21 @@ fn stream(auth: &Auth, body: &str, emit: &Emit, path: &str, flag: &AtomicBool) -
             return Reply::failed(
                 "signing in with ChatGPT is the only way to use this provider".to_string(),
             )
+        }
+        (Wire::Responses, Auth::OAuth(token)) => {
+            let Some(account) = account_of(token) else {
+                return Reply::failed(
+                    "this ChatGPT sign-in carries no account — sign out and sign in again"
+                        .to_string(),
+                );
+            };
+            prepared
+                .header("authorization", format!("Bearer {token}"))
+                .header("chatgpt-account-id", account)
+                .header("originator", crate::oauth::ORIGINATOR)
+                .header("user-agent", USER_AGENT)
+                .header("OpenAI-Beta", "responses=experimental")
+                .header("accept", "text/event-stream")
         }
         (_, Auth::OAuth(token)) => prepared
             .header("anthropic-version", API_VERSION)
