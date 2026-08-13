@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use cler_flowgraph_gui::ai_agent::{self, Auth};
-use cler_flowgraph_gui::oauth::{self, Tokens};
+use cler_flowgraph_gui::oauth::{self, Tokens, ANTHROPIC_FLOW, CODEX_FLOW};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -42,28 +42,98 @@ fn pkce_yields_a_43_char_urlsafe_verifier_and_a_matching_challenge() {
         "the RFC 7636 vector must hold"
     );
 
-    let url = oauth::authorize_url(&challenge, &verifier);
-    assert!(url.starts_with("https://claude.ai/oauth/authorize?code=true&"));
-    assert!(url.contains(&format!("client_id={}", oauth::CLIENT_ID)));
-    assert!(url.contains("code_challenge_method=S256"));
-    assert!(url.contains(&format!("state={verifier}")));
-    assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A53692%2Fcallback"));
-    assert!(url.contains("scope=org%3Acreate_api_key%20user%3Aprofile"));
+    let url = oauth::authorize_url(&ANTHROPIC_FLOW, &challenge, &verifier);
+    assert_eq!(
+        url,
+        format!(
+            "https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A53692%2Fcallback&scope=org%3Acreate_api_key%20user%3Aprofile%20user%3Ainference%20user%3Asessions%3Aclaude_code%20user%3Amcp_servers%20user%3Afile_upload&code_challenge={challenge}&code_challenge_method=S256&state={verifier}"
+        ),
+        "the Claude authorize url must not move"
+    );
+}
+
+#[test]
+fn the_codex_flow_hides_the_verifier_and_carries_its_own_params() {
+    let url = oauth::authorize_url(&CODEX_FLOW, "chal-1", "state-1");
+    assert!(url.starts_with("https://auth.openai.com/oauth/authorize?"), "{url}");
+    assert!(url.contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"), "{url}");
+    assert!(url.contains("code_challenge=chal-1&code_challenge_method=S256"), "{url}");
+    assert!(url.contains("state=state-1"), "{url}");
+    assert!(url.contains("id_token_add_organizations=true"), "{url}");
+    assert!(url.contains("codex_cli_simplified_flow=true"), "{url}");
+    assert!(url.contains("originator=cler"), "{url}");
+    assert!(url.contains("scope=openid%20profile%20email%20offline_access"), "{url}");
+
+    let body = oauth::exchange_body(&CODEX_FLOW, "code-1", "state-1", "verifier-1");
+    assert_eq!(
+        body,
+        "grant_type=authorization_code&client_id=app_EMoamEEZ73f0CkXaXp7hrann&code=code-1&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&code_verifier=verifier-1"
+    );
+    assert!(!body.contains("state"), "the verifier travels, the state does not");
+
+    let claude = oauth::exchange_body(&ANTHROPIC_FLOW, "code-1", "ver-1", "ver-1");
+    let claude: serde_json::Value = serde_json::from_str(&claude).expect("json body");
+    assert_eq!(claude["state"], "ver-1");
+    assert_eq!(claude["code_verifier"], "ver-1");
+}
+
+#[test]
+fn a_callback_with_a_foreign_state_never_reaches_the_token_endpoint() {
+    let dir = temp_dir("state");
+    let refusal = oauth::complete(&CODEX_FLOW, &dir, "code-1", "elsewhere", "ours", "verifier-1")
+        .expect_err("a mismatched state must be refused");
+    assert!(refusal.contains("does not match"), "{refusal}");
+    assert!(!oauth::token_path(&CODEX_FLOW, &dir).exists());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_two_flows_keep_separate_token_files() {
+    let dir = temp_dir("files");
+    assert_ne!(
+        oauth::token_path(&ANTHROPIC_FLOW, &dir),
+        oauth::token_path(&CODEX_FLOW, &dir)
+    );
+    assert!(oauth::token_path(&CODEX_FLOW, &dir).ends_with("openai-codex-oauth.json"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_codex_answer_missing_rotation_fields_is_refused() {
+    let whole = serde_json::json!({
+        "access_token": "acc",
+        "refresh_token": "ref",
+        "expires_in": 3600
+    });
+    assert_eq!(
+        oauth::tokens_of(&CODEX_FLOW, &whole).map(|got| got.refresh),
+        Ok("ref".to_string())
+    );
+
+    for lacking in [
+        serde_json::json!({ "access_token": "acc", "expires_in": 3600 }),
+        serde_json::json!({ "access_token": "acc", "refresh_token": "ref" }),
+    ] {
+        let refusal = oauth::tokens_of(&CODEX_FLOW, &lacking).expect_err("must refuse");
+        assert!(refusal.contains("sign in again"), "{refusal}");
+        // Claude's endpoint answers this way on purpose: the old refresh stands.
+        assert!(oauth::tokens_of(&ANTHROPIC_FLOW, &lacking).is_ok());
+    }
 }
 
 #[test]
 fn tokens_round_trip_and_lock_down() {
     let dir = temp_dir("roundtrip");
-    assert_eq!(oauth::load(&dir), None);
+    assert_eq!(oauth::load(&ANTHROPIC_FLOW, &dir), None);
 
     let wanted = tokens("acc-1", "ref-1", 1_999_999_999_000);
-    oauth::store(&dir, &wanted).expect("store");
-    assert_eq!(oauth::load(&dir), Some(wanted));
+    oauth::store(&ANTHROPIC_FLOW, &dir, &wanted).expect("store");
+    assert_eq!(oauth::load(&ANTHROPIC_FLOW, &dir), Some(wanted));
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(oauth::token_path(&dir))
+        let mode = std::fs::metadata(oauth::token_path(&ANTHROPIC_FLOW, &dir))
             .expect("token file")
             .permissions()
             .mode();
@@ -82,10 +152,10 @@ fn tokens_round_trip_and_lock_down() {
 fn a_stale_token_refreshes_and_the_rotated_refresh_is_persisted() {
     let dir = temp_dir("stale");
     let now = 1_000_000_000_000u64;
-    oauth::store(&dir, &tokens("old-access", "old-refresh", now + 60_000)).expect("store stale");
+    oauth::store(&ANTHROPIC_FLOW, &dir, &tokens("old-access", "old-refresh", now + 60_000)).expect("store stale");
 
     let mut asked_with = None;
-    let access = oauth::access_via(&dir, now, |refresh| {
+    let access = oauth::access_via(&ANTHROPIC_FLOW, &dir, now, |refresh| {
         asked_with = Some(refresh.to_string());
         Ok(tokens("new-access", "rotated-refresh", now + 3_600_000))
     })
@@ -94,7 +164,7 @@ fn a_stale_token_refreshes_and_the_rotated_refresh_is_persisted() {
     assert_eq!(access, "new-access");
     assert_eq!(asked_with.as_deref(), Some("old-refresh"));
     assert_eq!(
-        oauth::load(&dir),
+        oauth::load(&ANTHROPIC_FLOW, &dir),
         Some(tokens("new-access", "rotated-refresh", now + 3_600_000)),
         "the rotated refresh token must be persisted"
     );
@@ -105,13 +175,13 @@ fn a_stale_token_refreshes_and_the_rotated_refresh_is_persisted() {
 fn racing_threads_renew_once_and_share_the_new_access_token() {
     let dir = temp_dir("race");
     let now = 1_000_000_000_000u64;
-    oauth::store(&dir, &tokens("old-access", "old-refresh", now + 60_000)).expect("store stale");
+    oauth::store(&ANTHROPIC_FLOW, &dir, &tokens("old-access", "old-refresh", now + 60_000)).expect("store stale");
 
     let renewals = AtomicUsize::new(0);
     let (entered, started) = std::sync::mpsc::channel();
     let (first, second) = std::thread::scope(|scope| {
         let one = scope.spawn(|| {
-            oauth::access_via(&dir, now, |_| {
+            oauth::access_via(&ANTHROPIC_FLOW, &dir, now, |_| {
                 renewals.fetch_add(1, Ordering::SeqCst);
                 entered.send(()).ok();
                 std::thread::sleep(std::time::Duration::from_millis(50));
@@ -120,7 +190,7 @@ fn racing_threads_renew_once_and_share_the_new_access_token() {
         });
         started.recv().expect("the first renew starts");
         let two = scope.spawn(|| {
-            oauth::access_via(&dir, now, |_| {
+            oauth::access_via(&ANTHROPIC_FLOW, &dir, now, |_| {
                 renewals.fetch_add(1, Ordering::SeqCst);
                 Ok(tokens("other-access", "other-refresh", now + 3_600_000))
             })
@@ -132,7 +202,7 @@ fn racing_threads_renew_once_and_share_the_new_access_token() {
     assert_eq!(first.as_deref(), Ok("new-access"));
     assert_eq!(second.as_deref(), Ok("new-access"));
     assert_eq!(
-        oauth::load(&dir),
+        oauth::load(&ANTHROPIC_FLOW, &dir),
         Some(tokens("new-access", "rotated-refresh", now + 3_600_000))
     );
     std::fs::remove_dir_all(&dir).ok();
@@ -143,11 +213,11 @@ fn a_failed_store_or_renew_leaves_the_previous_tokens_complete() {
     let dir = temp_dir("survives");
     let now = 1_000_000_000_000u64;
     let previous = tokens("old-access", "old-refresh", now + 60_000);
-    oauth::store(&dir, &previous).expect("store stale");
+    oauth::store(&ANTHROPIC_FLOW, &dir, &previous).expect("store stale");
 
     // A directory where the temp file belongs makes the write fail without
     // ever touching the real token file.
-    let mut name = oauth::token_path(&dir)
+    let mut name = oauth::token_path(&ANTHROPIC_FLOW, &dir)
         .file_name()
         .expect("token file name")
         .to_os_string();
@@ -155,19 +225,19 @@ fn a_failed_store_or_renew_leaves_the_previous_tokens_complete() {
     let blocker = dir.join(&name);
     std::fs::create_dir(&blocker).expect("blocker directory");
 
-    let refusal = oauth::access_via(&dir, now, |_| {
+    let refusal = oauth::access_via(&ANTHROPIC_FLOW, &dir, now, |_| {
         Ok(tokens("new-access", "rotated-refresh", now + 3_600_000))
     })
     .expect_err("the store must fail");
     assert!(refusal.contains("cannot write"), "{refusal}");
-    assert_eq!(oauth::load(&dir), Some(previous.clone()));
+    assert_eq!(oauth::load(&ANTHROPIC_FLOW, &dir), Some(previous.clone()));
 
     std::fs::remove_dir(&blocker).expect("clear blocker");
-    let refusal = oauth::access_via(&dir, now, |_| Err("the network is down".to_string()))
+    let refusal = oauth::access_via(&ANTHROPIC_FLOW, &dir, now, |_| Err("the network is down".to_string()))
         .expect_err("the renew must fail");
     assert_eq!(refusal, "the network is down");
-    assert!(oauth::token_path(&dir).is_file());
-    assert_eq!(oauth::load(&dir), Some(previous));
+    assert!(oauth::token_path(&ANTHROPIC_FLOW, &dir).is_file());
+    assert_eq!(oauth::load(&ANTHROPIC_FLOW, &dir), Some(previous));
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -175,9 +245,9 @@ fn a_failed_store_or_renew_leaves_the_previous_tokens_complete() {
 fn a_fresh_token_is_used_without_refreshing() {
     let dir = temp_dir("fresh");
     let now = 1_000_000_000_000u64;
-    oauth::store(&dir, &tokens("live-access", "live-refresh", now + 3_600_000)).expect("store");
+    oauth::store(&ANTHROPIC_FLOW, &dir, &tokens("live-access", "live-refresh", now + 3_600_000)).expect("store");
 
-    let access = oauth::access_via(&dir, now, |_| {
+    let access = oauth::access_via(&ANTHROPIC_FLOW, &dir, now, |_| {
         panic!("a fresh token must not be refreshed");
     })
     .expect("fresh path");
@@ -189,7 +259,7 @@ fn a_fresh_token_is_used_without_refreshing() {
 #[test]
 fn without_any_tokens_access_says_not_signed_in() {
     let dir = temp_dir("absent");
-    let refusal = oauth::access_via(&dir, 0, |_| unreachable!()).expect_err("no file");
+    let refusal = oauth::access_via(&ANTHROPIC_FLOW, &dir, 0, |_| unreachable!()).expect_err("no file");
     assert!(refusal.contains("not signed in"), "{refusal}");
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -200,7 +270,7 @@ fn status_names_the_auth_method_and_the_key_file_outranks_oauth() {
     std::env::remove_var(ai_agent::ANTHROPIC.key_env);
 
     let far = oauth::now_ms() + 3_600_000;
-    oauth::store(&dir, &tokens("oauth-access", "oauth-refresh", far)).expect("store");
+    oauth::store(&ANTHROPIC_FLOW, &dir, &tokens("oauth-access", "oauth-refresh", far)).expect("store");
     let status = ai_agent::status(&dir);
     assert!(status.available);
     assert_eq!(status.method.as_deref(), Some("oauth"));
@@ -221,7 +291,7 @@ fn status_names_the_auth_method_and_the_key_file_outranks_oauth() {
     let status = oauth::logout(&dir);
     assert!(!status.available);
     assert_eq!(status.method, None);
-    assert!(!oauth::token_path(&dir).exists());
+    assert!(!oauth::token_path(&ANTHROPIC_FLOW, &dir).exists());
     let reason = status.reason.expect("a reason");
     assert!(reason.contains("sign in with Claude"), "{reason}");
     std::fs::remove_dir_all(&dir).ok();

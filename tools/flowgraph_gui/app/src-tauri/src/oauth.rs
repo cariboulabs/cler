@@ -15,15 +15,77 @@ use sha2::{Digest, Sha256};
 use crate::ai_agent::{self, Status};
 use crate::build::Emit;
 
-pub const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-pub const TOKEN_FILE: &str = "anthropic-oauth.json";
 pub const AUTH_CHANGED_EVENT: &str = "ai-agent-auth-changed";
 
-const AUTHORIZE_ENDPOINT: &str = "https://claude.ai/oauth/authorize";
-const TOKEN_ENDPOINT: &str = "https://platform.claude.com/v1/oauth/token";
-const SCOPES: &str = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
-const REDIRECT_URI: &str = "http://localhost:53692/callback";
-const BIND_ADDR: &str = "127.0.0.1:53692";
+pub struct Flow {
+    pub client_id: &'static str,
+    pub authorize: &'static str,
+    pub token: &'static str,
+    pub scopes: &'static str,
+    pub redirect_uri: &'static str,
+    pub bind_addr: &'static str,
+    pub route: &'static str,
+    pub token_file: &'static str,
+    pub extra: &'static [(&'static str, &'static str)],
+    pub form: bool,
+    // Anthropic's token body carries state, and its state is the verifier.
+    pub state_is_verifier: bool,
+    // Anthropic may answer a refresh without a new refresh_token, meaning the
+    // old one still stands; endpoints that always rotate must instead fail
+    // loudly, since the spent token would otherwise loop forever.
+    pub carry_refresh: bool,
+}
+
+// Statics, not consts: the flow travels as &'static Flow and const promotion
+// would hand out a fresh address per use site.
+pub static ANTHROPIC_FLOW: Flow = Flow {
+    client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+    authorize: "https://claude.ai/oauth/authorize",
+    token: "https://platform.claude.com/v1/oauth/token",
+    scopes: "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
+    redirect_uri: "http://localhost:53692/callback",
+    bind_addr: "127.0.0.1:53692",
+    route: "/callback",
+    token_file: "anthropic-oauth.json",
+    extra: &[("code", "true")],
+    form: false,
+    state_is_verifier: true,
+    carry_refresh: true,
+};
+
+// Dead until a provider claims the openai-codex id.
+pub static CODEX_FLOW: Flow = Flow {
+    client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
+    authorize: "https://auth.openai.com/oauth/authorize",
+    token: "https://auth.openai.com/oauth/token",
+    scopes: "openid profile email offline_access",
+    redirect_uri: "http://localhost:1455/auth/callback",
+    bind_addr: "127.0.0.1:1455",
+    route: "/auth/callback",
+    token_file: "openai-codex-oauth.json",
+    extra: &[
+        ("id_token_add_organizations", "true"),
+        ("codex_cli_simplified_flow", "true"),
+        ("originator", ORIGINATOR),
+    ],
+    form: true,
+    state_is_verifier: false,
+    carry_refresh: false,
+};
+
+pub const ORIGINATOR: &str = "cler";
+
+pub fn flow_for(provider_id: &str) -> &'static Flow {
+    match provider_id {
+        "openai-codex" => &CODEX_FLOW,
+        _ => &ANTHROPIC_FLOW,
+    }
+}
+
+fn flow() -> &'static Flow {
+    flow_for(ai_agent::provider().id)
+}
+
 const LOGIN_WINDOW: Duration = Duration::from_secs(300);
 const POLL: Duration = Duration::from_millis(100);
 const REFRESH_MARGIN_MS: u64 = 5 * 60 * 1000;
@@ -53,7 +115,9 @@ pub struct Tokens {
 }
 
 struct Pending {
+    flow: &'static Flow,
     verifier: String,
+    state: String,
     cancel: Arc<AtomicBool>,
 }
 
@@ -63,21 +127,21 @@ fn pending() -> MutexGuard<'static, Option<Pending>> {
     PENDING.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-pub fn token_path(config_dir: &Path) -> PathBuf {
-    config_dir.join(TOKEN_FILE)
+pub fn token_path(flow: &Flow, config_dir: &Path) -> PathBuf {
+    config_dir.join(flow.token_file)
 }
 
-pub fn load(config_dir: &Path) -> Option<Tokens> {
-    let text = std::fs::read_to_string(token_path(config_dir)).ok()?;
+pub fn load(flow: &Flow, config_dir: &Path) -> Option<Tokens> {
+    let text = std::fs::read_to_string(token_path(flow, config_dir)).ok()?;
     serde_json::from_str(&text).ok()
 }
 
 // A refresh token is single use: a truncated file is a permanent brick, so the
 // new tokens land in a sibling file and reach the real path by rename only.
-pub fn store(config_dir: &Path, tokens: &Tokens) -> Result<(), String> {
+pub fn store(flow: &Flow, config_dir: &Path, tokens: &Tokens) -> Result<(), String> {
     std::fs::create_dir_all(config_dir)
         .map_err(|cause| format!("cannot create {}: {cause}", config_dir.display()))?;
-    let file = token_path(config_dir);
+    let file = token_path(flow, config_dir);
     let mut name = file.file_name().unwrap_or_default().to_os_string();
     name.push(".tmp");
     let temp = file.with_file_name(name);
@@ -131,45 +195,51 @@ pub fn fresh(tokens: &Tokens, now_ms: u64) -> bool {
 static RENEWING: Mutex<()> = Mutex::new(());
 
 pub fn access_via(
+    flow: &Flow,
     config_dir: &Path,
     now: u64,
     renew: impl FnOnce(&str) -> Result<Tokens, String>,
 ) -> Result<String, String> {
     let missing = || {
-        format!("not signed in with Claude — no {}", token_path(config_dir).display())
+        format!("not signed in — no {}", token_path(flow, config_dir).display())
     };
-    let tokens = load(config_dir).ok_or_else(missing)?;
+    let tokens = load(flow, config_dir).ok_or_else(missing)?;
     if fresh(&tokens, now) {
         return Ok(tokens.access);
     }
     let _turn = RENEWING.lock().unwrap_or_else(PoisonError::into_inner);
     // A sibling thread may have rotated while we waited; its refresh token is
     // the only usable one left, so re-read rather than renew from ours.
-    let tokens = load(config_dir).ok_or_else(missing)?;
+    let tokens = load(flow, config_dir).ok_or_else(missing)?;
     if fresh(&tokens, now) {
         return Ok(tokens.access);
     }
     let renewed = renew(&tokens.refresh)?;
-    store(config_dir, &renewed)?;
+    store(flow, config_dir, &renewed)?;
     Ok(renewed.access)
 }
 
 pub fn access(config_dir: &Path) -> Result<String, String> {
-    access_via(config_dir, now_ms(), refresh_http)
+    let flow = flow();
+    access_via(flow, config_dir, now_ms(), |refresh| refresh_http(flow, refresh))
 }
 
 pub fn signed_in(config_dir: &Path) -> bool {
-    token_path(config_dir).is_file()
+    token_path(flow(), config_dir).is_file()
 }
 
 pub fn challenge_of(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
-pub fn pkce() -> Result<(String, String), String> {
+pub fn random_token() -> Result<String, String> {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).map_err(|cause| format!("cannot gather randomness: {cause}"))?;
-    let verifier = URL_SAFE_NO_PAD.encode(bytes);
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
+
+pub fn pkce() -> Result<(String, String), String> {
+    let verifier = random_token()?;
     let challenge = challenge_of(&verifier);
     Ok((verifier, challenge))
 }
@@ -218,12 +288,17 @@ fn decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-pub fn authorize_url(challenge: &str, state: &str) -> String {
+pub fn authorize_url(flow: &Flow, challenge: &str, state: &str) -> String {
+    let mut extra = String::new();
+    for (name, value) in flow.extra {
+        extra.push_str(&format!("{}={}&", encode(name), encode(value)));
+    }
     format!(
-        "{AUTHORIZE_ENDPOINT}?code=true&client_id={}&response_type=code&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}",
-        encode(CLIENT_ID),
-        encode(REDIRECT_URI),
-        encode(SCOPES),
+        "{}?{extra}client_id={}&response_type=code&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}",
+        flow.authorize,
+        encode(flow.client_id),
+        encode(flow.redirect_uri),
+        encode(flow.scopes),
         encode(challenge),
         encode(state)
     )
@@ -279,24 +354,62 @@ pub fn parse_manual(input: &str) -> Result<(String, Option<String>), String> {
     Ok((trimmed.to_string(), None))
 }
 
-fn token_request(body: Value) -> Result<Tokens, String> {
+pub fn body_of(flow: &Flow, fields: &[(&str, &str)]) -> String {
+    if !flow.form {
+        let mut object = serde_json::Map::new();
+        for (name, value) in fields {
+            object.insert(name.to_string(), json!(value));
+        }
+        return Value::Object(object).to_string();
+    }
+    fields
+        .iter()
+        .map(|(name, value)| format!("{}={}", encode(name), encode(value)))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+pub fn exchange_body(flow: &Flow, code: &str, state: &str, verifier: &str) -> String {
+    let mut fields = vec![
+        ("grant_type", "authorization_code"),
+        ("client_id", flow.client_id),
+        ("code", code),
+        ("redirect_uri", flow.redirect_uri),
+        ("code_verifier", verifier),
+    ];
+    if flow.state_is_verifier {
+        fields.insert(3, ("state", state));
+    }
+    body_of(flow, &fields)
+}
+
+fn token_request(flow: &Flow, body: String) -> Result<Tokens, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|cause| format!("cannot start an HTTPS client: {cause}"))?;
+    let content_type = if flow.form {
+        "application/x-www-form-urlencoded"
+    } else {
+        "application/json"
+    };
     let response = client
-        .post(TOKEN_ENDPOINT)
-        .header("content-type", "application/json")
-        .body(body.to_string())
+        .post(flow.token)
+        .header("content-type", content_type)
+        .body(body)
         .send()
-        .map_err(|cause| format!("cannot reach the Claude token endpoint: {cause}"))?;
+        .map_err(|cause| format!("cannot reach {}: {cause}", flow.token))?;
     let status = response.status().as_u16();
     let text = response.text().unwrap_or_default();
     if status != 200 {
-        return Err(format!("the Claude token endpoint answered HTTP {status}: {text}"));
+        return Err(format!("{} answered HTTP {status}: {text}", flow.token));
     }
     let value: Value = serde_json::from_str(&text)
-        .map_err(|_| "the Claude token endpoint answered with something other than JSON".to_string())?;
+        .map_err(|_| format!("{} answered with something other than JSON", flow.token))?;
+    tokens_of(flow, &value)
+}
+
+pub fn tokens_of(flow: &Flow, value: &Value) -> Result<Tokens, String> {
     let access = value
         .get("access_token")
         .and_then(Value::as_str)
@@ -305,34 +418,37 @@ fn token_request(body: Value) -> Result<Tokens, String> {
         .get("refresh_token")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let expires_in = value.get("expires_in").and_then(Value::as_u64).unwrap_or(0);
+    let expires_in = value.get("expires_in").and_then(Value::as_u64);
+    if !flow.carry_refresh && (refresh.is_empty() || expires_in.is_none()) {
+        // The refresh token that bought this answer is already spent, so an
+        // answer we cannot store whole leaves nothing to retry with.
+        return Err(format!(
+            "{} answered without a refresh_token and expires_in — sign in again",
+            flow.token
+        ));
+    }
     Ok(Tokens {
         access: access.to_string(),
         refresh: refresh.to_string(),
-        expires_unix_ms: now_ms() + expires_in * 1000,
+        expires_unix_ms: now_ms() + expires_in.unwrap_or(0) * 1000,
     })
 }
 
-fn exchange(code: &str, state: &str, verifier: &str) -> Result<Tokens, String> {
-    token_request(json!({
-        "grant_type": "authorization_code",
-        "client_id": CLIENT_ID,
-        "code": code,
-        "state": state,
-        "redirect_uri": REDIRECT_URI,
-        "code_verifier": verifier
-    }))
+fn exchange(flow: &Flow, code: &str, state: &str, verifier: &str) -> Result<Tokens, String> {
+    token_request(flow, exchange_body(flow, code, state, verifier))
 }
 
-// Anthropic-shaped: this endpoint may answer without a refresh_token, meaning
-// the old one still stands. Carrying it forward is per-flow, not universal.
-fn refresh_http(refresh: &str) -> Result<Tokens, String> {
-    let mut renewed = token_request(json!({
-        "grant_type": "refresh_token",
-        "client_id": CLIENT_ID,
-        "refresh_token": refresh
-    }))?;
-    if renewed.refresh.is_empty() {
+fn refresh_http(flow: &Flow, refresh: &str) -> Result<Tokens, String> {
+    let body = body_of(
+        flow,
+        &[
+            ("grant_type", "refresh_token"),
+            ("client_id", flow.client_id),
+            ("refresh_token", refresh),
+        ],
+    );
+    let mut renewed = token_request(flow, body)?;
+    if flow.carry_refresh && renewed.refresh.is_empty() {
         renewed.refresh = refresh.to_string();
     }
     Ok(renewed)
@@ -346,43 +462,59 @@ fn respond(stream: &mut TcpStream, status: &str, page: &str) {
     );
 }
 
-fn request_query(stream: &TcpStream) -> Option<String> {
+fn request_query(flow: &Flow, stream: &TcpStream) -> Option<String> {
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line).ok()?;
     let path = line.split_whitespace().nth(1)?;
     let (route, query) = path.split_once('?')?;
-    if route != "/callback" {
+    if route != flow.route {
         return None;
     }
     Some(query.to_string())
 }
 
-fn bind_listener() -> Result<TcpListener, String> {
+fn bind_listener(flow: &Flow) -> Result<TcpListener, String> {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        match TcpListener::bind(BIND_ADDR) {
+        match TcpListener::bind(flow.bind_addr) {
             Ok(listener) => return Ok(listener),
             Err(cause) if Instant::now() < deadline => {
                 let _ = cause;
                 thread::sleep(POLL);
             }
-            Err(cause) => return Err(format!("cannot listen on {BIND_ADDR}: {cause}")),
+            // The port is fixed by the redirect registered with the provider,
+            // so there is nothing to fall back to.
+            Err(cause) => {
+                return Err(format!(
+                    "cannot listen on {}: {cause} — the sign-in needs that exact port; close whatever holds it (another cler window, or an earlier sign-in) and try again",
+                    flow.bind_addr
+                ))
+            }
         }
     }
 }
 
-fn complete(config_dir: &Path, code: &str, state: &str, verifier: &str) -> Result<(), String> {
-    if state != verifier {
+pub fn complete(
+    flow: &Flow,
+    config_dir: &Path,
+    code: &str,
+    state: &str,
+    expected: &str,
+    verifier: &str,
+) -> Result<(), String> {
+    if state != expected {
         return Err("the sign-in state does not match this login attempt".to_string());
     }
-    let tokens = exchange(code, state, verifier)?;
-    store(config_dir, &tokens)
+    let tokens = exchange(flow, code, state, verifier)?;
+    store(flow, config_dir, &tokens)
 }
 
 fn wait_for_callback(
+    flow: &'static Flow,
     listener: TcpListener,
     cancel: Arc<AtomicBool>,
     verifier: String,
+    state: String,
     config_dir: PathBuf,
     emit: Emit,
 ) {
@@ -396,17 +528,18 @@ fn wait_for_callback(
                 continue;
             }
         };
-        let Some(query) = request_query(&stream) else {
+        let Some(query) = request_query(flow, &stream) else {
             respond(&mut stream, "400 Bad Request", FAIL_PAGE);
             continue;
         };
-        let finished = parse_callback(&query)
-            .and_then(|(code, state)| complete(&config_dir, &code, &state, &verifier));
+        let finished = parse_callback(&query).and_then(|(code, seen)| {
+            complete(flow, &config_dir, &code, &seen, &state, &verifier)
+        });
         match finished {
             Ok(()) => {
                 respond(&mut stream, "200 OK", DONE_PAGE);
                 let mut slot = pending();
-                if slot.as_ref().is_some_and(|login| login.verifier == verifier) {
+                if slot.as_ref().is_some_and(|login| login.state == state) {
                     *slot = None;
                 }
                 drop(slot);
@@ -428,32 +561,50 @@ pub fn start_login(config_dir: &Path, emit: Emit) -> Result<String, String> {
             previous.cancel.store(true, Ordering::Relaxed);
         }
     }
-    let listener = bind_listener()?;
+    let flow = flow();
+    let listener = bind_listener(flow)?;
     let (verifier, challenge) = pkce()?;
+    // Only a flow whose state is defined to be the verifier may send it
+    // through the browser.
+    let state = if flow.state_is_verifier {
+        verifier.clone()
+    } else {
+        random_token()?
+    };
     let cancel = Arc::new(AtomicBool::new(false));
     *pending() = Some(Pending {
+        flow,
         verifier: verifier.clone(),
+        state: state.clone(),
         cancel: cancel.clone(),
     });
-    let url = authorize_url(&challenge, &verifier);
+    let url = authorize_url(flow, &challenge, &state);
     let config_dir = config_dir.to_path_buf();
-    thread::spawn(move || wait_for_callback(listener, cancel, verifier, config_dir, emit));
+    thread::spawn(move || {
+        wait_for_callback(flow, listener, cancel, verifier, state, config_dir, emit)
+    });
     Ok(url)
 }
 
+// Manual paste is Anthropic-only: no UI reaches it for any other flow.
 pub fn finish_login(input: &str, config_dir: &Path) -> Result<Status, String> {
+    let flow = &ANTHROPIC_FLOW;
     let verifier = {
         let slot = pending();
-        slot.as_ref()
-            .map(|login| login.verifier.clone())
-            .ok_or_else(|| "no sign-in is in progress — start one first".to_string())?
+        let login = slot
+            .as_ref()
+            .ok_or_else(|| "no sign-in is in progress — start one first".to_string())?;
+        if !std::ptr::eq(login.flow, flow) {
+            return Err("the sign-in in progress is not a Claude one".to_string());
+        }
+        login.verifier.clone()
     };
     let (code, state) = parse_manual(input)?;
     if state.as_deref().is_some_and(|state| state != verifier) {
         return Err("the pasted state does not match this login attempt".to_string());
     }
-    let tokens = exchange(&code, &verifier, &verifier)?;
-    store(config_dir, &tokens)?;
+    let tokens = exchange(flow, &code, &verifier, &verifier)?;
+    store(flow, config_dir, &tokens)?;
     let mut slot = pending();
     if let Some(login) = slot.take() {
         login.cancel.store(true, Ordering::Relaxed);
@@ -463,6 +614,6 @@ pub fn finish_login(input: &str, config_dir: &Path) -> Result<Status, String> {
 }
 
 pub fn logout(config_dir: &Path) -> Status {
-    std::fs::remove_file(token_path(config_dir)).ok();
+    std::fs::remove_file(token_path(flow(), config_dir)).ok();
     ai_agent::status(config_dir)
 }

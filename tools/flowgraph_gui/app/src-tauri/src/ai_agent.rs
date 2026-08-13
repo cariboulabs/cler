@@ -1192,7 +1192,8 @@ mod tests {
     fn a_claude_sign_in_is_never_used_for_another_provider() {
         let _guard = settings::test_guard();
         let dir = temp("oauth-gate");
-        std::fs::write(dir.join(crate::oauth::TOKEN_FILE), "{}").expect("fake token file");
+        std::fs::write(dir.join(crate::oauth::ANTHROPIC_FLOW.token_file), "{}")
+            .expect("fake token file");
 
         choose(&dir, Some("openai"));
         let refusal = locate(None, &dir).expect_err("no openai key");
