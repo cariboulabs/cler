@@ -52,6 +52,12 @@
   let waiting = $state(false);
   let oauthError = $state<string | null>(null);
 
+  $effect(() => {
+    if (status?.available !== true) return;
+    waiting = false;
+    oauthError = null;
+  });
+
   const PROVIDERS = [
     { id: 'anthropic', label: 'Claude' },
     { id: 'openai', label: 'OpenAI' }

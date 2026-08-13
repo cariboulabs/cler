@@ -248,6 +248,35 @@ describe('signing in with Claude is the front door', () => {
   );
 
   it(
+    'signing out offers sign-in again, not a stale wait for the browser',
+    async () => {
+      const page = await boot({ aiAgent: NO_KEY });
+      await openAiAgent(page);
+      await page.click('[data-testid="ai-agent-signin"]');
+      await expect
+        .poll(() => page.textContent('[data-testid="ai-agent-signin"]'))
+        .toContain('waiting for the browser');
+
+      await emit(page, 'ai-agent-auth-changed', {
+        available: true,
+        provider: 'anthropic',
+        model: 'claude-opus-5',
+        reason: null,
+        method: 'oauth'
+      });
+      await page.waitForSelector('[data-testid="ai-agent-setup"]', { state: 'detached' });
+      await page.click('[data-testid="ai-agent-logout"]');
+
+      await page.waitForSelector('[data-testid="ai-agent-signin"]');
+      expect(await page.textContent('[data-testid="ai-agent-signin"]')).toContain(
+        'Sign in with Claude'
+      );
+      await page.close();
+    },
+    CASE
+  );
+
+  it(
     'sign out shows only for oauth and tells the backend to forget the tokens',
     async () => {
       const keyed = await boot();
