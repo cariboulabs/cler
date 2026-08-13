@@ -21,7 +21,6 @@ const CARET = '[data-testid="assistant-caret"]';
 const CHIP = '[data-testid="assistant-chip"]';
 const INPUT = '[data-testid="assistant-input"]';
 const MESSAGE = '[data-testid="assistant-message"]';
-const SEND = '[data-testid="assistant-send"]';
 const STOP = '[data-testid="assistant-stop"]';
 const USAGE = '[data-testid="assistant-usage"]';
 
@@ -44,7 +43,7 @@ async function done(page: Page, error: string | null = null): Promise<void> {
 
 async function ask(page: Page, question: string): Promise<void> {
   await page.fill(INPUT, question);
-  await page.click(SEND);
+  await page.press(INPUT, 'Enter');
   await page.waitForSelector(MESSAGE);
 }
 
@@ -88,7 +87,6 @@ describe('the assistant says what it needs before it costs anything', () => {
       expect(
         await page.locator('[data-testid="assistant-model-select"]').inputValue()
       ).toBe('claude-opus-5');
-      expect(await page.textContent('[data-testid="assistant-empty"]')).toContain('not saved');
       await page.close();
     },
     CASE
@@ -276,18 +274,17 @@ describe('an answer streams in and is paid for in the open', () => {
   );
 
   it(
-    'swaps send for stop while streaming and carries the history on the next question',
+    'shows stop while streaming and carries the history on the next question',
     async () => {
       const page = await boot();
       await openAssistant(page);
       await ask(page, 'first question');
 
-      expect(await page.locator(SEND).count()).toBe(0);
       expect(await page.locator(STOP).count()).toBe(1);
 
       await stream(page, ['first answer']);
       await done(page);
-      await expect.poll(() => page.locator(SEND).count()).toBe(1);
+      await expect.poll(() => page.locator(STOP).count()).toBe(0);
 
       await ask(page, 'second question');
       const sent = (await asks(page)) as { history: { role: string; text: string }[] }[];
@@ -310,7 +307,7 @@ describe('an answer streams in and is paid for in the open', () => {
 
       await page.click(STOP);
 
-      await expect.poll(() => page.locator(SEND).count()).toBe(1);
+      await expect.poll(() => page.locator(STOP).count()).toBe(0);
       expect(await page.locator(CARET).count()).toBe(0);
       expect((await calls(page)).filter((name) => name === 'assistant_stop').length).toBe(1);
 
@@ -338,7 +335,7 @@ describe('failures read as sentences', () => {
       expect(await page.textContent('[data-testid="assistant-error"]')).toBe(
         'the Anthropic API is overloaded right now — try again in a moment'
       );
-      expect(await page.locator(SEND).count()).toBe(1);
+      expect(await page.locator(STOP).count()).toBe(0);
       await page.close();
     },
     CASE
@@ -354,7 +351,7 @@ describe('failures read as sentences', () => {
       await expect
         .poll(() => page.textContent('[data-testid="assistant-error"]'))
         .toBe('ask a question first');
-      expect(await page.locator(SEND).count()).toBe(1);
+      expect(await page.locator(STOP).count()).toBe(0);
       await page.close();
     },
     CASE
@@ -401,7 +398,7 @@ describe('the assistant shares the inspector rail', () => {
       await page.click('[data-testid="file-menu"]');
       await page.click('[data-testid="file-open"]');
       await expect.poll(() => page.locator(MESSAGE).count()).toBe(0);
-      expect(await page.locator('[data-testid="assistant-empty"]').count()).toBe(1);
+      expect(await page.locator('[data-testid="assistant-chip"]').count()).toBeGreaterThan(0);
       await page.close();
     },
     CASE

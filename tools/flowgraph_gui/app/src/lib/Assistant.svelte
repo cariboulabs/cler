@@ -54,7 +54,6 @@
     { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' }
   ];
 
-  const TRANSIENT = 'this conversation is not saved — it goes when the file closes';
   const STALE = 'the graph moved on since this was checked — re-check it before applying';
   const CEILING = 'one proposal per answer: further tool calls in that turn were dropped';
 
@@ -68,7 +67,6 @@
   const streaming = $derived(pending !== null);
   const ready = $derived(enabled && status?.available === true);
   const starters = $derived(chips(selection));
-  const canSend = $derived(ready && !streaming && draft.trim().length > 0);
   const hint = $derived(status === null ? 'looking for an API key…' : enabled ? '' : note);
   const showRecord = $derived(messages.length > 0 || status?.available === true);
   const showComposer = $derived(status === null || status.available);
@@ -136,11 +134,6 @@
               <option value={status.model}>{status.model}</option>
             {/if}
           </select>
-          {#if status.method === 'oauth'}
-            <button class="linkish signout" data-testid="assistant-logout" onclick={onlogout}>
-              Sign out
-            </button>
-          {/if}
         </span>
       </div>
     {/if}
@@ -256,7 +249,6 @@
         {/each}
 
         {#if messages.length === 0}
-          <p class="faint" data-testid="assistant-empty">{TRANSIENT}</p>
           <div class="chips">
             {#each starters as chip, index (chip.label)}
               <button
@@ -287,16 +279,14 @@
           onkeydown={onKeydown}
         ></textarea>
         <div class="row">
-          <span class="faint">Enter sends · Shift+Enter newline</span>
+          {#if status?.available === true && status.method === 'oauth'}
+            <button class="linkish signout" data-testid="assistant-logout" onclick={onlogout}>
+              Sign out
+            </button>
+          {/if}
+          <span class="grow"></span>
           {#if streaming}
             <button class="stop" data-testid="assistant-stop" onclick={onstop}>Stop</button>
-          {:else}
-            <button
-              class="primary send"
-              data-testid="assistant-send"
-              disabled={!canSend}
-              onclick={() => send(draft)}>Ask</button
-            >
           {/if}
         </div>
       </div>
@@ -622,11 +612,16 @@
     align-items: center;
     gap: var(--sp-2);
   }
-  .row button {
-    margin-left: auto;
+  .row .grow {
+    flex: 1;
+  }
+  .row .stop {
     flex: none;
     width: auto;
     padding: var(--sp-1) var(--sp-3);
+  }
+  .row .signout {
+    margin-left: 0;
   }
   @keyframes blink {
     50% {
