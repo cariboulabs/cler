@@ -40,6 +40,7 @@
     text-transform: uppercase;
     font-weight: 600;
     color: var(--muted);
+    white-space: nowrap;
   }
   button.on {
     background: var(--bg-2);

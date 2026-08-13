@@ -120,9 +120,9 @@
   </div>
 
   <div class="body">
-    <div class="model" data-testid="assistant-model">
-      <span class="name">
-        {#if status?.available === true}
+    {#if status?.available === true}
+      <div class="model" data-testid="assistant-model">
+        <span class="name">
           <select
             class="model-select"
             data-testid="assistant-model-select"
@@ -136,16 +136,14 @@
               <option value={status.model}>{status.model}</option>
             {/if}
           </select>
-        {:else}
-          {status?.model ?? '—'}
-        {/if}
-        {#if status?.available === true && status.method === 'oauth'}
-          <button class="linkish signout" data-testid="assistant-logout" onclick={onlogout}>
-            Sign out
-          </button>
-        {/if}
-      </span>
-    </div>
+          {#if status.method === 'oauth'}
+            <button class="linkish signout" data-testid="assistant-logout" onclick={onlogout}>
+              Sign out
+            </button>
+          {/if}
+        </span>
+      </div>
+    {/if}
 
     {#if status !== null && !status.available}
       <div class="setup" data-testid="assistant-setup">

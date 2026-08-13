@@ -16,7 +16,7 @@ test('j) the assistant asks for a key before it can cost anything', async ({
     await page.keyboard.press('Control+j');
     await expect(page.getByTestId('assistant-panel')).toBeVisible();
     await expect(page.getByTestId('rail-tab-assistant')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByTestId('assistant-model')).toContainText('claude-opus-5');
+    await expect(page.getByTestId('assistant-model')).toHaveCount(0);
   });
 
   await test.step('the real backend reports no key and offers sign-in', async () => {
