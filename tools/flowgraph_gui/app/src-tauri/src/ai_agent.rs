@@ -35,7 +35,8 @@ pub struct Provider {
     pub key_prefix: &'static str,
     pub default_model: &'static str,
     pub wire: Wire,
-    pub oauth: bool,
+    // Brand the sign-in is offered under, empty when the provider has no oauth.
+    pub signin: &'static str,
 }
 
 pub const ANTHROPIC: Provider = Provider {
@@ -47,7 +48,7 @@ pub const ANTHROPIC: Provider = Provider {
     key_prefix: "sk-ant-",
     default_model: "claude-opus-5",
     wire: Wire::Anthropic,
-    oauth: true,
+    signin: "Claude",
 };
 
 pub const OPENAI: Provider = Provider {
@@ -59,10 +60,25 @@ pub const OPENAI: Provider = Provider {
     key_prefix: "sk-",
     default_model: "gpt-5",
     wire: Wire::OpenAi,
-    oauth: false,
+    signin: "",
 };
 
-pub const PROVIDERS: [Provider; 2] = [ANTHROPIC, OPENAI];
+// No key file and no key env var: the browser sign-in is the only way in, so
+// every key-shaped path below branches on the empty key_file rather than on
+// what a lookup of the empty string would return.
+pub const OPENAI_CODEX: Provider = Provider {
+    id: "openai-codex",
+    label: "ChatGPT",
+    endpoint: "https://chatgpt.com/backend-api/codex/responses",
+    key_env: "",
+    key_file: "",
+    key_prefix: "",
+    default_model: "gpt-5.4",
+    wire: Wire::Responses,
+    signin: "ChatGPT",
+};
+
+pub const PROVIDERS: [Provider; 3] = [ANTHROPIC, OPENAI, OPENAI_CODEX];
 
 const API_VERSION: &str = "2023-06-01";
 const USER_AGENT: &str = concat!("cler/", env!("CARGO_PKG_VERSION"));
@@ -250,11 +266,17 @@ pub fn key_path(config_dir: &Path) -> PathBuf {
 }
 
 pub fn store_key(key: &str, config_dir: &Path) -> Result<Status, String> {
+    let provider = provider();
+    if oauth_only(&provider) {
+        return Err(format!(
+            "{} signs in through the browser; there is no API key to store",
+            provider.label
+        ));
+    }
     let trimmed = key.trim();
     if trimmed.is_empty() {
         return Err("the key is empty".to_string());
     }
-    let provider = provider();
     if !trimmed.starts_with(provider.key_prefix) {
         return Err(format!(
             "that does not look like a key for {} ({}…)",
@@ -276,12 +298,22 @@ pub fn store_key(key: &str, config_dir: &Path) -> Result<Status, String> {
 }
 
 pub fn locate(env_key: Option<String>, config_dir: &Path) -> Result<Auth, String> {
+    let provider = provider();
+    if oauth_only(&provider) {
+        if !crate::oauth::signed_in(config_dir) {
+            return Err(format!(
+                "not signed in — sign in with {} to use it",
+                provider.signin
+            ));
+        }
+        return crate::oauth::access(config_dir).map(Auth::OAuth);
+    }
     if let Some(key) = env_key.map(|text| text.trim().to_string()).filter(|text| !text.is_empty()) {
         return Ok(Auth::ApiKey(key));
     }
     let file = key_path(config_dir);
     let Ok(contents) = std::fs::read_to_string(&file) else {
-        if provider().oauth && crate::oauth::signed_in(config_dir) {
+        if !provider.signin.is_empty() && crate::oauth::signed_in(config_dir) {
             return crate::oauth::access(config_dir).map(Auth::OAuth);
         }
         return Err(missing(&file));
@@ -294,8 +326,20 @@ pub fn locate(env_key: Option<String>, config_dir: &Path) -> Result<Auth, String
     Ok(Auth::ApiKey(key))
 }
 
+fn oauth_only(provider: &Provider) -> bool {
+    provider.key_file.is_empty()
+}
+
+fn env_key() -> Option<String> {
+    let provider = provider();
+    if provider.key_env.is_empty() {
+        return None;
+    }
+    std::env::var(provider.key_env).ok()
+}
+
 pub fn status(config_dir: &Path) -> Status {
-    match locate(std::env::var(provider().key_env).ok(), config_dir) {
+    match locate(env_key(), config_dir) {
         Ok(auth) => Status {
             available: true,
             provider: provider().id.to_string(),
@@ -315,10 +359,10 @@ pub fn status(config_dir: &Path) -> Status {
 
 fn missing(file: &Path) -> String {
     let provider = provider();
-    let signin = if provider.oauth {
-        ", or sign in with Claude"
+    let signin = if provider.signin.is_empty() {
+        String::new()
     } else {
-        ""
+        format!(", or sign in with {}", provider.signin)
     };
     format!(
         "no key for {} — export {} before starting the editor, write the key into {} and chmod 600 it{signin}",
@@ -954,15 +998,23 @@ pub fn describe(error: Option<&Value>) -> String {
         .unwrap_or("no detail given");
     let provider = provider();
     let label = provider.label;
+    let credential = if oauth_only(&provider) {
+        "sign-in"
+    } else {
+        "API key"
+    };
     match kind {
+        "authentication_error" if oauth_only(&provider) => {
+            format!("{label} rejected the sign-in — sign out and sign in again")
+        }
         "authentication_error" => {
             format!(
                 "{label} rejected the key — check {} or the key file",
                 provider.key_env
             )
         }
-        "permission_error" => format!("this API key is not allowed to use {}", model()),
-        "not_found_error" => format!("{} is not available to this API key", model()),
+        "permission_error" => format!("this {credential} is not allowed to use {}", model()),
+        "not_found_error" => format!("{} is not available to this {credential}", model()),
         "rate_limit_error" => format!("rate limited by {label} — wait a moment and ask again"),
         "overloaded_error" => format!("{label} is overloaded right now — try again in a moment"),
         "request_too_large" => {
@@ -1065,7 +1117,7 @@ pub fn ask(
     if question.trim().is_empty() {
         return Err("ask a question first".to_string());
     }
-    let auth = locate(std::env::var(provider().key_env).ok(), config_dir)?;
+    let auth = locate(env_key(), config_dir)?;
     let state = document::open(docs, path)?;
     let specs = document::palette(docs, path).unwrap_or_default();
     let model_json = serde_json::to_string(&state.model).map_err(|cause| cause.to_string())?;
@@ -1183,6 +1235,14 @@ fn unreachable(cause: &reqwest::Error) -> String {
 }
 
 fn refused(status: u16, text: &str) -> String {
+    // A stale ChatGPT token answers 401 with whatever body it likes, and none of
+    // its error types are the Anthropic ones describe() knows.
+    if status == 401 && oauth_only(&provider()) {
+        return format!(
+            "{} rejected the sign-in — sign out and sign in again",
+            provider().label
+        );
+    }
     match serde_json::from_str::<Value>(text) {
         Ok(value) if value.get("error").is_some() => describe(value.get("error")),
         _ => format!("{} answered HTTP {status}", provider().label),
@@ -1235,6 +1295,11 @@ mod tests {
         assert_eq!(provider().wire, Wire::OpenAi);
         assert_eq!(model(), OPENAI.default_model);
         assert_eq!(key_path(&dir), dir.join(OPENAI.key_file));
+
+        choose(&dir, Some("openai-codex"));
+        assert_eq!(provider().id, OPENAI_CODEX.id);
+        assert_eq!(provider().wire, Wire::Responses);
+        assert_eq!(model(), OPENAI_CODEX.default_model);
 
         assert!(settings::store(
             &dir,
@@ -1389,6 +1454,33 @@ mod tests {
     }
 
     #[test]
+    fn chatgpt_has_no_key_file_no_env_var_and_no_key_sentences() {
+        let _guard = settings::test_guard();
+        let dir = temp("codex-keyless");
+        choose(&dir, Some("openai-codex"));
+        let refusal = locate(None, &dir).expect_err("not signed in");
+        let stored = store_key("sk-anything", &dir).expect_err("nowhere to store a key");
+        let rejected: Value =
+            serde_json::from_str(r#"{"type":"authentication_error","message":"nope"}"#)
+                .expect("json");
+        let sentence = describe(Some(&rejected));
+        let expired = refused(401, r#"{"detail":"missing token"}"#);
+        choose(&dir, None);
+
+        assert!(refusal.contains("ChatGPT"), "{refusal}");
+        assert!(!refusal.contains("  "), "{refusal}");
+        assert!(!refusal.contains("export"), "{refusal}");
+        assert!(
+            !refusal.contains(&dir.display().to_string()),
+            "no key path: {refusal}"
+        );
+        assert!(stored.contains("no API key to store"), "{stored}");
+        assert!(sentence.contains("sign in again"), "{sentence}");
+        assert!(!sentence.contains("  "), "{sentence}");
+        assert!(expired.contains("sign in again"), "{expired}");
+    }
+
+    #[test]
     fn a_claude_sign_in_is_never_used_for_another_provider() {
         let _guard = settings::test_guard();
         let dir = temp("oauth-gate");
@@ -1400,6 +1492,18 @@ mod tests {
         assert!(refusal.contains(OPENAI.key_env), "{refusal}");
         assert!(refusal.contains(OPENAI.key_file), "{refusal}");
         assert!(!refusal.contains("sign in"), "{refusal}");
+
+        choose(&dir, Some("openai-codex"));
+        let claude_only = locate(None, &dir).expect_err("a Claude token is not a ChatGPT sign-in");
+        assert!(claude_only.contains("not signed in"), "{claude_only}");
+        assert!(claude_only.contains("ChatGPT"), "{claude_only}");
+
+        std::fs::write(dir.join(crate::oauth::CODEX_FLOW.token_file), "{}")
+            .expect("fake token file");
+        choose(&dir, Some("openai"));
+        let codex_only = locate(None, &dir).expect_err("a ChatGPT token is not an openai key");
+        assert!(codex_only.contains(OPENAI.key_env), "{codex_only}");
+        assert!(!codex_only.contains("sign in"), "{codex_only}");
 
         choose(&dir, None);
         let anthropic = locate(None, &dir).expect_err("token file is not a real token");
