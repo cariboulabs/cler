@@ -161,10 +161,15 @@ fn an_empty_key_file_is_refused_by_name() {
 fn the_guide_carries_only_the_sections_the_ai_agent_needs() {
     let guide = ai_agent::guide();
 
-    for wanted in ["## 1. ", "## 4. ", "## 5. ", "## 6. "] {
+    for wanted in [
+        "# AI Bringup Guide",
+        "## Writing a Block",
+        "## Channels & Buffer Access",
+        "## Flowgraph & Schedulers",
+    ] {
         assert!(guide.contains(wanted), "guide is missing {wanted}");
     }
-    for skipped in ["## 2. ", "## 3. ", "## 9. ", "## 12. "] {
+    for skipped in ["## Repository Map", "## Build", "## Tools", "## Common Pitfalls"] {
         assert!(!guide.contains(skipped), "guide should not carry {skipped}");
     }
     assert!(
@@ -338,7 +343,7 @@ fn the_request_carries_the_model_the_context_and_the_history() {
     assert!(body.get("tools").is_none(), "a read-only file offers no tool");
     let preamble = body["system"][0]["text"].as_str().unwrap();
     assert!(preamble.contains("You explain; you do not act"), "{preamble}");
-    assert!(preamble.contains("## 4. "), "the guide is missing");
+    assert!(preamble.contains("## Writing a Block"), "the guide is missing");
 }
 
 /* ============================================================ the tool */

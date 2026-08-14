@@ -96,7 +96,12 @@ const DONE_EVENT: &str = "ai-agent-done";
 const PROPOSAL_EVENT: &str = "ai-agent-proposal";
 
 const GUIDE: &str = include_str!("../../../../../AGENTS.md");
-const GUIDE_SECTIONS: [&str; 4] = ["## 1. ", "## 4. ", "## 5. ", "## 6. "];
+const GUIDE_SECTIONS: [&str; 4] = [
+    "# AI Bringup Guide",
+    "## Writing a Block",
+    "## Channels & Buffer Access",
+    "## Flowgraph & Schedulers",
+];
 
 const MODEL_BUDGET: usize = 16_000;
 const SOURCE_BUDGET: usize = 32_000;
