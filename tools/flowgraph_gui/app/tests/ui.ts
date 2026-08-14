@@ -64,6 +64,7 @@ type Setup = {
   askError: string | null;
   previewError: string | null;
   diff: string;
+  cache: Record<string, unknown>;
 };
 
 type Fake = {
@@ -101,7 +102,7 @@ function installFake(setup: Setup) {
     canRedo: false,
     dirty: false,
     externalChange: false,
-    cache: {} as Record<string, unknown>
+    cache: setup.cache as Record<string, unknown>
   };
   type HistoricalState = {
     model: FileModel;
@@ -689,6 +690,7 @@ export type BootOptions = {
   askError?: string;
   previewError?: string;
   diff?: string;
+  rail?: 'untouched';
 };
 
 export const AI_AGENT_READY: FakeAiAgent = {
@@ -749,7 +751,8 @@ export async function boot(options: BootOptions = {}): Promise<Page> {
     aiAgent: options.aiAgent ?? AI_AGENT_READY,
     askError: options.askError ?? null,
     previewError: options.previewError ?? null,
-    diff: options.diff ?? SAMPLE_DIFF
+    diff: options.diff ?? SAMPLE_DIFF,
+    cache: options.rail === 'untouched' ? {} : { panels: { leftTab: 'settings' } }
   });
   await page.addInitScript(openInspector);
   await page.goto(origin, { waitUntil: 'load' });

@@ -55,7 +55,7 @@ function installFake(setup: Setup) {
     canRedo: false,
     dirty: false,
     externalChange: false,
-    cache: JSON.parse(localStorage.getItem('__fake_cfgc') ?? '{}') as Record<string, unknown>
+    cache: JSON.parse(localStorage.getItem('__fake_cfgc') ?? '{"panels":{"leftTab":"settings"}}') as Record<string, unknown>
   };
   const undone: string[] = [];
   const redone: string[] = [];
@@ -1639,6 +1639,7 @@ describe('G. fixture mode never reaches for a backend', () => {
       });
       await page.goto(`${origin}/?fixture=uhd_device`, { waitUntil: 'load' });
       await page.waitForSelector('.svelte-flow__node');
+      await page.click('[data-testid="rail-tab-settings"]');
 
       await page.evaluate(() => {
         const spy = { calls: [] as string[] };

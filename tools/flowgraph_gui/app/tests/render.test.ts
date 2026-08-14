@@ -146,7 +146,7 @@ function installFakeBackend(setup: FakeSetup) {
     canRedo: false,
     dirty: false,
     externalChange: false,
-    cache: {}
+    cache: { panels: { leftTab: 'settings' } }
   };
   const undone: string[] = [];
   const redone: string[] = [];

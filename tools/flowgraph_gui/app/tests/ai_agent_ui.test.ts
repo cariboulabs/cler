@@ -520,7 +520,7 @@ describe('the AI agent shares the settings panel', () => {
   it(
     'Ctrl+J opens the AI agent tab and closes the rail again',
     async () => {
-      const page = await boot();
+      const page = await boot({ rail: 'untouched' });
       await page.waitForSelector('[data-testid="ai-agent-panel"]');
       expect(await page.locator('.sidebar').count()).toBe(0);
       expect(

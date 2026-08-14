@@ -171,28 +171,26 @@ describe('the problems chip merges the compiler with the model', () => {
 
 describe('build and run follow what find_target reports', () => {
   it(
-    'stays disabled with the reason as its tooltip when there is no target',
+    'stays pressable without a target so the backend can configure, while run stays disabled',
     async () => {
       const page = await boot();
       expect(await page.locator('[data-testid="check"]').isDisabled()).toBe(false);
-      expect(await page.locator('[data-testid="build"]').isDisabled()).toBe(true);
+      expect(await page.locator('[data-testid="build"]').isDisabled()).toBe(false);
       expect(await page.locator('[data-testid="run"]').isDisabled()).toBe(true);
-      for (const action of ['build', 'run']) {
-        expect(await styleOf(page, `[data-testid="${action}"]`, 'background-color')).toBe(
-          await token(page, '--bg-1')
-        );
-        expect(await styleOf(page, `[data-testid="${action}"]`, 'border-top-color')).toBe(
-          await token(page, '--border')
-        );
-      }
-      expect(await page.textContent('[data-testid="build-tooltip"]')).toContain(
-        'desktop_examples'
+      expect(await styleOf(page, '[data-testid="run"]', 'background-color')).toBe(
+        await token(page, '--bg-1')
+      );
+      expect(await styleOf(page, '[data-testid="run"]', 'border-top-color')).toBe(
+        await token(page, '--border')
+      );
+      expect(await page.getAttribute('[data-testid="build"]', 'title')).toContain(
+        'configures the build directory'
       );
 
       await page.keyboard.press('Control+b');
       await page.keyboard.press('Control+r');
       await page.waitForTimeout(200);
-      expect(await ran(page, 'build_target')).toBe(0);
+      expect(await ran(page, 'build_target')).toBe(1);
       expect(await ran(page, 'run_target')).toBe(0);
       await page.close();
     },

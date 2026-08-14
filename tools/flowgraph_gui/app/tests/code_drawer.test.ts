@@ -41,7 +41,7 @@ function installFake(setup: Setup) {
     canRedo: false,
     dirty: false,
     externalChange: false,
-    cache: {}
+    cache: { panels: { leftTab: 'settings' } }
   };
   const calls: { name: string; args: Record<string, unknown> }[] = [];
   const callbacks = new Map<number, (message: unknown) => void>();

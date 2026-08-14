@@ -237,7 +237,7 @@
   let running = $state(false);
   let targetRefresh = $state(0);
   let rightTab = $state<RailTab>('inspector');
-  let leftTab = $state<RailTab>('ai-agent');
+  let leftTab = $state<RailTab>(desktop ? 'ai-agent' : 'settings');
   let runArgs = $state('');
   let libSettings = $state<AppSettings>({ clerRoot: null, blockLibraries: [], aiAgentModel: null, aiAgentProvider: null, aiAgentBaseUrl: null });
   let resolvedRoot = $state<string | null>(null);
@@ -696,7 +696,12 @@
         drawerHeight = panels.drawerHeight;
       }
       rightTab = panels.rightTab === 'library' ? 'library' : 'inspector';
-      leftTab = panels.leftTab === 'settings' ? 'settings' : 'ai-agent';
+      leftTab =
+        panels.leftTab === 'settings' || panels.leftTab === 'ai-agent'
+          ? panels.leftTab
+          : editable
+            ? 'ai-agent'
+            : 'settings';
       runArgs = typeof panels.runArgs === 'string' ? panels.runArgs : '';
       const cachedSite = siteViewIds(next.model.sites).indexOf(flowCache.activeView ?? '');
       siteIndex = cachedSite >= 0 ? cachedSite : 0;
