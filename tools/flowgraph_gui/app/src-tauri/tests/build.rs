@@ -194,6 +194,36 @@ fn without_a_configured_build_directory_the_reason_is_the_command_to_run() {
 }
 
 #[test]
+fn building_without_a_configured_build_directory_configures_one_and_proceeds() {
+    if !have_cmake() {
+        eprintln!("skipping: no cmake on this machine");
+        return;
+    }
+    let root = repo("autoconfigure");
+    write(
+        &root.join("CMakeLists.txt"),
+        "cmake_minimum_required(VERSION 3.16)\nproject(auto_test LANGUAGES CXX)\nadd_subdirectory(desktop_examples)\n",
+    );
+    write(
+        &root.join("desktop_examples/CMakeLists.txt"),
+        "add_executable(hello_world hello_world.cpp)\n",
+    );
+    let source = root.join("desktop_examples/hello_world.cpp");
+    write(&source, "int main() { return 0; }\n");
+
+    assert!(!build::find_target(as_str(&source))
+        .expect("answer")
+        .available);
+
+    let jobs = Jobs::default();
+    let (seen, emit) = recorder();
+    build::build(&jobs, as_str(&source), emit).expect("build configures the missing directory");
+    assert_eq!(await_event(&seen, "build-finished")["code"], 0);
+    assert!(root.join("build/CMakeCache.txt").is_file());
+    assert!(root.join("build/desktop_examples/hello_world").is_file());
+}
+
+#[test]
 fn a_file_outside_a_cler_repository_builds_against_the_fallback_root() {
     let dir = temp_dir("stray");
     let source = dir.join("stray.cpp");

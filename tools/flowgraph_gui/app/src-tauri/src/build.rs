@@ -131,9 +131,8 @@ pub fn find_target(path: &str) -> Result<Target, String> {
         return Ok(refused(
             name,
             format!(
-                "configure a build directory first: cmake -B {}/build -S {}",
-                root.display(),
-                root.display()
+                "configure a build directory first: {}",
+                configure_command(&root)
             ),
         ));
     };
@@ -148,6 +147,52 @@ pub fn find_target(path: &str) -> Result<Target, String> {
             reason: "build the current draft before running".to_string(),
         },
     })
+}
+
+fn default_build_dir(root: &Path) -> PathBuf {
+    root.join("build")
+}
+
+fn configure_command(root: &Path) -> String {
+    format!(
+        "cmake -B {} -S {}",
+        default_build_dir(root).display(),
+        root.display()
+    )
+}
+
+fn configured_target(path: &str) -> Result<Target, String> {
+    let found = find_target(path)?;
+    if found.available {
+        return Ok(found);
+    }
+    let file = canonical(path)?;
+    let root = repo_root(&file).ok_or_else(|| outside(&file))?;
+    configure_build(&root)?;
+    find_target(path)
+}
+
+fn configure_build(root: &Path) -> Result<(), String> {
+    let dir = default_build_dir(root);
+    std::fs::create_dir_all(&dir)
+        .map_err(|cause| format!("cannot create {}: {cause}", dir.display()))?;
+    let output = Command::new("cmake")
+        .arg("-S")
+        .arg(root)
+        .arg("-B")
+        .arg(&dir)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|cause| format!("cannot start cmake: {cause}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "{} failed:\n{}{}",
+        configure_command(root),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ))
 }
 
 pub fn find_draft_target(jobs: &Jobs, path: &str, draft: &DraftState) -> Result<Target, String> {
@@ -189,7 +234,7 @@ pub fn find_draft_target(jobs: &Jobs, path: &str, draft: &DraftState) -> Result<
 pub fn build(jobs: &Jobs, path: &str, emit: Emit) -> Result<Started, String> {
     let target = canonical(path)?;
     refuse_parallel_build(jobs, &target)?;
-    let found = find_target(path)?;
+    let found = configured_target(path)?;
     let dir = usable(&found)?;
     let mut command = Command::new("cmake");
     command.args(["--build", dir, "--target", &found.name, "--parallel"]);
@@ -218,7 +263,7 @@ pub fn build_draft(
 ) -> Result<Started, String> {
     let target = canonical(path)?;
     refuse_parallel_build(jobs, &target)?;
-    let found = find_target(path)?;
+    let found = configured_target(path)?;
     usable(&found)?;
     let (source_dir, build_dir, binary) = draft_tree(&target, &draft.workspace)?;
     prepare_overlay(&target, &draft.path, &source_dir)?;
