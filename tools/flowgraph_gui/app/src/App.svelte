@@ -237,7 +237,7 @@
   let running = $state(false);
   let targetRefresh = $state(0);
   let rightTab = $state<RailTab>('inspector');
-  let leftTab = $state<RailTab>('settings');
+  let leftTab = $state<RailTab>('ai-agent');
   let runArgs = $state('');
   let libSettings = $state<AppSettings>({ clerRoot: null, blockLibraries: [], aiAgentModel: null, aiAgentProvider: null, aiAgentBaseUrl: null });
   let resolvedRoot = $state<string | null>(null);
@@ -338,17 +338,19 @@
       enabled:
         blocked === null &&
         busy === null &&
-        target?.available === true &&
+        target !== null &&
+        targetError === null &&
         target.artifact?.state !== 'building',
       hint:
         blocked ??
-        target?.reason ??
         targetError ??
         (target === null
           ? 'finding the build target'
           : target.artifact?.state === 'building'
             ? `a build is already running for this document (job ${target.artifact.jobId})`
-            : 'build the temporary draft (Ctrl+B)')
+            : target.available !== true
+              ? 'build the temporary draft (configures the build directory first) (Ctrl+B)'
+              : 'build the temporary draft (Ctrl+B)')
     },
     run: {
       enabled:
@@ -694,7 +696,7 @@
         drawerHeight = panels.drawerHeight;
       }
       rightTab = panels.rightTab === 'library' ? 'library' : 'inspector';
-      leftTab = panels.leftTab === 'ai-agent' ? 'ai-agent' : 'settings';
+      leftTab = panels.leftTab === 'settings' ? 'settings' : 'ai-agent';
       runArgs = typeof panels.runArgs === 'string' ? panels.runArgs : '';
       const cachedSite = siteViewIds(next.model.sites).indexOf(flowCache.activeView ?? '');
       siteIndex = cachedSite >= 0 ? cachedSite : 0;

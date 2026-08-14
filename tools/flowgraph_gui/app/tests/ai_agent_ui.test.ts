@@ -494,8 +494,16 @@ describe('the AI agent shares the settings panel', () => {
     'remembers the chosen left tab in the layout cache',
     async () => {
       const page = await boot();
+      await page.click('[data-testid="rail-tab-settings"]');
+      await expect
+        .poll(async () => {
+          const cache = await page.evaluate(
+            () => (window as unknown as FakeWindow).__fake.cache() as { panels?: { leftTab?: string } }
+          );
+          return cache.panels?.leftTab;
+        })
+        .toBe('settings');
       await page.click('[data-testid="rail-tab-ai-agent"]');
-      await page.waitForSelector('[data-testid="ai-agent-panel"]');
       await expect
         .poll(async () => {
           const cache = await page.evaluate(
@@ -513,7 +521,6 @@ describe('the AI agent shares the settings panel', () => {
     'Ctrl+J opens the AI agent tab and closes the rail again',
     async () => {
       const page = await boot();
-      await page.keyboard.press('Control+j');
       await page.waitForSelector('[data-testid="ai-agent-panel"]');
       expect(await page.locator('.sidebar').count()).toBe(0);
       expect(
@@ -524,6 +531,11 @@ describe('the AI agent shares the settings panel', () => {
       await expect
         .poll(() => page.locator('[data-testid="ai-agent-panel"].collapsed').count())
         .toBe(1);
+
+      await page.keyboard.press('Control+j');
+      await expect
+        .poll(() => page.locator('[data-testid="ai-agent-panel"].collapsed').count())
+        .toBe(0);
       await page.close();
     },
     CASE

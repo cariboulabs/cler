@@ -169,7 +169,7 @@
             {/each}
           </select>
         </span>
-        {#if models.length > 0}
+        {#if status.available && models.length > 0}
           <span class="name">
             <select
               class="model-select"
