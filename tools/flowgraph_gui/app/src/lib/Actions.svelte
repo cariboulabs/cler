@@ -888,7 +888,7 @@
     display: flex;
     flex-direction: column;
   }
-  .examples-menu {
+  .draft-menu.examples-menu {
     position: absolute;
     top: 0;
     left: calc(100% + var(--sp-0));
