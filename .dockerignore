@@ -45,3 +45,7 @@ perf-results/
 # Docker-related files that shouldn't be in the build context
 .dockerignore
 docker-compose.override.yml
+# flowgraph gui
+**/node_modules/
+**/target/
+build-e2e-gui/

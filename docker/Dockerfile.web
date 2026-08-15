@@ -1,0 +1,25 @@
+# Hosted cler-fg: static frontend + e2e_backend on one port, full edit/build inside the container.
+#   docker build -f docker/Dockerfile.web -t cler-fg-web .
+#   docker run --rm -p 8080:8080 cler-fg-web
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+    build-essential cmake git pkg-config curl ca-certificates \
+    libusb-1.0-0-dev libfftw3-dev libglfw3-dev libgl1-mesa-dev libglu1-mesa-dev \
+    libwebkit2gtk-4.1-dev librsvg2-dev libssl-dev libxdo-dev libayatana-appindicator3-dev \
+    nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+ENV PATH=/root/.cargo/bin:$PATH
+
+WORKDIR /cler
+COPY . .
+
+# frontend in web mode (same-origin backend)
+RUN cd tools/flowgraph_gui/app && npm ci && VITE_CLER_WEB_BACKEND= npx vite build --outDir /web --emptyOutDir
+# backend
+RUN cd tools/flowgraph_gui/app/src-tauri && cargo build --release --bin e2e_backend \
+    && cp target/release/e2e_backend /usr/local/bin/cler-fg-web && rm -rf target
+# ponytail: single stage, ~4 GB with the rust toolchain still inside; multi-stage if pull size matters.
+EXPOSE 8080
+CMD ["cler-fg-web", "8080", "--static", "/web"]

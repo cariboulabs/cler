@@ -1,6 +1,6 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use cler_flowgraph_gui::settings;
@@ -28,10 +28,18 @@ fn e2e_config_dir() -> std::path::PathBuf {
 
 fn main() {
     settings::init(&e2e_config_dir());
-    let port: u16 = std::env::args()
-        .nth(1)
+    let mut args = std::env::args().skip(1);
+    let port: u16 = args
+        .next()
         .and_then(|text| text.parse().ok())
-        .expect("usage: e2e_backend <port>");
+        .expect("usage: e2e_backend <port> [--static <dir>]");
+    // ponytail: --static turns the e2e backend into the hosted web demo — one shared
+    // workspace for every visitor, run without a display fails; per-visitor sandboxes if that hurts.
+    let static_dir: Option<PathBuf> = match args.next().as_deref() {
+        Some("--static") => Some(PathBuf::from(args.next().expect("--static needs a dir"))),
+        _ => None,
+    };
+    let bind = if static_dir.is_some() { "0.0.0.0" } else { "127.0.0.1" };
 
     let docs: Shared = Arc::new(Documents::default());
     let events: Events = Arc::new(Mutex::new(Vec::new()));
@@ -40,16 +48,17 @@ fn main() {
         build_watcher(docs.clone(), events.clone()).expect("file watcher"),
     ));
 
-    let listener = TcpListener::bind(("127.0.0.1", port)).expect("bind 127.0.0.1");
-    println!("e2e_backend listening on http://127.0.0.1:{port}");
+    let listener = TcpListener::bind((bind, port)).expect("bind");
+    println!("e2e_backend listening on http://{bind}:{port}");
 
     for stream in listener.incoming().flatten() {
         let docs = docs.clone();
         let events = events.clone();
         let watcher = watcher.clone();
         let jobs = jobs.clone();
+        let static_dir = static_dir.clone();
         std::thread::spawn(move || {
-            serve(stream, &docs, &watcher, &events, &jobs);
+            serve(stream, &docs, &watcher, &events, &jobs, static_dir.as_deref());
         });
     }
 }
@@ -60,12 +69,44 @@ fn serve(
     watcher: &FileWatcher,
     events: &Events,
     jobs: &Jobs,
+    static_dir: Option<&Path>,
 ) {
     let Some((method, target, body)) = request(&stream) else {
         return;
     };
+    if method == "GET" {
+        if let Some(dir) = static_dir {
+            return serve_static(&mut stream, dir, &target);
+        }
+    }
     let (status, payload) = route(&method, &target, &body, docs, watcher, events, jobs);
     respond(&mut stream, status, &payload);
+}
+
+fn serve_static(stream: &mut TcpStream, dir: &Path, target: &str) {
+    let clean = target.split('?').next().unwrap_or("/").trim_start_matches('/');
+    let mut file = dir.join(clean);
+    if clean.is_empty() || clean.contains("..") || !file.is_file() {
+        file = dir.join("index.html");
+    }
+    let mime = match file.extension().and_then(|ext| ext.to_str()) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript",
+        Some("css") => "text/css",
+        Some("png") => "image/png",
+        Some("svg") => "image/svg+xml",
+        Some("json") => "application/json",
+        Some("wasm") => "application/wasm",
+        _ => "application/octet-stream",
+    };
+    let body = std::fs::read(&file).unwrap_or_default();
+    let head = format!(
+        "HTTP/1.1 200\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).ok();
+    stream.write_all(&body).ok();
+    stream.flush().ok();
 }
 
 fn request(stream: &TcpStream) -> Option<(String, String, Vec<u8>)> {
@@ -181,6 +222,12 @@ fn dispatch(
         None => return Reply::Loud(format!("{cmd} needs a path argument")),
     };
     match cmd {
+        "resolved_cler_root" => Reply::Value(
+            build::repo_root(Path::new(&path))
+                .map(|root| Value::String(root.display().to_string()))
+                .unwrap_or(Value::Null),
+        ),
+        "open_in_editor" => Reply::Refused("opening an editor needs the desktop app".to_string()),
         "open_document" => match document::canonical(&path).and_then(|target| {
             watch_parent(watcher, &target)?;
             document::open(docs, &path)
