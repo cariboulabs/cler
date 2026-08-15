@@ -1,0 +1,13 @@
+Third-party toolchain, vendored verbatim so /try depends on nothing external.
+
+emception — https://github.com/jprendes/emception
+  Licensed MIT OR Apache-2.0 (see LICENSE.MIT / LICENSE.Apache-2.0 upstream).
+  Files: emception.worker.bundle.worker.js, 9d1e542b80004e27297f.wasm,
+  f0283badd42fe745cbe4.wasm, cecdfcda360457a8f204.br
+
+The *.a files are the emscripten sysroot archives that pack lazily requests
+for our fixed link flags. emscripten is licensed MIT / University of Illinois
+NCSA — https://github.com/emscripten-core/emscripten/blob/main/LICENSE
+
+Copied from https://jprendes.github.io/emception/. See
+tools/flowgraph_gui/AGENTS.md for how to refresh this directory.
