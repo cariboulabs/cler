@@ -1,7 +1,3 @@
-// The phases a browser build really goes through, as events rather than prose: emception.ts
-// and wasmbridge.ts call phase() at the points where the pipeline actually moves on, and the
-// progress panel maps them to a label and a fraction. Nothing here rotates on a timer — a
-// phrase is on screen only while its phase runs.
 export type Phase =
   | 'toolchain'
   | 'boot'
@@ -16,8 +12,7 @@ export type PhaseEvent = { phase: Phase; detail?: string; bytes?: number; total?
 
 export type Timings = Partial<Record<Phase, number>>;
 
-// Rough shares of a cold build, used only until a real run replaces them (TIMINGS_KEY).
-const WEIGHT: Record<Phase, number> = {
+const COLD_BUILD_WEIGHT: Record<Phase, number> = {
   toolchain: 30,
   boot: 6,
   stage: 6,
@@ -32,35 +27,43 @@ const ORDER: Phase[] = ['toolchain', 'boot', 'stage', 'compile', 'link', 'optimi
 
 export const TIMINGS_KEY = 'cler.build.timings';
 
-export function label(event: PhaseEvent): string {
+export function parts(event: PhaseEvent): { phrase: string; target: string | null } {
   switch (event.phase) {
     case 'toolchain':
-      return event.total
-        ? `Downloading the compiler… ${mb(event.bytes ?? 0)} / ${mb(event.total)} MB`
-        : `Downloading the compiler… ${mb(event.bytes ?? 0)} MB`;
+      return {
+        phrase: 'Downloading the compiler…',
+        target: event.total
+          ? `${mb(event.bytes ?? 0)} / ${mb(event.total)} MB`
+          : `${mb(event.bytes ?? 0)} MB`
+      };
     case 'boot':
-      return 'Unpacking clang — warming the toolchain…';
+      return { phrase: 'Unpacking clang — warming the toolchain…', target: null };
     case 'stage':
-      return event.detail ? `Staging cler headers — ${event.detail}…` : 'Staging cler headers…';
+      return { phrase: event.detail ? 'Staging cler headers' : 'Staging cler headers…', target: event.detail ?? null };
     case 'compile':
-      return `Compiling ${event.detail ?? 'the flowgraph'}…`;
+      return { phrase: 'Compiling', target: event.detail ?? 'the flowgraph' };
     case 'link':
-      return 'Persuading wasm-ld — linking against libcler_web…';
+      return { phrase: 'Persuading wasm-ld — linking against libcler_web…', target: null };
     case 'optimize':
-      return 'Optimizing wasm (Asyncify)…';
+      return { phrase: 'Optimizing wasm (Asyncify)…', target: null };
     case 'store':
-      return 'Storing the build in your browser…';
+      return { phrase: 'Storing the build in your browser…', target: null };
     case 'launch':
-      return 'Wiring runners — launching…';
+      return { phrase: 'Wiring runners — launching…', target: null };
   }
+}
+
+export function label(event: PhaseEvent): string {
+  const { phrase, target } = parts(event);
+  return target ? `${phrase} ${target}` : phrase;
 }
 
 function mb(bytes: number): string {
   return (bytes / 1e6).toFixed(1);
 }
 
-function weights(timings: Timings): Record<Phase, number> {
-  const out = { ...WEIGHT };
+function effectiveWeights(timings: Timings): Record<Phase, number> {
+  const out = { ...COLD_BUILD_WEIGHT };
   for (const phase of ORDER) {
     const seen = timings[phase];
     if (seen && seen > 0) out[phase] = seen;
@@ -68,28 +71,25 @@ function weights(timings: Timings): Record<Phase, number> {
   return out;
 }
 
-// Fraction of the whole job, or null when we have no honest number for the phase in flight
-// (first ever build, no download bytes) — the bar shimmers instead of guessing.
 export function progress(event: PhaseEvent, elapsedInPhase: number, timings: Timings): number | null {
-  const w = weights(timings);
+  const w = effectiveWeights(timings);
   const total = ORDER.reduce((sum, phase) => sum + w[phase], 0);
   const before = ORDER.slice(0, ORDER.indexOf(event.phase)).reduce((sum, phase) => sum + w[phase], 0);
-  const within = share(event, elapsedInPhase, timings);
+  const within = phaseShare(event, elapsedInPhase, timings);
   if (within === null) return null;
   return Math.min(1, (before + within * w[event.phase]) / total);
 }
 
-function share(event: PhaseEvent, elapsedInPhase: number, timings: Timings): number | null {
+function phaseShare(event: PhaseEvent, elapsedInPhase: number, timings: Timings): number | null {
   if (event.phase === 'toolchain' && event.total) return Math.min(1, (event.bytes ?? 0) / event.total);
   const expected = timings[event.phase];
   if (!expected || expected <= 0) return null;
   return Math.min(0.95, elapsedInPhase / expected);
 }
 
-// Seconds left, once a previous run told us how long the remaining phases take.
 export function remaining(event: PhaseEvent, elapsedInPhase: number, timings: Timings): number | null {
   if (Object.keys(timings).length === 0) return null;
-  const w = weights(timings);
+  const w = effectiveWeights(timings);
   const rest = ORDER.slice(ORDER.indexOf(event.phase) + 1).reduce((sum, phase) => sum + (timings[phase] ?? 0), 0);
   const here = timings[event.phase]
     ? Math.max(0, timings[event.phase]! - elapsedInPhase)
@@ -112,8 +112,7 @@ export const FACTS = [
   'The run window is cross-origin isolated, which is the only reason pthreads work in it.'
 ];
 
-// Tiny bus: the two producers (emception, wasmbridge) are module singletons already, and the
-// panel is the one consumer. ponytail: one listener; make it a Set if a second surface wants it.
+// ponytail: one listener — the panel is the only consumer; make it a Set if a second surface wants it.
 let listener: ((event: PhaseEvent) => void) | null = null;
 
 export function onPhase(fn: (event: PhaseEvent) => void): () => void {

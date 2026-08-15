@@ -1,17 +1,8 @@
-// The C++ toolchain, in the browser: emception (clang + lld + the emscripten sysroot,
-// compiled to wasm) runs em++ over a virtual repo, so /try can compile and link an edited
-// flowgraph with no server. Self-hosting is a base-URL swap: mirror the files emception's
-// Pages site serves next to this app and point TOOLCHAIN_BASE at them (public/cler-sw.js
-// reads it off its own registration URL and mirrors it under emception/*, which is what
-// makes the cross-origin worker bundle loadable at all).
 import * as Comlink from 'comlink';
 import { phase } from './progress';
 
 export const TOOLCHAIN_BASE = 'https://jprendes.github.io/emception/';
 
-// The bundle below runs as same-origin code, so it is pinned: cler-sw.js verifies these four
-// sha256s before caching, and refuses the file otherwise. Recompute after a TOOLCHAIN_BASE bump
-// with `curl -sL <base><name> | sha256sum`.
 export const TOOLCHAIN_PINS: Record<string, string> = {
   'emception.worker.bundle.worker.js': '60b9f0fb7982f9395ef63872b5ed3b798377fab09a8666f28b67ccb5029c0107',
   'f0283badd42fe745cbe4.wasm': '2c60c515eca756e80ddc752a6ac062e07f596eb70c7a1308321705f90e09b442',
@@ -19,17 +10,12 @@ export const TOOLCHAIN_PINS: Record<string, string> = {
   'cecdfcda360457a8f204.br': '9bd873132b4915a4da34a977a386a4ae68785df34b8cdb9c3d205fae26eeb772'
 };
 
-// Sum of the four pinned files above, so the first-visit download can show a real fraction.
-// Recompute alongside the pins: `curl -sIL <base><name> | grep -i content-length`.
 export const TOOLCHAIN_BYTES = 24_992_393;
 
-// Virtual repo root, and emception's cwd — so every path on the em++ command line is the
-// app's own repo-relative path, and so are the paths in the diagnostics coming back.
-const ROOT = '/working';
+const VIRTUAL_REPO_ROOT = '/working';
 const OBJ = 'draft.o';
 const ARTIFACTS = ['app.html', 'app.js', 'app.wasm', 'app.worker.js'];
 
-// Must stay in step with tools/flowgraph_gui/web-run/build.sh — the archives were built with these.
 const CXXFLAGS = [
   '-std=c++17', '-O2', '-pthread', '-Iinclude', '-I.', '-Idesktop_blocks/gui', '-Idesktop_blocks/plots',
   '-Ibuild/_deps/imgui-src', '-Ibuild/_deps/imgui-src/backends', '-Ibuild/_deps/implot-src', '-Iliquid',
@@ -37,7 +23,6 @@ const CXXFLAGS = [
   '-Wno-unused-parameter', '-Wno-unused-variable', '-Wno-missing-braces', '-Wno-deprecated-declarations'
 ];
 // ponytail: -O1 links in ~10 s where -O2 takes ~2 min; raise it if the run window turns out too slow.
-// -sMINIFY_HTML=0 is not optional: emception ships no html-minifier.
 const LDFLAGS = [
   '-O1', '-pthread', '-sUSE_GLFW=3', '-sUSE_WEBGL2=1', '-sFULL_ES3=1', '-sALLOW_MEMORY_GROWTH=1',
   '-sPTHREAD_POOL_SIZE=8', '-sASYNCIFY', '-sASYNCIFY_STACK_SIZE=65536', '-sEXIT_RUNTIME=0',
@@ -59,16 +44,12 @@ type Emception = {
 export type Line = (text: string) => void;
 
 const encoder = new TextEncoder();
-// Absolute: dynamic import() and new Worker() resolve against this module's URL (assets/), not the page.
-const base = () => new URL(import.meta.env.BASE_URL, location.href).href;
+const assetBaseUrl = () => new URL(import.meta.env.BASE_URL, location.href).href;
 const INIT_TIMEOUT_MS = 60_000;
 let booting: Promise<Emception> | null = null;
 let sink: Line = () => {};
 let blocked: string | null = null;
 
-// Set by main.ts when the service worker cannot be registered (private windows, disabled
-// workers): without it there is no cross-origin isolation and no toolchain mirror, so the
-// editor still runs but Check/Build/Run have to say why they cannot.
 export function blockToolchain(reason: string): void {
   blocked = reason;
 }
@@ -95,18 +76,17 @@ export async function link(onLine: Line): Promise<{ code: number; files: Record<
   const em = await booting;
   const argv = ['em++', OBJ, 'lib/libcler_web.a', 'lib/libliquid.a', ...LDFLAGS, '-o', 'app.html'];
   phase({ phase: 'link' });
-  // em++ names the tool it is about to run, so wasm-opt is a phase we observe, not one we invent.
-  let optimizing = false;
+  let wasmOptStarted = false;
   const code = await exec(em, argv, (text) => {
-    if (!optimizing && /wasm-opt/.test(text)) {
-      optimizing = true;
+    if (!wasmOptStarted && /wasm-opt/.test(text)) {
+      wasmOptStarted = true;
       phase({ phase: 'optimize' });
     }
     onLine(text);
   });
   const out: Record<string, Uint8Array> = {};
   if (code === 0) {
-    for (const name of ARTIFACTS) out[name] = new Uint8Array(await em.fileSystem.readFile(`${ROOT}/${name}`));
+    for (const name of ARTIFACTS) out[name] = new Uint8Array(await em.fileSystem.readFile(`${VIRTUAL_REPO_ROOT}/${name}`));
   }
   return { code, files: out };
 }
@@ -114,8 +94,6 @@ export async function link(onLine: Line): Promise<{ code: number; files: Record<
 function boot(files: Record<string, string>, onLine: Line): Promise<Emception> {
   if (blocked) return Promise.reject(new Error(blocked));
   sink = onLine;
-  // Reset on failure so the next Check/Build retries instead of awaiting a promise that will
-  // never settle (offline, a moved upstream hash, a proxy in the way).
   booting ??= start(files).catch((error: unknown) => {
     booting = null;
     throw error;
@@ -125,11 +103,11 @@ function boot(files: Record<string, string>, onLine: Line): Promise<Emception> {
 
 async function start(files: Record<string, string>): Promise<Emception> {
   let bytes = 0;
-  let reported: string | null = null;
-  const progress = (event: MessageEvent) => {
+  let workerReportedError: string | null = null;
+  const onToolchainMessage = (event: MessageEvent) => {
     const data = event.data as { toolchain?: string; bytes?: number; toolchainError?: string };
     if (data?.toolchainError) {
-      reported = data.toolchainError;
+      workerReportedError = data.toolchainError;
       sink(data.toolchainError);
     } else if (data?.toolchain) {
       bytes += data.bytes ?? 0;
@@ -137,20 +115,19 @@ async function start(files: Record<string, string>): Promise<Emception> {
       sink(`downloading the C++ toolchain (first visit only)… ${(bytes / 1e6).toFixed(1)} MB`);
     }
   };
-  navigator.serviceWorker.addEventListener('message', progress);
+  navigator.serviceWorker.addEventListener('message', onToolchainMessage);
   sink('starting the in-browser C++ toolchain…');
   phase({ phase: 'boot' });
-  const worker = new Worker(`${base()}emception/emception.worker.bundle.worker.js`);
+  const worker = new Worker(`${assetBaseUrl()}emception/emception.worker.bundle.worker.js`);
   const em = Comlink.wrap(worker) as unknown as Emception;
   em.onstdout = Comlink.proxy((text: string) => sink(text));
   em.onstderr = Comlink.proxy((text: string) => sink(text));
   let timer = 0;
-  // em.init() simply never settles when a toolchain file does not arrive, so race it.
   const stalled = new Promise<never>((_, reject) => {
     worker.onerror = (event) =>
-      reject(new Error(reported ?? `the C++ toolchain worker failed: ${event.message || 'load error'}`));
+      reject(new Error(workerReportedError ?? `the C++ toolchain worker failed: ${event.message || 'load error'}`));
     timer = self.setTimeout(
-      () => reject(new Error(reported ?? `the C++ toolchain did not start within ${INIT_TIMEOUT_MS / 1000} s`)),
+      () => reject(new Error(workerReportedError ?? `the C++ toolchain did not start within ${INIT_TIMEOUT_MS / 1000} s`)),
       INIT_TIMEOUT_MS
     );
   });
@@ -164,27 +141,27 @@ async function start(files: Record<string, string>): Promise<Emception> {
     throw error;
   } finally {
     clearTimeout(timer);
-    navigator.serviceWorker.removeEventListener('message', progress);
+    navigator.serviceWorker.removeEventListener('message', onToolchainMessage);
   }
   return em;
 }
 
 async function upload(em: Emception, files: Record<string, string>): Promise<void> {
-  const headers = (await (await fetch(`${base()}payload/headers.json`)).json()) as Record<string, string>;
+  const headers = (await (await fetch(`${assetBaseUrl()}payload/headers.json`)).json()) as Record<string, string>;
   phase({ phase: 'stage', detail: `${Object.keys(headers).length} headers` });
   for (const [path, text] of Object.entries({ ...headers, ...files })) {
     await write(em, path, encoder.encode(text));
   }
   for (const lib of ['libcler_web.a', 'libliquid.a']) {
     phase({ phase: 'stage', detail: lib });
-    const data = await (await fetch(`${base()}payload/${lib}`)).arrayBuffer();
+    const data = await (await fetch(`${assetBaseUrl()}payload/${lib}`)).arrayBuffer();
     await write(em, `lib/${lib}`, new Uint8Array(data));
   }
 }
 
 async function write(em: Emception, path: string, data: Uint8Array): Promise<void> {
-  await em.fileSystem.mkdirTree(`${ROOT}/${path}`.replace(/\/[^/]+$/, ''));
-  await em.fileSystem.writeFile(`${ROOT}/${path}`, data);
+  await em.fileSystem.mkdirTree(`${VIRTUAL_REPO_ROOT}/${path}`.replace(/\/[^/]+$/, ''));
+  await em.fileSystem.writeFile(`${VIRTUAL_REPO_ROOT}/${path}`, data);
 }
 
 async function exec(em: Emception, argv: string[], onLine: Line): Promise<number> {

@@ -1,5 +1,3 @@
-// Browser backend: cler-web.wasm behind the Tauri IPC surface, so the app runs the
-// full editor with no server. Same JSON invoke shape as e2e_backend / webshim.
 import wasmUrl from '../wasm/cler_web.wasm?url';
 import { compile, link, toolchainBlocked, type Line } from './emception';
 import { phase } from './progress';
@@ -14,8 +12,6 @@ type Exports = {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-// Only the WASI calls Rust std actually links here; anything else would show up as
-// a LinkError at instantiate time, not silently misbehave.
 function wasi(getMemory: () => WebAssembly.Memory) {
   const view = () => new DataView(getMemory().buffer);
   const bytes = () => new Uint8Array(getMemory().buffer);
@@ -93,11 +89,6 @@ export async function bindWasm(
 
 export type RunnableExample = { name: string; path: string; source: string };
 
-// Installs window.__TAURI_INTERNALS__ over the wasm so backend.ts sees a desktop shell.
-// `runnable` lists bundled examples with a prebuilt browser build under run/<name>.html; an
-// untouched one runs straight from there. Anything else — an edited example, a new document —
-// is compiled and linked by emception (src/lib/emception.ts) into built/<sha of source>/, which
-// public/cler-sw.js serves out of Cache Storage. Either way Run pops the build in a new window.
 export async function installWasmShell(
   files: Record<string, string>,
   runnable: RunnableExample[] = []
@@ -116,7 +107,6 @@ export async function installWasmShell(
   const building = new Map<string, number>();
   const currentSource = (path: string) => (invoke('open_document', { path }) as { source: string }).source;
 
-  // Async tasks the app polls through events: it gets {jobId, inputKey} now and lines later.
   const job = (kind: 'check' | 'build', path: string, work: (emit: Line) => Promise<number>) => {
     const jobId = next++;
     const inputKey = { inputs: {}, recipeSha256: '' };
@@ -200,8 +190,6 @@ export async function installWasmShell(
       if (cmd === 'run_target') {
         let target = `run/${pristine?.name}.html`;
         if (!pristine) {
-          // The document can have changed since find_target said ready; opening a 404 popup
-          // would look like a crash.
           const sha = await sha256(currentSource(path));
           if (!(await cached(sha))) throw 'this edit is not built yet — press Build (Ctrl+B) first';
           target = `built/${sha}/app.html`;
@@ -241,24 +229,21 @@ export async function installWasmShell(
   };
 }
 
-// A build lands in Cache Storage under the app's own origin and path; public/cler-sw.js
-// serves built/* from there with the COOP/COEP headers pthreads need in the run window.
-const CACHE = 'cler-built';
+const BUILD_CACHE = 'cler-built';
 const KEEP_BUILDS = 5;
-const built = () => caches.open(CACHE);
-const absolute = (path: string) => new URL(path, location.href).pathname;
+const buildCache = () => caches.open(BUILD_CACHE);
+const originPath = (path: string) => new URL(path, location.href).pathname;
 
 async function cached(sha: string): Promise<boolean> {
-  return !!(await built().then((cache) => cache.match(absolute(`built/${sha}/app.html`))));
+  return !!(await buildCache().then((cache) => cache.match(originPath(`built/${sha}/app.html`))));
 }
 
 async function store(sha: string, artifacts: Record<string, Uint8Array>): Promise<void> {
-  const cache = await built();
+  const cache = await buildCache();
   for (const [name, data] of Object.entries(artifacts)) {
-    await cache.put(absolute(`built/${sha}/${name}`), new Response(data as BlobPart));
+    await cache.put(originPath(`built/${sha}/${name}`), new Response(data as BlobPart));
   }
-  // ponytail: ~4 MB a build, so keep the last few and drop the rest in insertion order —
-  // an LRU would need access times Cache Storage does not keep.
+  // ponytail: ~4 MB a build, so keep the last few in insertion order; an LRU would need access times Cache Storage does not keep.
   const keys = await cache.keys();
   const shas = [...new Set(keys.map((request) => new URL(request.url).pathname.split('/built/')[1]?.split('/')[0]))];
   for (const stale of shas.slice(0, Math.max(0, shas.length - KEEP_BUILDS))) {

@@ -153,16 +153,21 @@ decision it enables, not information it displays.
   a bundled example still equal to the bundle runs straight from `run/<name>.html`;
   anything else compiles and links into `built/<sha of source>/app.html` and Run
   pops that. Both run windows are cross-origin isolated, so pthreads work.
-- Waiting, in the browser — a build takes 15-60 s, so `src/lib/BuildProgress.svelte` puts a slim
-  card above the drawer for the duration (browser only: `inTauri()` is true under the wasm shell
+- Waiting, in the browser — a build takes 15-60 s, so `src/lib/BuildProgress.svelte` takes over the
+  top band of the bottom drawer for the duration — the drawer reserves `STRIP_H` pixels (its `inset`
+  prop) so the canvas is never covered, and when the drawer is collapsed the same surface shrinks to
+  a pill at bottom centre that opens it (browser only: `inTauri()` is true under the wasm shell
   too, so the gate is the `VITE_CLER_WASM` build flag). It shows nothing it did not observe:
   `emception.ts` and `wasmbridge.ts` call `phase()` from `src/lib/progress.ts` at the real
   transitions — toolchain download (cumulative service-worker bytes over `TOOLCHAIN_BYTES`),
   boot, staging the payload, compile (with the file), link, wasm-opt *only* when em++ names it,
-  store, launch — and the panel maps the event to one phrase, a determinate bar where there are
-  numbers (bytes, or per-phase durations banked in `localStorage` by the last run) and a shimmer
-  where there are none. A failed job turns the card red with the first error and a jump to
-  Diagnostics; Output keeps the raw em++ log. `tests/progress.test.ts` covers the mapping.
+  store, launch — and the panel maps the event to one phrase in the UI font
+  with its target (file, byte count) in monospace beside it, over a 3 px full-bleed track:
+  determinate where there are numbers (bytes, or per-phase durations banked in `localStorage` by the
+  last run), a shimmer where there are none. Under the track one muted line — a cler fact, or the
+  25 MB first-build note while the toolchain downloads. A finished job flashes the track green and
+  folds away; a failed one keeps a red track with the first error and a jump to Diagnostics, and
+  Output keeps the raw em++ log. `tests/progress.test.ts` covers the mapping.
 - `web-run/smoke.mjs` is the end-to-end check: `node ../web-run/smoke.mjs` from
   `app/` after `npm run build:web` serves `docs/` with a header-less
   `python3 -m http.server` (as Pages does) and drives edit → check → build → run

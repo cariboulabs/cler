@@ -95,6 +95,12 @@ await timed('check (cold, includes the ~25 MB toolchain)', async () => {
   );
   console.log(`progress: ${await page.getByTestId('progress-phase').innerText()}`);
   await page.screenshot({ path: path.join(shots, 'progress.png') });
+  await page.getByTestId('drawer-close').click();
+  await page.getByTestId('progress-open').waitFor({ timeout: 5000 });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: path.join(shots, 'progress-pill.png') });
+  await page.getByTestId('progress-open').click();
+  await page.getByTestId('drawer-close').waitFor({ timeout: 5000 });
   await page.getByTestId('tab-output').click();
   await page.waitForFunction(
     () => document.querySelector('[data-testid="output-body"]')?.textContent?.includes('check finished'),
@@ -113,6 +119,14 @@ if (!checked.includes('check finished (exit 0)')) throw new Error(`check failed:
 
 await timed('build (compile + link)', async () => {
   await page.getByTestId('build').click();
+  const fold = page
+    .waitForFunction(
+      () => document.querySelector('[data-testid="progress-phase"]')?.getAttribute('data-phase') === 'done',
+      null,
+      { timeout: 300_000 }
+    )
+    .then(() => page.screenshot({ path: path.join(shots, 'progress-done.png') }))
+    .catch(() => console.log('missed the success flash'));
   await page.waitForFunction(
     () =>
       ['compile', 'link', 'optimize'].includes(
@@ -129,6 +143,7 @@ await timed('build (compile + link)', async () => {
     null,
     { timeout: 300_000 }
   );
+  await fold;
 });
 const builtLog = await output();
 if (!builtLog.includes('build finished (exit 0)')) throw new Error(`build failed:\n${builtLog.slice(-4000)}`);
@@ -172,6 +187,8 @@ if (!/invalid suffix/.test(diagnostic)) throw new Error(`unexpected diagnostic: 
 const blamed = await page.locator('[data-diagnostic-block]').first().innerText();
 if (blamed !== 'source1') throw new Error(`diagnostic blamed ${blamed}, expected source1`);
 console.log(`diagnostics: "${diagnostic.split('\n')[0]}" on ${blamed}`);
+await page.getByTestId('progress-diagnostics').waitFor({ timeout: 5000 });
+await page.screenshot({ path: path.join(shots, 'progress-fail.png') });
 
 await page.screenshot({ path: path.join(shots, 'editor.png') });
 await browser.close();

@@ -32,6 +32,7 @@
     anchors: Span[];
     siteAnchor: Span | null;
     height: number;
+    inset?: number;
     tab: Tab;
     diagnostics: Placed[];
     notes: ReadOnlyNote[];
@@ -60,6 +61,7 @@
     anchors,
     siteAnchor,
     height,
+    inset = 0,
     tab,
     diagnostics,
     notes,
@@ -230,7 +232,7 @@
   class="drawer"
   class:collapsed={!shown}
   data-testid="code-drawer"
-  style="height: {shown ? tall : 0}px"
+  style="height: {shown ? tall : 0}px; padding-top: {shown ? inset : 0}px"
 >
   <div
     class="grip"
@@ -363,6 +365,7 @@
     box-shadow: var(--shadow);
     transition:
       height 150ms ease,
+      padding-top 200ms ease,
       left 150ms ease,
       right 150ms ease;
   }

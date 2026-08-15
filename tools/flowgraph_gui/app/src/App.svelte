@@ -134,7 +134,7 @@
     type Span
   } from './lib/schema';
   import type { CodeMark } from './lib/editor';
-  import BuildProgress from './lib/BuildProgress.svelte';
+  import BuildProgress, { STRIP_H } from './lib/BuildProgress.svelte';
   import CodeDrawer from './lib/CodeDrawer.svelte';
   import type { Tab } from './lib/CodeDrawer.svelte';
   import { fixtureNames } from './fixtures';
@@ -241,6 +241,11 @@
   let busy = $state<TaskKind | null>(null);
   let running = $state(false);
   let taskFail = $state<string | null>(null);
+  let justFinished = $state<'check' | 'build' | null>(null);
+  let justFinishedTimer: ReturnType<typeof setTimeout> | undefined;
+  const progressOn = $derived(
+    inBrowser && (busy !== null || running || taskFail !== null || justFinished !== null)
+  );
   let targetRefresh = $state(0);
   let rightTab = $state<RailTab>('inspector');
   let leftTab = $state<RailTab>(desktop ? 'ai-agent' : 'settings');
@@ -481,6 +486,7 @@
         if (kind === 'build') targetRefresh += 1;
       }
       output = [...output, `— ${kind} finished (exit ${payload.code ?? 'signal'})`];
+      if (kind !== 'run' && payload.code === 0) flashFinished(kind);
       if (kind !== 'run' && payload.code !== 0) {
         taskFail =
           diagnostics.find((entry) => entry.severity === 'error')?.message ??
@@ -1398,6 +1404,12 @@
     return true;
   }
 
+  function flashFinished(kind: 'check' | 'build') {
+    clearTimeout(justFinishedTimer);
+    justFinished = kind;
+    justFinishedTimer = setTimeout(() => (justFinished = null), 1400);
+  }
+
   async function task(kind: TaskKind, action: (path: string) => Promise<TaskStarted>) {
     await flushText();
     if (unparsed) {
@@ -1406,6 +1418,8 @@
     }
     output = [];
     taskFail = null;
+    clearTimeout(justFinishedTimer);
+    justFinished = null;
     if (kind !== 'run') diagLines = [];
     if (kind === 'run') running = true;
     else busy = kind;
@@ -1919,7 +1933,7 @@
         </div>
       {/if}
 
-      {#if !drawerOpen}
+      {#if !drawerOpen && !progressOn}
         <button
           class="drawer-toggle"
           data-testid="drawer-toggle"
@@ -1929,17 +1943,20 @@
         >
       {/if}
 
-      {#if inBrowser && (busy !== null || running || taskFail !== null)}
+      {#if progressOn}
         <BuildProgress
           kind={busy ?? (running ? 'run' : null)}
+          done={justFinished}
           error={taskFail}
-          bottom={(drawerOpen ? drawerHeight : 26) + 20}
+          docked={drawerOpen}
+          bottom={drawerOpen ? drawerHeight - STRIP_H + 12 : 12}
           onstop={() => void toggleRun()}
           ondiagnostics={() => {
             drawerOpen = true;
             tab = 'diagnostics';
           }}
           ondismiss={() => (taskFail = null)}
+          onopen={() => (drawerOpen = true)}
         />
       {/if}
 
@@ -1960,6 +1977,7 @@
           {anchors}
           {siteAnchor}
           height={drawerHeight}
+          inset={progressOn && drawerOpen ? STRIP_H : 0}
           {tab}
           {diagnostics}
           {output}
