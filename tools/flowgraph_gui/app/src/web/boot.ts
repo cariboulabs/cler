@@ -2,8 +2,6 @@ import { blockToolchain, TOOLCHAIN_BASE, TOOLCHAIN_PINS } from './emception';
 import { installWasmShell } from './wasmbridge';
 import { browserFiles, runnableExamples } from './files';
 
-/// The whole browser edition starts here: the service worker that makes the page
-/// cross-origin isolated, then the wasm session installed as a desktop shell.
 export async function bootBrowser(): Promise<void> {
   const base = import.meta.env.BASE_URL;
   try {

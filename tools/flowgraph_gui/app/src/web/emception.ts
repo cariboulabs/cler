@@ -16,11 +16,8 @@ const VIRTUAL_REPO_ROOT = '/working';
 const OBJ = 'draft.o';
 const ARTIFACTS = ['app.html', 'app.js', 'app.wasm', 'app.worker.js'];
 
-// The flags themselves come from payload/flags.json, written by web-build/build.sh with
-// the same values it builds the bundled examples with. These are the browser's deliberate
-// departures: -O1 links in ~10 s where -O2 takes ~2 min (raise it if the run window turns
-// out too slow), the shell lives at the virtual repo root, and emception's html minifier
-// cannot run here.
+// ponytail: -O1 links in ~10 s where -O2 takes ~2 min; raise it if the run window turns
+// out too slow. The rest of the flags come from payload/flags.json.
 const LINK_OVERRIDES = ['-O1', '-sMINIFY_HTML=0', '--shell-file', 'shell.html'];
 
 type Flags = { cxxflags: string[]; ldflags: string[] };
