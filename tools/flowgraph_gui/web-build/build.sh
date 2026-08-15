@@ -59,7 +59,7 @@ build_example() { # name source
 echo "== payload for the in-browser compiler"
 cp "$out/libcler_web.a" "$out/liquid/lib/libliquid.a" "$payload/"
 # The same flags, against the virtual repo the browser compiles in ($VIRTUAL_REPO_ROOT
-# in src/lib/emception.ts), so the two editions cannot drift apart.
+# in app/src/web/emception.ts), so the two editions cannot drift apart.
 cxxvirtual=()
 for flag in "${CXXFLAGS[@]}"; do
   cxxvirtual+=("$(printf '%s' "$flag" | sed -e "s|^-I$out/liquid/include/liquid\$|-Iliquid|" \

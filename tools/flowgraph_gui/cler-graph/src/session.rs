@@ -1,5 +1,5 @@
-//! The document session every edition shares: source, undo history and the ui cache,
-//! with no filesystem underneath. Desktop and browser adapters own where the bytes live.
+//! The document session every edition shares, with no filesystem underneath: the
+//! adapters own where the bytes live and are handed the new source to write.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -140,6 +140,7 @@ pub fn apply(
     base_revision: u64,
     commands: Vec<Command>,
     includes: &[String],
+    write: &mut dyn FnMut(&str) -> Result<(), String>,
 ) -> Result<(), String> {
     let pending = doc
         .session
@@ -161,6 +162,9 @@ pub fn apply(
                 .ok_or_else(|| ApplyError::HistoryMismatch.to_string())
         })
         .transpose()?;
+    if patch.is_some() {
+        write(pending.source())?;
+    }
     doc.session.commit(pending);
     if let Some(patch) = patch {
         doc.history.push(Action::Source(patch));
@@ -193,7 +197,12 @@ pub fn preview(
     })
 }
 
-pub fn edit(doc: &mut Document, base_revision: u64, source: &str) -> Result<Edited, String> {
+pub fn edit(
+    doc: &mut Document,
+    base_revision: u64,
+    source: &str,
+    write: &mut dyn FnMut(&str) -> Result<(), String>,
+) -> Result<Edited, String> {
     if base_revision != doc.session.revision() {
         return Err(ApplyError::RevisionMismatch {
             base_revision,
@@ -215,6 +224,9 @@ pub fn edit(doc: &mut Document, base_revision: u64, source: &str) -> Result<Edit
                 .ok_or_else(|| ApplyError::HistoryMismatch.to_string())
         })
         .transpose()?;
+    if patch.is_some() {
+        write(pending.source())?;
+    }
     doc.session.commit(pending);
     if let Some(patch) = patch {
         doc.history.push(Action::Source(patch));
@@ -258,9 +270,7 @@ pub fn move_nodes(doc: &mut Document, view: &str, moves: Vec<NodeMove>) -> Resul
     Ok(())
 }
 
-/// Whether the next history entry in this direction rewrites the source — the desktop
-/// gates those on the file not having drifted, and lets position moves through.
-/// `None` when there is nothing left to walk.
+/// `None` when there is nothing left to walk in this direction.
 pub fn pending_action_edits_source(doc: &Document, direction: PatchDirection) -> Option<bool> {
     let action = match direction {
         PatchDirection::Reverse => doc.history.undo(),
@@ -269,7 +279,11 @@ pub fn pending_action_edits_source(doc: &Document, direction: PatchDirection) ->
     Some(matches!(action, Action::Source(_)))
 }
 
-pub fn step(doc: &mut Document, direction: PatchDirection) -> Result<(), String> {
+pub fn step(
+    doc: &mut Document,
+    direction: PatchDirection,
+    write: &mut dyn FnMut(&str) -> Result<(), String>,
+) -> Result<(), String> {
     let action = match direction {
         PatchDirection::Reverse => doc.history.undo(),
         PatchDirection::Forward => doc.history.redo(),
@@ -290,6 +304,7 @@ pub fn step(doc: &mut Document, direction: PatchDirection) -> Result<(), String>
                 .session
                 .preview_source(source)
                 .map_err(|cause| cause.to_string())?;
+            write(pending.source())?;
             doc.session.commit(pending);
         }
         Action::MoveNodes { view, moves } => apply_node_moves(&mut doc.ui, &view, &moves, direction),
@@ -324,7 +339,6 @@ pub fn snapshot(path: &str, doc: &Document, palette: &[BlockSpec]) -> DocumentSt
     }
 }
 
-/// The blocks declared in this document shadow same-named palette entries.
 pub fn palette(doc: &Document, origin: &str, palette: &[BlockSpec]) -> Vec<BlockSpec> {
     let mut specs = extract_specs(doc.session.source(), origin);
     let local: Vec<String> = specs.iter().map(|spec| spec.name.clone()).collect();
@@ -405,15 +419,15 @@ impl Request {
     pub fn parse(cmd: &str, args: &Value) -> Result<Option<Request>, Malformed> {
         let request = match cmd {
             "apply_commands" => Request::Apply {
-                base_revision: base_revision(cmd, args)?,
+                base_revision: base_revision(args, "apply_commands needs baseRevision and commands")?,
                 commands: commands(cmd, args)?,
             },
             "preview_commands" => Request::Preview {
-                base_revision: base_revision(cmd, args)?,
+                base_revision: base_revision(args, "preview_commands needs baseRevision and commands")?,
                 commands: commands(cmd, args)?,
             },
             "edit_source" => Request::Edit {
-                base_revision: base_revision(cmd, args)?,
+                base_revision: base_revision(args, "edit_source needs baseRevision and source")?,
                 source: args
                     .get("source")
                     .and_then(Value::as_str)
@@ -450,11 +464,11 @@ impl Request {
     }
 }
 
-fn base_revision(cmd: &str, args: &Value) -> Result<u64, Malformed> {
+fn base_revision(args: &Value, missing: &str) -> Result<u64, Malformed> {
     args.get("base_revision")
         .or_else(|| args.get("baseRevision"))
         .and_then(Value::as_u64)
-        .ok_or_else(|| Malformed(format!("{cmd} needs baseRevision and commands")))
+        .ok_or_else(|| Malformed(missing.to_string()))
 }
 
 fn commands(cmd: &str, args: &Value) -> Result<Vec<Value>, Malformed> {
@@ -464,7 +478,6 @@ fn commands(cmd: &str, args: &Value) -> Result<Vec<Value>, Malformed> {
         .ok_or_else(|| Malformed(format!("{cmd} needs baseRevision and commands")))
 }
 
-/// Runs a request against the session alone — the browser edition end to end.
 pub fn command(
     doc: &mut Document,
     specs: &[BlockSpec],
@@ -479,7 +492,7 @@ pub fn command(
             let commands: Vec<Command> = serde_json::from_value(Value::Array(commands))
                 .map_err(|cause| cause.to_string())?;
             let includes = add_block_origins(&commands, specs);
-            apply(doc, base_revision, commands, &includes)?;
+            apply(doc, base_revision, commands, &includes, &mut |_| Ok(()))?;
             serde_json::to_value(snapshot(path, doc, specs)).map_err(|cause| cause.to_string())
         }
         Request::Preview {
@@ -496,7 +509,7 @@ pub fn command(
             base_revision,
             source,
         } => {
-            let (unparsed, fault) = match edit(doc, base_revision, &source)? {
+            let (unparsed, fault) = match edit(doc, base_revision, &source, &mut |_| Ok(()))? {
                 Edited::Applied => (false, None),
                 Edited::Unparsed(fault) => (true, fault),
             };
@@ -512,11 +525,11 @@ pub fn command(
             serde_json::to_value(snapshot(path, doc, specs)).map_err(|cause| cause.to_string())
         }
         Request::Undo => {
-            step(doc, PatchDirection::Reverse)?;
+            step(doc, PatchDirection::Reverse, &mut |_| Ok(()))?;
             serde_json::to_value(snapshot(path, doc, specs)).map_err(|cause| cause.to_string())
         }
         Request::Redo => {
-            step(doc, PatchDirection::Forward)?;
+            step(doc, PatchDirection::Forward, &mut |_| Ok(()))?;
             serde_json::to_value(snapshot(path, doc, specs)).map_err(|cause| cause.to_string())
         }
         Request::Palette => {

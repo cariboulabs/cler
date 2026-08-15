@@ -24,20 +24,20 @@ fn an_edit_undoes_back_to_the_saved_bytes_and_redoes_forward() {
     let mut doc = document();
     let edited = "int main() { return 7; }\n";
     assert!(matches!(
-        session::edit(&mut doc, 0, edited).expect("edit applies"),
+        session::edit(&mut doc, 0, edited, &mut |_| Ok(())).expect("edit applies"),
         Edited::Applied
     ));
     assert_eq!(doc.session.source(), edited);
 
-    session::step(&mut doc, PatchDirection::Reverse).expect("undo");
+    session::step(&mut doc, PatchDirection::Reverse, &mut |_| Ok(())).expect("undo");
     assert_eq!(doc.session.source(), SOURCE);
     let state = session::snapshot("doc.cpp", &doc, &[]);
     assert!(!state.dirty);
     assert!(state.can_redo && !state.can_undo);
 
-    session::step(&mut doc, PatchDirection::Forward).expect("redo");
+    session::step(&mut doc, PatchDirection::Forward, &mut |_| Ok(())).expect("redo");
     assert_eq!(doc.session.source(), edited);
-    assert!(session::step(&mut doc, PatchDirection::Forward)
+    assert!(session::step(&mut doc, PatchDirection::Forward, &mut |_| Ok(()))
         .expect_err("nothing left")
         .contains("nothing_to_redo"));
 }
@@ -46,7 +46,7 @@ fn an_edit_undoes_back_to_the_saved_bytes_and_redoes_forward() {
 fn an_edit_against_a_stale_revision_is_refused() {
     let mut doc = document();
     assert!(
-        session::edit(&mut doc, 4, "int main() { return 1; }\n")
+        session::edit(&mut doc, 4, "int main() { return 1; }\n", &mut |_| Ok(()))
             .expect_err("stale base")
             .contains("revision"),
         "the caller must be told which revision it missed"
@@ -56,7 +56,7 @@ fn an_edit_against_a_stale_revision_is_refused() {
 #[test]
 fn text_the_parser_rejects_never_enters_the_session() {
     let mut doc = document();
-    let outcome = session::edit(&mut doc, 0, "int main() { return 1;\n").expect("reported, not an error");
+    let outcome = session::edit(&mut doc, 0, "int main() { return 1;\n", &mut |_| Ok(())).expect("reported, not an error");
     assert!(matches!(outcome, Edited::Unparsed(Some(_))));
     assert_eq!(doc.session.source(), SOURCE);
     assert!(!session::snapshot("doc.cpp", &doc, &[]).can_undo);
@@ -109,18 +109,18 @@ fn a_no_op_movement_moves_nothing_and_records_nothing() {
 #[test]
 fn source_and_position_actions_walk_one_history() {
     let mut doc = document();
-    session::edit(&mut doc, 0, "int main() { return 7; }\n").expect("edit");
+    session::edit(&mut doc, 0, "int main() { return 7; }\n", &mut |_| Ok(())).expect("edit");
     session::move_nodes(&mut doc, "main", vec![movement("a", (0.0, 0.0), (10.0, 20.0))])
         .expect("move");
     assert_eq!(doc.ui["views"]["main"]["positions"]["a"]["x"], 10.0);
 
-    session::step(&mut doc, PatchDirection::Reverse).expect("undo the move");
+    session::step(&mut doc, PatchDirection::Reverse, &mut |_| Ok(())).expect("undo the move");
     assert_eq!(doc.ui["views"]["main"]["positions"]["a"]["x"], 0.0);
     assert_eq!(doc.session.source(), "int main() { return 7; }\n");
 
-    session::step(&mut doc, PatchDirection::Reverse).expect("undo the edit");
+    session::step(&mut doc, PatchDirection::Reverse, &mut |_| Ok(())).expect("undo the edit");
     assert_eq!(doc.session.source(), SOURCE);
-    assert!(session::step(&mut doc, PatchDirection::Reverse)
+    assert!(session::step(&mut doc, PatchDirection::Reverse, &mut |_| Ok(()))
         .expect_err("nothing left")
         .contains("nothing_to_undo"));
 }
@@ -132,14 +132,14 @@ fn the_desktop_gate_can_tell_a_position_action_from_a_source_action() {
         session::pending_action_edits_source(&doc, PatchDirection::Reverse),
         None
     );
-    session::edit(&mut doc, 0, "int main() { return 7; }\n").expect("edit");
+    session::edit(&mut doc, 0, "int main() { return 7; }\n", &mut |_| Ok(())).expect("edit");
     session::move_nodes(&mut doc, "main", vec![movement("a", (0.0, 0.0), (10.0, 20.0))])
         .expect("move");
     assert_eq!(
         session::pending_action_edits_source(&doc, PatchDirection::Reverse),
         Some(false)
     );
-    session::step(&mut doc, PatchDirection::Reverse).expect("undo the move");
+    session::step(&mut doc, PatchDirection::Reverse, &mut |_| Ok(())).expect("undo the move");
     assert_eq!(
         session::pending_action_edits_source(&doc, PatchDirection::Reverse),
         Some(true)
@@ -148,4 +148,35 @@ fn the_desktop_gate_can_tell_a_position_action_from_a_source_action() {
         session::pending_action_edits_source(&doc, PatchDirection::Forward),
         Some(false)
     );
+}
+
+#[test]
+fn only_a_step_that_rewrites_the_source_asks_the_adapter_to_write() {
+    let mut doc = document();
+    let mut written: Vec<String> = Vec::new();
+    session::edit(&mut doc, 0, "int main() { return 7; }\n", &mut |source| {
+        written.push(source.to_string());
+        Ok(())
+    })
+    .expect("edit");
+    session::move_nodes(&mut doc, "main", vec![movement("a", (0.0, 0.0), (10.0, 20.0))])
+        .expect("move");
+    session::step(&mut doc, PatchDirection::Reverse, &mut |source| {
+        written.push(source.to_string());
+        Ok(())
+    })
+    .expect("undo the move");
+    assert_eq!(written, vec!["int main() { return 7; }\n".to_string()]);
+}
+
+#[test]
+fn a_transaction_that_changes_nothing_writes_nothing() {
+    let mut doc = document();
+    let mut writes = 0;
+    session::apply(&mut doc, 0, Vec::new(), &[], &mut |_| {
+        writes += 1;
+        Ok(())
+    })
+    .expect("empty transaction");
+    assert_eq!(writes, 0);
 }

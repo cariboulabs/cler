@@ -11,9 +11,7 @@ use cler_graph::{block_requirements, palette_specs, BlockSpec, Command, Document
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-pub use cler_graph::session::{
-    DocumentModel, DocumentState, EditOutcome, NodeMove, Point, Preview, Summary,
-};
+pub use cler_graph::session::{DocumentState, EditOutcome, NodeMove, Point, Preview};
 use sha2::{Digest, Sha256};
 
 use crate::provenance::{ArtifactCatalog, ArtifactRecord};
@@ -150,8 +148,9 @@ pub fn apply(
     refuse_external(doc, &target)?;
 
     let includes = includes_for(&commands, doc, &target);
-    session::apply(&mut doc.core, base_revision, commands, &includes)?;
-    write_working(doc, doc.core.session.source())?;
+    session::apply(&mut doc.core, base_revision, commands, &includes, &mut |source| {
+        write_working(&doc.working, source)
+    })?;
     Ok(snapshot(&target, doc))
 }
 
@@ -164,16 +163,18 @@ pub fn edit(
     let mut map = lock(docs);
     let (target, doc) = document(&mut map, path)?;
     refuse_external(doc, &target)?;
-    if let Edited::Unparsed(fault) = session::edit(&mut doc.core, base_revision, &source)? {
-        // typed text that does not parse stays in the working copy, out of the session
-        write_working(doc, &source)?;
+    let edited = session::edit(&mut doc.core, base_revision, &source, &mut |next| {
+        write_working(&doc.working, next)
+    })?;
+    if let Edited::Unparsed(fault) = edited {
+        // text the parser rejects belongs in the working copy, not in the session
+        write_working(&doc.working, &source)?;
         return Ok(EditOutcome {
             unparsed: true,
             fault,
             state: snapshot(&target, doc),
         });
     }
-    write_working(doc, doc.core.session.source())?;
     Ok(EditOutcome {
         unparsed: false,
         fault: None,
@@ -197,8 +198,6 @@ pub fn preview(
     session::preview(&doc.core, base_revision, commands, &includes)
 }
 
-/// The desktop resolves palette origins against the repo and the configured block
-/// libraries; the include it splices is relative to the library root.
 fn includes_for(commands: &[Command], doc: &Document, target: &Path) -> Vec<String> {
     let roots = include_roots(target);
     session::add_block_origins(commands, &doc.palette)
@@ -290,7 +289,7 @@ pub fn reload(docs: &Documents, path: &str) -> Result<DocumentState, String> {
     let (target, doc) = document(&mut map, path)?;
     let text = read(&target)?;
     doc.core.reload(text)?;
-    write_working(doc, doc.core.session.source())?;
+    write_working(&doc.working, doc.core.session.source())?;
     update_cache_document(doc, &target);
     doc.core.external_change = false;
     Ok(snapshot(&target, doc))
@@ -447,12 +446,14 @@ pub fn note_disk_event(docs: &Documents, path: &Path) -> bool {
 fn step(docs: &Documents, path: &str, direction: PatchDirection) -> Result<DocumentState, String> {
     let mut map = lock(docs);
     let (target, doc) = document(&mut map, path)?;
-    // a position action carries no source, so disk drift does not block walking past it
+    // a position action carries no source: disk drift does not block it and the
+    // working copy — which may hold unparsed text — must be left alone
     if session::pending_action_edits_source(&doc.core, direction) != Some(false) {
         refuse_external(doc, &target)?;
     }
-    session::step(&mut doc.core, direction)?;
-    write_working(doc, doc.core.session.source())?;
+    session::step(&mut doc.core, direction, &mut |source| {
+        write_working(&doc.working, source)
+    })?;
     store_ui(doc)?;
     Ok(snapshot(&target, doc))
 }
@@ -620,12 +621,12 @@ fn create_working(
     Ok((working, cache_path, cache, draft))
 }
 
-fn write_working(doc: &Document, contents: &str) -> Result<(), String> {
-    let staged = doc.working.with_extension("cpp.next");
+fn write_working(working: &Path, contents: &str) -> Result<(), String> {
+    let staged = working.with_extension("cpp.next");
     std::fs::write(&staged, contents)
         .map_err(|cause| format!("cannot write {}: {cause}", staged.display()))?;
-    std::fs::rename(&staged, &doc.working)
-        .map_err(|cause| format!("cannot replace {}: {cause}", doc.working.display()))
+    std::fs::rename(&staged, working)
+        .map_err(|cause| format!("cannot replace {}: {cause}", working.display()))
 }
 
 fn update_cache_document(doc: &mut Document, target: &Path) {

@@ -611,3 +611,37 @@ fn disk_drift_allows_position_undo_before_refusing_source_undo() {
         .expect_err("source undo must refuse disk drift")
         .contains("changed on disk"));
 }
+
+#[test]
+fn nothing_but_a_source_change_may_overwrite_an_unparsed_draft() {
+    let path = temp_copy("hello_world.cpp");
+    let docs = Documents::default();
+    let p = as_str(&path);
+    let opened = document::open(&docs, p).expect("open");
+    let working = document::working_path(&docs, p).expect("working copy");
+    document::move_nodes(
+        &docs,
+        p,
+        "main".to_string(),
+        vec![movement("source1", (0.0, 0.0), (10.0, 10.0))],
+    )
+    .expect("position action");
+
+    let typed = format!("{}\nint unfinished( {{\n", opened.source);
+    let outcome = document::edit(&docs, p, opened.revision, typed.clone()).expect("typed text");
+    assert!(outcome.unparsed);
+    assert_eq!(text(&working), typed);
+
+    document::undo(&docs, p).expect("undo the movement");
+    assert_eq!(
+        text(&working),
+        typed,
+        "a position undo must leave the typed draft alone"
+    );
+    document::apply(&docs, p, opened.revision, Vec::new()).expect("no-op transaction");
+    assert_eq!(
+        text(&working),
+        typed,
+        "a transaction that splices nothing must not rewrite the draft"
+    );
+}
