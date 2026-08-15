@@ -9,20 +9,20 @@
 #include <atomic>
 #include <cmath>
 
-const size_t SPS = 100; // Samples per second
-const float DT = 1.0f / static_cast<float>(SPS);
-const float wn = 1.0f; // Natural frequency
-const float zeta = 0.5f; // Damping ratio
-const float M = 1.0f; // Mass
-const float K = wn * wn * M; // Spring constant
-const float C = 2.0f * zeta * wn * M;
+constexpr size_t SPS = 100;
+constexpr float DT = 1.0f / static_cast<float>(SPS);
+constexpr float wn = 1.0f;
+constexpr float zeta = 0.5f;
+constexpr float M = 1.0f;
+constexpr float K = wn * wn * M;
+constexpr float C = 2.0f * zeta * wn * M;
 
 struct PlantBlock : public cler::BlockBase {
     static constexpr bool is_gui = true;
     cler::Channel<float> force_in;
     PlantBlock(const char* name)  
         : BlockBase(name), force_in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) {
-            force_in.push(0.0f); // seed value required: cyclic graph deadlocks without it
+            force_in.push(0.0f);
         }
 
     cler::Result<cler::Empty, cler::Error> procedure(
@@ -31,32 +31,22 @@ struct PlantBlock : public cler::BlockBase {
         auto [write_ptr, write_size] = measured_position_out->write_dbf();
 
         size_t to_process = std::min(read_size, write_size);
-
-        if (to_process > 0 && read_ptr && write_ptr) {
-            for (size_t i = 0; i < to_process; ++i) {
-                float force = read_ptr[i];
-
-                // mass-spring-damper equation of motion (semi-implicit Euler)
-                float acceleration = (force - K * _x - C * _v) / M;
-                _v += acceleration * DT;
-                _x += _v * DT + 0.5f * acceleration * DT * DT;
-                write_ptr[i] = _x;
-            }
-            force_in.commit_read(to_process);
-            measured_position_out->commit_write(to_process);
-        } else {
-            // Fallback to push/pop if DBF not available
-            size_t transerable = std::min(force_in.size(), measured_position_out->space());
-            for (size_t i = 0; i < transerable; ++i) {
-                float force;
-                force_in.pop(force);
-
-                float acceleration = (force - K * _x - C * _v) / M;
-                _v += acceleration * DT;
-                _x += _v * DT + 0.5f * acceleration * DT * DT;
-                measured_position_out->push(_x);
-            }
+        if (to_process == 0 || !read_ptr || !write_ptr) {
+            return cler::Error::NotEnoughSpaceOrSamples;
         }
+
+        float x = _x.load(std::memory_order_relaxed);
+        for (size_t i = 0; i < to_process; ++i) {
+            float force = read_ptr[i];
+
+            float acceleration = (force - K * x - C * _v) / M;
+            _v += acceleration * DT;
+            x += _v * DT;
+            write_ptr[i] = x;
+        }
+        _x.store(x, std::memory_order_relaxed);
+        force_in.commit_read(to_process);
+        measured_position_out->commit_write(to_process);
         return cler::Empty{};
     }
 
@@ -79,7 +69,7 @@ struct PlantBlock : public cler::BlockBase {
         float spring_start_x = canvas_p0.x + 50.0f;
         float center_y = (canvas_p0.y + canvas_p1.y) * 0.5f;
 
-        float spring_end_x = spring_start_x + 200.0f + _x * 20.0f;
+        float spring_end_x = spring_start_x + 200.0f + _x.load(std::memory_order_relaxed) * 20.0f;
 
         draw_list->AddLine(
             ImVec2(canvas_p0.x + 20.0f, center_y + 50.0f),
@@ -150,8 +140,8 @@ struct PlantBlock : public cler::BlockBase {
     }
 
     private:
-        float _x = 0.0;
-        float _v = 0.0;
+        std::atomic<float> _x {0.0f};
+        float _v = 0.0f;
         
         ImVec2 _initial_window_position {0.0f, 0.0f};
         ImVec2 _initial_window_size {600.0f, 300.0f};
@@ -180,20 +170,26 @@ struct ControllerBlock : public cler::BlockBase {
 
         measured_position_in.readN(_buffer, transferable);
 
-        // snapshot once per batch so all samples in it see consistent gains
         float target  = _target.load(std::memory_order_relaxed);
         float kp      = _kp.load(std::memory_order_relaxed);
         float ki      = _ki.load(std::memory_order_relaxed);
         float kd      = _kd.load(std::memory_order_relaxed);
         bool feed_forward_enabled = _feed_forward.load(std::memory_order_relaxed);
 
+        constexpr float DERIVATIVE_TAU = 0.05f;
+        constexpr float ALPHA = DERIVATIVE_TAU / (DERIVATIVE_TAU + DT);
+        constexpr float INTEGRAL_LIMIT = 20.0f;
+
         for (size_t i = 0; i < transferable; ++i) {
             float measured_position = _buffer[i];
             float ek = target - measured_position;
 
-            float derivative = (ek - _ekm1) / DT;
-            float dk = 0.95f * _dkm1 + 0.05f * derivative; // low-pass filtered derivative term
+            // Derivative of the measurement, not the error: a target step
+            // must not kick the D term.
+            float derivative = -(measured_position - _xkm1) / DT;
+            float dk = ALPHA * _dkm1 + (1.0f - ALPHA) * derivative;
             _int_state += ek * DT;
+            _int_state = std::clamp(_int_state, -INTEGRAL_LIMIT, INTEGRAL_LIMIT);
 
             float feed_forward = 0.0f;
             if (feed_forward_enabled) {
@@ -202,7 +198,7 @@ struct ControllerBlock : public cler::BlockBase {
 
             float force = kp * ek + ki * _int_state + kd * dk + feed_forward;
 
-            _ekm1 = ek;
+            _xkm1 = measured_position;
             _dkm1 = dk;
 
             _buffer[i] = force;
@@ -218,7 +214,6 @@ struct ControllerBlock : public cler::BlockBase {
         ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
         ImGui::Begin("Controller");
         ImGui::Text("PID Controller");
-        // Use a local copy for ImGui input, then store atomically
         float tmp_target = _target.load();
         if (ImGui::SliderFloat("Target", &tmp_target, -10.0f, 10.0f)) {
             _target.store(tmp_target);
@@ -257,14 +252,14 @@ struct ControllerBlock : public cler::BlockBase {
     }
 
 private:
-    float _ekm1 = 0.0;
-    float _dkm1 = 0.0;
-    float _int_state = 0.0;
+    float _xkm1 = 0.0f;
+    float _dkm1 = 0.0f;
+    float _int_state = 0.0f;
 
     std::atomic<float> _target {10.0f};
-    std::atomic<float> _kp {2.0f};
-    std::atomic<float> _ki {1.0f};
-    std::atomic<float> _kd {1.0f};
+    std::atomic<float> _kp {8.0f};
+    std::atomic<float> _ki {2.0f};
+    std::atomic<float> _kd {5.0f};
     std::atomic<bool>  _feed_forward {false};
 
     ImVec2 _initial_window_position {0.0f, 0.0f};
