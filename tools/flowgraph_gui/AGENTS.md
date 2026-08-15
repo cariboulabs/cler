@@ -122,3 +122,5 @@ decision it enables, not information it displays.
   Tauri-IPC-over-HTTP bridge the e2e tests use, and `e2e_backend <port>
   --static <dir>` serves both. One shared workspace for every visitor; the AI
   agent, file dialogs, and Run (no display) stay desktop-only.
+- Codespaces — `.devcontainer/devcontainer.json` builds `Dockerfile.web`,
+  autostarts `cler-fg-web` on 8080 and opens it; one container per visitor.

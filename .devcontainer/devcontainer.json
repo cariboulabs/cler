@@ -1,0 +1,8 @@
+{
+  "name": "cler-fg web",
+  "build": { "dockerfile": "../docker/Dockerfile.web", "context": ".." },
+  "workspaceFolder": "/cler",
+  "forwardPorts": [8080],
+  "portsAttributes": { "8080": { "label": "cler-fg", "onAutoForward": "openBrowser" } },
+  "postStartCommand": "nohup cler-fg-web 8080 --static /web > /tmp/cler-fg-web.log 2>&1 &"
+}
