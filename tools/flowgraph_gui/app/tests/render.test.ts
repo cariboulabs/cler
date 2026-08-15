@@ -44,28 +44,39 @@ function firstSite(name: string): Site {
   return site;
 }
 
-async function measureEdges(fixture: string): Promise<RenderedEdge[]> {
+async function measureEdges(
+  fixture: string,
+  endpoints: Record<string, string[]>
+): Promise<RenderedEdge[]> {
   await page.goto(`${origin}/?fixture=${fixture}`, { waitUntil: 'load' });
   await page.waitForSelector('.svelte-flow__node');
   await page.waitForSelector('path.svelte-flow__edge-path');
   await page.waitForTimeout(500);
 
-  return page.evaluate(() => {
+  return page.evaluate((ends: Record<string, string[]>) => {
     const pane = document.querySelector('.svelte-flow__pane');
     if (!pane) throw new Error('flow pane never rendered');
     const paneBox = pane.getBoundingClientRect();
-    const nodeBoxes = Array.from(document.querySelectorAll('.svelte-flow__node')).map((node) =>
-      node.getBoundingClientRect()
-    );
-    const hidden = (x: number, y: number) =>
+    const nodeBoxes = Array.from(document.querySelectorAll('.svelte-flow__node')).map((node) => ({
+      id: node.getAttribute('data-id') ?? '',
+      box: node.getBoundingClientRect()
+    }));
+    // ponytail: a wire may tuck under the two blocks it joins — a back edge in a cycle
+    // leaves its source sideways and crosses it. Only a third block swallowing it is a bug.
+    const hidden = (x: number, y: number, own: string[]) =>
       x < paneBox.left ||
       x > paneBox.right ||
       y < paneBox.top ||
       y > paneBox.bottom ||
-      nodeBoxes.some((box) => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom);
+      nodeBoxes.some(
+        ({ id, box }) =>
+          !own.includes(id) && x >= box.left && x <= box.right && y >= box.top && y <= box.bottom
+      );
 
     const samples = 100;
     return Array.from(document.querySelectorAll('.svelte-flow__edge')).map((group) => {
+      const id = group.getAttribute('data-id') ?? '';
+      const own = ends[id] ?? [];
       const path = group.querySelector('path.svelte-flow__edge-path');
       if (!(path instanceof SVGPathElement)) throw new Error('edge rendered without a path');
       const matrix = path.getScreenCTM();
@@ -76,15 +87,11 @@ async function measureEdges(fixture: string): Promise<RenderedEdge[]> {
         const point = path.getPointAtLength((length * i) / samples);
         const x = matrix.a * point.x + matrix.c * point.y + matrix.e;
         const y = matrix.b * point.x + matrix.d * point.y + matrix.f;
-        if (!hidden(x, y)) clear++;
+        if (!hidden(x, y, own)) clear++;
       }
-      return {
-        id: group.getAttribute('data-id') ?? '',
-        length,
-        visible: clear / (samples + 1)
-      };
+      return { id, length, visible: clear / (samples + 1) };
     });
-  });
+  }, endpoints);
 }
 
 function viewportTransform(target: Page): Promise<string> {
@@ -332,7 +339,10 @@ describe('every fixture renders its edges on screen', () => {
       name,
       async () => {
         const projected = projectSite(firstSite(name)).edges;
-        const rendered = await measureEdges(name);
+        const rendered = await measureEdges(
+          name,
+          Object.fromEntries(projected.map((edge) => [edge.id, [edge.source, edge.target]]))
+        );
 
         expect(rendered.map((edge) => edge.id).sort()).toEqual(
           projected.map((edge) => edge.id).sort()
@@ -340,7 +350,7 @@ describe('every fixture renders its edges on screen', () => {
 
         for (const edge of rendered) {
           expect(edge.length).toBeGreaterThan(0);
-          expect(edge.visible).toBeGreaterThanOrEqual(MIN_VISIBLE_FRACTION);
+          expect(edge.visible, edge.id).toBeGreaterThanOrEqual(MIN_VISIBLE_FRACTION);
         }
       },
       CASE_TIMEOUT

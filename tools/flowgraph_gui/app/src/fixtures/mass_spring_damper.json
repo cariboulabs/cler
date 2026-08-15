@@ -1,5 +1,5 @@
 {
-  "sha256": "d80d8f9a389f04788d0eb4e75c4a44d45922b0ce9d1f244a25233402470ed808",
+  "sha256": "129e3e3513f9d5c12302964d313bfe3bb80d56c7c7a1b673db1183caff6c0792",
   "version": "0.3.0",
   "file": "desktop_examples/mass_spring_damper.cpp",
   "has_errors": false,
@@ -7,10 +7,10 @@
   "sites": [
     {
       "function": "main",
-      "call_offset": 10252,
+      "call_offset": 21922,
       "span": {
-        "start": 10252,
-        "end": 10539
+        "start": 21922,
+        "end": 22300
       },
       "flowgraph_var": "flowgraph",
       "blocks": [
@@ -24,16 +24,16 @@
             {
               "text": "\"Controller\"",
               "span": {
-                "start": 9741,
-                "end": 9753
+                "start": 21081,
+                "end": 21093
               }
             }
           ],
           "display_name": "Controller",
           "in_graph": true,
           "span": {
-            "start": 9714,
-            "end": 9755
+            "start": 21054,
+            "end": 21095
           },
           "editable": true,
           "read_only_reason": null
@@ -48,8 +48,8 @@
               "text": "float",
               "resolved": null,
               "span": {
-                "start": 9774,
-                "end": 9779
+                "start": 21114,
+                "end": 21119
               }
             }
           ],
@@ -57,23 +57,23 @@
             {
               "text": "\"Throttle\"",
               "span": {
-                "start": 9790,
-                "end": 9800
+                "start": 21130,
+                "end": 21140
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 9802,
-                "end": 9805
+                "start": 21142,
+                "end": 21145
               }
             }
           ],
           "display_name": "Throttle",
           "in_graph": true,
           "span": {
-            "start": 9760,
-            "end": 9807
+            "start": 21100,
+            "end": 21147
           },
           "editable": true,
           "read_only_reason": null
@@ -88,16 +88,47 @@
             {
               "text": "\"Plant\"",
               "span": {
-                "start": 9829,
-                "end": 9836
+                "start": 21169,
+                "end": 21176
               }
             }
           ],
           "display_name": "Plant",
           "in_graph": true,
           "span": {
-            "start": 9812,
-            "end": 9838
+            "start": 21152,
+            "end": 21178
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "root_locus",
+          "type_text": "RootLocusBlock",
+          "type_name": "RootLocusBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"RootLocus\"",
+              "span": {
+                "start": 21209,
+                "end": 21220
+              }
+            },
+            {
+              "text": "&controller",
+              "span": {
+                "start": 21222,
+                "end": 21233
+              }
+            }
+          ],
+          "display_name": "RootLocus",
+          "in_graph": true,
+          "span": {
+            "start": 21183,
+            "end": 21235
           },
           "editable": true,
           "read_only_reason": null
@@ -112,8 +143,8 @@
               "text": "float",
               "resolved": null,
               "span": {
-                "start": 9857,
-                "end": 9862
+                "start": 21253,
+                "end": 21258
               }
             }
           ],
@@ -121,23 +152,23 @@
             {
               "text": "\"Fanout\"",
               "span": {
-                "start": 9871,
-                "end": 9879
+                "start": 21267,
+                "end": 21275
               }
             },
             {
               "text": "2",
               "span": {
-                "start": 9881,
-                "end": 9882
+                "start": 21277,
+                "end": 21278
               }
             }
           ],
           "display_name": "Fanout",
           "in_graph": true,
           "span": {
-            "start": 9845,
-            "end": 9884
+            "start": 21241,
+            "end": 21280
           },
           "editable": true,
           "read_only_reason": null
@@ -152,37 +183,82 @@
             {
               "text": "\"Sensor Plot\"",
               "span": {
-                "start": 9924,
-                "end": 9937
+                "start": 21320,
+                "end": 21333
               }
             },
             {
               "text": "{\"Measured Position\"}",
               "span": {
-                "start": 9947,
-                "end": 9968
+                "start": 21343,
+                "end": 21364
               }
             },
             {
               "text": "SPS",
               "span": {
-                "start": 9995,
-                "end": 9998
+                "start": 21374,
+                "end": 21377
               }
             },
             {
               "text": "100.0f",
               "span": {
-                "start": 10008,
-                "end": 10014
+                "start": 21387,
+                "end": 21393
               }
             }
           ],
           "display_name": "Sensor Plot",
           "in_graph": true,
           "span": {
-            "start": 9890,
-            "end": 10044
+            "start": 21286,
+            "end": 21400
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "error_plot",
+          "type_text": "PlotTimeSeriesBlock",
+          "type_name": "PlotTimeSeriesBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"Error Plot\"",
+              "span": {
+                "start": 21446,
+                "end": 21458
+              }
+            },
+            {
+              "text": "{\"target - x\"}",
+              "span": {
+                "start": 21468,
+                "end": 21482
+              }
+            },
+            {
+              "text": "SPS",
+              "span": {
+                "start": 21492,
+                "end": 21495
+              }
+            },
+            {
+              "text": "100.0f",
+              "span": {
+                "start": 21505,
+                "end": 21511
+              }
+            }
+          ],
+          "display_name": "Error Plot",
+          "in_graph": true,
+          "span": {
+            "start": 21406,
+            "end": 21518
           },
           "editable": true,
           "read_only_reason": null
@@ -196,8 +272,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 10286,
-            "end": 10330
+            "start": 21956,
+            "end": 22019
           },
           "editable": true,
           "read_only_reason": null
@@ -209,8 +285,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 10336,
-            "end": 10381
+            "start": 22025,
+            "end": 22070
           },
           "editable": true,
           "read_only_reason": null
@@ -222,8 +298,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 10387,
-            "end": 10424
+            "start": 22076,
+            "end": 22113
           },
           "editable": true,
           "read_only_reason": null
@@ -235,8 +311,8 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 10430,
-            "end": 10503
+            "start": 22119,
+            "end": 22192
           },
           "editable": true,
           "read_only_reason": null
@@ -248,8 +324,34 @@
           "may_block": false,
           "form": "inline",
           "span": {
-            "start": 10509,
-            "end": 10533
+            "start": 22198,
+            "end": 22222
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 5,
+          "block": "error_plot",
+          "block_expr": "&error_plot",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 22228,
+            "end": 22258
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 6,
+          "block": "root_locus",
+          "block_expr": "&root_locus",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 22264,
+            "end": 22294
           },
           "editable": true,
           "read_only_reason": null
@@ -268,8 +370,29 @@
           "arg_index": 1,
           "text": "&throttle.in",
           "span": {
-            "start": 10317,
-            "end": 10329
+            "start": 21987,
+            "end": 21999
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "float",
+          "source_type": "float",
+          "type_conflict": false
+        },
+        {
+          "from": "controller",
+          "to": "error_plot",
+          "port": {
+            "name": "in",
+            "index": 0,
+            "kind": "indexed_field"
+          },
+          "runner_index": 0,
+          "arg_index": 2,
+          "text": "&error_plot.in[0]",
+          "span": {
+            "start": 22001,
+            "end": 22018
           },
           "editable": true,
           "read_only_reason": null,
@@ -289,8 +412,8 @@
           "arg_index": 1,
           "text": "&plant.force_in",
           "span": {
-            "start": 10365,
-            "end": 10380
+            "start": 22054,
+            "end": 22069
           },
           "editable": true,
           "read_only_reason": null,
@@ -310,8 +433,8 @@
           "arg_index": 1,
           "text": "&fanout.in",
           "span": {
-            "start": 10413,
-            "end": 10423
+            "start": 22102,
+            "end": 22112
           },
           "editable": true,
           "read_only_reason": null,
@@ -331,8 +454,8 @@
           "arg_index": 1,
           "text": "&plot.in[0]",
           "span": {
-            "start": 10457,
-            "end": 10468
+            "start": 22146,
+            "end": 22157
           },
           "editable": true,
           "read_only_reason": null,
@@ -352,8 +475,8 @@
           "arg_index": 2,
           "text": "&controller.measured_position_in",
           "span": {
-            "start": 10470,
-            "end": 10502
+            "start": 22159,
+            "end": 22191
           },
           "editable": true,
           "read_only_reason": null,
@@ -367,8 +490,8 @@
         "source": "absent",
         "assignments": [],
         "run_call_span": {
-          "start": 10546,
-          "end": 10561
+          "start": 22307,
+          "end": 22322
         },
         "editable": true,
         "read_only_reason": null
@@ -376,8 +499,8 @@
       "gui": {
         "var": "gui",
         "span": {
-          "start": 10568,
-          "end": 10634
+          "start": 22329,
+          "end": 22395
         },
         "legacy": false
       },

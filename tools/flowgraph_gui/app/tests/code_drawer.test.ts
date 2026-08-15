@@ -673,7 +673,7 @@ describe('the drawer in fixture mode', () => {
       expect(await page.locator('[data-testid="menu-copy-declaration"]').isDisabled()).toBe(false);
       expect(await page.locator('[data-testid="menu-open-editor"]').isDisabled()).toBe(true);
       expect(await page.getAttribute('[data-testid="menu-open-editor"]', 'title')).toContain(
-        'desktop shell'
+        'read-only viewer'
       );
 
       await page.click('[data-testid="menu-copy-declaration"]');

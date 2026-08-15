@@ -108,8 +108,8 @@ describe('mass_spring_damper', () => {
     );
     expect(feedback).toBeDefined();
     expect(feedback?.targetHandle).toBe('measured_position_in');
-    expect(projection.nodes).toHaveLength(5);
-    expect(projection.edges).toHaveLength(5);
+    expect(projection.nodes).toHaveLength(site.blocks.length);
+    expect(projection.edges).toHaveLength(site.edges.length);
   });
 
   it('lays the cycle out without collapsing nodes', async () => {
