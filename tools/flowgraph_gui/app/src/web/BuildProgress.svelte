@@ -5,7 +5,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import {
-    FACTS,
     onPhase,
     parts,
     progress,
@@ -30,15 +29,12 @@
   const { kind, done, error, docked, bottom, onstop, ondiagnostics, ondismiss, onopen }: Props =
     $props();
 
-  const FACT_MS = 6000;
-
   const TOOLCHAIN_NOTE = 'the first build in this browser also fetches the 25 MB compiler — once.';
 
   let event = $state.raw<PhaseEvent | null>(null);
   let phaseStartedAt = $state(0);
   let jobStartedAt = $state(0);
   let now = $state(0);
-  let fact = $state(0);
   let timings = $state.raw<Timings>(storedTimings());
   const phaseDurations: Timings = {};
 
@@ -83,18 +79,13 @@
     jobStartedAt = performance.now();
     phaseStartedAt = jobStartedAt;
     now = jobStartedAt;
-    fact = Math.floor(Math.random() * FACTS.length);
     for (const key of Object.keys(phaseDurations)) delete phaseDurations[key as keyof Timings];
   }
 
   $effect(() => {
     if (kind === null) return;
     const tick = setInterval(() => (now = performance.now()), 250);
-    const roll = setInterval(() => (fact = (fact + 1) % FACTS.length), FACT_MS);
-    return () => {
-      clearInterval(tick);
-      clearInterval(roll);
-    };
+    return () => clearInterval(tick);
   });
 
   const elapsed = $derived(Math.max(0, Math.round((now - jobStartedAt) / 1000)));
@@ -179,17 +170,10 @@
     ></div>
   </div>
 
-  {#if docked && !error}
+  {#if docked && !error && note}
     <div class="under">
-      {#if note}
-        <span class="tag">first build</span>
-        <span class="fact" data-testid="progress-cold">{note}</span>
-      {:else}
-        <span class="tag">did you know</span>
-        {#key fact}
-          <span class="fact" data-testid="progress-fact">{FACTS[fact]}</span>
-        {/key}
-      {/if}
+      <span class="tag">first build</span>
+      <span class="note" data-testid="progress-cold">{note}</span>
     </div>
   {/if}
 </section>
@@ -328,7 +312,7 @@
     font-weight: 600;
     color: var(--faint);
   }
-  .fact {
+  .note {
     min-width: 0;
     font-size: 11px;
     color: var(--muted);
@@ -386,7 +370,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .fill,
-    .fact {
+    .note {
       transition: none;
       animation: none;
     }

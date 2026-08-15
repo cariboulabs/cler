@@ -29,14 +29,20 @@ the working copy is adopted on open only if it still parses.
 
 - `cler-graph/` (Rust lib + CLI): parse → `FileModel` (sites, blocks, runners,
   edges, config), commands → splices (`apply/planner.rs`), palette extraction
-  from block headers. Pure; no app state.
+  from block headers, and `session.rs` — the document session (source, undo
+  history, ui cache, JSON command requests) both editions run on. Pure; no app
+  state, no filesystem.
 - `app/src-tauri/`: document sessions, unified undo (`ActionQueue<Action>`),
   drafts + shadow builds, artifact provenance, app settings
   (`settings.json`: `clerRoot`, `blockLibraries`), jobs (check/build/run).
 - `app/src/`: Svelte 5 (runes only — `$state`, `$derived`, `$effect`,
   `$props`; never Svelte 4 syntax). `FieldList.svelte` is the single field
   editing machinery (drafts, IME, focus restore, errors) — reuse it, never
-  duplicate it.
+  duplicate it. The browser edition is `src/web/` plus one build flag: delete
+  both and the desktop app is untouched. The rest of `src/` reaches into it
+  only at four hook points — `main.ts` boots it, `App.svelte` mounts
+  `BuildProgress`, `CodeDrawer` takes its `inset`, `Actions.svelte` gates the
+  menu on `VITE_CLER_WASM`; keep it that way.
 
 **Correlation rule**: every UI surface mirrors one model concept. If a widget
 has no backing model concept, question the widget. If a model concept shows up
@@ -118,22 +124,24 @@ decision it enables, not information it displays.
   to `wasm32-wasip1` behind a JSON `cler_invoke` ABI; same command names and
   reply shapes as the Tauri backend, minus filesystem, build, run and agent
   (those refuse with "needs the desktop app"). Files and `desktop_blocks/*.hpp`
-  are bundled by `app/src/fixtures/files.ts`; `app/src/lib/wasmbridge.ts`
+  are bundled by `app/src/web/files.ts`; `app/src/web/wasmbridge.ts`
   installs it as `__TAURI_INTERNALS__` so the app sees a desktop shell.
 - `docs/try/` — the static site build of that: `npm run build:web` in `app/`
   (needs `rustup target add wasm32-wasip1` and `WASI_SDK=` a wasi-sdk
   checkout for tree-sitter's C). Regenerate after UI, fixture, or block-header
   changes and commit the output. `tests/wasm_session.test.ts` covers the wasm
   end to end and skips when it is not built.
-- Run in the browser — `web-run/build.sh` (needs `EMSDK=` an emsdk checkout with
+- Run in the browser — `web-build/build.sh` (needs `EMSDK=` an emsdk checkout with
   **3.1.24** activated, the version emception ships) builds liquid-dsp + GUI/plot
-  blocks into `libcler_web.a`, the examples in `src/fixtures/files.ts::RUNNABLE`
+  blocks into `libcler_web.a`, the examples in `src/web/files.ts::RUNNABLE`
   into `app/public/run/`, and the *payload* the in-browser compiler needs into
   `app/public/payload/`: the two archives plus `headers.json` (`include/**`, the
   imgui/implot headers, `liquid.h`, `shell.html` — `desktop_blocks/**` already
-  ships inside the app bundle). Rerun it after touching those headers or flags;
-  `CXXFLAGS`/`LDFLAGS` in `src/lib/emception.ts` must stay in step with the script.
-- Build in the browser — `src/lib/emception.ts` runs em++ under
+  ships inside the app bundle). Rerun it after touching those headers or flags: it also
+  writes `payload/flags.json`, the one place the compile and link flags are spelled,
+  which `emception.ts` reads — only the browser's deliberate overrides (`-O1` link,
+  `-sMINIFY_HTML=0`, `--shell-file`) live in the TypeScript.
+- Build in the browser — `src/web/emception.ts` runs em++ under
   [emception](https://github.com/jprendes/emception) (clang + lld + the emscripten
   sysroot, in wasm) over a virtual repo rooted at `/working`, so every path on the
   command line — and in the diagnostics coming back — is the app's own
@@ -157,12 +165,12 @@ decision it enables, not information it displays.
   a bundled example still equal to the bundle runs straight from `run/<name>.html`;
   anything else compiles and links into `built/<sha of source>/app.html` and Run
   pops that. Both run windows are cross-origin isolated, so pthreads work.
-- Waiting, in the browser — a build takes 15-60 s, so `src/lib/BuildProgress.svelte` takes over the
+- Waiting, in the browser — a build takes 15-60 s, so `src/web/BuildProgress.svelte` takes over the
   top band of the bottom drawer for the duration — the drawer reserves `STRIP_H` pixels (its `inset`
   prop) so the canvas is never covered, and when the drawer is collapsed the same surface shrinks to
   a pill at bottom centre that opens it (browser only: `inTauri()` is true under the wasm shell
   too, so the gate is the `VITE_CLER_WASM` build flag). It shows nothing it did not observe:
-  `emception.ts` and `wasmbridge.ts` call `phase()` from `src/lib/progress.ts` at the real
+  `emception.ts` and `wasmbridge.ts` call `phase()` from `src/web/progress.ts` at the real
   transitions — toolchain download (cumulative service-worker bytes over `TOOLCHAIN_BYTES`),
   boot, staging the payload, compile (with the file), link, wasm-opt *only* when em++ names it,
   store, launch — and the panel maps the event to one phrase in the UI font
@@ -172,7 +180,7 @@ decision it enables, not information it displays.
   25 MB first-build note while the toolchain downloads. A finished job flashes the track green and
   folds away; a failed one keeps a red track with the first error and a jump to Diagnostics, and
   Output keeps the raw em++ log. `tests/progress.test.ts` covers the mapping.
-- `web-run/smoke.mjs` is the end-to-end check: `node ../web-run/smoke.mjs` from
+- `web-build/smoke.mjs` is the end-to-end check: `node ../web-build/smoke.mjs` from
   `app/` after `npm run build:web` serves `docs/` with a header-less
   `python3 -m http.server` (as Pages does) and drives edit → check → build → run
   → screenshot in headless Chromium.

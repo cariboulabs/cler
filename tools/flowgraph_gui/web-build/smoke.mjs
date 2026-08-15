@@ -1,6 +1,6 @@
 // End-to-end check of the browser edition: serves docs/ with no COOP/COEP headers (as GitHub
 // Pages does), then edits, checks, builds and runs hello_world entirely in the browser.
-// usage: node ../web-run/smoke.mjs   (from tools/flowgraph_gui/app, after `npm run build:web`)
+// usage: node ../web-build/smoke.mjs   (from tools/flowgraph_gui/app, after `npm run build:web`)
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

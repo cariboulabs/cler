@@ -94,18 +94,6 @@ export function remaining(event: PhaseEvent, elapsedInPhase: number, timings: Ti
   return Math.round((rest + here) / 1000);
 }
 
-export const FACTS = [
-  'This build is running inside your tab — there is no server compiling anything.',
-  'cler-fg edits the .cpp itself: the file is the only source of truth, no project file, no export step.',
-  'read_dbf/write_dbf hand a block a pointer into the channel — the default path is zero-copy.',
-  'A block owns its input channels; upstream blocks only get a reference to write into.',
-  'The progress contract: return cler::Empty{} only when you actually moved a sample.',
-  'A block that fails on one input may still succeed on another — errors are retryable, not fatal.',
-  'PinnedIslands cuts the graph into contiguous islands, one pinned worker each — the pick for 2 cores.',
-  'The core is header-only, so the same flowgraph compiles down to bare metal.',
-  'Prefer read_dbf/write_dbf over push/pop: push/pop in a hot path is the classic cler mistake.',
-  'The run window is cross-origin isolated, which is the only reason pthreads work in it.'
-];
 
 // ponytail: one listener — the panel is the only consumer; make it a Set if a second surface wants it.
 let listener: ((event: PhaseEvent) => void) | null = null;

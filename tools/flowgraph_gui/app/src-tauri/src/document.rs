@@ -6,13 +6,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
-use cler_graph::{
-    block_requirements, extract_specs, first_fault, palette_specs, unified, ActionQueue,
-    ApplyError, BlockSpec, Command, DocumentSession, FileModel, ParseFault, PatchDirection,
-    SourcePatch, Transaction, SCHEMA_VERSION,
-};
+use cler_graph::session::{self, Edited};
+use cler_graph::{block_requirements, palette_specs, BlockSpec, Command, DocumentSession, PatchDirection};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
+
+pub use cler_graph::session::{DocumentState, EditOutcome, NodeMove, Point, Preview};
 use sha2::{Digest, Sha256};
 
 use crate::provenance::{ArtifactCatalog, ArtifactRecord};
@@ -42,36 +41,12 @@ pub struct BuildRequirements {
 }
 
 pub struct Document {
-    session: DocumentSession,
+    core: session::Document,
     spelling: String,
-    saved: String,
     working: PathBuf,
     cache_path: PathBuf,
     cache: CacheFile,
-    external_change: bool,
     palette: Vec<BlockSpec>,
-    history: ActionQueue<Action>,
-}
-
-#[derive(Clone)]
-enum Action {
-    Source(SourcePatch),
-    MoveNodes { view: String, moves: Vec<NodeMove> },
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct Point {
-    pub x: f64,
-    pub y: f64,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct NodeMove {
-    pub node: String,
-    pub from: Point,
-    pub to: Point,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -109,54 +84,6 @@ impl Default for CacheFile {
             extra: Map::new(),
         }
     }
-}
-
-#[derive(Debug, Serialize)]
-pub struct DocumentModel {
-    pub sha256: String,
-    #[serde(rename = "hasErrors")]
-    pub has_errors: bool,
-    #[serde(flatten)]
-    pub model: FileModel,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DocumentState {
-    pub path: String,
-    pub revision: u64,
-    pub model: DocumentModel,
-    pub source: String,
-    pub can_undo: bool,
-    pub can_redo: bool,
-    pub dirty: bool,
-    pub external_change: bool,
-    pub cache: Value,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EditOutcome {
-    pub state: DocumentState,
-    pub unparsed: bool,
-    pub fault: Option<ParseFault>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Summary {
-    pub splices: usize,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Preview {
-    pub diff: String,
-    pub summary: Summary,
-}
-
-#[derive(Clone, Copy)]
-enum HistoryDirection {
-    Undo,
-    Redo,
 }
 
 enum WriteFailure {
@@ -220,26 +147,10 @@ pub fn apply(
     let (target, doc) = document(&mut map, path)?;
     refuse_external(doc, &target)?;
 
-    let origins = add_block_origins(&commands, &doc.palette, &target);
-    let pending = doc
-        .session
-        .preview_with_includes(Transaction {
-            version: SCHEMA_VERSION.to_string(),
-            base_revision,
-            commands,
-        }, &origins)
-        .map_err(|cause| cause.to_string())?;
-    if pending.changes() {
-        let patch = pending
-            .patch()
-            .cloned()
-            .ok_or_else(|| ApplyError::HistoryMismatch.to_string())?;
-        write_working(doc, pending.source())?;
-        doc.session.commit(pending);
-        doc.history.push(Action::Source(patch));
-    } else {
-        doc.session.commit(pending);
-    }
+    let includes = includes_for(&commands, doc, &target);
+    session::apply(&mut doc.core, base_revision, commands, &includes, &mut |source| {
+        write_working(&doc.working, source)
+    })?;
     Ok(snapshot(&target, doc))
 }
 
@@ -252,36 +163,17 @@ pub fn edit(
     let mut map = lock(docs);
     let (target, doc) = document(&mut map, path)?;
     refuse_external(doc, &target)?;
-    if base_revision != doc.session.revision() {
-        return Err(ApplyError::RevisionMismatch {
-            base_revision,
-            current_revision: doc.session.revision(),
-        }
-        .to_string());
-    }
-
-    let pending = match doc.session.preview_text(source.clone()) {
-        Ok(pending) => pending,
-        Err(ApplyError::ProducesParseError) => {
-            write_working(doc, &source)?;
-            return Ok(EditOutcome {
-                unparsed: true,
-                fault: first_fault(&source),
-                state: snapshot(&target, doc),
-            });
-        }
-        Err(cause) => return Err(cause.to_string()),
-    };
-    if pending.changes() {
-        let patch = pending
-            .patch()
-            .cloned()
-            .ok_or_else(|| ApplyError::HistoryMismatch.to_string())?;
-        write_working(doc, pending.source())?;
-        doc.session.commit(pending);
-        doc.history.push(Action::Source(patch));
-    } else {
-        doc.session.commit(pending);
+    let edited = session::edit(&mut doc.core, base_revision, &source, &mut |next| {
+        write_working(&doc.working, next)
+    })?;
+    if let Edited::Unparsed(fault) = edited {
+        // text the parser rejects belongs in the working copy, not in the session
+        write_working(&doc.working, &source)?;
+        return Ok(EditOutcome {
+            unparsed: true,
+            fault,
+            state: snapshot(&target, doc),
+        });
     }
     Ok(EditOutcome {
         unparsed: false,
@@ -302,38 +194,15 @@ pub fn preview(
     let (target, doc) = document(&mut map, path)?;
     refuse_external(doc, &target)?;
 
-    let origins = add_block_origins(&commands, &doc.palette, &target);
-    let pending = doc
-        .session
-        .preview_with_includes(Transaction {
-            version: SCHEMA_VERSION.to_string(),
-            base_revision,
-            commands,
-        }, &origins)
-        .map_err(|cause| cause.to_string())?;
-    Ok(Preview {
-        diff: unified(doc.session.source(), pending.source(), pending.splices()),
-        summary: Summary {
-            splices: pending.splices().len(),
-        },
-    })
+    let includes = includes_for(&commands, doc, &target);
+    session::preview(&doc.core, base_revision, commands, &includes)
 }
 
-fn add_block_origins(commands: &[Command], palette: &[BlockSpec], target: &Path) -> Vec<String> {
+fn includes_for(commands: &[Command], doc: &Document, target: &Path) -> Vec<String> {
     let roots = include_roots(target);
-    commands
+    session::add_block_origins(commands, &doc.palette)
         .iter()
-        .filter_map(|command| match command {
-            Command::AddBlock { type_name, .. } => palette
-                .iter()
-                .find(|spec| {
-                    spec.name == *type_name
-                        || spec.synonyms.iter().any(|synonym| synonym.name == *type_name)
-                })
-                .map(|spec| spec.origin.clone()),
-            _ => None,
-        })
-        .filter_map(|origin| include_path(&origin, &roots))
+        .filter_map(|origin| include_path(origin, &roots))
         .collect()
 }
 
@@ -368,89 +237,38 @@ pub fn move_nodes(
     view: String,
     moves: Vec<NodeMove>,
 ) -> Result<DocumentState, String> {
-    if view.is_empty() {
-        return Err("node movement requires a view".to_string());
-    }
-    let mut nodes = HashSet::new();
-    let mut moves = moves
-        .into_iter()
-        .filter(|movement| movement.from != movement.to)
-        .collect::<Vec<_>>();
-    for movement in &moves {
-        if movement.node.is_empty() {
-            return Err("node movement requires a node".to_string());
-        }
-        if !movement.from.x.is_finite()
-            || !movement.from.y.is_finite()
-            || !movement.to.x.is_finite()
-            || !movement.to.y.is_finite()
-        {
-            return Err("node movement requires finite coordinates".to_string());
-        }
-        if !nodes.insert(movement.node.clone()) {
-            return Err(format!("node movement repeats {}", movement.node));
-        }
-    }
-    if moves.is_empty() {
-        let mut map = lock(docs);
-        let (target, doc) = document(&mut map, path)?;
-        return Ok(snapshot(&target, doc));
-    }
-    moves.sort_by(|left, right| left.node.cmp(&right.node));
     let mut map = lock(docs);
     let (target, doc) = document(&mut map, path)?;
-    let mut cache = doc.cache.clone();
-    apply_node_moves(&mut cache.ui, &view, &moves, HistoryDirection::Redo);
-    write_cache(&doc.cache_path, &cache)?;
-    doc.cache = cache;
-    doc.history.push(Action::MoveNodes { view, moves });
+    session::move_nodes(&mut doc.core, &view, moves)?;
+    store_ui(doc)?;
     Ok(snapshot(&target, doc))
 }
 
 pub fn undo(docs: &Documents, path: &str) -> Result<DocumentState, String> {
-    step(docs, path, HistoryDirection::Undo)
+    step(docs, path, PatchDirection::Reverse)
 }
 
 pub fn redo(docs: &Documents, path: &str) -> Result<DocumentState, String> {
-    step(docs, path, HistoryDirection::Redo)
+    step(docs, path, PatchDirection::Forward)
 }
 
 pub fn save(docs: &Documents, path: &str) -> Result<DocumentState, String> {
     let mut map = lock(docs);
     let (target, doc) = document(&mut map, path)?;
     refuse_external(doc, &target)?;
-    if doc.session.source() != doc.saved {
-        let source = doc.session.source().to_string();
+    if doc.core.session.source() != doc.core.saved {
+        let source = doc.core.session.source().to_string();
         persist(doc, &target, &source)?;
         update_cache_document(doc, &target);
     }
     Ok(snapshot(&target, doc))
 }
 
-const NEW_DOCUMENT_TEMPLATE: &str = r#"#include "cler.hpp"
-#include "task_policies/cler_desktop_tpolicy.hpp"
-
-#include <chrono>
-#include <thread>
-
-int main() {
-    auto flowgraph = cler::make_desktop_flowgraph();
-
-    cler::FlowGraphConfig config;
-    config.scheduler = cler::SchedulerType::ThreadPerBlock;
-    flowgraph.run(config);
-    while (!flowgraph.is_stopped()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-    return 0;
-}
-"#;
-
 pub fn create(docs: &Documents, path: &str) -> Result<DocumentState, String> {
     if Path::new(path).exists() {
         return Err(format!("{path} already exists"));
     }
-    std::fs::write(path, NEW_DOCUMENT_TEMPLATE)
+    std::fs::write(path, session::NEW_DOCUMENT_TEMPLATE)
         .map_err(|cause| format!("cannot write {path}: {cause}"))?;
     open(docs, path)
 }
@@ -459,7 +277,7 @@ pub fn save_as(docs: &Documents, path: &str, new_path: &str) -> Result<DocumentS
     let source = {
         let mut map = lock(docs);
         let (_, doc) = document(&mut map, path)?;
-        doc.session.source().to_string()
+        doc.core.session.source().to_string()
     };
     std::fs::write(new_path, &source)
         .map_err(|cause| format!("cannot write {new_path}: {cause}"))?;
@@ -470,16 +288,10 @@ pub fn reload(docs: &Documents, path: &str) -> Result<DocumentState, String> {
     let mut map = lock(docs);
     let (target, doc) = document(&mut map, path)?;
     let text = read(&target)?;
-    if text != doc.session.source() {
-        write_working(doc, &text)?;
-        doc.session
-            .reload(text.clone())
-            .map_err(|cause| cause.to_string())?;
-        doc.history.clear();
-    }
-    doc.saved = text;
+    doc.core.reload(text)?;
+    write_working(&doc.working, doc.core.session.source())?;
     update_cache_document(doc, &target);
-    doc.external_change = false;
+    doc.core.external_change = false;
     Ok(snapshot(&target, doc))
 }
 
@@ -505,8 +317,8 @@ pub fn draft_state(docs: &Documents, path: &str) -> Result<DraftState, String> {
     Ok(DraftState {
         path: doc.working.clone(),
         workspace,
-        sha256: digest(doc.session.source()),
-        requirements: build_requirements(doc.session.source(), &doc.palette),
+        sha256: digest(doc.core.session.source()),
+        requirements: build_requirements(doc.core.session.source(), &doc.palette),
         artifacts: ArtifactCatalog::read(&doc.cache.build),
     })
 }
@@ -517,7 +329,7 @@ pub fn snapshot_draft(docs: &Documents, path: &str) -> Result<DraftState, String
     let doc = map
         .get(&key)
         .ok_or_else(|| format!("no open document for {path}"))?;
-    let source = doc.session.source();
+    let source = doc.core.session.source();
     let sha256 = digest(source);
     let snapshots = doc
         .working
@@ -579,53 +391,32 @@ pub fn record_artifact(
 pub fn store_cache(docs: &Documents, path: &str, ui: Value) -> Result<(), String> {
     let mut map = lock(docs);
     let (_, doc) = document(&mut map, path)?;
-    doc.cache.ui = ui;
+    doc.core.ui = ui;
+    store_ui(doc)
+}
+
+fn store_ui(doc: &mut Document) -> Result<(), String> {
+    if doc.cache.ui == doc.core.ui {
+        return Ok(());
+    }
+    doc.cache.ui = doc.core.ui.clone();
     write_cache(&doc.cache_path, &doc.cache)
-}
-
-fn apply_node_moves(
-    ui: &mut Value,
-    view: &str,
-    moves: &[NodeMove],
-    direction: HistoryDirection,
-) {
-    let views = object_field(object(ui), "views");
-    let cached_view = object_field(views, view);
-    let positions = object_field(cached_view, "positions");
-    for movement in moves {
-        let point = match direction {
-            HistoryDirection::Undo => &movement.from,
-            HistoryDirection::Redo => &movement.to,
-        };
-        positions.insert(movement.node.clone(), json!({ "x": point.x, "y": point.y }));
-    }
-}
-
-fn object(value: &mut Value) -> &mut Map<String, Value> {
-    if !value.is_object() {
-        *value = Value::Object(Map::new());
-    }
-    value.as_object_mut().expect("object was just initialized")
-}
-
-fn object_field<'a>(parent: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
-    object(
-        parent
-            .entry(key.to_string())
-            .or_insert_with(|| Value::Object(Map::new())),
-    )
 }
 
 pub fn parse_file(docs: &Documents, path: &str) -> Result<String, String> {
     let map = lock(docs);
     if let Some(doc) = resolve(&map, path).and_then(|key| map.get(&key)) {
-        return serde_json::to_string(&model_of(&doc.session, &doc.palette))
+        return serde_json::to_string(&session::model(&doc.core, &doc.palette))
             .map_err(|cause| cause.to_string());
     }
     drop(map);
     let target = canonical(path)?;
-    let session = DocumentSession::open(&target).map_err(|cause| cause.to_string())?;
-    serde_json::to_string(&model_of(&session, &nearby_palette(&target)))
+    let opened = session::Document::new(
+        DocumentSession::open(&target).map_err(|cause| cause.to_string())?,
+        String::new(),
+        Value::Null,
+    );
+    serde_json::to_string(&session::model(&opened, &nearby_palette(&target)))
         .map_err(|cause| cause.to_string())
 }
 
@@ -635,16 +426,11 @@ pub fn palette(docs: &Documents, path: &str) -> Result<Vec<BlockSpec>, String> {
     let doc = map
         .get(&key)
         .ok_or_else(|| format!("no open document for {path}"))?;
-    let mut specs = extract_specs(doc.session.source(), &key.display().to_string());
-    let local: Vec<&str> = specs.iter().map(|spec| spec.name.as_str()).collect();
-    let shipped: Vec<BlockSpec> = doc
-        .palette
-        .iter()
-        .filter(|spec| !local.contains(&spec.name.as_str()))
-        .cloned()
-        .collect();
-    specs.extend(shipped);
-    Ok(specs)
+    Ok(session::palette(
+        &doc.core,
+        &key.display().to_string(),
+        &doc.palette,
+    ))
 }
 
 pub fn note_disk_event(docs: &Documents, path: &Path) -> bool {
@@ -652,58 +438,23 @@ pub fn note_disk_event(docs: &Documents, path: &Path) -> bool {
     let Some(doc) = map.get_mut(path) else {
         return false;
     };
-    let quiet = !doc.external_change;
+    let quiet = !doc.core.external_change;
     revalidate(doc, path);
-    doc.external_change && quiet
+    doc.core.external_change && quiet
 }
 
-fn step(
-    docs: &Documents,
-    path: &str,
-    direction: HistoryDirection,
-) -> Result<DocumentState, String> {
+fn step(docs: &Documents, path: &str, direction: PatchDirection) -> Result<DocumentState, String> {
     let mut map = lock(docs);
     let (target, doc) = document(&mut map, path)?;
-    let action = match direction {
-        HistoryDirection::Undo => doc.history.undo(),
-        HistoryDirection::Redo => doc.history.redo(),
-    }
-    .cloned();
-    let Some(action) = action else {
+    // a position action carries no source: disk drift does not block it and the
+    // working copy — which may hold unparsed text — must be left alone
+    if session::pending_action_edits_source(&doc.core, direction) != Some(false) {
         refuse_external(doc, &target)?;
-        return Err(match direction {
-            HistoryDirection::Undo => ApplyError::NothingToUndo.to_string(),
-            HistoryDirection::Redo => ApplyError::NothingToRedo.to_string(),
-        });
-    };
-    match action {
-        Action::Source(patch) => {
-            refuse_external(doc, &target)?;
-            let patch_direction = match direction {
-                HistoryDirection::Undo => PatchDirection::Reverse,
-                HistoryDirection::Redo => PatchDirection::Forward,
-            };
-            let source = patch
-                .apply(doc.session.source(), patch_direction)
-                .map_err(|cause| cause.to_string())?;
-            let pending = doc
-                .session
-                .preview_source(source)
-                .map_err(|cause| cause.to_string())?;
-            write_working(doc, pending.source())?;
-            doc.session.commit(pending);
-        }
-        Action::MoveNodes { view, moves } => {
-            let mut cache = doc.cache.clone();
-            apply_node_moves(&mut cache.ui, &view, &moves, direction);
-            write_cache(&doc.cache_path, &cache)?;
-            doc.cache = cache;
-        }
     }
-    match direction {
-        HistoryDirection::Undo => doc.history.commit_undo(),
-        HistoryDirection::Redo => doc.history.commit_redo(),
-    }
+    session::step(&mut doc.core, direction, &mut |source| {
+        write_working(&doc.working, source)
+    })?;
+    store_ui(doc)?;
     Ok(snapshot(&target, doc))
 }
 
@@ -732,15 +483,12 @@ fn fresh(target: &Path, spelling: &str) -> Result<Document, String> {
     }
     write_cache(&cache_path, &cache)?;
     Ok(Document {
-        session,
+        core: session::Document::new(session, saved, cache.ui.clone()),
         spelling: spelling.to_string(),
-        saved,
         working,
         cache_path,
         cache,
-        external_change: false,
         palette: nearby_palette(target),
-        history: ActionQueue::default(),
     })
 }
 
@@ -796,40 +544,21 @@ fn document<'a>(
 }
 
 fn snapshot(target: &Path, doc: &Document) -> DocumentState {
-    DocumentState {
-        path: target.display().to_string(),
-        revision: doc.session.revision(),
-        model: model_of(&doc.session, &doc.palette),
-        source: doc.session.source().to_string(),
-        can_undo: doc.history.can_undo(),
-        can_redo: doc.history.can_redo(),
-        dirty: doc.session.source() != doc.saved,
-        external_change: doc.external_change,
-        cache: doc.cache.ui.clone(),
-    }
-}
-
-fn model_of(session: &DocumentSession, palette: &[BlockSpec]) -> DocumentModel {
-    let model = session.parse_with_palette(palette);
-    DocumentModel {
-        sha256: format!("{:x}", Sha256::digest(session.source().as_bytes())),
-        has_errors: model.has_errors,
-        model,
-    }
+    session::snapshot(&target.display().to_string(), &doc.core, &doc.palette)
 }
 
 fn revalidate(doc: &mut Document, target: &Path) {
-    doc.external_change =
-        !matches!(std::fs::read(target), Ok(bytes) if bytes == doc.saved.as_bytes());
+    doc.core.external_change =
+        !matches!(std::fs::read(target), Ok(bytes) if bytes == doc.core.saved.as_bytes());
 }
 
 fn refuse_external(doc: &mut Document, target: &Path) -> Result<(), String> {
     let bytes = std::fs::read(target)
         .map_err(|cause| format!("cannot read {}: {cause}", target.display()))?;
-    if bytes == doc.saved.as_bytes() {
+    if bytes == doc.core.saved.as_bytes() {
         return Ok(());
     }
-    doc.external_change = true;
+    doc.core.external_change = true;
     Err(drifted(target))
 }
 
@@ -841,14 +570,14 @@ fn drifted(target: &Path) -> String {
 }
 
 fn persist(doc: &mut Document, target: &Path, contents: &str) -> Result<(), String> {
-    match write_atomic(target, contents, &doc.saved) {
+    match write_atomic(target, contents, &doc.core.saved) {
         Ok(()) => {
-            doc.saved = contents.to_string();
-            doc.external_change = false;
+            doc.core.saved = contents.to_string();
+            doc.core.external_change = false;
             Ok(())
         }
         Err(WriteFailure::Drift) => {
-            doc.external_change = true;
+            doc.core.external_change = true;
             Err(drifted(target))
         }
         Err(WriteFailure::Io(cause)) => Err(format!("cannot write {}: {cause}", target.display())),
@@ -892,17 +621,17 @@ fn create_working(
     Ok((working, cache_path, cache, draft))
 }
 
-fn write_working(doc: &Document, contents: &str) -> Result<(), String> {
-    let staged = doc.working.with_extension("cpp.next");
+fn write_working(working: &Path, contents: &str) -> Result<(), String> {
+    let staged = working.with_extension("cpp.next");
     std::fs::write(&staged, contents)
         .map_err(|cause| format!("cannot write {}: {cause}", staged.display()))?;
-    std::fs::rename(&staged, &doc.working)
-        .map_err(|cause| format!("cannot replace {}: {cause}", doc.working.display()))
+    std::fs::rename(&staged, working)
+        .map_err(|cause| format!("cannot replace {}: {cause}", working.display()))
 }
 
 fn update_cache_document(doc: &mut Document, target: &Path) {
     doc.cache.document.source_path = target.display().to_string();
-    doc.cache.document.saved_sha256 = digest(&doc.saved);
+    doc.cache.document.saved_sha256 = digest(&doc.core.saved);
     write_cache(&doc.cache_path, &doc.cache).ok();
 }
 

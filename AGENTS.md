@@ -177,7 +177,7 @@ Svelte 5 runes API only (`$state`, `$derived`, `$effect`, `$props`).
 
 **Browser builds**: desktop examples compile unmodified with Emscripten
 (`__EMSCRIPTEN__` branches in `gui_manager.cpp`: GLES3, `emscripten_sleep`
-yield, `-DImDrawIdx=unsigned int`); `tools/flowgraph_gui/web-run/build.sh`
+yield, `-DImDrawIdx=unsigned int`); `tools/flowgraph_gui/web-build/build.sh`
 builds liquid + GUI blocks into an archive and the bundled examples for
 `docs/try/run/`. Hardware blocks stay desktop-only.
 
