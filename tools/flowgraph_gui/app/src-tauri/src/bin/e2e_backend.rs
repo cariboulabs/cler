@@ -8,6 +8,7 @@ use cler_flowgraph_gui::ai_agent;
 use cler_flowgraph_gui::build::{self, Emit, Jobs, RecordArtifact};
 use cler_flowgraph_gui::document::{self, Documents};
 use cler_flowgraph_gui::provenance::ArtifactRecord;
+use cler_graph::session;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -180,6 +181,13 @@ fn dispatch(
         Some(text) => text.to_string(),
         None => return Reply::Loud(format!("{cmd} needs a path argument")),
     };
+    let request = match session::Request::parse(cmd, args) {
+        Ok(request) => request,
+        Err(session::Malformed(message)) => return Reply::Loud(message),
+    };
+    if let Some(request) = request {
+        return document_reply(docs, watcher, &path, request);
+    }
     match cmd {
         "open_document" => match document::canonical(&path).and_then(|target| {
             watch_parent(watcher, &target)?;
@@ -194,67 +202,9 @@ fn dispatch(
             }
             Reply::Value(Value::Null)
         }
-        "apply_commands" => {
-            let base = args
-                .get("base_revision")
-                .or_else(|| args.get("baseRevision"))
-                .and_then(Value::as_u64);
-            let commands = args.get("commands").and_then(Value::as_array).cloned();
-            match (base, commands) {
-                (Some(base), Some(commands)) => {
-                    outcome(document::apply(docs, &path, base, commands))
-                }
-                _ => Reply::Loud("apply_commands needs baseRevision and commands".to_string()),
-            }
-        }
-        "edit_source" => {
-            let base = args
-                .get("base_revision")
-                .or_else(|| args.get("baseRevision"))
-                .and_then(Value::as_u64);
-            let source = args.get("source").and_then(Value::as_str);
-            match (base, source) {
-                (Some(base), Some(source)) => {
-                    outcome(document::edit(docs, &path, base, source.to_string()))
-                }
-                _ => Reply::Loud("edit_source needs baseRevision and source".to_string()),
-            }
-        }
-        "preview_commands" => {
-            let base = args
-                .get("base_revision")
-                .or_else(|| args.get("baseRevision"))
-                .and_then(Value::as_u64);
-            let commands = args.get("commands").and_then(Value::as_array).cloned();
-            match (base, commands) {
-                (Some(base), Some(commands)) => {
-                    outcome(document::preview(docs, &path, base, commands))
-                }
-                _ => Reply::Loud("preview_commands needs baseRevision and commands".to_string()),
-            }
-        }
-        "move_nodes" => {
-            let view = args.get("view").and_then(Value::as_str).map(str::to_string);
-            let moves = args
-                .get("moves")
-                .cloned()
-                .and_then(|listed| serde_json::from_value::<Vec<document::NodeMove>>(listed).ok());
-            match (view, moves) {
-                (Some(view), Some(moves)) => outcome(document::move_nodes(docs, &path, view, moves)),
-                _ => Reply::Loud("move_nodes needs view and moves".to_string()),
-            }
-        }
-        "undo" => outcome(document::undo(docs, &path)),
-        "redo" => outcome(document::redo(docs, &path)),
         "save_document" => outcome(document::save(docs, &path)),
-        "save_cache" => outcome(document::store_cache(
-            docs,
-            &path,
-            args.get("ui").cloned().unwrap_or(Value::Null),
-        )),
         "reload_document" => outcome(document::reload(docs, &path)),
         "parse_file" => outcome(document::parse_file(docs, &path)),
-        "palette" => outcome(document::palette(docs, &path)),
         "check_document" => outcome(
             document::snapshot_draft(docs, &path)
                 .and_then(|draft| build::check_draft(jobs, &path, &draft.path, emitter(events))),
@@ -281,20 +231,6 @@ fn dispatch(
             Ok(state) => carry(state),
             Err(message) => Reply::Refused(message),
         },
-        "save_document_as" => {
-            let Some(new_path) = args.get("newPath").and_then(Value::as_str) else {
-                return Reply::Loud("save_document_as needs a newPath argument".to_string());
-            };
-            match document::save_as(docs, &path, new_path).and_then(|state| {
-                document::canonical(new_path).map(|target| {
-                    watch_parent(watcher, &target).ok();
-                    state
-                })
-            }) {
-                Ok(state) => carry(state),
-                Err(message) => Reply::Refused(message),
-            }
-        }
         "run_target" => {
             let run_args: Vec<String> = args
                 .get("args")
@@ -312,6 +248,46 @@ fn dispatch(
         }
         "stop_target" => outcome(build::stop(jobs, &path)),
         _ => Reply::Loud(format!("unknown command: {cmd}")),
+    }
+}
+
+fn document_reply(
+    docs: &Shared,
+    watcher: &FileWatcher,
+    path: &str,
+    request: session::Request,
+) -> Reply {
+    match request {
+        session::Request::Apply {
+            base_revision,
+            commands,
+        } => outcome(document::apply(docs, path, base_revision, commands)),
+        session::Request::Preview {
+            base_revision,
+            commands,
+        } => outcome(document::preview(docs, path, base_revision, commands)),
+        session::Request::Edit {
+            base_revision,
+            source,
+        } => outcome(document::edit(docs, path, base_revision, source)),
+        session::Request::MoveNodes { view, moves } => {
+            outcome(document::move_nodes(docs, path, view, moves))
+        }
+        session::Request::Undo => outcome(document::undo(docs, path)),
+        session::Request::Redo => outcome(document::redo(docs, path)),
+        session::Request::Palette => outcome(document::palette(docs, path)),
+        session::Request::SaveCache { ui } => outcome(document::store_cache(docs, path, ui)),
+        session::Request::SaveAs { new_path } => {
+            match document::save_as(docs, path, &new_path).and_then(|state| {
+                document::canonical(&new_path).map(|target| {
+                    watch_parent(watcher, &target).ok();
+                    state
+                })
+            }) {
+                Ok(state) => carry(state),
+                Err(message) => Reply::Refused(message),
+            }
+        }
     }
 }
 

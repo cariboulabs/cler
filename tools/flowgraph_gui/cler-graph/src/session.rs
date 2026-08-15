@@ -383,3 +383,149 @@ fn object_field<'a>(parent: &'a mut Map<String, Value>, key: &str) -> &'a mut Ma
             .or_insert_with(|| Value::Object(Map::new())),
     )
 }
+
+/// The document commands, with their JSON arguments already read. Both editions parse
+/// requests here; what they do with one differs (the desktop has files to keep in step).
+pub enum Request {
+    Apply { base_revision: u64, commands: Vec<Value> },
+    Preview { base_revision: u64, commands: Vec<Value> },
+    Edit { base_revision: u64, source: String },
+    MoveNodes { view: String, moves: Vec<NodeMove> },
+    Undo,
+    Redo,
+    Palette,
+    SaveCache { ui: Value },
+    SaveAs { new_path: String },
+}
+
+/// Arguments the caller got wrong — a bug in the frontend, not a refusal of the edit.
+pub struct Malformed(pub String);
+
+impl Request {
+    pub fn parse(cmd: &str, args: &Value) -> Result<Option<Request>, Malformed> {
+        let request = match cmd {
+            "apply_commands" => Request::Apply {
+                base_revision: base_revision(cmd, args)?,
+                commands: commands(cmd, args)?,
+            },
+            "preview_commands" => Request::Preview {
+                base_revision: base_revision(cmd, args)?,
+                commands: commands(cmd, args)?,
+            },
+            "edit_source" => Request::Edit {
+                base_revision: base_revision(cmd, args)?,
+                source: args
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| Malformed("edit_source needs baseRevision and source".to_string()))?
+                    .to_string(),
+            },
+            "move_nodes" => Request::MoveNodes {
+                view: args
+                    .get("view")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| Malformed("move_nodes needs view and moves".to_string()))?
+                    .to_string(),
+                moves: serde_json::from_value(args.get("moves").cloned().unwrap_or(Value::Null))
+                    .map_err(|_| Malformed("move_nodes needs view and moves".to_string()))?,
+            },
+            "undo" => Request::Undo,
+            "redo" => Request::Redo,
+            "palette" => Request::Palette,
+            "save_cache" => Request::SaveCache {
+                ui: args.get("ui").cloned().unwrap_or(Value::Null),
+            },
+            "save_document_as" => Request::SaveAs {
+                new_path: args
+                    .get("newPath")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        Malformed("save_document_as needs a newPath argument".to_string())
+                    })?
+                    .to_string(),
+            },
+            _ => return Ok(None),
+        };
+        Ok(Some(request))
+    }
+}
+
+fn base_revision(cmd: &str, args: &Value) -> Result<u64, Malformed> {
+    args.get("base_revision")
+        .or_else(|| args.get("baseRevision"))
+        .and_then(Value::as_u64)
+        .ok_or_else(|| Malformed(format!("{cmd} needs baseRevision and commands")))
+}
+
+fn commands(cmd: &str, args: &Value) -> Result<Vec<Value>, Malformed> {
+    args.get("commands")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| Malformed(format!("{cmd} needs baseRevision and commands")))
+}
+
+/// Runs a request against the session alone — the browser edition end to end.
+pub fn command(
+    doc: &mut Document,
+    specs: &[BlockSpec],
+    path: &str,
+    request: Request,
+) -> Result<Value, String> {
+    match request {
+        Request::Apply {
+            base_revision,
+            commands,
+        } => {
+            let commands: Vec<Command> = serde_json::from_value(Value::Array(commands))
+                .map_err(|cause| cause.to_string())?;
+            let includes = add_block_origins(&commands, specs);
+            apply(doc, base_revision, commands, &includes)?;
+            serde_json::to_value(snapshot(path, doc, specs)).map_err(|cause| cause.to_string())
+        }
+        Request::Preview {
+            base_revision,
+            commands,
+        } => {
+            let commands: Vec<Command> = serde_json::from_value(Value::Array(commands))
+                .map_err(|cause| cause.to_string())?;
+            let includes = add_block_origins(&commands, specs);
+            serde_json::to_value(preview(doc, base_revision, commands, &includes)?)
+                .map_err(|cause| cause.to_string())
+        }
+        Request::Edit {
+            base_revision,
+            source,
+        } => {
+            let (unparsed, fault) = match edit(doc, base_revision, &source)? {
+                Edited::Applied => (false, None),
+                Edited::Unparsed(fault) => (true, fault),
+            };
+            serde_json::to_value(EditOutcome {
+                unparsed,
+                fault,
+                state: snapshot(path, doc, &[]),
+            })
+            .map_err(|cause| cause.to_string())
+        }
+        Request::MoveNodes { view, moves } => {
+            move_nodes(doc, &view, moves)?;
+            serde_json::to_value(snapshot(path, doc, specs)).map_err(|cause| cause.to_string())
+        }
+        Request::Undo => {
+            step(doc, PatchDirection::Reverse)?;
+            serde_json::to_value(snapshot(path, doc, specs)).map_err(|cause| cause.to_string())
+        }
+        Request::Redo => {
+            step(doc, PatchDirection::Forward)?;
+            serde_json::to_value(snapshot(path, doc, specs)).map_err(|cause| cause.to_string())
+        }
+        Request::Palette => {
+            serde_json::to_value(palette(doc, path, specs)).map_err(|cause| cause.to_string())
+        }
+        Request::SaveCache { ui } => {
+            doc.ui = ui;
+            Ok(Value::Null)
+        }
+        Request::SaveAs { .. } => Err("saving under a new name needs a filesystem".to_string()),
+    }
+}

@@ -5,8 +5,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use cler_graph::session::{self, Document, EditOutcome, Edited, NodeMove};
-use cler_graph::{extract_specs, BlockSpec, Command, PatchDirection};
+use cler_graph::session::{self, Document};
+use cler_graph::{extract_specs, BlockSpec};
 use serde_json::{json, Value};
 
 const DESKTOP_ONLY: &str = "needs the desktop app";
@@ -95,49 +95,9 @@ fn dispatch(world: &mut World, cmd: &str, args: &Value) -> Result<Value, String>
 
 fn document_command(world: &mut World, cmd: &str, args: &Value) -> Result<Value, String> {
     let path = text(args, "path")?;
-    match cmd {
-        "open_document" => {
-            if !world.docs.contains_key(&path) {
-                let source = world
-                    .files
-                    .get(&path)
-                    .cloned()
-                    .ok_or_else(|| format!("cannot resolve {path}: not in the browser bundle"))?;
-                let doc = Document::load(source).map_err(|cause| cause.to_string())?;
-                world.docs.insert(path.clone(), doc);
-            }
-            state(world, &path)
-        }
-        "new_document" => {
-            if world.files.contains_key(&path) {
-                return Err(format!("{path} already exists"));
-            }
-            let source = session::NEW_DOCUMENT_TEMPLATE.to_string();
-            world.files.insert(path.clone(), source.clone());
-            world.docs.insert(
-                path.clone(),
-                Document::load(source).map_err(|cause| cause.to_string())?,
-            );
-            state(world, &path)
-        }
-        "close_document" => {
-            world.docs.remove(&path);
-            Ok(Value::Null)
-        }
-        "reload_document" => {
-            let saved = world.files.get(&path).cloned().unwrap_or_default();
-            doc_mut(&mut world.docs, &path)?.reload(saved)?;
-            state(world, &path)
-        }
-        "save_document" => {
-            let doc = doc_mut(&mut world.docs, &path)?;
-            doc.saved = doc.session.source().to_string();
-            let saved = doc.saved.clone();
-            world.files.insert(path.clone(), saved);
-            state(world, &path)
-        }
-        "save_document_as" => {
-            let new_path = text(args, "newPath")?;
+    let request = session::Request::parse(cmd, args).map_err(|refused| refused.0)?;
+    match request {
+        Some(session::Request::SaveAs { new_path }) => {
             let source = doc_mut(&mut world.docs, &path)?.session.source().to_string();
             world.files.insert(new_path.clone(), source.clone());
             world.docs.insert(
@@ -146,63 +106,51 @@ fn document_command(world: &mut World, cmd: &str, args: &Value) -> Result<Value,
             );
             state(world, &new_path)
         }
-        "save_cache" => {
-            doc_mut(&mut world.docs, &path)?.ui = args.get("ui").cloned().unwrap_or(Value::Null);
-            Ok(Value::Null)
-        }
-        "palette" => {
-            let specs = session::palette(doc_mut(&mut world.docs, &path)?, &path, &world.palette);
-            serde_json::to_value(specs).map_err(|cause| cause.to_string())
-        }
-        "apply_commands" | "preview_commands" => {
-            let base = revision(args)?;
-            let commands: Vec<Command> = serde_json::from_value(
-                args.get("commands").cloned().unwrap_or(Value::Array(Vec::new())),
-            )
-            .map_err(|cause| cause.to_string())?;
-            // JS registers palette origins repo-relative, so an origin is already an include path.
-            let includes = session::add_block_origins(&commands, &world.palette);
+        Some(request) => {
             let doc = doc_mut(&mut world.docs, &path)?;
-            if cmd == "preview_commands" {
-                let preview = session::preview(doc, base, commands, &includes)?;
-                return serde_json::to_value(preview).map_err(|cause| cause.to_string());
+            session::command(doc, &world.palette, &path, request)
+        }
+        None => match cmd {
+            "open_document" => {
+                if !world.docs.contains_key(&path) {
+                    let source = world.files.get(&path).cloned().ok_or_else(|| {
+                        format!("cannot resolve {path}: not in the browser bundle")
+                    })?;
+                    let doc = Document::load(source).map_err(|cause| cause.to_string())?;
+                    world.docs.insert(path.clone(), doc);
+                }
+                state(world, &path)
             }
-            session::apply(doc, base, commands, &includes)?;
-            state(world, &path)
-        }
-        "edit_source" => {
-            let base = revision(args)?;
-            let source = text(args, "source")?;
-            let doc = doc_mut(&mut world.docs, &path)?;
-            let (unparsed, fault) = match session::edit(doc, base, &source)? {
-                Edited::Applied => (false, None),
-                Edited::Unparsed(fault) => (true, fault),
-            };
-            serde_json::to_value(EditOutcome {
-                unparsed,
-                fault,
-                state: session::snapshot(&path, doc, &[]),
-            })
-            .map_err(|cause| cause.to_string())
-        }
-        "move_nodes" => {
-            let view = text(args, "view")?;
-            let moves: Vec<NodeMove> =
-                serde_json::from_value(args.get("moves").cloned().unwrap_or(Value::Null))
-                    .map_err(|cause| cause.to_string())?;
-            session::move_nodes(doc_mut(&mut world.docs, &path)?, &view, moves)?;
-            state(world, &path)
-        }
-        "undo" | "redo" => {
-            let direction = if cmd == "undo" {
-                PatchDirection::Reverse
-            } else {
-                PatchDirection::Forward
-            };
-            session::step(doc_mut(&mut world.docs, &path)?, direction)?;
-            state(world, &path)
-        }
-        _ => Err(format!("unknown command: {cmd}")),
+            "new_document" => {
+                if world.files.contains_key(&path) {
+                    return Err(format!("{path} already exists"));
+                }
+                let source = session::NEW_DOCUMENT_TEMPLATE.to_string();
+                world.files.insert(path.clone(), source.clone());
+                world.docs.insert(
+                    path.clone(),
+                    Document::load(source).map_err(|cause| cause.to_string())?,
+                );
+                state(world, &path)
+            }
+            "close_document" => {
+                world.docs.remove(&path);
+                Ok(Value::Null)
+            }
+            "reload_document" => {
+                let saved = world.files.get(&path).cloned().unwrap_or_default();
+                doc_mut(&mut world.docs, &path)?.reload(saved)?;
+                state(world, &path)
+            }
+            "save_document" => {
+                let doc = doc_mut(&mut world.docs, &path)?;
+                doc.saved = doc.session.source().to_string();
+                let saved = doc.saved.clone();
+                world.files.insert(path.clone(), saved);
+                state(world, &path)
+            }
+            _ => Err(format!("unknown command: {cmd}")),
+        },
     }
 }
 
@@ -211,13 +159,6 @@ fn text(args: &Value, key: &str) -> Result<String, String> {
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| format!("missing {key} argument"))
-}
-
-fn revision(args: &Value) -> Result<u64, String> {
-    args.get("base_revision")
-        .or_else(|| args.get("baseRevision"))
-        .and_then(Value::as_u64)
-        .ok_or_else(|| "missing baseRevision".to_string())
 }
 
 fn doc_mut<'a>(docs: &'a mut HashMap<String, Document>, path: &str) -> Result<&'a mut Document, String> {
