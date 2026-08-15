@@ -12,7 +12,7 @@
 #include "desktop_blocks/plots/plot_cspectrogram.hpp"
 
 int main() {
-    size_t SPS = 200;
+    size_t SPS = 2000;
 
     const size_t GW = 1500;
     const size_t GH = 800;
@@ -29,7 +29,7 @@ int main() {
         10.0f //duration in seconds
     );
 
-    SourceChirpBlock<std::complex<float>> chirp_source("ChirpSource", 1.0f, 20.0f, 80.0f, SPS, 10.0f);
+    SourceChirpBlock<std::complex<float>> chirp_source("ChirpSource", 1.0f, 200.0f, 800.0f, SPS, 4.0f);
     ThrottleBlock<std::complex<float>> chirp_throttle("ChirpThrottle", SPS);
     FanoutBlock<std::complex<float>> chirp_fanout("ChirpFanout", 3);
     ComplexToMagPhaseBlock chirp_c2realimag("ChirpComplex2RealImag", ComplexToMagPhaseBlock::Mode::RealImag);
@@ -78,9 +78,30 @@ int main() {
     );
 
     flowgraph.run();
+
+    std::atomic<bool> probe_done{false};
+    std::thread probe([&] {
+        auto start = std::chrono::steady_clock::now();
+        size_t last_cw = 0, last_chirp = 0;
+        while (!probe_done.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            size_t cw = cspectrum_plot.in[0].consumer_thread_cumulative_read_count();
+            size_t chirp = cspectrum_plot.in[1].consumer_thread_cumulative_read_count();
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - start)
+                          .count();
+            printf("probe %6lld ms  cw +%4zu (=%6zu)  chirp +%4zu (=%6zu)\n",
+                   static_cast<long long>(ms), cw - last_cw, cw, chirp - last_chirp, chirp);
+            last_cw = cw;
+            last_chirp = chirp;
+        }
+    });
+
     while (!gui.should_close()) {
         gui.render(flowgraph);
     }
+    probe_done.store(true, std::memory_order_release);
+    probe.join();
     flowgraph.stop();
     cler::print_flowgraph_execution_report(flowgraph);
 }
