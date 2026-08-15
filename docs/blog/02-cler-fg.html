@@ -96,14 +96,14 @@
             </section>
 
             <section>
-                <h2>The agent has to show its work</h2>
-                <p>Press <kbd>Ctrl+J</kbd> and the agent gets the graph you are looking at, not a screenshot of it. Ask why a throttle sits before the plot. Ask for a spectrum sink after a filter. When words are enough, it answers in words.</p>
-                <p>When the answer is an edit, the agent must use the same validated graph operations as the canvas. cler-fg shows the commands in plain language and the exact source diff. Nothing touches the file until you accept; the accepted proposal becomes one undo step. The agent is inside the editor's safety model, not a second path around it.</p>
+                <h2>Just ask</h2>
+                <p>Press <kbd>Ctrl+J</kbd> and talk to the graph you are looking at. "Why is there a throttle before the plot?" gets an answer. "Add a spectrum sink after the filter" gets the block placed, wired, and included &mdash; you read the plain-language summary and press accept. Sign in with Claude or drop in an API key; nothing else to set up.</p>
+                <p>The agent works through the same validated graph operations as the canvas, so what it proposes always parses, always builds, and lands as one undo step. If you don't like it, undo.</p>
             </section>
 
             <section>
                 <h2>Try it</h2>
-                <p>Install the <a href="../learn.html#tools">cler-fg prerequisites</a>, then use the launcher at the repository root:</p>
+                <p><a href="../try/">Open the browser demo</a> — the real editor UI over the bundled examples, read-only (no build, run, or agent; those need your machine). For the full thing, install the <a href="../learn.html#tools">cler-fg prerequisites</a>, then use the launcher at the repository root:</p>
                 <div class="code-block">
                     <pre><code>git clone https://github.com/cariboulabs/cler.git
 cd cler

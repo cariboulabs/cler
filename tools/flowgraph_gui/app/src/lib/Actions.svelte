@@ -529,7 +529,7 @@
 />
 
 <div class="bar" data-testid="top-bar">
-  <img src="/brand/cler_mark.png" alt="cler" width="22" height="22" />
+  <img src={`${import.meta.env.BASE_URL}brand/cler_mark.png`} alt="cler" width="22" height="22" />
   <span class="wordmark">cler</span>
   <span class="draft-slot">
     <button

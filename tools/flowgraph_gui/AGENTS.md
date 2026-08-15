@@ -111,3 +111,14 @@ per document.
 
 Prefer deleting a surface over decorating it. The bar for adding UI is a user
 decision it enables, not information it displays.
+
+## Browser builds
+
+- `docs/try/` — static, read-only example mode (no shell). Regenerate with
+  `npm run build:web` in `app/` after UI or fixture changes and commit the
+  output; the docs site serves it as "Try it in the browser".
+- Hosted full editor — `docker/Dockerfile.web`: the frontend built with
+  `VITE_CLER_WEB_BACKEND=` (same origin) installs `src/lib/webshim.ts`, the
+  Tauri-IPC-over-HTTP bridge the e2e tests use, and `e2e_backend <port>
+  --static <dir>` serves both. One shared workspace for every visitor; the AI
+  agent, file dialogs, and Run (no display) stay desktop-only.
