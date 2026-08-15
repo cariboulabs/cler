@@ -53,11 +53,6 @@ export function parts(event: PhaseEvent): { phrase: string; target: string | nul
   }
 }
 
-export function label(event: PhaseEvent): string {
-  const { phrase, target } = parts(event);
-  return target ? `${phrase} ${target}` : phrase;
-}
-
 function mb(bytes: number): string {
   return (bytes / 1e6).toFixed(1);
 }

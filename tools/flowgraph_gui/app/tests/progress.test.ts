@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { label, progress, remaining, type Timings } from '../src/lib/progress';
+import { parts, progress, remaining, type PhaseEvent, type Timings } from '../src/lib/progress';
+
+const label = (event: PhaseEvent) => {
+  const { phrase, target } = parts(event);
+  return target ? `${phrase} ${target}` : phrase;
+};
 
 describe('phase → label', () => {
   it('names the download with real bytes', () => {

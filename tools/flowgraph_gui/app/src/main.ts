@@ -3,11 +3,7 @@ import App from './App.svelte';
 import { inTauri } from './lib/backend';
 import './app.css';
 
-// VITE_CLER_WASM: no server at all — the editor session runs in cler_web.wasm over the bundled examples and block headers.
 async function bootBrowser() {
-  // GitHub Pages sends no COOP/COEP headers, serves nothing under built/, and cannot proxy
-  // the emception toolchain — public/cler-sw.js does all three. The first visit reloads once
-  // so this document itself comes back through it and the page is cross-origin isolated.
   const { TOOLCHAIN_BASE, TOOLCHAIN_PINS, blockToolchain } = await import('./lib/emception');
   const base = import.meta.env.BASE_URL;
   try {
@@ -18,11 +14,9 @@ async function bootBrowser() {
     else if (!sessionStorage.getItem('clerSwReload')) {
       sessionStorage.setItem('clerSwReload', '1');
       location.reload();
-      return; // the rest of this module would only load into a document that is going away
+      return;
     }
   } catch (error) {
-    // Private windows and locked-down profiles have no service worker. The editor still works;
-    // compiling does not, and the task buttons say so instead of failing silently.
     console.warn('cler service worker unavailable', error);
     blockToolchain('Build and Run need a service worker; this browser mode disables it');
   }

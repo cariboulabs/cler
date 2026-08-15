@@ -45,7 +45,7 @@ export type Line = (text: string) => void;
 
 const encoder = new TextEncoder();
 const assetBaseUrl = () => new URL(import.meta.env.BASE_URL, location.href).href;
-const INIT_TIMEOUT_MS = 60_000;
+const STALL_TIMEOUT_MS = 60_000;
 let booting: Promise<Emception> | null = null;
 let sink: Line = () => {};
 let blocked: string | null = null;
@@ -103,6 +103,7 @@ function boot(files: Record<string, string>, onLine: Line): Promise<Emception> {
 
 async function start(files: Record<string, string>): Promise<Emception> {
   let bytes = 0;
+  let lastToolchainActivity = Date.now();
   let workerReportedError: string | null = null;
   const onToolchainMessage = (event: MessageEvent) => {
     const data = event.data as { toolchain?: string; bytes?: number; toolchainError?: string };
@@ -111,6 +112,7 @@ async function start(files: Record<string, string>): Promise<Emception> {
       sink(data.toolchainError);
     } else if (data?.toolchain) {
       bytes += data.bytes ?? 0;
+      lastToolchainActivity = Date.now();
       phase(bytes >= TOOLCHAIN_BYTES ? { phase: 'boot' } : { phase: 'toolchain', bytes, total: TOOLCHAIN_BYTES });
       sink(`downloading the C++ toolchain (first visit only)… ${(bytes / 1e6).toFixed(1)} MB`);
     }
@@ -122,14 +124,19 @@ async function start(files: Record<string, string>): Promise<Emception> {
   const em = Comlink.wrap(worker) as unknown as Emception;
   em.onstdout = Comlink.proxy((text: string) => sink(text));
   em.onstderr = Comlink.proxy((text: string) => sink(text));
-  let timer = 0;
+  let stallWatch = 0;
   const stalled = new Promise<never>((_, reject) => {
     worker.onerror = (event) =>
       reject(new Error(workerReportedError ?? `the C++ toolchain worker failed: ${event.message || 'load error'}`));
-    timer = self.setTimeout(
-      () => reject(new Error(workerReportedError ?? `the C++ toolchain did not start within ${INIT_TIMEOUT_MS / 1000} s`)),
-      INIT_TIMEOUT_MS
-    );
+    stallWatch = self.setInterval(() => {
+      if (Date.now() - lastToolchainActivity < STALL_TIMEOUT_MS) return;
+      reject(
+        new Error(
+          workerReportedError ??
+            `the C++ toolchain stalled for ${STALL_TIMEOUT_MS / 1000} s with no download progress`
+        )
+      );
+    }, 1000);
   });
   try {
     await Promise.race([em.init(), stalled]);
@@ -140,7 +147,7 @@ async function start(files: Record<string, string>): Promise<Emception> {
     worker.terminate();
     throw error;
   } finally {
-    clearTimeout(timer);
+    clearInterval(stallWatch);
     navigator.serviceWorker.removeEventListener('message', onToolchainMessage);
   }
   return em;

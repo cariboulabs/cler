@@ -141,9 +141,9 @@ export async function installWasmShell(
       }
       const path = args.path as string;
       const pristine = runnable.find((entry) => entry.path === path && entry.source === currentSource(path));
-      const blockedReason = pristine ? null : toolchainBlocked();
+      const noToolchain = toolchainBlocked();
       if (cmd === 'find_target') {
-        if (blockedReason) throw blockedReason;
+        if (noToolchain && !pristine) throw noToolchain;
         if (pristine) {
           return {
             available: true, reason: null, name: pristine.name, buildDir: null,
@@ -166,11 +166,11 @@ export async function installWasmShell(
         };
       }
       if (cmd === 'check_document') {
-        if (toolchainBlocked()) throw toolchainBlocked();
+        if (noToolchain) throw noToolchain;
         return job('check', path, (emit) => compile(files, path, currentSource(path), emit));
       }
       if (cmd === 'build_target') {
-        if (blockedReason) throw blockedReason;
+        if (noToolchain) throw noToolchain;
         return job('build', path, async (emit) => {
           const source = currentSource(path);
           const sha = await sha256(source);

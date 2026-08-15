@@ -158,9 +158,7 @@
   // too — this build flag is what separates /try from the desktop app. Progress panel is
   // browser-only; make it generic if the Tauri jobs ever grow phases worth showing.
   const inBrowser = !!import.meta.env.VITE_CLER_WASM;
-  const NOTE_BROWSER = 'example mode — read-only viewer, editing needs the desktop shell';
-  const NOTE_DESKTOP = 'example mode — read-only viewer — use Open file… to edit the real file';
-  const viewerNote = desktop ? NOTE_DESKTOP : NOTE_BROWSER;
+  const viewerNote = 'example mode — read-only viewer — use Open file… to edit the real file';
   const DISK_DRIFT = 'changed on disk';
   const DISK_NOTE = 'this file changed on disk — reload before building or running';
   const NO_SITE = 'no flowgraph site found in this file';

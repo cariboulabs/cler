@@ -10,6 +10,7 @@ repo="$(cd "$here/../../.." && pwd)"
 deps="${CLER_DEPS:-$repo/build/_deps}"        # imgui-src, implot-src, liquid-src from a native configure
 out="$here/out"; run="$here/../app/public/run"   # vite copies public/ into docs/try/
 payload="$here/../app/public/payload"             # what the in-browser compiler needs (fetched on first Build)
+rm -rf "$out/obj"
 mkdir -p "$out/obj" "$run" "$payload"
 jobs="$(nproc --ignore=1)"
 
@@ -51,6 +52,7 @@ build_example() { # name source
   echo "== example $name"
   em++ "${CXXFLAGS[@]}" -c "$src" -o "$out/obj/example_$name.o"
   em++ "$out/obj/example_$name.o" "$out/libcler_web.a" "$out/liquid/lib/libliquid.a" "${LDFLAGS[@]}" -o "$run/$name.html"
+  chmod 644 "$run/$name".*
 }
 echo "== payload for the in-browser compiler"
 cp "$out/libcler_web.a" "$out/liquid/lib/libliquid.a" "$payload/"

@@ -147,8 +147,12 @@ decision it enables, not information it displays.
   reloads once on the first visit; if registration fails (private windows) the
   editor still mounts and Check/Build/Run refuse with that reason. The mirrored
   bundle runs as same-origin code, so its four entry files are pinned by sha256 in
-  `TOOLCHAIN_PINS` — bump `TOOLCHAIN_BASE` and you must recompute them, and the
-  toolchain cache is keyed by origin so the old one is dropped.
+  `TOOLCHAIN_PINS` — bump `TOOLCHAIN_BASE` and you must recompute them. The
+  toolchain cache is keyed by both, so changing either drops the old one and
+  re-verifies; a stale cache would answer the bundle and 404 everything it asks
+  for. Fetch failures come back as a 502 with a `toolchainError` message, and
+  `em.init()` is raced against the worker's own error and a stall watch, since it
+  otherwise never settles.
 - `wasmbridge.ts` answers `find_target`/`check_document`/`build_target`/`run_target`:
   a bundled example still equal to the bundle runs straight from `run/<name>.html`;
   anything else compiles and links into `built/<sha of source>/app.html` and Run

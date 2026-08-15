@@ -1,15 +1,8 @@
-// Three jobs, all needed because GitHub Pages serves plain static files:
-//  1. add COOP/COEP to every response, so pthreads work (the coi-serviceworker trick, MIT,
-//     Guido Zuidhof and contributors — https://github.com/gzuidhof/coi-serviceworker);
-//  2. mirror the emception toolchain under emception/* so a cross-origin worker bundle
-//     becomes a same-origin one that can still resolve its own assets by relative URL —
-//     verifying each pinned file's sha256 before it is cached, because that bundle then
-//     runs as same-origin code;
-//  3. serve built/* out of Cache Storage, where a browser build drops its files.
+// COOP/COEP headers adapted from coi-serviceworker (MIT, Guido Zuidhof and contributors).
 const params = new URL(self.location.href).searchParams;
 const TOOLCHAIN = params.get('toolchain');
 const PINS = JSON.parse(params.get('pins') || '{}');
-const CACHE = `cler-toolchain:${TOOLCHAIN}`;
+const CACHE = `cler-toolchain:${TOOLCHAIN}:${Object.values(PINS).join('-')}`;
 const TYPES = { html: 'text/html', js: 'text/javascript', wasm: 'application/wasm', json: 'application/json' };
 
 self.addEventListener('install', () => self.skipWaiting());
@@ -17,8 +10,6 @@ self.addEventListener('activate', (event) =>
   event.waitUntil(
     (async () => {
       await self.clients.claim();
-      // A different TOOLCHAIN means different content-hashed asset names: a stale cache would
-      // answer the bundle but 404 everything it asks for.
       for (const name of await caches.keys()) {
         if (name.startsWith('cler-toolchain:') && name !== CACHE) await caches.delete(name);
       }
@@ -56,10 +47,9 @@ async function mirrored(name) {
   }
   if (!response.ok) return fail(`the C++ toolchain host answered ${response.status} for ${name}`);
   const body = await response.arrayBuffer();
-  // Only the four entry files are pinned by hash. Everything else the bundle pulls is named by
-  // its own content hash, and the bundle asking for it is itself pinned — so the *set* of names
-  // is fixed. Pinning their bytes too needs a generated table; add one if the host is ever
-  // untrusted rather than merely unversioned.
+  // ponytail: only the entry files are pinned by hash; the rest are named by their own content
+  // hash and requested by the pinned bundle, so the set of names is fixed but not the bytes.
+  // Generate a full table if the host ever becomes untrusted rather than merely unversioned.
   const pinned = PINS[name];
   if (pinned) {
     const digest = await crypto.subtle.digest('SHA-256', body);
