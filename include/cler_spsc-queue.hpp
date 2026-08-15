@@ -13,6 +13,7 @@
 #ifndef DRO_SPSC_QUEUE
 #define DRO_SPSC_QUEUE
 
+#include <algorithm>   // for std::copy_n
 #include <array>       // for std::array
 #include <atomic>      // for atomic, memory_order
 #include <cstddef>     // for size_t
@@ -71,6 +72,11 @@ struct AdaptiveHeapBuffer {
   T* buffer_;
   [[no_unique_address]] Allocator allocator_;
   bool is_doubly_mapped_ = false;
+  // Software mirror when the OS cannot double-map (wasm, exotic kernels): three halves.
+  // [0,cap) is the ring; write_dbf lets the writer overflow into [cap,2cap) and commit_write
+  // folds that tail back; read_dbf linearizes a window that crosses the end into [2cap,3cap).
+  // Costs a copy at the wrap only; the two sides never touch each other's spare half.
+  bool is_mirrored_ = false;
 
   static constexpr std::size_t padding = ((cacheLineSize - 1) / sizeof(T)) + 1;
   static constexpr std::size_t MAX_SIZE_T = std::numeric_limits<std::size_t>::max();
@@ -131,7 +137,8 @@ public:
     }
     
     // Fallback to standard heap allocation WITH padding
-    const std::size_t total_size = capacity_ + (2 * padding);
+    is_mirrored_ = buffer_bytes >= DOUBLY_MAPPED_MIN_SIZE;
+    const std::size_t total_size = (is_mirrored_ ? 3 * capacity_ : capacity_) + (2 * padding);
     raw_allocation_ = std::allocator_traits<Allocator>::allocate(allocator_, total_size);
     
     // Initialize all elements including padding
@@ -156,7 +163,7 @@ public:
       // vmem_allocation_ destructor will clean up mmap
     } else if (raw_allocation_) {
       // Standard heap buffer cleanup
-      const std::size_t total_size = capacity_ + (2 * padding);
+      const std::size_t total_size = (is_mirrored_ ? 3 * capacity_ : capacity_) + (2 * padding);
       
       // Destroy all elements including padding
       if constexpr (!std::is_trivially_destructible_v<T>) {
@@ -185,6 +192,7 @@ struct StackBuffer {
   // (2 * padding) is for preventing cache contention between adjacent memory
   std::array<T, capacity_ + (2 * padding)> buffer_;
   bool is_doubly_mapped_ = false;  // Always false for stack buffers
+  bool is_mirrored_ = false;
 
   explicit StackBuffer(const std::size_t capacity,
                        [[maybe_unused]] const Allocator &allocator = Allocator()) {
@@ -222,6 +230,7 @@ private:
     std::size_t readIndexCache_{0};
     std::size_t cumulativeWriteCount_{0};
     std::size_t dbfLastWriteIndex_{0};
+    bool dbfMirrorPending_{false};
   } writer_;
 
   struct alignas(details::cacheLineSize) ReaderCacheLine {
@@ -484,6 +493,9 @@ public:
   }
 
   std::size_t peek_write(T*& ptr1, std::size_t& size1, T*& ptr2, std::size_t& size2) noexcept {
+    if constexpr (N == 0) {
+      writer_.dbfMirrorPending_ = false; // a peek_write span is committed as-is; only write_dbf spans fold
+    }
     const auto capacity = base_type::capacity_;
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
@@ -583,7 +595,7 @@ public:
 
   std::pair<const T*, std::size_t> read_dbf() noexcept {
       if constexpr (N == 0) {
-          if (base_type::is_doubly_mapped_) {
+          if (base_type::is_doubly_mapped_ || base_type::is_mirrored_) {
               const auto capacity = base_type::capacity_;
               const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
 
@@ -604,6 +616,13 @@ public:
               }
 
               const T* ptr = &base_type::buffer_[readIndex];
+              if (base_type::is_mirrored_ && readIndex + available > capacity) {
+                  T* scratch = base_type::buffer_ + 2 * capacity;
+                  std::copy_n(ptr, capacity - readIndex, scratch);
+                  std::copy_n(base_type::buffer_, readIndex + available - capacity,
+                              scratch + (capacity - readIndex));
+                  return {scratch, available};
+              }
               return {ptr, available};
           }
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
@@ -621,6 +640,15 @@ public:
   void commit_write(std::size_t count) noexcept {
       const auto capacity = base_type::capacity_;
       const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
+      if constexpr (N == 0) {
+          if (writer_.dbfMirrorPending_) {
+              writer_.dbfMirrorPending_ = false;
+              if (writeIndex + count > capacity) {
+                  T* tail = base_type::buffer_ + capacity;
+                  std::move(tail, tail + (writeIndex + count - capacity), base_type::buffer_);
+              }
+          }
+      }
       const auto nextWriteIndex = (writeIndex + count) % capacity;
       writer_.writeIndex_.store(nextWriteIndex, std::memory_order_release);
       writer_.cumulativeWriteCount_ += count;
@@ -628,7 +656,7 @@ public:
 
   std::pair<T*, std::size_t> write_dbf() noexcept {
       if constexpr (N == 0) {
-          if (base_type::is_doubly_mapped_) {
+          if (base_type::is_doubly_mapped_ || base_type::is_mirrored_) {
               const auto capacity = base_type::capacity_;
               const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
 
@@ -649,6 +677,7 @@ public:
               }
 
               T* ptr = &base_type::buffer_[writeIndex];
+              writer_.dbfMirrorPending_ = base_type::is_mirrored_;
               return {ptr, space};
           }
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);

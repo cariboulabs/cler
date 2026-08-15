@@ -125,3 +125,54 @@ decision it enables, not information it displays.
   checkout for tree-sitter's C). Regenerate after UI, fixture, or block-header
   changes and commit the output. `tests/wasm_session.test.ts` covers the wasm
   end to end and skips when it is not built.
+- Run in the browser — `web-run/build.sh` (needs `EMSDK=` an emsdk checkout with
+  **3.1.24** activated, the version emception ships) builds liquid-dsp + GUI/plot
+  blocks into `libcler_web.a`, the examples in `src/fixtures/files.ts::RUNNABLE`
+  into `app/public/run/`, and the *payload* the in-browser compiler needs into
+  `app/public/payload/`: the two archives plus `headers.json` (`include/**`, the
+  imgui/implot headers, `liquid.h`, `shell.html` — `desktop_blocks/**` already
+  ships inside the app bundle). Rerun it after touching those headers or flags;
+  `CXXFLAGS`/`LDFLAGS` in `src/lib/emception.ts` must stay in step with the script.
+- Build in the browser — `src/lib/emception.ts` runs em++ under
+  [emception](https://github.com/jprendes/emception) (clang + lld + the emscripten
+  sysroot, in wasm) over a virtual repo rooted at `/working`, so every path on the
+  command line — and in the diagnostics coming back — is the app's own
+  repo-relative path. The toolchain itself is fetched from `TOOLCHAIN_BASE`
+  (emception's GitHub Pages); self-hosting is a base-URL swap. Compile is `-O2`,
+  link is `-O1` (`-O2` links take minutes).
+- `public/cler-sw.js` is the one service worker: it adds COOP/COEP to every
+  response (the coi-serviceworker trick, MIT), mirrors the cross-origin toolchain
+  under `emception/*` so its worker bundle can resolve its own assets by relative
+  URL, and serves `built/*` out of Cache Storage. `main.ts` registers it and
+  reloads once on the first visit; if registration fails (private windows) the
+  editor still mounts and Check/Build/Run refuse with that reason. The mirrored
+  bundle runs as same-origin code, so its four entry files are pinned by sha256 in
+  `TOOLCHAIN_PINS` — bump `TOOLCHAIN_BASE` and you must recompute them. The
+  toolchain cache is keyed by both, so changing either drops the old one and
+  re-verifies; a stale cache would answer the bundle and 404 everything it asks
+  for. Fetch failures come back as a 502 with a `toolchainError` message, and
+  `em.init()` is raced against the worker's own error and a stall watch, since it
+  otherwise never settles.
+- `wasmbridge.ts` answers `find_target`/`check_document`/`build_target`/`run_target`:
+  a bundled example still equal to the bundle runs straight from `run/<name>.html`;
+  anything else compiles and links into `built/<sha of source>/app.html` and Run
+  pops that. Both run windows are cross-origin isolated, so pthreads work.
+- Waiting, in the browser — a build takes 15-60 s, so `src/lib/BuildProgress.svelte` takes over the
+  top band of the bottom drawer for the duration — the drawer reserves `STRIP_H` pixels (its `inset`
+  prop) so the canvas is never covered, and when the drawer is collapsed the same surface shrinks to
+  a pill at bottom centre that opens it (browser only: `inTauri()` is true under the wasm shell
+  too, so the gate is the `VITE_CLER_WASM` build flag). It shows nothing it did not observe:
+  `emception.ts` and `wasmbridge.ts` call `phase()` from `src/lib/progress.ts` at the real
+  transitions — toolchain download (cumulative service-worker bytes over `TOOLCHAIN_BYTES`),
+  boot, staging the payload, compile (with the file), link, wasm-opt *only* when em++ names it,
+  store, launch — and the panel maps the event to one phrase in the UI font
+  with its target (file, byte count) in monospace beside it, over a 3 px full-bleed track:
+  determinate where there are numbers (bytes, or per-phase durations banked in `localStorage` by the
+  last run), a shimmer where there are none. Under the track one muted line — a cler fact, or the
+  25 MB first-build note while the toolchain downloads. A finished job flashes the track green and
+  folds away; a failed one keeps a red track with the first error and a jump to Diagnostics, and
+  Output keeps the raw em++ log. `tests/progress.test.ts` covers the mapping.
+- `web-run/smoke.mjs` is the end-to-end check: `node ../web-run/smoke.mjs` from
+  `app/` after `npm run build:web` serves `docs/` with a header-less
+  `python3 -m http.server` (as Pages does) and drives edit → check → build → run
+  → screenshot in headless Chromium.

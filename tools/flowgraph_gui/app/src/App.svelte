@@ -134,6 +134,7 @@
     type Span
   } from './lib/schema';
   import type { CodeMark } from './lib/editor';
+  import BuildProgress, { STRIP_H } from './lib/BuildProgress.svelte';
   import CodeDrawer from './lib/CodeDrawer.svelte';
   import type { Tab } from './lib/CodeDrawer.svelte';
   import { fixtureNames } from './fixtures';
@@ -153,9 +154,11 @@
   }
 
   const desktop = inTauri();
-  const NOTE_BROWSER = 'example mode — read-only viewer, editing needs the desktop shell';
-  const NOTE_DESKTOP = 'example mode — read-only viewer — use Open file… to edit the real file';
-  const viewerNote = desktop ? NOTE_DESKTOP : NOTE_BROWSER;
+  // ponytail: the wasm shell installs __TAURI_INTERNALS__, so inTauri() is true in the browser
+  // too — this build flag is what separates /try from the desktop app. Progress panel is
+  // browser-only; make it generic if the Tauri jobs ever grow phases worth showing.
+  const inBrowser = !!import.meta.env.VITE_CLER_WASM;
+  const viewerNote = 'example mode — read-only viewer — use Open file… to edit the real file';
   const DISK_DRIFT = 'changed on disk';
   const DISK_NOTE = 'this file changed on disk — reload before building or running';
   const NO_SITE = 'no flowgraph site found in this file';
@@ -235,6 +238,12 @@
   let output = $state.raw<string[]>([]);
   let busy = $state<TaskKind | null>(null);
   let running = $state(false);
+  let taskFail = $state<string | null>(null);
+  let justFinished = $state<'check' | 'build' | null>(null);
+  let justFinishedTimer: ReturnType<typeof setTimeout> | undefined;
+  const progressOn = $derived(
+    inBrowser && (busy !== null || running || taskFail !== null || justFinished !== null)
+  );
   let targetRefresh = $state(0);
   let rightTab = $state<RailTab>('inspector');
   let leftTab = $state<RailTab>(desktop ? 'ai-agent' : 'settings');
@@ -475,6 +484,12 @@
         if (kind === 'build') targetRefresh += 1;
       }
       output = [...output, `— ${kind} finished (exit ${payload.code ?? 'signal'})`];
+      if (kind !== 'run' && payload.code === 0) flashFinished(kind);
+      if (kind !== 'run' && payload.code !== 0) {
+        taskFail =
+          diagnostics.find((entry) => entry.severity === 'error')?.message ??
+          `${kind} failed — the raw log is in Output`;
+      }
     });
     const artifactChanges = onArtifactStatusChange((path) => {
       if (path === doc.path) targetRefresh += 1;
@@ -717,6 +732,7 @@
     output = [];
     busy = null;
     running = false;
+    taskFail = null;
     for (const [kind, jobId] of activeJobs) latestJobs.set(kind, jobId);
     activeJobs.clear();
     targetRefresh += 1;
@@ -1386,6 +1402,12 @@
     return true;
   }
 
+  function flashFinished(kind: 'check' | 'build') {
+    clearTimeout(justFinishedTimer);
+    justFinished = kind;
+    justFinishedTimer = setTimeout(() => (justFinished = null), 1400);
+  }
+
   async function task(kind: TaskKind, action: (path: string) => Promise<TaskStarted>) {
     await flushText();
     if (unparsed) {
@@ -1393,6 +1415,9 @@
       return;
     }
     output = [];
+    taskFail = null;
+    clearTimeout(justFinishedTimer);
+    justFinished = null;
     if (kind !== 'run') diagLines = [];
     if (kind === 'run') running = true;
     else busy = kind;
@@ -1408,7 +1433,8 @@
       activeJobs.delete(kind);
       if (kind === 'run') running = false;
       else busy = null;
-      announce(describeApplyError(error));
+      taskFail = describeApplyError(error);
+      announce(taskFail);
     }
   }
 
@@ -1905,7 +1931,7 @@
         </div>
       {/if}
 
-      {#if !drawerOpen}
+      {#if !drawerOpen && !progressOn}
         <button
           class="drawer-toggle"
           data-testid="drawer-toggle"
@@ -1913,6 +1939,23 @@
           title="Expand code drawer  Ctrl+`"
           onclick={() => (drawerOpen = true)}>⌃ Code</button
         >
+      {/if}
+
+      {#if progressOn}
+        <BuildProgress
+          kind={busy ?? (running ? 'run' : null)}
+          done={justFinished}
+          error={taskFail}
+          docked={drawerOpen}
+          bottom={drawerOpen ? drawerHeight - STRIP_H + 12 : 12}
+          onstop={() => void toggleRun()}
+          ondiagnostics={() => {
+            drawerOpen = true;
+            tab = 'diagnostics';
+          }}
+          ondismiss={() => (taskFail = null)}
+          onopen={() => (drawerOpen = true)}
+        />
       {/if}
 
       {#if drawerMounted}
@@ -1932,6 +1975,7 @@
           {anchors}
           {siteAnchor}
           height={drawerHeight}
+          inset={progressOn && drawerOpen ? STRIP_H : 0}
           {tab}
           {diagnostics}
           {output}

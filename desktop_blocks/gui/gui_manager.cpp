@@ -3,6 +3,9 @@
 #include "cler_desktop_utils.hpp"
 
 #include <GLFW/glfw3.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
@@ -257,10 +260,16 @@ GuiManager::GuiManager(int width, int height, const std::string_view title) {
         cler::panic("GLFW init failed!");
     }
 
+#ifdef __EMSCRIPTEN__
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+#else
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_SAMPLES, 4);
+#endif
 
     window = glfwCreateWindow(width, height, title.data(), nullptr, nullptr);
     if (!window) {
@@ -269,14 +278,20 @@ GuiManager::GuiManager(int width, int height, const std::string_view title) {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
+#ifndef __EMSCRIPTEN__
     glEnable(GL_MULTISAMPLE);
+#endif
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImPlot::CreateContext();
     apply_cler_style();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
+#ifdef __EMSCRIPTEN__
+    ImGui_ImplOpenGL3_Init("#version 300 es");
+#else
     ImGui_ImplOpenGL3_Init("#version 330");
+#endif
 
     ImGui::GetStyle().AntiAliasedLines = true;
     ImGui::GetStyle().AntiAliasedLinesUseTex = true;
@@ -317,6 +332,9 @@ void GuiManager::end_frame() {
         _screenshot_pending = false;
     }
     glfwSwapBuffers(window);
+#ifdef __EMSCRIPTEN__
+    emscripten_sleep(0); // yield to the browser event loop (ASYNCIFY); the app owns the render loop
+#endif
 }
 
 void GuiManager::request_screenshot(const std::string& path) {
@@ -333,7 +351,11 @@ void GuiManager::request_close() {
 }
 
 void GuiManager::frame_sleep() const {
+#ifdef __EMSCRIPTEN__
+    emscripten_sleep(_frame_sleep_ms);
+#else
     std::this_thread::sleep_for(std::chrono::milliseconds(_frame_sleep_ms));
+#endif
 }
 
 } // namespace cler

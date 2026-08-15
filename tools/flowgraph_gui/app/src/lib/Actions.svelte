@@ -201,6 +201,10 @@
     ]
   };
 
+  // The browser build has no file dialogs, so these two would silently do nothing.
+  const NO_DIALOG = import.meta.env.VITE_CLER_WASM
+    ? 'needs the desktop app — the browser has no file dialogs (use Save to download)'
+    : null;
   let menu = $state<Menu | null>(null);
   let toast = $state<{ text: string; danger: boolean; action: AlertAction | null } | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -255,8 +259,8 @@
       id: 'save-as',
       label: 'Save as…',
       shortcut: '',
-      enabled: true,
-      hint: 'write the current draft to a new file and open it',
+      enabled: NO_DIALOG === null,
+      hint: NO_DIALOG ?? 'write the current draft to a new file and open it',
       run: onsaveas
     },
     {
@@ -549,6 +553,8 @@
       <div class="draft-menu file-menu" data-testid="file-menu-list">
         <button
           data-testid="file-new"
+          disabled={NO_DIALOG !== null}
+          title={NO_DIALOG ?? undefined}
           onclick={() => {
             fileOpen = false;
             onnew();
@@ -598,6 +604,8 @@
         >
         <button
           data-testid="file-save-as"
+          disabled={NO_DIALOG !== null}
+          title={NO_DIALOG ?? undefined}
           onclick={() => {
             fileOpen = false;
             onsaveas();

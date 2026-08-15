@@ -36,6 +36,8 @@ describe('cler_web.wasm session', () => {
     expect(undone.source).toBe(opened.source);
     expect(undone.dirty).toBe(false);
 
-    expect(() => invoke('find_target', { path: 'desktop_examples/hello_world.cpp' })).toThrow(/desktop app/);
+    expect(() => invoke('open_in_editor', { path: 'desktop_examples/hello_world.cpp', line: 1 })).toThrow(
+      /desktop app/
+    );
   });
 });

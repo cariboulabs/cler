@@ -15,3 +15,11 @@ for (const [name, source] of Object.entries(fixtureSources)) {
 for (const [path, text] of Object.entries(headers)) {
   browserFiles[path.replace(/^(\.\.\/)+/, '')] = text;
 }
+
+// Bundled examples with a prebuilt browser build (tools/flowgraph_gui/web-run/build.sh → docs/try/run/).
+export const RUNNABLE = ['hello_world', 'mass_spring_damper', 'plots', 'polyphase_channelizer'];
+export const runnableExamples = RUNNABLE.flatMap((name) => {
+  const path = fixtures[name]?.file;
+  const source = fixtureSources[name];
+  return path && source !== undefined ? [{ name, path, source }] : [];
+});

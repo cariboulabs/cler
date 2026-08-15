@@ -171,9 +171,6 @@ fn dispatch(world: &mut World, cmd: &str, args: &Value) -> Result<Value, String>
         "ai_agent_stop" => Ok(Value::Null),
         "ai_agent_models" => Ok(json!([])),
         "resolved_cler_root" => Ok(Value::Null),
-        "find_target" | "check_document" | "build_target" | "run_target" | "stop_target" => {
-            Err(format!("build and run {DESKTOP_ONLY}"))
-        }
         "open_in_editor" => Err(format!("opening an editor {DESKTOP_ONLY}")),
         _ => document_command(world, cmd, args),
     }

@@ -33,6 +33,8 @@ add_spsc_test(spsc_basic_test test_spsc_basic.cpp)
 add_spsc_test(spsc_batch_test test_spsc_batch.cpp)
 add_spsc_test(spsc_bounds_test test_spsc_bounds.cpp)
 add_spsc_test(spsc_doubly_mapped_test test_spsc_doubly_mapped.cpp)
+add_spsc_test(spsc_mirror_test test_spsc_mirror.cpp)
+target_compile_definitions(spsc_mirror_test PRIVATE CLER_DISABLE_DOUBLY_MAPPED)
 
 
 # Print configuration info

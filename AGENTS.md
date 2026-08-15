@@ -107,7 +107,10 @@ surfaces the shortfall next call.
 is heap/runtime size. Access methods ranked by measured performance:
 1. **`read_dbf`/`write_dbf`** — zero-copy, **the default**; mandatory for
    hardware interfaces. Needs a heap channel ≥ `DOUBLY_MAPPED_MIN_SIZE` (4 KB);
-   otherwise asserts in debug, returns `{nullptr, 0}` in release.
+   otherwise asserts in debug, returns `{nullptr, 0}` in release. Where the OS
+   cannot double-map (wasm; `-DCLER_DISABLE_DOUBLY_MAPPED` to force it) the
+   channel falls back to a software mirror: same API, 3× memory, one copy at
+   the wrap (`tests/spsc-queue/test_spsc_mirror.cpp`).
 2. **`readN`/`writeN`** — fine when an external API (liquid-dsp, a decoder)
    needs its own contiguous buffer anyway.
 3. **`peek_read`/`peek_write`** — ~5% over readN, easy to misuse (by-reference
@@ -171,6 +174,12 @@ cler-viz file.cpp -o output.svg
 Product constraint: the GUI places existing blocks discovered from the library
 but must not offer a new-block wizard — new block types are authored in C++.
 Svelte 5 runes API only (`$state`, `$derived`, `$effect`, `$props`).
+
+**Browser builds**: desktop examples compile unmodified with Emscripten
+(`__EMSCRIPTEN__` branches in `gui_manager.cpp`: GLES3, `emscripten_sleep`
+yield, `-DImDrawIdx=unsigned int`); `tools/flowgraph_gui/web-run/build.sh`
+builds liquid + GUI blocks into an archive and the bundled examples for
+`docs/try/run/`. Hardware blocks stay desktop-only.
 
 **Screenshots**: `GuiManager::request_screenshot(path)` grabs the next frame
 (prefer `.png`). `spike` exposes it: `./spike --capture /tmp/shots
