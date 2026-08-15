@@ -606,6 +606,20 @@ public:
               const T* ptr = &base_type::buffer_[readIndex];
               return {ptr, available};
           }
+#ifdef __EMSCRIPTEN__
+          // ponytail: no double mapping in wasm — hand out the contiguous tail only; a block that
+          // insists on more than the tail chunk stalls at the wrap. Mirror-copy buffer if that bites.
+          {
+              const auto capacity = base_type::capacity_;
+              const auto readIndex = reader_.readIndex_.load(std::memory_order_relaxed);
+              reader_.writeIndexCache_ = writer_.writeIndex_.load(std::memory_order_acquire);
+              std::size_t available = (reader_.writeIndexCache_ >= readIndex)
+                  ? reader_.writeIndexCache_ - readIndex
+                  : capacity - readIndex;
+              if (available == 0) return {nullptr, 0};
+              return {&base_type::buffer_[readIndex], available};
+          }
+#endif
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
           if (buffer_bytes < details::DOUBLY_MAPPED_MIN_SIZE) {
               assert(false && "read_dbf() requires buffer size >= 4KB. Current buffer too small.");
@@ -651,6 +665,18 @@ public:
               T* ptr = &base_type::buffer_[writeIndex];
               return {ptr, space};
           }
+#ifdef __EMSCRIPTEN__
+          {
+              const auto capacity = base_type::capacity_;
+              const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
+              writer_.readIndexCache_ = reader_.readIndex_.load(std::memory_order_acquire);
+              std::size_t space = (writer_.readIndexCache_ > writeIndex)
+                  ? writer_.readIndexCache_ - writeIndex - 1
+                  : capacity - writeIndex - (writer_.readIndexCache_ == 0 ? 1 : 0);
+              if (space == 0) return {nullptr, 0};
+              return {&base_type::buffer_[writeIndex], space};
+          }
+#endif
           const size_t buffer_bytes = base_type::capacity_ * sizeof(T);
           if (buffer_bytes < details::DOUBLY_MAPPED_MIN_SIZE) {
               assert(false && "write_dbf() requires buffer size >= 4KB. Current buffer too small.");
