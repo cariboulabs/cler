@@ -29,6 +29,9 @@ const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
 });
 const context = await browser.newContext();
+// /try must be self-contained: the toolchain lives in public/emception/, so any hit on the
+// upstream base is a missing vendored file, not a fallback worth exercising.
+await context.route('https://jprendes.github.io/**', (route) => route.abort());
 const page = await context.newPage();
 page.on('pageerror', (error) => console.log('[pageerror]', error.message));
 page.on('console', (message) => message.type() === 'error' && console.log('[console]', message.text()));

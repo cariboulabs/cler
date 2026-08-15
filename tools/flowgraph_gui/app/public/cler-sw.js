@@ -35,17 +35,19 @@ function fail(message) {
   return new Response(message, { status: 502, headers: { 'Content-Type': 'text/plain' } });
 }
 
-async function mirrored(name) {
+async function mirrored(name, local) {
   const cache = await caches.open(CACHE);
   const hit = await cache.match(name);
   if (hit) return isolated(hit);
-  let response;
-  try {
-    response = await fetch(TOOLCHAIN + name, { mode: 'cors' });
-  } catch (error) {
-    return fail(`cannot reach the C++ toolchain at ${TOOLCHAIN} — ${error}`);
+  let response = await fetch(local, { cache: 'no-store' }).catch(() => null);
+  if (!response?.ok) {
+    try {
+      response = await fetch(TOOLCHAIN + name, { mode: 'cors' });
+    } catch (error) {
+      return fail(`cannot reach the C++ toolchain at ${TOOLCHAIN} — ${error}`);
+    }
+    if (!response.ok) return fail(`the C++ toolchain host answered ${response.status} for ${name}`);
   }
-  if (!response.ok) return fail(`the C++ toolchain host answered ${response.status} for ${name}`);
   const body = await response.arrayBuffer();
   // ponytail: only the entry files are pinned by hash; the rest are named by their own content
   // hash and requested by the pinned bundle, so the set of names is fixed but not the bytes.
@@ -68,7 +70,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   const mirror = url.origin === self.location.origin && url.pathname.match(/\/emception\/([^/]+)$/);
   if (mirror && TOOLCHAIN) {
-    event.respondWith(mirrored(mirror[1]));
+    event.respondWith(mirrored(mirror[1], url.href));
     return;
   }
   if (url.origin === self.location.origin && url.pathname.includes('/built/')) {

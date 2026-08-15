@@ -278,7 +278,7 @@ test('e) an external edit blocks editing until reload', async ({
 
   await page.locator('input[data-field="throttle.ctor.1"]').fill('888');
   await page.locator('input[data-field="throttle.ctor.1"]').press('Enter');
-  await expect(page.getByTestId('status')).toContainText('changed on disk');
+  await expect(page.getByTestId('alert-toast')).toContainText('changed on disk');
   expect(work.bytes(file)).toBe(behind);
   await shot('refused');
 

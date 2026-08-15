@@ -146,12 +146,13 @@ decision it enables, not information it displays.
   sysroot, in wasm) over a virtual repo rooted at `/working`, so every path on the
   command line — and in the diagnostics coming back — is the app's own
   repo-relative path. The toolchain itself is fetched from `TOOLCHAIN_BASE`
-  (emception's GitHub Pages); self-hosting is a base-URL swap. Compile is `-O2`,
-  link is `-O1` (`-O2` links take minutes).
+  (emception's GitHub Pages) but served out of `app/public/emception/`, which is
+  vendored — see below. Compile is `-O2`, link is `-O1` (`-O2` links take minutes).
 - `public/cler-sw.js` is the one service worker: it adds COOP/COEP to every
   response (the coi-serviceworker trick, MIT), mirrors the cross-origin toolchain
   under `emception/*` so its worker bundle can resolve its own assets by relative
-  URL, and serves `built/*` out of Cache Storage. `main.ts` registers it and
+  URL — same-origin static file first, `TOOLCHAIN_BASE` only when that 404s — and
+  serves `built/*` out of Cache Storage. `main.ts` registers it and
   reloads once on the first visit; if registration fails (private windows) the
   editor still mounts and Check/Build/Run refuse with that reason. The mirrored
   bundle runs as same-origin code, so its four entry files are pinned by sha256 in
@@ -161,6 +162,17 @@ decision it enables, not information it displays.
   for. Fetch failures come back as a 502 with a `toolchainError` message, and
   `em.init()` is raced against the worker's own error and a stall watch, since it
   otherwise never settles.
+- `public/emception/` is the vendored toolchain (36.5 MB, MIT OR Apache-2.0, see its
+  `NOTICE`) so `/try` fetches nothing third-party. It is the exact set one Check +
+  Build touches: the four entry files named in `TOOLCHAIN_PINS` plus the eleven
+  content-hash-named sysroot `.a` archives the pack requests for our link flags —
+  the same eleven for every example, since the set follows `payload/flags.json`
+  and not the source. To refresh, point `TOOLCHAIN_BASE` at the new upstream, delete
+  `public/emception/*` (keep `NOTICE`), run one Check + Build so the worker fetches
+  from the base again, and read the names back out of Cache Storage in the page
+  console — `caches.open((await caches.keys()).find((k) => k.startsWith('cler-toolchain:')))
+  .then((c) => c.keys())`. `curl` those names out of the base into
+  `public/emception/` and recompute the four pins with `sha256sum`.
 - `wasmbridge.ts` answers `find_target`/`check_document`/`build_target`/`run_target`:
   a bundled example still equal to the bundle runs straight from `run/<name>.html`;
   anything else compiles and links into `built/<sha of source>/app.html` and Run
@@ -183,4 +195,5 @@ decision it enables, not information it displays.
 - `web-build/smoke.mjs` is the end-to-end check: `node ../web-build/smoke.mjs` from
   `app/` after `npm run build:web` serves `docs/` with a header-less
   `python3 -m http.server` (as Pages does) and drives edit → check → build → run
-  → screenshot in headless Chromium.
+  → screenshot in headless Chromium. It aborts every request to `TOOLCHAIN_BASE`, so a
+  green run proves `/try` needs nothing third-party.

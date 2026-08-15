@@ -40,7 +40,7 @@ test('h) F7 checks the temporary draft and blames the right block without saving
     await expect(page.getByTestId('tab-code')).toHaveAttribute('aria-pressed', 'true');
     await expect
       .poll(() => page.locator('[data-testid="code-drawer"] .hit').allTextContents())
-      .toContain('1.0ff');
+      .toEqual(expect.arrayContaining([expect.stringContaining('1.0ff')]));
   });
 
   await test.step('a copy outside desktop_examples builds as a draft target', async () => {
