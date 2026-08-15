@@ -134,7 +134,7 @@
     type Span
   } from './lib/schema';
   import type { CodeMark } from './lib/editor';
-  import BuildProgress, { STRIP_H } from './lib/BuildProgress.svelte';
+  import BuildProgress, { STRIP_H } from './web/BuildProgress.svelte';
   import CodeDrawer from './lib/CodeDrawer.svelte';
   import type { Tab } from './lib/CodeDrawer.svelte';
   import { fixtureNames } from './fixtures';

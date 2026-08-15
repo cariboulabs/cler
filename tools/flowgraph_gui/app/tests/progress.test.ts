@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parts, progress, remaining, type PhaseEvent, type Timings } from '../src/lib/progress';
+import { parts, progress, remaining, type PhaseEvent, type Timings } from '../src/web/progress';
 
 const label = (event: PhaseEvent) => {
   const { phrase, target } = parts(event);

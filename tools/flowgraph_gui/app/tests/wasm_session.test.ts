@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { bindWasm } from '../src/lib/wasmbridge';
+import { bindWasm } from '../src/web/wasmbridge';
 
 const WASM = join(__dirname, '../src/wasm/cler_web.wasm');
 const HELLO = join(__dirname, '../../../../desktop_examples/hello_world.cpp');

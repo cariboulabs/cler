@@ -1,4 +1,9 @@
-import{a as r,f as a}from"./index-BIr--Nwg.js";const _=`#pragma once
+import{d as v,f as K,a as j}from"./progress-BhDyycxq.js";/**
+ * @license
+ * Copyright 2019 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */const $=Symbol("Comlink.proxy"),ue=Symbol("Comlink.endpoint"),pe=Symbol("Comlink.releaseProxy"),N=Symbol("Comlink.finalizer"),I=Symbol("Comlink.thrown"),Q=e=>typeof e=="object"&&e!==null||typeof e=="function",fe={canHandle:e=>Q(e)&&e[$],serialize(e){const{port1:n,port2:t}=new MessageChannel;return ee(e,n),[t,[t]]},deserialize(e){return e.start(),te(e)}},me={canHandle:e=>Q(e)&&I in e,serialize({value:e}){let n;return e instanceof Error?n={isError:!0,value:{message:e.message,name:e.name,stack:e.stack}}:n={isError:!1,value:e},[n,[]]},deserialize(e){throw e.isError?Object.assign(new Error(e.value.message),e.value):e.value}},J=new Map([["proxy",fe],["throw",me]]);function he(e,n){for(const t of e)if(n===t||t==="*"||t instanceof RegExp&&t.test(n))return!0;return!1}function ee(e,n=globalThis,t=["*"]){n.addEventListener("message",function r(a){if(!a||!a.data)return;if(!he(t,a.origin)){console.warn(`Invalid origin '${a.origin}' for comlink proxy`);return}const{id:i,type:o,path:c}=Object.assign({path:[]},a.data),d=(a.data.argumentList||[]).map(z);let _;try{const l=c.slice(0,-1).reduce((s,p)=>s[p],e),u=c.reduce((s,p)=>s[p],e);switch(o){case"GET":_=u;break;case"SET":l[c.slice(-1)[0]]=z(a.data.value),_=!0;break;case"APPLY":_=u.apply(l,d);break;case"CONSTRUCT":{const s=new u(...d);_=F(s)}break;case"ENDPOINT":{const{port1:s,port2:p}=new MessageChannel;ee(e,p),_=we(s,[s])}break;case"RELEASE":_=void 0;break;default:return}}catch(l){_={value:l,[I]:0}}Promise.resolve(_).catch(l=>({value:l,[I]:0})).then(l=>{const[u,s]=P(l);n.postMessage(Object.assign(Object.assign({},u),{id:i}),s),o==="RELEASE"&&(n.removeEventListener("message",r),ne(n),N in e&&typeof e[N]=="function"&&e[N]())}).catch(l=>{const[u,s]=P({value:new TypeError("Unserializable return value"),[I]:0});n.postMessage(Object.assign(Object.assign({},u),{id:i}),s)})}),n.start&&n.start()}function ge(e){return e.constructor.name==="MessagePort"}function ne(e){ge(e)&&e.close()}function te(e,n){const t=new Map;return e.addEventListener("message",function(a){const{data:i}=a;if(!i||!i.id)return;const o=t.get(i.id);if(o)try{o(i)}finally{t.delete(i.id)}}),q(e,t,[],n)}function B(e){if(e)throw new Error("Proxy has been released and is not useable")}function re(e){return y(e,new Map,{type:"RELEASE"}).then(()=>{ne(e)})}const A=new WeakMap,D="FinalizationRegistry"in globalThis&&new FinalizationRegistry(e=>{const n=(A.get(e)||0)-1;A.set(e,n),n===0&&re(e)});function be(e,n){const t=(A.get(n)||0)+1;A.set(n,t),D&&D.register(e,n,e)}function Se(e){D&&D.unregister(e)}function q(e,n,t=[],r=function(){}){let a=!1;const i=new Proxy(r,{get(o,c){if(B(a),c===pe)return()=>{Se(i),re(e),n.clear(),a=!0};if(c==="then"){if(t.length===0)return{then:()=>i};const d=y(e,n,{type:"GET",path:t.map(_=>_.toString())}).then(z);return d.then.bind(d)}return q(e,n,[...t,c])},set(o,c,d){B(a);const[_,l]=P(d);return y(e,n,{type:"SET",path:[...t,c].map(u=>u.toString()),value:_},l).then(z)},apply(o,c,d){B(a);const _=t[t.length-1];if(_===ue)return y(e,n,{type:"ENDPOINT"}).then(z);if(_==="bind")return q(e,n,t.slice(0,-1));const[l,u]=V(d);return y(e,n,{type:"APPLY",path:t.map(s=>s.toString()),argumentList:l},u).then(z)},construct(o,c){B(a);const[d,_]=V(c);return y(e,n,{type:"CONSTRUCT",path:t.map(l=>l.toString()),argumentList:d},_).then(z)}});return be(i,e),i}function ve(e){return Array.prototype.concat.apply([],e)}function V(e){const n=e.map(P);return[n.map(t=>t[0]),ve(n.map(t=>t[1]))]}const ae=new WeakMap;function we(e,n){return ae.set(e,n),e}function F(e){return Object.assign(e,{[$]:!0})}function P(e){for(const[n,t]of J)if(t.canHandle(e)){const[r,a]=t.serialize(e);return[{type:"HANDLER",name:n,value:r},a]}return[{type:"RAW",value:e},ae.get(e)||[]]}function z(e){switch(e.type){case"HANDLER":return J.get(e.name).deserialize(e.value);case"RAW":return e.value}}function y(e,n,t,r){return new Promise(a=>{const i=ze();n.set(i,a),e.start&&e.start(),e.postMessage(Object.assign({id:i},t),r)})}function ze(){return new Array(4).fill(0).map(()=>Math.floor(Math.random()*Number.MAX_SAFE_INTEGER).toString(16)).join("-")}const ke="https://jprendes.github.io/emception/",xe={"emception.worker.bundle.worker.js":"60b9f0fb7982f9395ef63872b5ed3b798377fab09a8666f28b67ccb5029c0107","f0283badd42fe745cbe4.wasm":"2c60c515eca756e80ddc752a6ac062e07f596eb70c7a1308321705f90e09b442","9d1e542b80004e27297f.wasm":"47a2b00defa938d4471ff6ffdbf4d424ee03599db7d8f56590c6223e96191631","cecdfcda360457a8f204.br":"9bd873132b4915a4da34a977a386a4ae68785df34b8cdb9c3d205fae26eeb772"},X=24992393,U="/working",se="draft.o",ye=["app.html","app.js","app.wasm","app.worker.js"],Ee=["-O1","-sMINIFY_HTML=0","--shell-file","shell.html"];let L=null;const ie=new TextEncoder,T=()=>new URL("./",location.href).href,Z=6e4;let R=null,w=()=>{},C=null;function Re(e){C=e}function Be(){return C}function W(e,n,t,r){return Te(e,r).then(async a=>(await H(a,n,ie.encode(t)),v({phase:"compile",detail:n}),oe(a,["em++",..._e().cxxflags,"-c",n,"-o",se],r)))}async function Ie(e){if(!R)throw new Error("the C++ toolchain is not running — compile first");const n=await R,t=["em++",se,"lib/libcler_web.a","lib/libliquid.a",..._e().ldflags,...Ee,"-o","app.html"];v({phase:"link"});let r=!1;const a=await oe(n,t,o=>{!r&&/wasm-opt/.test(o)&&(r=!0,v({phase:"optimize"})),e(o)}),i={};if(a===0)for(const o of ye)i[o]=new Uint8Array(await n.fileSystem.readFile(`${U}/${o}`));return{code:a,files:i}}function Te(e,n){return C?Promise.reject(new Error(C)):(w=n,R??=Ae(e).catch(t=>{throw R=null,t}),R)}async function Ae(e){let n=0,t=Date.now(),r=null;const a=_=>{const l=_.data;l?.toolchainError?(r=l.toolchainError,w(l.toolchainError)):l?.toolchain&&(n+=l.bytes??0,t=Date.now(),v(n>=X?{phase:"boot"}:{phase:"toolchain",bytes:n,total:X}),w(`downloading the C++ toolchain (first visit only)… ${(n/1e6).toFixed(1)} MB`))};navigator.serviceWorker.addEventListener("message",a),w("starting the in-browser C++ toolchain…"),v({phase:"boot"});const i=new Worker(`${T()}emception/emception.worker.bundle.worker.js`),o=te(i);o.onstdout=F(_=>w(_)),o.onstderr=F(_=>w(_));let c=0;const d=new Promise((_,l)=>{i.onerror=u=>l(new Error(r??`the C++ toolchain worker failed: ${u.message||"load error"}`)),c=self.setInterval(()=>{Date.now()-t<Z||l(new Error(r??`the C++ toolchain stalled for ${Z/1e3} s with no download progress`))},1e3)});try{await Promise.race([o.init(),d]),w("unpacking the cler headers and libraries…"),v({phase:"stage"}),await De(o,e)}catch(_){throw i.terminate(),_}finally{clearInterval(c),navigator.serviceWorker.removeEventListener("message",a)}return o}function _e(){if(!L)throw new Error("the build flags are not staged — the toolchain never booted");return L}async function De(e,n){L=await(await fetch(`${T()}payload/flags.json`)).json();const t=await(await fetch(`${T()}payload/headers.json`)).json();v({phase:"stage",detail:`${Object.keys(t).length} headers`});for(const[r,a]of Object.entries({...t,...n}))await H(e,r,ie.encode(a));for(const r of["libcler_web.a","libliquid.a"]){v({phase:"stage",detail:r});const a=await(await fetch(`${T()}payload/${r}`)).arrayBuffer();await H(e,`lib/${r}`,new Uint8Array(a))}}async function H(e,n,t){await e.fileSystem.mkdirTree(`${U}/${n}`.replace(/\/[^/]+$/,"")),await e.fileSystem.writeFile(`${U}/${n}`,t)}async function oe(e,n,t){return w=t,t(`$ ${n[0]} … ${n[n.length-2]} ${n[n.length-1]}`),(await e.run(...n)).returncode}const Pe=""+new URL("cler_web-dgzjaArE.wasm",import.meta.url).href,Ce=new TextEncoder,le=new TextDecoder;function Ne(e){const n=()=>new DataView(e().buffer),t=()=>new Uint8Array(e().buffer);return{random_get(r,a){return crypto.getRandomValues(t().subarray(r,r+a)),0},environ_get(){return 0},environ_sizes_get(r,a){return n().setUint32(r,0,!0),n().setUint32(a,0,!0),0},clock_time_get(r,a,i){return n().setBigUint64(i,BigInt(Math.round(performance.now()*1e6)),!0),0},fd_close(){return 0},fd_seek(){return 70},fd_write(r,a,i,o){let c=0,d="";for(let _=0;_<i;_++){const l=n().getUint32(a+_*8,!0),u=n().getUint32(a+_*8+4,!0);d+=le.decode(t().subarray(l,l+u)),c+=u}return n().setUint32(o,c,!0),(r===2?console.error:console.log)(d),0},proc_exit(r){throw new Error(`cler-web.wasm exited with ${r}`)}}}async function Oe(){return Me(e=>WebAssembly.instantiateStreaming(fetch(Pe),e))}async function Me(e){let n=null;const{instance:t}=await e({wasi_snapshot_preview1:Ne(()=>n.memory)});n=t.exports;const r=n;return(a,i)=>{const o=Ce.encode(JSON.stringify({cmd:a,args:i})),c=r.cler_alloc(o.length);new Uint8Array(r.memory.buffer).set(o,c);const d=r.cler_invoke(c,o.length);r.cler_free(c,o.length);const _=new Uint8Array(r.memory.buffer);let l=d;for(;_[l]!==0;)l++;const u=JSON.parse(le.decode(_.subarray(d,l)));if(r.cler_free(d,l-d+1),"loud"in u)throw new Error(u.loud);if("err"in u)throw u.err;return u.ok}}async function qe(e,n=[]){const t=await Oe();for(const[s,p]of Object.entries(e))t("put_file",{path:s,text:p});const r=new Map,a=new Map;let i=1;const o=(s,p)=>{for(const[f,g]of r)g.event===s&&a.get(g.handler)?.({event:s,id:f,payload:p})},c=new Map,d=new Map,_=s=>t("open_document",{path:s}).source,l=(s,p,f)=>{const g=i++,S={inputs:{},recipeSha256:""};s==="build"&&d.set(p,g);const E=h=>{for(const b of String(h).split(`
+`))b.trim()&&o(`${s}-output`,{jobId:g,inputKey:S,path:p,line:b})},m=h=>{s==="build"&&d.delete(p),o(`${s}-finished`,{jobId:g,inputKey:S,path:p,code:h})};return f(E).then(m,h=>{E(h instanceof Error?h.message:String(h)),m(1)}),{jobId:g,inputKey:S}},u=window;u.__TAURI_INTERNALS__={invoke:async(s,p={})=>{if(s==="plugin:dialog|open"||s==="plugin:dialog|save")return null;if(s==="plugin:event|listen"){const m=i++;return r.set(m,{event:p.event,handler:p.handler}),m}if(s==="plugin:event|unlisten")return r.delete(p.eventId),null;const f=p.path,g=n.find(m=>m.path===f&&m.source===_(f)),S=Be();if(s==="find_target"){if(S&&!g)throw S;if(g)return{available:!0,reason:null,name:g.name,buildDir:null,binary:`run/${g.name}.html`,artifact:{state:"ready",artifactPath:`run/${g.name}.html`}};const m=d.get(f),h=await M(_(f)),b=`built/${h}/app.html`;return{available:!0,reason:null,name:f.split("/").pop()?.replace(/\.[^.]+$/,"")??"flowgraph",buildDir:null,binary:null,artifact:m!==void 0?{state:"building",jobId:m}:await O(h)?{state:"ready",artifactPath:b}:{state:"needs_build",reason:"compile this document in the browser first (Ctrl+B)"}}}if(s==="check_document"){if(S)throw S;return l("check",f,m=>W(e,f,_(f),m))}if(s==="build_target"){if(S)throw S;return l("build",f,async m=>{const h=_(f),b=await M(h);if(await O(b))return m(`built/${b}/app.html is already built — press Run`),0;const k=await W(e,f,h,m);if(k!==0)return k;const x=await Ie(m);return x.code!==0?x.code:(v({phase:"store"}),await Le(b,x.files),0)})}if(s==="run_target"){let m=`run/${g?.name}.html`;if(!g){const Y=await M(_(f));if(!await O(Y))throw"this edit is not built yet — press Build (Ctrl+B) first";m=`built/${Y}/app.html`}const h=i++;v({phase:"launch"});const b=window.open(m,"_blank","popup,width=1280,height=800");if(!b)throw"the browser blocked the run window — allow popups for this site";const k={inputs:{},recipeSha256:""},x=window.setInterval(()=>{b.closed&&(window.clearInterval(x),c.delete(f),o("run-finished",{jobId:h,inputKey:k,path:f,code:0}))},500);return c.set(f,{win:b,jobId:h,timer:x}),o("run-output",{jobId:h,inputKey:k,path:f,line:`running ${m} in a new window — close it or press Stop`}),{jobId:h,inputKey:k}}if(s==="stop_target")return c.get(f)?.win.close(),null;const E=t(s,p);return s==="save_document"&&He(f,E.source),E},transformCallback:s=>{const p=i++;return a.set(p,s),p},metadata:{}},u.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:(s,p)=>r.delete(p)}}const Fe="cler-built",Ue=5,ce=()=>caches.open(Fe),de=e=>new URL(e,location.href).pathname;async function O(e){return!!await ce().then(n=>n.match(de(`built/${e}/app.html`)))}async function Le(e,n){const t=await ce();for(const[i,o]of Object.entries(n))await t.put(de(`built/${e}/${i}`),new Response(o));const r=await t.keys(),a=[...new Set(r.map(i=>new URL(i.url).pathname.split("/built/")[1]?.split("/")[0]))];for(const i of a.slice(0,Math.max(0,a.length-Ue)))for(const o of r)o.url.includes(`/built/${i}/`)&&await t.delete(o)}async function M(e){const n=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(e));return Array.from(new Uint8Array(n),t=>t.toString(16).padStart(2,"0")).join("").slice(0,16)}function He(e,n){const t=e.split("/").pop()??"flowgraph.cpp",r=URL.createObjectURL(new Blob([n],{type:"text/plain"})),a=document.createElement("a");a.href=r,a.download=t,a.click(),URL.revokeObjectURL(r)}const Ge=`#pragma once
 
 #include "cler.hpp"
 #include "adsb_types.hpp"
@@ -365,7 +370,7 @@ private:
 
     }
 };
-`,i=`#pragma once
+`,Ye=`#pragma once
 
 #include <vector>
 #include <cstdint>
@@ -500,7 +505,7 @@ private:
         }
     }
 };
-`,o=`#pragma once
+`,Ve=`#pragma once
 
 #include "cler.hpp"
 #include "desktop_blocks/adsb/modes.h"
@@ -620,7 +625,7 @@ private:
         }
     }
 };
-`,l=`#pragma once
+`,Xe=`#pragma once
 
 #include <cstdint>
 #include <cstring>
@@ -664,7 +669,7 @@ struct ADSBState {
         callsign[0] = '\\0';
     }
 };
-`,c=`#pragma once
+`,Ze=`#pragma once
 #include "cler.hpp"
 #include <memory>
 
@@ -696,7 +701,7 @@ private:
     size_t _max_blob_size;
     std::unique_ptr<uint8_t[]> _data;
     cler::Channel<size_t> _free_slots;
-};`,d=`#pragma once
+};`,We=`#pragma once
 
 #include "liquid.h"
 #include "polyphase_transform_5.hpp"
@@ -815,7 +820,7 @@ private:
     std::array<std::complex<float>, 2 * history_frames * channels> _carry{};
     std::array<std::complex<float>, twiddle_len> _twiddles{};
 };
-`,p=`#include "cler.hpp"
+`,Ke=`#include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include "polyphase_analyzer.hpp"
 #include <complex>
@@ -892,7 +897,7 @@ private:
 
     PolyphaseAnalyzer<NUM_CHANNELS, FILTER_SEMILENGTH> _analyzer;
 };
-`,u=`#pragma once
+`,je=`#pragma once
 
 #include <array>
 #include <complex>
@@ -1011,7 +1016,7 @@ inline void transform(const float* taps,
 #endif
 
 }
-`,f=`#pragma once
+`,$e=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -1082,7 +1087,7 @@ struct EZGmskDemodBlock : public cler::BlockBase {
 private:
     ezgmsk::ezgmsk_demod _demod = nullptr;
 };
-`,m=`#pragma once
+`,Qe=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -1171,7 +1176,7 @@ private:
     float _BT;
     unsigned int _preamble_len;
 };
-`,h=`#pragma once
+`,Je=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -1311,7 +1316,7 @@ private:
     double _sample_rate;
     double _cutoff_freq;
 };
-`,g=`#pragma once
+`,en=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -1388,7 +1393,7 @@ private:
     double _sample_rate;
     double _freq_deviation;
 };
-`,b=`#pragma once
+`,nn=`#pragma once
 
 #include "imgui.h"
 
@@ -1427,7 +1432,7 @@ inline constexpr ImVec4 plot_series[] = {
 };
 
 }
-`,v=`#pragma once
+`,tn=`#pragma once
 
 #include <GLFW/glfw3.h>
 #include <string>
@@ -1499,7 +1504,7 @@ private:
 };
 
 } // namespace cler
-`,S=`#pragma once
+`,rn=`#pragma once
 
 #include <complex>
 #include <random>
@@ -1537,7 +1542,7 @@ private:
     std::mt19937 _rng;
     std::normal_distribution<scalar_type> _normal_dist;
 };
-`,z=`#include "cler.hpp"
+`,an=`#include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include <type_traits>
 
@@ -1601,7 +1606,7 @@ struct AddBlock : public cler::BlockBase {
     private:
         std::aligned_storage_t<sizeof(cler::Channel<T>), alignof(cler::Channel<T>)> _in_storage[NumInputs];
 };
-`,x=`#pragma once
+`,sn=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -1661,7 +1666,7 @@ struct ComplexToMagPhaseBlock : public cler::BlockBase {
 private:
     Mode _block_mode;
 };
-`,k=`#include "cler.hpp"
+`,_n=`#include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include <new>
 
@@ -1713,7 +1718,7 @@ struct FrequencyShiftBlock : public cler::BlockBase {
         size_t _buffer_size;
         std::complex<float> _shifter{1.0 ,0.0};
         std::complex<float> _dshift;
-};`,y=`#include "cler.hpp"
+};`,on=`#include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include "desktop_blocks/kernels/kernels.hpp"
 #include <new>
@@ -1758,7 +1763,7 @@ struct GainBlock : public cler::BlockBase {
         GainKernel<T> _kernel;
         T* _buffer;
         size_t _buffer_size;
-};`,w=`#pragma once
+};`,ln=`#pragma once
 #include <string>
 
 struct UHDConfig {
@@ -1780,7 +1785,7 @@ inline std::string get_uhd_format() {
         static_assert(!std::is_same_v<T, T>, "UHD blocks only support complex types");
     }
 }
-`,E=`#pragma once
+`,cn=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -1834,7 +1839,7 @@ private:
     T* _buffer;
     size_t _buffer_size;
 };
-`,R=`#pragma once
+`,dn=`#pragma once
 
 #include "cler.hpp"
 #include "liquid.h"
@@ -2002,7 +2007,7 @@ private:
 
     bool _visible = true;
 };
-`,B=`#pragma once
+`,un=`#pragma once
 
 #include "cler.hpp"
 #include "liquid.h"
@@ -2104,7 +2109,7 @@ private:
 
     bool _visible = true;
 };
-`,I=`#pragma once
+`,pn=`#pragma once
 
 #include "cler.hpp"
 #include <vector>
@@ -2155,7 +2160,7 @@ private:
     ImVec2 _initial_window_position {0.0f, 0.0f};
     ImVec2 _initial_window_size {600.0f, 300.0f};
 };
-`,T=`#pragma once
+`,fn=`#pragma once
 #include <cmath>
 
 enum class SpectralWindow {
@@ -2216,7 +2221,7 @@ inline constexpr float spectral_window_function(SpectralWindow type, float x, fl
     }
     return 0.0f;
 }
-`,D=`#pragma once
+`,mn=`#pragma once
 
 #include "liquid.h"
 #include "cler.hpp"
@@ -2353,7 +2358,7 @@ private:
     msresamp_rrrf _msresamp_r = nullptr;
     msresamp_crcf _msresamp_c = nullptr;
 };
-`,A=`#pragma once
+`,hn=`#pragma once
 
 #include "liquid.h"
 #include "cler.hpp"
@@ -2548,7 +2553,7 @@ struct RationalResamplerBlock : public cler::BlockBase {
 private:
     RationalResampler<INTERP, DECIM, TAPS_PER_PHASE> _resampler;
 };
-`,P=`#pragma once
+`,gn=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -2720,7 +2725,7 @@ private:
         }
     }
 };
-`,N=`#pragma once
+`,bn=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -2782,7 +2787,7 @@ struct SinkFileBlock : public cler::BlockBase {
 private:
     FILE* _fp = nullptr;
 };
-`,C=`#pragma once
+`,Sn=`#pragma once
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 
@@ -2935,7 +2940,7 @@ private:
 
         return 0;
     }
-};`,O=`#pragma once
+};`,vn=`#pragma once
 
 #include "cler.hpp"
 template <typename T>
@@ -2972,7 +2977,7 @@ struct SinkNullBlock : public cler::BlockBase {
     private:
         OnReceiveCallback _callback = nullptr;
         void* _callback_context = nullptr;
-};`,M=`#pragma once
+};`,wn=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -3305,7 +3310,7 @@ using SinkSoapySDRBlockCU8 = SinkSoapySDRBlock<std::complex<uint8_t>>;
 using SinkSoapySDRBlockS32 = SinkSoapySDRBlock<int32_t>;
 using SinkSoapySDRBlockS16 = SinkSoapySDRBlock<int16_t>;
 using SinkSoapySDRBlockU8 = SinkSoapySDRBlock<uint8_t>;
-using SinkSoapySDRBlockF32 = SinkSoapySDRBlock<float>;`,q=`#pragma once
+using SinkSoapySDRBlockF32 = SinkSoapySDRBlock<float>;`,zn=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -3593,7 +3598,7 @@ private:
 using SinkUHDBlockCF32 = SinkUHDBlock<std::complex<float>>;
 using SinkUHDBlockSC16 = SinkUHDBlock<std::complex<int16_t>>;
 using SinkUHDBlockSC8 = SinkUHDBlock<std::complex<int8_t>>;
-`,F=`#pragma once
+`,kn=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -3836,7 +3841,7 @@ private:
         }
     }
 };
-`,U=`#pragma once
+`,xn=`#pragma once
 #include <CaribouLite.hpp>
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -3952,7 +3957,7 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             CaribouLiteRadio* _radio = nullptr;
             size_t _max_samples_to_read;
 };
-`,L=`#pragma once
+`,yn=`#pragma once
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include <cmath>
@@ -4048,7 +4053,7 @@ private:
     std::complex<double> _psi;
     std::complex<double> _psi_inc;
 };
-`,H=`#pragma once
+`,En=`#pragma once
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include <cmath>
@@ -4122,7 +4127,7 @@ private:
     T* _buffer;
     size_t _buffer_size;
 };
-`,G=`#pragma once
+`,Rn=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -4191,7 +4196,7 @@ private:
     on_eof _callback;
     std::ifstream _file;
 };
-`,Y=`#pragma once
+`,Bn=`#pragma once
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 
@@ -4402,7 +4407,7 @@ private:
 
         return 0;
     }
-};`,V=`#pragma once
+};`,In=`#pragma once
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 
@@ -4616,7 +4621,7 @@ private:
     size_t _available = 0; // samples in the current iio buffer
     size_t _consumed = 0;  // samples already pushed downstream
 };
-`,X=`#pragma once
+`,Tn=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -4961,7 +4966,7 @@ inline std::vector<SoapyDeviceInfo> enumerate_devices() {
     }
     
     return devices;
-}`,Z=`#pragma once
+}`,An=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -5257,7 +5262,7 @@ private:
 
 using SourceUHDBlockCF32 = SourceUHDBlock<std::complex<float>>;
 using SourceUHDBlockSC16 = SourceUHDBlock<std::complex<int16_t>>;
-using SourceUHDBlockSC8 = SourceUHDBlock<std::complex<int8_t>>;`,K=`#pragma once
+using SourceUHDBlockSC8 = SourceUHDBlock<std::complex<int8_t>>;`,Dn=`#pragma once
 
 #include "cler.hpp"
 #include "imgui.h"
@@ -5792,7 +5797,7 @@ private:
     ImVec2 _pending_rect_pos{0.0f, 0.0f};
     ImVec2 _pending_rect_size{0.0f, 0.0f};
 };
-`,W=`#pragma once
+`,Pn=`#pragma once
 #include "cler.hpp"
 #include <cstring>
 #include <cerrno>
@@ -5849,7 +5854,7 @@ private:
 };
 
 } // namespace UDPBlock
-`,j=`#pragma once
+`,Cn=`#pragma once
 #include "shared.hpp"
 #include "../blob.hpp"
 #include "cler_desktop_utils.hpp"
@@ -5930,7 +5935,7 @@ private:
     size_t _buffer_size;
     T* _buffer = nullptr;
 };
-`,Q=`#pragma once
+`,Nn=`#pragma once
 #include "shared.hpp"
 #include "../blob.hpp"
 #include "cler_desktop_utils.hpp"
@@ -6060,7 +6065,7 @@ private:
     size_t _buffer_size;
     T* _buffer = nullptr;
 };
-`,J=`#pragma once
+`,On=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -6116,7 +6121,7 @@ struct FanoutBlock : public cler::BlockBase {
     private:
         size_t _num_outputs;
 };
-`,$=`#pragma once
+`,Mn=`#pragma once
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -6221,7 +6226,7 @@ private:
         }
     }
 };
-`,ee=`#pragma once
+`,qn=`#pragma once
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include <algorithm>
@@ -6312,7 +6317,7 @@ private:
     size_t _emitted = 0;
     clock::time_point _epoch;
 };
-`,ne=`#pragma once
+`,Fn=`#pragma once
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include <chrono>
@@ -6369,4 +6374,4 @@ private:
     size_t _samples_passed = 0;
     std::chrono::high_resolution_clock::time_point _start_time;
 };
-`,te=Object.assign({"../../../../../desktop_blocks/adsb/adsb_aggregate.hpp":_,"../../../../../desktop_blocks/adsb/adsb_coastline_loader.hpp":i,"../../../../../desktop_blocks/adsb/adsb_decoder.hpp":o,"../../../../../desktop_blocks/adsb/adsb_types.hpp":l,"../../../../../desktop_blocks/blob.hpp":c,"../../../../../desktop_blocks/channelizers/polyphase_analyzer.hpp":d,"../../../../../desktop_blocks/channelizers/polyphase_channelizer.hpp":p,"../../../../../desktop_blocks/channelizers/polyphase_transform_5.hpp":u,"../../../../../desktop_blocks/ezgmsk/ezgmsk_demod.hpp":f,"../../../../../desktop_blocks/ezgmsk/ezgmsk_mod.hpp":m,"../../../../../desktop_blocks/filters/kaiser_lpf.hpp":h,"../../../../../desktop_blocks/fm/fm_demod.hpp":g,"../../../../../desktop_blocks/gui/cler_palette.hpp":b,"../../../../../desktop_blocks/gui/gui_manager.hpp":v,"../../../../../desktop_blocks/kernels/kernels.hpp":S,"../../../../../desktop_blocks/math/add.hpp":z,"../../../../../desktop_blocks/math/complex_demux.hpp":x,"../../../../../desktop_blocks/math/frequency_shift.hpp":k,"../../../../../desktop_blocks/math/gain.hpp":y,"../../../../../desktop_blocks/misc/uhd_common.hpp":w,"../../../../../desktop_blocks/noise/awgn.hpp":E,"../../../../../desktop_blocks/plots/plot_cspectrogram.hpp":R,"../../../../../desktop_blocks/plots/plot_cspectrum.hpp":B,"../../../../../desktop_blocks/plots/plot_timeseries.hpp":I,"../../../../../desktop_blocks/plots/spectral_windows.hpp":T,"../../../../../desktop_blocks/resamplers/multistage_resampler.hpp":D,"../../../../../desktop_blocks/resamplers/rational_resampler.hpp":A,"../../../../../desktop_blocks/sinks/sink_audio.hpp":P,"../../../../../desktop_blocks/sinks/sink_file.hpp":N,"../../../../../desktop_blocks/sinks/sink_hackrf.hpp":C,"../../../../../desktop_blocks/sinks/sink_null.hpp":O,"../../../../../desktop_blocks/sinks/sink_soapysdr.hpp":M,"../../../../../desktop_blocks/sinks/sink_uhd.hpp":q,"../../../../../desktop_blocks/sources/source_audio_file.hpp":F,"../../../../../desktop_blocks/sources/source_cariboulite.hpp":U,"../../../../../desktop_blocks/sources/source_chirp.hpp":L,"../../../../../desktop_blocks/sources/source_cw.hpp":H,"../../../../../desktop_blocks/sources/source_file.hpp":G,"../../../../../desktop_blocks/sources/source_hackrf.hpp":Y,"../../../../../desktop_blocks/sources/source_pluto.hpp":V,"../../../../../desktop_blocks/sources/source_soapysdr.hpp":X,"../../../../../desktop_blocks/sources/source_uhd.hpp":Z,"../../../../../desktop_blocks/triggers/trigger_block.hpp":K,"../../../../../desktop_blocks/udp/shared.hpp":W,"../../../../../desktop_blocks/udp/sink_udp.hpp":j,"../../../../../desktop_blocks/udp/source_udp.hpp":Q,"../../../../../desktop_blocks/utils/fanout.hpp":J,"../../../../../desktop_blocks/utils/fused.hpp":$,"../../../../../desktop_blocks/utils/throttle.hpp":ee,"../../../../../desktop_blocks/utils/throughput.hpp":ne}),s={};for(const[e,n]of Object.entries(a)){const t=r[e]?.file;t&&(s[t]=n)}for(const[e,n]of Object.entries(te))s[e.replace(/^(\.\.\/)+/,"")]=n;const re=["hello_world","mass_spring_damper","plots","polyphase_channelizer"],se=re.flatMap(e=>{const n=r[e]?.file,t=a[e];return n&&t!==void 0?[{name:e,path:n,source:t}]:[]});export{re as RUNNABLE,s as browserFiles,se as runnableExamples};
+`,Un=Object.assign({"../../../../../desktop_blocks/adsb/adsb_aggregate.hpp":Ge,"../../../../../desktop_blocks/adsb/adsb_coastline_loader.hpp":Ye,"../../../../../desktop_blocks/adsb/adsb_decoder.hpp":Ve,"../../../../../desktop_blocks/adsb/adsb_types.hpp":Xe,"../../../../../desktop_blocks/blob.hpp":Ze,"../../../../../desktop_blocks/channelizers/polyphase_analyzer.hpp":We,"../../../../../desktop_blocks/channelizers/polyphase_channelizer.hpp":Ke,"../../../../../desktop_blocks/channelizers/polyphase_transform_5.hpp":je,"../../../../../desktop_blocks/ezgmsk/ezgmsk_demod.hpp":$e,"../../../../../desktop_blocks/ezgmsk/ezgmsk_mod.hpp":Qe,"../../../../../desktop_blocks/filters/kaiser_lpf.hpp":Je,"../../../../../desktop_blocks/fm/fm_demod.hpp":en,"../../../../../desktop_blocks/gui/cler_palette.hpp":nn,"../../../../../desktop_blocks/gui/gui_manager.hpp":tn,"../../../../../desktop_blocks/kernels/kernels.hpp":rn,"../../../../../desktop_blocks/math/add.hpp":an,"../../../../../desktop_blocks/math/complex_demux.hpp":sn,"../../../../../desktop_blocks/math/frequency_shift.hpp":_n,"../../../../../desktop_blocks/math/gain.hpp":on,"../../../../../desktop_blocks/misc/uhd_common.hpp":ln,"../../../../../desktop_blocks/noise/awgn.hpp":cn,"../../../../../desktop_blocks/plots/plot_cspectrogram.hpp":dn,"../../../../../desktop_blocks/plots/plot_cspectrum.hpp":un,"../../../../../desktop_blocks/plots/plot_timeseries.hpp":pn,"../../../../../desktop_blocks/plots/spectral_windows.hpp":fn,"../../../../../desktop_blocks/resamplers/multistage_resampler.hpp":mn,"../../../../../desktop_blocks/resamplers/rational_resampler.hpp":hn,"../../../../../desktop_blocks/sinks/sink_audio.hpp":gn,"../../../../../desktop_blocks/sinks/sink_file.hpp":bn,"../../../../../desktop_blocks/sinks/sink_hackrf.hpp":Sn,"../../../../../desktop_blocks/sinks/sink_null.hpp":vn,"../../../../../desktop_blocks/sinks/sink_soapysdr.hpp":wn,"../../../../../desktop_blocks/sinks/sink_uhd.hpp":zn,"../../../../../desktop_blocks/sources/source_audio_file.hpp":kn,"../../../../../desktop_blocks/sources/source_cariboulite.hpp":xn,"../../../../../desktop_blocks/sources/source_chirp.hpp":yn,"../../../../../desktop_blocks/sources/source_cw.hpp":En,"../../../../../desktop_blocks/sources/source_file.hpp":Rn,"../../../../../desktop_blocks/sources/source_hackrf.hpp":Bn,"../../../../../desktop_blocks/sources/source_pluto.hpp":In,"../../../../../desktop_blocks/sources/source_soapysdr.hpp":Tn,"../../../../../desktop_blocks/sources/source_uhd.hpp":An,"../../../../../desktop_blocks/triggers/trigger_block.hpp":Dn,"../../../../../desktop_blocks/udp/shared.hpp":Pn,"../../../../../desktop_blocks/udp/sink_udp.hpp":Cn,"../../../../../desktop_blocks/udp/source_udp.hpp":Nn,"../../../../../desktop_blocks/utils/fanout.hpp":On,"../../../../../desktop_blocks/utils/fused.hpp":Mn,"../../../../../desktop_blocks/utils/throttle.hpp":qn,"../../../../../desktop_blocks/utils/throughput.hpp":Fn}),G={};for(const[e,n]of Object.entries(K)){const t=j[e]?.file;t&&(G[t]=n)}for(const[e,n]of Object.entries(Un))G[e.replace(/^(\.\.\/)+/,"")]=n;const Ln=["hello_world","mass_spring_damper","plots","polyphase_channelizer"],Hn=Ln.flatMap(e=>{const n=j[e]?.file,t=K[e];return n&&t!==void 0?[{name:e,path:n,source:t}]:[]});async function Yn(){try{const n=new URLSearchParams({toolchain:ke,pins:JSON.stringify(xe)});if(await navigator.serviceWorker.register(`./cler-sw.js?${n}`,{scope:"./"}),await navigator.serviceWorker.ready,window.crossOriginIsolated)sessionStorage.removeItem("clerSwReload");else if(!sessionStorage.getItem("clerSwReload")){sessionStorage.setItem("clerSwReload","1"),location.reload();return}}catch(n){console.warn("cler service worker unavailable",n),Re("Build and Run need a service worker; this browser mode disables it")}await qe(G,Hn)}export{Yn as bootBrowser};
