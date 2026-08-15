@@ -12,10 +12,15 @@ test('j) the AI agent asks for a key before it can cost anything', async ({
   await page.goto('/');
   await openFile(file);
 
-  await test.step('Ctrl+J opens the AI agent in the left panel', async () => {
-    await page.keyboard.press('Control+j');
-    await expect(page.getByTestId('ai-agent-panel')).toBeVisible();
+  await test.step('the left panel opens on the AI agent, and Ctrl+J toggles it', async () => {
+    const collapse = page.getByRole('button', { name: 'Collapse AI agent' });
+    const expand = page.getByRole('button', { name: 'Expand AI agent' });
+    await expect(collapse).toBeVisible();
     await expect(page.getByTestId('rail-tab-ai-agent')).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Control+j');
+    await expect(expand).toBeVisible();
+    await page.keyboard.press('Control+j');
+    await expect(collapse).toBeVisible();
     await expect(page.getByTestId('ai-agent-provider-select')).toBeVisible();
   });
 
@@ -52,8 +57,7 @@ test('k) an accepted proposal is checked, drafted, then saved to the file', asyn
 
   await page.goto('/');
   const opened = await openFile(file);
-  await page.keyboard.press('Control+j');
-  await expect(page.getByTestId('ai-agent-panel')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Collapse AI agent' })).toBeVisible();
 
   await test.step('the proposal is dry-run through the real validator before it is shown', async () => {
     await emit('ai-agent-proposal', {
