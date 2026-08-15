@@ -125,7 +125,7 @@ decision it enables, not information it displays.
   checkout for tree-sitter's C). Regenerate after UI, fixture, or block-header
   changes and commit the output. `tests/wasm_session.test.ts` covers the wasm
   end to end and skips when it is not built.
-- Run in the browser — `web-run/build.sh` (needs `EMSDK=` an emsdk checkout with
+- Run in the browser — `web-build/build.sh` (needs `EMSDK=` an emsdk checkout with
   **3.1.24** activated, the version emception ships) builds liquid-dsp + GUI/plot
   blocks into `libcler_web.a`, the examples in `src/fixtures/files.ts::RUNNABLE`
   into `app/public/run/`, and the *payload* the in-browser compiler needs into
@@ -174,7 +174,7 @@ decision it enables, not information it displays.
   25 MB first-build note while the toolchain downloads. A finished job flashes the track green and
   folds away; a failed one keeps a red track with the first error and a jump to Diagnostics, and
   Output keeps the raw em++ log. `tests/progress.test.ts` covers the mapping.
-- `web-run/smoke.mjs` is the end-to-end check: `node ../web-run/smoke.mjs` from
+- `web-build/smoke.mjs` is the end-to-end check: `node ../web-build/smoke.mjs` from
   `app/` after `npm run build:web` serves `docs/` with a header-less
   `python3 -m http.server` (as Pages does) and drives edit → check → build → run
   → screenshot in headless Chromium.
