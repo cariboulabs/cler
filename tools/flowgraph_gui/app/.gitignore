@@ -4,3 +4,4 @@ node_modules
 .env.*
 vite.config.ts.timestamp-*
 src/wasm/*.wasm
+public/run/

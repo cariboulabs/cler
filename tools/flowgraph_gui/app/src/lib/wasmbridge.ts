@@ -89,33 +89,91 @@ export async function bindWasm(
   };
 }
 
+export type RunnableExample = { name: string; path: string; source: string };
+
 // Installs window.__TAURI_INTERNALS__ over the wasm so backend.ts sees a desktop shell.
-export async function installWasmShell(files: Record<string, string>): Promise<void> {
+// `runnable` lists bundled examples with a prebuilt browser build under run/<name>.html;
+// Run pops that build in a new window (the desktop pops a GLFW window) while the source
+// still matches the bundle. Compiling edits in the browser is the next step.
+export async function installWasmShell(
+  files: Record<string, string>,
+  runnable: RunnableExample[] = []
+): Promise<void> {
   const invoke = await loadWasm();
   for (const [path, text] of Object.entries(files)) invoke('put_file', { path, text });
-  const listeners = new Map<number, string>();
+  const listeners = new Map<number, { event: string; handler: number }>();
+  const callbacks = new Map<number, (payload: unknown) => void>();
   let next = 1;
+  const emit = (event: string, payload: unknown) => {
+    for (const [id, entry] of listeners) {
+      if (entry.event === event) callbacks.get(entry.handler)?.({ event, id, payload });
+    }
+  };
+  const windows = new Map<string, { win: Window; jobId: number; timer: number }>();
+  const currentSource = (path: string) => (invoke('open_document', { path }) as { source: string }).source;
   const win = window as unknown as Record<string, unknown>;
   win.__TAURI_INTERNALS__ = {
     invoke: async (cmd: string, args: Record<string, unknown> = {}) => {
       if (cmd === 'plugin:dialog|open' || cmd === 'plugin:dialog|save') return null;
       if (cmd === 'plugin:event|listen') {
         const id = next++;
-        listeners.set(id, args.event as string);
+        listeners.set(id, { event: args.event as string, handler: args.handler as number });
         return id;
       }
       if (cmd === 'plugin:event|unlisten') {
         listeners.delete(args.eventId as number);
         return null;
       }
+      const path = args.path as string;
+      const example = runnable.find((entry) => entry.path === path);
+      if (cmd === 'find_target') {
+        if (!example) throw `no browser build for ${path} — Run works on the bundled examples`;
+        if (currentSource(path) !== example.source) {
+          throw 'compiling your edits in the browser lands next — Run works on the unmodified example (undo or reload to get back)';
+        }
+        return {
+          available: true,
+          reason: null,
+          name: example.name,
+          buildDir: null,
+          binary: `run/${example.name}.html`,
+          artifact: { state: 'ready', artifactPath: `run/${example.name}.html` }
+        };
+      }
+      if (cmd === 'run_target') {
+        if (!example) throw `no browser build for ${path}`;
+        const jobId = next++;
+        const opened = window.open(`run/${example.name}.html`, '_blank', 'popup,width=1280,height=800');
+        if (!opened) throw 'the browser blocked the run window — allow popups for this site';
+        const inputKey = { inputs: {}, recipeSha256: '' };
+        const timer = window.setInterval(() => {
+          if (!opened.closed) return;
+          window.clearInterval(timer);
+          windows.delete(path);
+          emit('run-finished', { jobId, inputKey, path, code: 0 });
+        }, 500);
+        windows.set(path, { win: opened, jobId, timer });
+        emit('run-output', { jobId, inputKey, path, line: `running run/${example.name}.html in a new window — close it or press Stop` });
+        return { jobId, inputKey };
+      }
+      if (cmd === 'stop_target') {
+        windows.get(path)?.win.close();
+        return null;
+      }
       const result = invoke(cmd, args);
-      if (cmd === 'save_document') download(args.path as string, (result as { source: string }).source);
+      if (cmd === 'save_document') download(path, (result as { source: string }).source);
       return result;
     },
-    transformCallback: (_callback: unknown) => next++,
+    transformCallback: (callback: (payload: unknown) => void) => {
+      const id = next++;
+      callbacks.set(id, callback);
+      return id;
+    },
     metadata: {}
   };
-  win.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
+  win.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+    unregisterListener: (_event: string, eventId: number) => listeners.delete(eventId)
+  };
 }
 
 // ponytail: "save" in the browser hands the file to the visitor; there is no disk to write.

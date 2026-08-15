@@ -126,7 +126,8 @@ namespace cler {
 
         // Runtime capability check with caching
         inline bool supports_doubly_mapped_buffers() {
-            #if !defined(__linux__) && !defined(__APPLE__) && !defined(__FreeBSD__)
+            // CLER_DISABLE_DOUBLY_MAPPED forces the software-mirror path (tests, wasm parity)
+            #if defined(CLER_DISABLE_DOUBLY_MAPPED) || (!defined(__linux__) && !defined(__APPLE__) && !defined(__FreeBSD__))
                 return false;
             #else
                 static bool tested = false;

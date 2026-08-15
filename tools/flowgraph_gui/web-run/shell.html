@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>cler</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d1117; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+  #status { position: fixed; left: 12px; bottom: 10px; color: #8b949e; font: 12px/1.4 ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+<div id="status">starting…</div>
+<script>
+  var statusElement = document.getElementById('status');
+  var Module = {
+    canvas: document.getElementById('canvas'),
+    print: function (text) { console.log(text); },
+    printErr: function (text) { console.error(text); },
+    setStatus: function (text) { statusElement.textContent = text; if (!text) statusElement.remove(); },
+    onRuntimeInitialized: function () { Module.setStatus(''); }
+  };
+  window.addEventListener('error', function (event) { statusElement.textContent = 'error: ' + event.message; });
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>
