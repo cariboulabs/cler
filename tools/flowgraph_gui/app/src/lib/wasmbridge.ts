@@ -1,7 +1,7 @@
 // Browser backend: cler-web.wasm behind the Tauri IPC surface, so the app runs the
 // full editor with no server. Same JSON invoke shape as e2e_backend / webshim.
 import wasmUrl from '../wasm/cler_web.wasm?url';
-import { compile, link, type Line } from './emception';
+import { compile, link, toolchainBlocked, type Line } from './emception';
 
 type Exports = {
   memory: WebAssembly.Memory;
@@ -126,7 +126,7 @@ export async function installWasmShell(
       }
     };
     const settle = (code: number) => {
-      building.delete(path);
+      if (kind === 'build') building.delete(path);
       emitEvent(`${kind}-finished`, { jobId, inputKey, path, code });
     };
     void work(emit).then(settle, (error: unknown) => {
@@ -150,7 +150,9 @@ export async function installWasmShell(
       }
       const path = args.path as string;
       const pristine = runnable.find((entry) => entry.path === path && entry.source === currentSource(path));
+      const blockedReason = pristine ? null : toolchainBlocked();
       if (cmd === 'find_target') {
+        if (blockedReason) throw blockedReason;
         if (pristine) {
           return {
             available: true, reason: null, name: pristine.name, buildDir: null,
@@ -159,36 +161,49 @@ export async function installWasmShell(
           };
         }
         const jobId = building.get(path);
-        const artifactPath = `built/${await sha256(currentSource(path))}/app.html`;
+        const sha = await sha256(currentSource(path));
+        const artifactPath = `built/${sha}/app.html`;
         return {
           available: true, reason: null,
           name: path.split('/').pop()?.replace(/\.[^.]+$/, '') ?? 'flowgraph',
           buildDir: null, binary: null,
           artifact: jobId !== undefined
             ? { state: 'building', jobId }
-            : (await built().then((cache) => cache.match(absolute(artifactPath))))
+            : (await cached(sha))
               ? { state: 'ready', artifactPath }
               : { state: 'needs_build', reason: 'compile this document in the browser first (Ctrl+B)' }
         };
       }
       if (cmd === 'check_document') {
+        if (toolchainBlocked()) throw toolchainBlocked();
         return job('check', path, (emit) => compile(files, path, currentSource(path), emit));
       }
       if (cmd === 'build_target') {
+        if (blockedReason) throw blockedReason;
         return job('build', path, async (emit) => {
           const source = currentSource(path);
+          const sha = await sha256(source);
+          if (await cached(sha)) {
+            emit(`built/${sha}/app.html is already built — press Run`);
+            return 0;
+          }
           const code = await compile(files, path, source, emit);
           if (code !== 0) return code;
           const linked = await link(emit);
           if (linked.code !== 0) return linked.code;
-          await store(await sha256(source), linked.files);
+          await store(sha, linked.files);
           return 0;
         });
       }
       if (cmd === 'run_target') {
-        const target = pristine
-          ? `run/${pristine.name}.html`
-          : `built/${await sha256(currentSource(path))}/app.html`;
+        let target = `run/${pristine?.name}.html`;
+        if (!pristine) {
+          // The document can have changed since find_target said ready; opening a 404 popup
+          // would look like a crash.
+          const sha = await sha256(currentSource(path));
+          if (!(await cached(sha))) throw 'this edit is not built yet — press Build (Ctrl+B) first';
+          target = `built/${sha}/app.html`;
+        }
         const jobId = next++;
         const opened = window.open(target, '_blank', 'popup,width=1280,height=800');
         if (!opened) throw 'the browser blocked the run window — allow popups for this site';
@@ -226,13 +241,25 @@ export async function installWasmShell(
 // A build lands in Cache Storage under the app's own origin and path; public/cler-sw.js
 // serves built/* from there with the COOP/COEP headers pthreads need in the run window.
 const CACHE = 'cler-built';
+const KEEP_BUILDS = 5;
 const built = () => caches.open(CACHE);
 const absolute = (path: string) => new URL(path, location.href).pathname;
+
+async function cached(sha: string): Promise<boolean> {
+  return !!(await built().then((cache) => cache.match(absolute(`built/${sha}/app.html`))));
+}
 
 async function store(sha: string, artifacts: Record<string, Uint8Array>): Promise<void> {
   const cache = await built();
   for (const [name, data] of Object.entries(artifacts)) {
     await cache.put(absolute(`built/${sha}/${name}`), new Response(data as BlobPart));
+  }
+  // ponytail: ~4 MB a build, so keep the last few and drop the rest in insertion order —
+  // an LRU would need access times Cache Storage does not keep.
+  const keys = await cache.keys();
+  const shas = [...new Set(keys.map((request) => new URL(request.url).pathname.split('/built/')[1]?.split('/')[0]))];
+  for (const stale of shas.slice(0, Math.max(0, shas.length - KEEP_BUILDS))) {
+    for (const request of keys) if (request.url.includes(`/built/${stale}/`)) await cache.delete(request);
   }
 }
 

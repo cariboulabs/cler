@@ -144,7 +144,11 @@ decision it enables, not information it displays.
   response (the coi-serviceworker trick, MIT), mirrors the cross-origin toolchain
   under `emception/*` so its worker bundle can resolve its own assets by relative
   URL, and serves `built/*` out of Cache Storage. `main.ts` registers it and
-  reloads once on the first visit.
+  reloads once on the first visit; if registration fails (private windows) the
+  editor still mounts and Check/Build/Run refuse with that reason. The mirrored
+  bundle runs as same-origin code, so its four entry files are pinned by sha256 in
+  `TOOLCHAIN_PINS` — bump `TOOLCHAIN_BASE` and you must recompute them, and the
+  toolchain cache is keyed by origin so the old one is dropped.
 - `wasmbridge.ts` answers `find_target`/`check_document`/`build_target`/`run_target`:
   a bundled example still equal to the bundle runs straight from `run/<name>.html`;
   anything else compiles and links into `built/<sha of source>/app.html` and Run

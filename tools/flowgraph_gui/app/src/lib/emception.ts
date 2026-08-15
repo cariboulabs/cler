@@ -8,6 +8,16 @@ import * as Comlink from 'comlink';
 
 export const TOOLCHAIN_BASE = 'https://jprendes.github.io/emception/';
 
+// The bundle below runs as same-origin code, so it is pinned: cler-sw.js verifies these four
+// sha256s before caching, and refuses the file otherwise. Recompute after a TOOLCHAIN_BASE bump
+// with `curl -sL <base><name> | sha256sum`.
+export const TOOLCHAIN_PINS: Record<string, string> = {
+  'emception.worker.bundle.worker.js': '60b9f0fb7982f9395ef63872b5ed3b798377fab09a8666f28b67ccb5029c0107',
+  'f0283badd42fe745cbe4.wasm': '2c60c515eca756e80ddc752a6ac062e07f596eb70c7a1308321705f90e09b442',
+  '9d1e542b80004e27297f.wasm': '47a2b00defa938d4471ff6ffdbf4d424ee03599db7d8f56590c6223e96191631',
+  'cecdfcda360457a8f204.br': '9bd873132b4915a4da34a977a386a4ae68785df34b8cdb9c3d205fae26eeb772'
+};
+
 // Virtual repo root, and emception's cwd — so every path on the em++ command line is the
 // app's own repo-relative path, and so are the paths in the diagnostics coming back.
 const ROOT = '/working';
@@ -46,8 +56,21 @@ export type Line = (text: string) => void;
 const encoder = new TextEncoder();
 // Absolute: dynamic import() and new Worker() resolve against this module's URL (assets/), not the page.
 const base = () => new URL(import.meta.env.BASE_URL, location.href).href;
+const INIT_TIMEOUT_MS = 60_000;
 let booting: Promise<Emception> | null = null;
 let sink: Line = () => {};
+let blocked: string | null = null;
+
+// Set by main.ts when the service worker cannot be registered (private windows, disabled
+// workers): without it there is no cross-origin isolation and no toolchain mirror, so the
+// editor still runs but Check/Build/Run have to say why they cannot.
+export function blockToolchain(reason: string): void {
+  blocked = reason;
+}
+
+export function toolchainBlocked(): string | null {
+  return blocked;
+}
 
 export function compile(
   files: Record<string, string>,
@@ -62,7 +85,8 @@ export function compile(
 }
 
 export async function link(onLine: Line): Promise<{ code: number; files: Record<string, Uint8Array> }> {
-  const em = await booting!;
+  if (!booting) throw new Error('the C++ toolchain is not running — compile first');
+  const em = await booting;
   const argv = ['em++', OBJ, 'lib/libcler_web.a', 'lib/libliquid.a', ...LDFLAGS, '-o', 'app.html'];
   const code = await exec(em, argv, onLine);
   const out: Record<string, Uint8Array> = {};
@@ -73,28 +97,55 @@ export async function link(onLine: Line): Promise<{ code: number; files: Record<
 }
 
 function boot(files: Record<string, string>, onLine: Line): Promise<Emception> {
+  if (blocked) return Promise.reject(new Error(blocked));
   sink = onLine;
-  booting ??= start(files);
+  // Reset on failure so the next Check/Build retries instead of awaiting a promise that will
+  // never settle (offline, a moved upstream hash, a proxy in the way).
+  booting ??= start(files).catch((error: unknown) => {
+    booting = null;
+    throw error;
+  });
   return booting;
 }
 
 async function start(files: Record<string, string>): Promise<Emception> {
   let bytes = 0;
+  let reported: string | null = null;
   const progress = (event: MessageEvent) => {
-    if (!(event.data as { toolchain?: string })?.toolchain) return;
-    bytes += (event.data as { bytes: number }).bytes;
-    sink(`downloading the C++ toolchain (first visit only)… ${(bytes / 1e6).toFixed(1)} MB`);
+    const data = event.data as { toolchain?: string; bytes?: number; toolchainError?: string };
+    if (data?.toolchainError) {
+      reported = data.toolchainError;
+      sink(data.toolchainError);
+    } else if (data?.toolchain) {
+      bytes += data.bytes ?? 0;
+      sink(`downloading the C++ toolchain (first visit only)… ${(bytes / 1e6).toFixed(1)} MB`);
+    }
   };
   navigator.serviceWorker.addEventListener('message', progress);
   sink('starting the in-browser C++ toolchain…');
-  const em = Comlink.wrap(new Worker(`${base()}emception/emception.worker.bundle.worker.js`)) as unknown as Emception;
+  const worker = new Worker(`${base()}emception/emception.worker.bundle.worker.js`);
+  const em = Comlink.wrap(worker) as unknown as Emception;
   em.onstdout = Comlink.proxy((text: string) => sink(text));
   em.onstderr = Comlink.proxy((text: string) => sink(text));
+  let timer = 0;
+  // em.init() simply never settles when a toolchain file does not arrive, so race it.
+  const stalled = new Promise<never>((_, reject) => {
+    worker.onerror = (event) =>
+      reject(new Error(reported ?? `the C++ toolchain worker failed: ${event.message || 'load error'}`));
+    timer = self.setTimeout(
+      () => reject(new Error(reported ?? `the C++ toolchain did not start within ${INIT_TIMEOUT_MS / 1000} s`)),
+      INIT_TIMEOUT_MS
+    );
+  });
   try {
-    await em.init();
+    await Promise.race([em.init(), stalled]);
     sink('unpacking the cler headers and libraries…');
     await upload(em, files);
+  } catch (error) {
+    worker.terminate();
+    throw error;
   } finally {
+    clearTimeout(timer);
     navigator.serviceWorker.removeEventListener('message', progress);
   }
   return em;

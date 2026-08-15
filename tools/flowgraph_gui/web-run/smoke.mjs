@@ -58,6 +58,24 @@ await field.fill('2.5');
 await field.press('Enter');
 await field.blur();
 
+// Offline cold: the toolchain cannot arrive, so Check must say so and stay retryable.
+await context.setOffline(true);
+await timed('check (offline, must fail fast)', async () => {
+  await page.getByTestId('check').click();
+  await page.getByTestId('tab-output').click();
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="output-body"]')?.textContent?.includes('check finished'),
+    null,
+    { timeout: 120_000 }
+  );
+});
+const offline = await output();
+if (!/cannot reach the C\+\+ toolchain|did not start|worker failed/.test(offline)) {
+  throw new Error(`offline check gave no clear reason:\n${offline}`);
+}
+if (offline.includes('check finished (exit 0)')) throw new Error('offline check reported success');
+await context.setOffline(false);
+
 await timed('check (cold, includes the ~25 MB toolchain)', async () => {
   await page.getByTestId('check').click();
   await page.getByTestId('tab-output').click();
@@ -84,6 +102,16 @@ const builtLog = await output();
 if (!builtLog.includes('build finished (exit 0)')) throw new Error(`build failed:\n${builtLog.slice(-4000)}`);
 await page.getByTestId('run').waitFor({ state: 'visible' });
 await page.waitForFunction(() => !document.querySelector('[data-testid="run"]')?.disabled, null, { timeout: 30_000 });
+
+// Already built: Build must recognise the cached artifact instead of linking again.
+await timed('build (already cached)', async () => {
+  await page.getByTestId('build').click();
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="output-body"]')?.textContent?.includes('already built'),
+    null,
+    { timeout: 30_000 }
+  );
+});
 
 const popupPromise = context.waitForEvent('page');
 await page.getByTestId('run').click();
