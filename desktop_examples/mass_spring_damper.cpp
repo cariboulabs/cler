@@ -8,6 +8,7 @@
 #include "desktop_blocks/utils/fanout.hpp"
 #include <atomic>
 #include <cmath>
+#include <complex>
 
 constexpr size_t SPS = 100;
 constexpr float DT = 1.0f / static_cast<float>(SPS);
@@ -16,6 +17,7 @@ constexpr float zeta = 0.5f;
 constexpr float M = 1.0f;
 constexpr float K = wn * wn * M;
 constexpr float C = 2.0f * zeta * wn * M;
+constexpr float DERIVATIVE_TAU = 0.05f;
 
 struct PlantBlock : public cler::BlockBase {
     static constexpr bool is_gui = true;
@@ -151,22 +153,30 @@ struct ControllerBlock : public cler::BlockBase {
     static constexpr bool is_gui = true;
     cler::Channel<float> measured_position_in;
     float* _buffer;
+    float* _error_buffer;
     size_t _buffer_size;
 
     ControllerBlock(const char* name)
         : BlockBase(name), measured_position_in(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float)) {
         _buffer_size = cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float);
         _buffer = new float[_buffer_size];
-    }
-    
-    ~ControllerBlock() {
-        delete[] _buffer;
+        _error_buffer = new float[_buffer_size];
     }
 
+    ~ControllerBlock() {
+        delete[] _buffer;
+        delete[] _error_buffer;
+    }
+
+    float kp() const { return _kp.load(std::memory_order_relaxed); }
+    float ki() const { return _ki.load(std::memory_order_relaxed); }
+    float kd() const { return _kd.load(std::memory_order_relaxed); }
+
     cler::Result<cler::Empty, cler::Error> procedure(
-        cler::ChannelBase<float>* force_out) {
-        size_t transferable = std::min({measured_position_in.size(), force_out->space(), _buffer_size});
-        if (transferable == 0) return cler::Error::NotEnoughSamples;
+        cler::ChannelBase<float>* force_out, cler::ChannelBase<float>* error_out) {
+        size_t transferable = std::min(
+            {measured_position_in.size(), force_out->space(), error_out->space(), _buffer_size});
+        if (transferable == 0) return cler::Error::NotEnoughSpaceOrSamples;
 
         measured_position_in.readN(_buffer, transferable);
 
@@ -176,7 +186,6 @@ struct ControllerBlock : public cler::BlockBase {
         float kd      = _kd.load(std::memory_order_relaxed);
         bool feed_forward_enabled = _feed_forward.load(std::memory_order_relaxed);
 
-        constexpr float DERIVATIVE_TAU = 0.05f;
         constexpr float ALPHA = DERIVATIVE_TAU / (DERIVATIVE_TAU + DT);
         constexpr float INTEGRAL_LIMIT = 20.0f;
 
@@ -202,9 +211,11 @@ struct ControllerBlock : public cler::BlockBase {
             _dkm1 = dk;
 
             _buffer[i] = force;
+            _error_buffer[i] = ek;
         }
 
         force_out->writeN(_buffer, transferable);
+        error_out->writeN(_error_buffer, transferable);
 
         return cler::Empty{};
     }
@@ -260,38 +271,159 @@ private:
     std::atomic<float> _kp {99.0f};
     std::atomic<float> _ki {5.0f};
     std::atomic<float> _kd {19.0f};
-    std::atomic<bool>  _feed_forward {false};
+    std::atomic<bool>  _feed_forward {true};
 
     ImVec2 _initial_window_position {0.0f, 0.0f};
     ImVec2 _initial_window_size {600.0f, 300.0f};
 };
 
+struct RootLocusBlock : public cler::BlockBase {
+    static constexpr bool is_gui = true;
+
+    RootLocusBlock(const char* name, const ControllerBlock* controller)
+        : BlockBase(name), _controller(controller) {}
+
+    cler::Result<cler::Empty, cler::Error> procedure() {
+        return cler::Error::NotEnoughSamples;
+    }
+
+    void render() {
+        float kp = _controller->kp();
+        float ki = _controller->ki();
+        float kd = _controller->kd();
+        if (kp != _kp || ki != _ki || kd != _kd) {
+            _kp = kp;
+            _ki = ki;
+            _kd = kd;
+            sweep();
+        }
+
+        ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
+        ImGui::Begin("Root Locus");
+        ImGui::Text("Closed-loop poles as loop gain sweeps 0..2x (squares: 1x)");
+        if (ImPlot::BeginPlot("##locus", ImVec2(-1, -1))) {
+            ImPlot::SetupAxes("Re [rad/s]", "Im [rad/s]");
+            float zero = 0.0f;
+            ImPlot::PlotInfLines("##stability", &zero, 1,
+                                 {ImPlotProp_LineColor, ImVec4(0.7f, 0.2f, 0.2f, 0.8f)});
+            ImPlot::PlotScatter("locus", _re, _im, GAIN_STEPS * ORDER,
+                                {ImPlotProp_Marker, ImPlotMarker_Circle,
+                                 ImPlotProp_MarkerSize, 2.0f});
+            ImPlot::PlotScatter("current gains", _nom_re, _nom_im, ORDER,
+                                {ImPlotProp_Marker, ImPlotMarker_Square,
+                                 ImPlotProp_MarkerSize, 5.0f});
+            ImPlot::EndPlot();
+        }
+        ImGui::End();
+    }
+
+    void set_initial_window(float x, float y, float w, float h) {
+        _initial_window_position = ImVec2(x, y);
+        _initial_window_size = ImVec2(w, h);
+    }
+
+private:
+    static constexpr int GAIN_STEPS = 60;
+    static constexpr int ORDER = 4;
+
+    // Characteristic polynomial of the loop with the filtered PID:
+    //   s(tau s+1)(M s^2 + C s + K) + g [ (kp tau + kd) s^2 + (kp + ki tau) s + ki ] = 0
+    void sweep() {
+        constexpr double tau = DERIVATIVE_TAU;
+        for (int step = 1; step <= GAIN_STEPS; ++step) {
+            double g = 2.0 * step / GAIN_STEPS;
+            double a[ORDER + 1] = {
+                g * _ki,
+                K + g * (_kp + _ki * tau),
+                tau * K + C + g * (_kp * tau + _kd),
+                tau * C + M,
+                tau * M,
+            };
+            std::complex<double> roots[ORDER];
+            solve_quartic(a, roots);
+            for (int r = 0; r < ORDER; ++r) {
+                size_t at = static_cast<size_t>(step - 1) * ORDER + r;
+                _re[at] = static_cast<float>(roots[r].real());
+                _im[at] = static_cast<float>(roots[r].imag());
+                if (step == GAIN_STEPS / 2) {
+                    _nom_re[r] = _re[at];
+                    _nom_im[r] = _im[at];
+                }
+            }
+        }
+    }
+
+    static void solve_quartic(const double a[ORDER + 1], std::complex<double>* roots) {
+        std::complex<double> monic[ORDER];
+        for (int i = 0; i < ORDER; ++i) monic[i] = a[i] / a[ORDER];
+        std::complex<double> seed(0.4, 0.9);
+        for (int i = 0; i < ORDER; ++i) roots[i] = std::pow(seed, i + 1);
+        for (int pass = 0; pass < 80; ++pass) {
+            for (int i = 0; i < ORDER; ++i) {
+                std::complex<double> value = 1.0;
+                for (int p = ORDER - 1; p >= 0; --p) value = value * roots[i] + monic[p];
+                std::complex<double> denom = 1.0;
+                for (int j = 0; j < ORDER; ++j) {
+                    if (j != i) denom *= roots[i] - roots[j];
+                }
+                roots[i] -= value / denom;
+            }
+        }
+    }
+
+    const ControllerBlock* _controller;
+    float _kp = -1.0f;
+    float _ki = -1.0f;
+    float _kd = -1.0f;
+    float _re[GAIN_STEPS * ORDER] = {};
+    float _im[GAIN_STEPS * ORDER] = {};
+    float _nom_re[ORDER] = {};
+    float _nom_im[ORDER] = {};
+
+    ImVec2 _initial_window_position {0.0f, 0.0f};
+    ImVec2 _initial_window_size {600.0f, 400.0f};
+};
+
 int main() {
-    cler::GuiManager gui (1000, 600, "Mass-Spring-Damper Simulation");
+    const float GW = 1400.0f;
+    const float GH = 800.0f;
+    cler::GuiManager gui (static_cast<size_t>(GW), static_cast<size_t>(GH), "Mass-Spring-Damper Simulation");
     ControllerBlock controller("Controller");
     ThrottleBlock<float> throttle("Throttle", SPS);
     PlantBlock plant("Plant");
-
+    RootLocusBlock root_locus("RootLocus", &controller);
 
     FanoutBlock<float> fanout("Fanout", 2);
 
     PlotTimeSeriesBlock plot(
         "Sensor Plot",
-        {"Measured Position"}, // signal labels
+        {"Measured Position"},
         SPS,
-        100.0f // duration in seconds
+        100.0f
     );
 
-    controller.set_initial_window(0.0f, 0.0f, 175.0f, 200.0f);
-    plot.set_initial_window(200.0f, 0.0f, 800.0f, 400.0f);
-    plant.set_initial_window(200.0f, 400.0f, 800.0f, 200.0f);
+    PlotTimeSeriesBlock error_plot(
+        "Error Plot",
+        {"target - x"},
+        SPS,
+        100.0f
+    );
+
+    controller.set_initial_window(0.0f, 0.0f, 200.0f, 400.0f);
+    plot.set_initial_window(200.0f, 0.0f, 600.0f, GH / 2.0f);
+    error_plot.set_initial_window(200.0f, GH / 2.0f, 600.0f, GH / 2.0f);
+    plant.set_initial_window(800.0f, 0.0f, 600.0f, GH / 2.0f);
+    root_locus.set_initial_window(800.0f, GH / 2.0f, 600.0f, GH / 2.0f);
 
     auto flowgraph = cler::make_desktop_flowgraph(
-    cler::BlockRunner(&controller, &throttle.in),
+    cler::BlockRunner(&controller, &throttle.in, &error_plot.in[0]),
     cler::BlockRunner(&throttle, &plant.force_in),
     cler::BlockRunner(&plant, &fanout.in),
     cler::BlockRunner(&fanout, &plot.in[0], &controller.measured_position_in),
-    cler::BlockRunner(&plot)
+    cler::BlockRunner(&plot),
+    cler::BlockRunner(&error_plot),
+    cler::BlockRunner(&root_locus)
     );
 
     flowgraph.run();
