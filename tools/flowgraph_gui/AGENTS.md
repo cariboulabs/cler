@@ -131,8 +131,10 @@ decision it enables, not information it displays.
   into `app/public/run/`, and the *payload* the in-browser compiler needs into
   `app/public/payload/`: the two archives plus `headers.json` (`include/**`, the
   imgui/implot headers, `liquid.h`, `shell.html` — `desktop_blocks/**` already
-  ships inside the app bundle). Rerun it after touching those headers or flags;
-  `CXXFLAGS`/`LDFLAGS` in `src/lib/emception.ts` must stay in step with the script.
+  ships inside the app bundle). Rerun it after touching those headers or flags: it also
+  writes `payload/flags.json`, the one place the compile and link flags are spelled,
+  which `emception.ts` reads — only the browser's deliberate overrides (`-O1` link,
+  `-sMINIFY_HTML=0`, `--shell-file`) live in the TypeScript.
 - Build in the browser — `src/lib/emception.ts` runs em++ under
   [emception](https://github.com/jprendes/emception) (clang + lld + the emscripten
   sysroot, in wasm) over a virtual repo rooted at `/working`, so every path on the

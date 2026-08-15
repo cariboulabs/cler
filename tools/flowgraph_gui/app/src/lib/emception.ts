@@ -16,18 +16,15 @@ const VIRTUAL_REPO_ROOT = '/working';
 const OBJ = 'draft.o';
 const ARTIFACTS = ['app.html', 'app.js', 'app.wasm', 'app.worker.js'];
 
-const CXXFLAGS = [
-  '-std=c++17', '-O2', '-pthread', '-Iinclude', '-I.', '-Idesktop_blocks/gui', '-Idesktop_blocks/plots',
-  '-Ibuild/_deps/imgui-src', '-Ibuild/_deps/imgui-src/backends', '-Ibuild/_deps/implot-src', '-Iliquid',
-  '-DIMGUI_IMPL_OPENGL_ES3', '-DImDrawIdx=unsigned int',
-  '-Wno-unused-parameter', '-Wno-unused-variable', '-Wno-missing-braces', '-Wno-deprecated-declarations'
-];
-// ponytail: -O1 links in ~10 s where -O2 takes ~2 min; raise it if the run window turns out too slow.
-const LDFLAGS = [
-  '-O1', '-pthread', '-sUSE_GLFW=3', '-sUSE_WEBGL2=1', '-sFULL_ES3=1', '-sALLOW_MEMORY_GROWTH=1',
-  '-sPTHREAD_POOL_SIZE=8', '-sASYNCIFY', '-sASYNCIFY_STACK_SIZE=65536', '-sEXIT_RUNTIME=0',
-  '-sMINIFY_HTML=0', '--shell-file', 'shell.html'
-];
+// The flags themselves come from payload/flags.json, written by web-build/build.sh with
+// the same values it builds the bundled examples with. These are the browser's deliberate
+// departures: -O1 links in ~10 s where -O2 takes ~2 min (raise it if the run window turns
+// out too slow), the shell lives at the virtual repo root, and emception's html minifier
+// cannot run here.
+const LINK_OVERRIDES = ['-O1', '-sMINIFY_HTML=0', '--shell-file', 'shell.html'];
+
+type Flags = { cxxflags: string[]; ldflags: string[] };
+let staged: Flags | null = null;
 
 type Emception = {
   init(): Promise<void>;
@@ -67,14 +64,14 @@ export function compile(
   return boot(files, onLine).then(async (em) => {
     await write(em, path, encoder.encode(source));
     phase({ phase: 'compile', detail: path });
-    return exec(em, ['em++', ...CXXFLAGS, '-c', path, '-o', OBJ], onLine);
+    return exec(em, ['em++', ...flags().cxxflags, '-c', path, '-o', OBJ], onLine);
   });
 }
 
 export async function link(onLine: Line): Promise<{ code: number; files: Record<string, Uint8Array> }> {
   if (!booting) throw new Error('the C++ toolchain is not running — compile first');
   const em = await booting;
-  const argv = ['em++', OBJ, 'lib/libcler_web.a', 'lib/libliquid.a', ...LDFLAGS, '-o', 'app.html'];
+  const argv = ['em++', OBJ, 'lib/libcler_web.a', 'lib/libliquid.a', ...flags().ldflags, ...LINK_OVERRIDES, '-o', 'app.html'];
   phase({ phase: 'link' });
   let wasmOptStarted = false;
   const code = await exec(em, argv, (text) => {
@@ -153,7 +150,13 @@ async function start(files: Record<string, string>): Promise<Emception> {
   return em;
 }
 
+function flags(): Flags {
+  if (!staged) throw new Error('the build flags are not staged — the toolchain never booted');
+  return staged;
+}
+
 async function upload(em: Emception, files: Record<string, string>): Promise<void> {
+  staged = (await (await fetch(`${assetBaseUrl()}payload/flags.json`)).json()) as Flags;
   const headers = (await (await fetch(`${assetBaseUrl()}payload/headers.json`)).json()) as Record<string, string>;
   phase({ phase: 'stage', detail: `${Object.keys(headers).length} headers` });
   for (const [path, text] of Object.entries({ ...headers, ...files })) {

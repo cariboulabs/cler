@@ -18,8 +18,10 @@ jobs="$(nproc --ignore=1)"
 CXXFLAGS=(-std=c++17 -O2 -pthread -I"$repo/include" -I"$repo" -I"$repo/desktop_blocks/gui" -I"$repo/desktop_blocks/plots"
   -I"$deps/imgui-src" -I"$deps/imgui-src/backends" -I"$deps/implot-src" -I"$out/liquid/include/liquid" -DIMGUI_IMPL_OPENGL_ES3 "-DImDrawIdx=unsigned int"
   -Wno-unused-parameter -Wno-unused-variable -Wno-missing-braces -Wno-deprecated-declarations)
-LDFLAGS=(-O2 -pthread -sUSE_GLFW=3 -sUSE_WEBGL2=1 -sFULL_ES3=1 -sALLOW_MEMORY_GROWTH=1 -sPTHREAD_POOL_SIZE=8 -sASYNCIFY
-  -sASYNCIFY_STACK_SIZE=65536 -sEXIT_RUNTIME=0 --shell-file "$here/shell.html")
+# LDSHARED is what the in-browser linker reuses; -O2 and the shell live here only.
+LDSHARED=(-pthread -sUSE_GLFW=3 -sUSE_WEBGL2=1 -sFULL_ES3=1 -sALLOW_MEMORY_GROWTH=1 -sPTHREAD_POOL_SIZE=8 -sASYNCIFY
+  -sASYNCIFY_STACK_SIZE=65536 -sEXIT_RUNTIME=0)
+LDFLAGS=(-O2 "${LDSHARED[@]}" --shell-file "$here/shell.html")
 
 if [ ! -f "$out/liquid/lib/libliquid.a" ]; then
   echo "== liquid-dsp"
@@ -56,6 +58,17 @@ build_example() { # name source
 }
 echo "== payload for the in-browser compiler"
 cp "$out/libcler_web.a" "$out/liquid/lib/libliquid.a" "$payload/"
+# The same flags, against the virtual repo the browser compiles in ($VIRTUAL_REPO_ROOT
+# in src/lib/emception.ts), so the two editions cannot drift apart.
+cxxvirtual=()
+for flag in "${CXXFLAGS[@]}"; do
+  cxxvirtual+=("$(printf '%s' "$flag" | sed -e "s|^-I$out/liquid/include/liquid\$|-Iliquid|" \
+    -e "s|^-I$deps|-Ibuild/_deps|" -e "s|^-I$repo\$|-I.|" -e "s|^-I$repo/|-I|")")
+done
+python3 -c 'import json, sys
+count = int(sys.argv[2])
+json.dump({"cxxflags": sys.argv[3:3 + count], "ldflags": sys.argv[3 + count:]}, open(sys.argv[1], "w"))' \
+  "$payload/flags.json" "${#cxxvirtual[@]}" "${cxxvirtual[@]}" "${LDSHARED[@]}"
 # Headers em++ needs that the app does not already bundle (it bundles desktop_blocks/**/*.hpp).
 # Keys are the paths the in-browser build uses as its virtual repo root.
 CLER_REPO="$repo" CLER_DEPS_DIR="$deps" CLER_LIQUID="$out/liquid/include/liquid/liquid.h" CLER_SHELL="$here/shell.html" \
