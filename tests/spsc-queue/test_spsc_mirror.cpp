@@ -93,3 +93,32 @@ TEST(SPSCMirror, DbfWriterCopyReaderAndCopyWriterDbfReader) {
 }
 
 } // namespace
+
+TEST(SPSCMirror, AbandonedDbfSpanDoesNotClobberWrappedPeekWrite) {
+    dro::SPSCQueue<uint32_t> queue(CAPACITY);
+    const size_t cap = queue.capacity();
+    std::vector<uint32_t> tmp(cap);
+    // park the write index near the end
+    for (size_t i = 0; i < cap - 5; ++i) queue.push(0u);
+    queue.readN(tmp.data(), cap - 5);
+    // a dbf span is taken and abandoned (block bailed), then a wrapped peek_write is committed
+    (void)queue.write_dbf();
+    uint32_t* p1; size_t s1; uint32_t* p2; size_t s2;
+    size_t got = queue.peek_write(p1, s1, p2, s2);
+    ASSERT_GE(got, 20u);
+    for (size_t i = 0; i < 20; ++i) (i < s1 ? p1[i] : p2[i - s1]) = 1000 + i;
+    queue.commit_write(20);
+    ASSERT_EQ(queue.readN(tmp.data(), 20), 20u);
+    for (size_t i = 0; i < 20; ++i) EXPECT_EQ(tmp[i], 1000 + i) << "idx " << i;
+}
+
+TEST(SPSCMirror, MoveOnlyTypeStillCompiles) {
+    dro::SPSCQueue<std::unique_ptr<int>> queue(8);
+    std::unique_ptr<int>* p1; size_t s1; std::unique_ptr<int>* p2; size_t s2;
+    ASSERT_GE(queue.peek_write(p1, s1, p2, s2), 1u);
+    p1[0] = std::make_unique<int>(7);
+    queue.commit_write(1);
+    std::unique_ptr<int> out;
+    ASSERT_TRUE(queue.try_pop(out));
+    EXPECT_EQ(*out, 7);
+}

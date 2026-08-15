@@ -493,6 +493,9 @@ public:
   }
 
   std::size_t peek_write(T*& ptr1, std::size_t& size1, T*& ptr2, std::size_t& size2) noexcept {
+    if constexpr (N == 0) {
+      writer_.dbfMirrorPending_ = false; // a peek_write span is committed as-is; only write_dbf spans fold
+    }
     const auto capacity = base_type::capacity_;
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_relaxed);
     auto readIndexCache = reader_.readIndex_.load(std::memory_order_acquire);
@@ -641,8 +644,8 @@ public:
           if (writer_.dbfMirrorPending_) {
               writer_.dbfMirrorPending_ = false;
               if (writeIndex + count > capacity) {
-                  std::copy_n(base_type::buffer_ + capacity, writeIndex + count - capacity,
-                              base_type::buffer_);
+                  T* tail = base_type::buffer_ + capacity;
+                  std::move(tail, tail + (writeIndex + count - capacity), base_type::buffer_);
               }
           }
       }
