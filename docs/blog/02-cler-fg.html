@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Introducing cler-fg, a projection editor that turns an existing CLER C++ flowgraph into a canvas and writes every visual edit back as a reviewable source change.">
+    <title>The C++ is the flowgraph: introducing cler-fg — CLER blog</title>
+    <link rel="stylesheet" href="../styles/main.css">
+</head>
+<body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <nav class="nav" aria-label="Primary">
+        <a href="../index.html" class="nav-brand" aria-label="CLER home">
+            <img src="../cler-mark.png" alt="" class="logo" width="28" height="28"><span class="wordmark">cler</span>
+        </a>
+        <div class="nav-tabs">
+            <a href="../index.html" class="nav-tab">Home</a>
+            <a href="../learn.html" class="nav-tab">Learn</a>
+            <a href="../blog.html" class="nav-tab" aria-current="page">Blog</a>
+        </div>
+        <a href="https://github.com/cariboulabs/cler" class="github-link" target="_blank" rel="noreferrer">GitHub</a>
+    </nav>
+
+    <main id="main-content">
+        <article class="container blog-article">
+            <header>
+                <h1>The C++ is the flowgraph.</h1>
+                <p class="article-meta">August 2026</p>
+                <p class="article-dek">cler-fg opens an existing CLER C++ flowgraph as a canvas. The <code>.cpp</code> remains the source of truth, and visual changes are written back as normal source edits.</p>
+            </header>
+
+            <section>
+                <h2>How visual flowgraph tools usually work</h2>
+                <p>Open GNU Radio Companion, move a block, press run. The <code>.grc</code> model remains the design and GRC rebuilds the runnable source from it. Its own tutorial makes the boundary explicit: <a href="https://wiki.gnuradio.org/index.php/Guided_Tutorial_GRC">generating the flowgraph overwrites the generated Python</a>. Hand-edit that file and the next generation can erase the edit.</p>
+                <p>Simulink and LabVIEW keep the graphical model itself. Git treats Simulink's <code>.slx</code> as binary by default, so useful review and merging need <a href="https://www.mathworks.com/help/simulink/slref/comparisontool.html">Simulink's comparison tools</a>. National Instruments says the same plainly about a LabVIEW <code>.vi</code>: its binary source needs <a href="https://www.ni.com/en/support/documentation/supplemental/06/software-configuration-management-and-labview.html">special comparison and merge utilities</a>.</p>
+                <p>These are coherent designs, and they make complex systems visible. The trade-off is that teams must treat the model, rather than generated source, as the authoritative representation:</p>
+                <ul>
+                    <li>The model and generated program cannot both be edited as sources of truth.</li>
+                    <li>Custom behavior generally belongs in an extension point outside the generated program.</li>
+                    <li>Review happens in the model format or through a model-aware comparison tool.</li>
+                </ul>
+                <p>cler-fg starts in the opposite direction. It does not generate C++ from a graph; it derives the graph from the C++.</p>
+            </section>
+
+            <section>
+                <h2>Making C++ the source of truth</h2>
+                <p>cler-fg has no document format of its own. It opens the C++ you already wrote — <code>hello_world.cpp</code>, last year's receiver, a graph from another team — parses it with tree-sitter, and draws a temporary projection. Blocks become boxes. Channels become wires colored by sample type. Flowgraph settings appear with the values the code will actually use.</p>
+                <p>Drag a wire and cler-fg finds the exact <code>BlockRunner</code> span and writes the connection into the source. Drop a library block and it places the include, constructor, and runner in the C++. Change a parameter and its constructor call changes. The code drawer underneath edits that same file, using the same undo history as the canvas.</p>
+                <p>The result is a structured source editor with two views. <code>git diff</code> shows the exact change to the C++ file the project already maintains.</p>
+                <figure class="article-figure">
+                    <img src="02-cler-fg-hello-world.png" alt="cler-fg with desktop_examples/hello_world.cpp open: two CW sources feeding an adder, a throttle and a plot on the canvas, the code drawer below, the AI agent panel on the left" width="1440" height="900" loading="lazy">
+                    <figcaption><code>hello_world.cpp</code>, opened in place. Two sources, an adder, a throttle, a plot — and the file that says so, directly underneath.</figcaption>
+                </figure>
+            </section>
+
+            <section>
+                <h2>What changes in practice</h2>
+                <div class="comparison-wrap">
+                    <table class="comparison-table">
+                        <thead>
+                            <tr><th scope="col">Common model-first workflow</th><th scope="col">cler-fg</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>A dedicated model file owns the design.</td><td>The existing <code>.cpp</code> owns the design.</td></tr>
+                            <tr><td>A canvas edit changes the model; source may be regenerated.</td><td>A canvas edit changes one known span of C++.</td></tr>
+                            <tr><td>A source edit can be overwritten or drift away from the model.</td><td>A source edit reparses into the canvas.</td></tr>
+                            <tr><td>Review may require model-aware tools.</td><td>Review is an ordinary text diff.</td></tr>
+                            <tr><td>The design remains coupled to its model format and tooling.</td><td>Close cler-fg. The program remains the same C++ file.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p>Most of these differences follow from the same design choice: the plain source file remains authoritative.</p>
+            </section>
+
+            <section>
+                <h2>Diagnostics and builds</h2>
+                <p>Check, build, run: three actions in the top bar. When the compiler complains, cler-fg maps the diagnostic back to the block and source line that caused it. The short explanation is up front; the compiler's own message remains underneath when you need the detail.</p>
+                <p>Files outside the CLER repository are supported too. A flowgraph in a scratch directory or another repository builds against your CLER checkout inside a shadow workspace. The original tree stays clean, and the resulting binary retains provenance back to the document.</p>
+                <figure class="article-figure">
+                    <img src="02-cler-fg-diagnostics.png" alt="cler-fg with the hello_world example and a diagnostics tab showing one compiler error attributed to the source1 block" width="1440" height="900" loading="lazy">
+                    <figcaption>The compiler diagnostic is associated with <code>source1</code> and line 14.</figcaption>
+                </figure>
+            </section>
+
+            <section>
+                <h2>The editor knows when it does not know</h2>
+                <p>This approach has a boundary: if the code owns the design, the canvas may change only what it can prove safe to change.</p>
+                <p>A block constructed inside a <code>try</code> through <code>std::optional</code>, for example, is valid C++ but not a simple declaration cler-fg can rewrite with confidence. The block still appears, marked read-only, and its reason follows it. The code remains yours to edit.</p>
+                <p>Halfway through typing, the source may not parse at all. cler-fg keeps the draft in the code drawer and pauses every canvas action that would have to guess. Each disabled action says why. Add the missing semicolon and the graph catches up.</p>
+                <figure class="article-figure">
+                    <img src="02-cler-fg-adsb.png" alt="cler-fg with the ADS-B example: four wired blocks, the source marked read-only, code drawer open on the std::optional declaration" width="1440" height="900" loading="lazy">
+                    <figcaption>The hand-written ADS-B receiver predates cler-fg. Its source block is built through <code>std::optional</code> inside a <code>try</code>, so the canvas preserves it and explains why it is read-only.</figcaption>
+                </figure>
+                <p>The editor's first responsibility is to leave correct, hand-written C++ correct.</p>
+                <p>New block types also remain C++ headers rather than editor-specific definitions. The library scans <code>desktop_blocks/</code> and the block directories you configure; write the header, and the palette discovers it.</p>
+            </section>
+
+            <section>
+                <h2>The agent has to show its work</h2>
+                <p>Press <kbd>Ctrl+J</kbd> and the agent gets the graph you are looking at, not a screenshot of it. Ask why a throttle sits before the plot. Ask for a spectrum sink after a filter. When words are enough, it answers in words.</p>
+                <p>When the answer is an edit, the agent must use the same validated graph operations as the canvas. cler-fg shows the commands in plain language and the exact source diff. Nothing touches the file until you accept; the accepted proposal becomes one undo step. The agent is inside the editor's safety model, not a second path around it.</p>
+            </section>
+
+            <section>
+                <h2>Try it</h2>
+                <p>Install the <a href="../learn.html#tools">cler-fg prerequisites</a>, then use the launcher at the repository root:</p>
+                <div class="code-block">
+                    <pre><code>git clone https://github.com/cariboulabs/cler.git
+cd cler
+./cler_fg.sh</code></pre>
+                </div>
+                <p>Open <code>desktop_examples/hello_world.cpp</code>, move a wire, and run <code>git diff</code> to inspect the resulting <code>BlockRunner</code> change.</p>
+            </section>
+
+            <footer class="article-footer">
+                <p><a href="../blog.html">← Back to blog</a></p>
+            </footer>
+        </article>
+    </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p>CLER · CaribouLabs</p>
+            <p class="footer-links">
+                <a href="https://github.com/cariboulabs/cler/blob/main/License">MIT license</a>
+            </p>
+        </div>
+    </footer>
+</body>
+</html>

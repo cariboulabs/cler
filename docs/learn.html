@@ -6,14 +6,14 @@
     <meta name="description" content="CLER guide: blocks, channels, flowgraphs, schedulers, embedded targets, and performance.">
     <title>CLER guide</title>
     <link rel="stylesheet" href="styles/main.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css">
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
     <nav class="nav" aria-label="Primary">
         <a href="index.html" class="nav-brand" aria-label="CLER home">
-            <img src="cler-logo.jpeg" alt="CLER" class="logo" width="113" height="40">
+            <img src="cler-mark.png" alt="" class="logo" width="28" height="28"><span class="wordmark">cler</span>
         </a>
         <div class="nav-tabs">
             <a href="index.html" class="nav-tab">Home</a>
@@ -38,7 +38,7 @@
                         <li><a href="#schedulers">Schedulers</a></li>
                         <li><a href="#performance">Performance</a></li>
                         <li><a href="#platforms">Platforms</a></li>
-                        <li><a href="#desktop-blocks">Desktop blocks</a></li>
+                        <li><a href="#desktop-blocks">Desktop blocks library</a></li>
                         <li><a href="#tools">Tools and tests</a></li>
                     </ul>
                 </nav>
@@ -46,8 +46,6 @@
 
             <div class="content">
                 <h1>CLER guide</h1>
-                <p class="intro">The rules and APIs needed to build a correct graph. Examples here match the current code.</p>
-                <p class="status-note"><strong>Project status:</strong> CLER is in early development. Block names and APIs can change. Pin a commit instead of <code>main</code> for stable builds.</p>
 
                 <section id="build">
                     <h2>Build and link</h2>
@@ -79,7 +77,7 @@ target_link_libraries(my_app PRIVATE cler::cler)</code></pre>
                     </div>
                     <p>Link <code>cler::cler</code> for the header-only core. To use <code>cler::desktop_blocks</code>, leave <code>CLER_BUILD_BLOCKS</code> on and enable only the parts you need.</p>
 
-                    <h3>Desktop-block dependencies</h3>
+                    <h3>Desktop blocks library dependencies</h3>
                     <p>The build always needs threads and pkg-config. GUI blocks also need OpenGL and X11 on Linux; GLFW is used from the system or fetched. ImGui and ImPlot are fetched. Enabling liquid-backed blocks fetches liquid-dsp. Hardware and audio libraries are optional and enable their matching blocks when found.</p>
 
                     <h3>Build switches</h3>
@@ -172,7 +170,7 @@ return cler::Empty{};</code></pre>
 
                     <h3>Fatal errors</h3>
                     <p>Errors at or after <code>TERMINATE_FLOWGRAPH</code> stop the graph. Use <code>TERM_ProcedureError</code> for a runtime failure that cannot be retried. On desktop, use <code>cler::panic()</code> for bad setup or a broken invariant.</p>
-                    <p>CLER code does not throw. Catch exceptions only at the edge of a library whose API throws, such as UHD or SoapySDR.</p>
+                    <p>CLER code does not throw on any normal path; only <code>Result::unwrap()</code> on a misuse does. Catch exceptions only at the edge of a library whose API throws, such as UHD or SoapySDR.</p>
                 </section>
 
                 <section id="execution">
@@ -351,8 +349,8 @@ const double items_per_second = items / seconds;</code></pre>
                 </section>
 
                 <section id="desktop-blocks">
-                    <h2>Desktop blocks</h2>
-                    <p><code>desktop_blocks/</code> is for quick desktop and embedded-Linux work. It favors broad APIs over the smallest memory use.</p>
+                    <h2>Desktop blocks library</h2>
+                    <p>The desktop blocks library, <code>desktop_blocks/</code>, is for quick desktop and embedded-Linux work. It favors broad APIs over the smallest memory use.</p>
                     <table>
                         <thead><tr><th scope="col">Group</th><th scope="col">Included blocks</th></tr></thead>
                         <tbody>
@@ -370,13 +368,13 @@ const double items_per_second = items / seconds;</code></pre>
 
                 <section id="tools">
                     <h2>Tools and tests</h2>
-                    <h3>Flowgraph GUI</h3>
+                    <h3>cler-fg, the flowgraph editor</h3>
+                    <p>cler-fg opens a flowgraph <code>.cpp</code> as a graph and writes canvas edits back into that same file. It needs Node.js, a Rust toolchain, and Tauri's system libraries (WebKitGTK on Linux). From the repository root, the launcher installs the app packages and starts the editor:</p>
                     <div class="code-block">
                         <button class="copy-button" onclick="copyCode(this)">Copy</button>
-                        <pre><code class="language-bash line-numbers">cd tools/flowgraph_gui/app
-npm install
-npm run tauri dev</code></pre>
+                        <pre><code class="language-bash line-numbers">./cler_fg.sh</code></pre>
                     </div>
+                    <p>Files inside <code>desktop_examples/</code> build through their own CMake target. Any other file builds as a draft against the CLER checkout the app was built from, or the <code>clerRoot</code> set in the app's settings. Block types are still written in C++; the library palette scans <code>desktop_blocks/</code> and any configured block library, and there is no wizard for new block types.</p>
 
                     <h3>Flowgraph diagram</h3>
                     <div class="code-block">
@@ -410,10 +408,9 @@ ctest --output-on-failure
 
     <footer class="site-footer">
         <div class="container">
-            <p>CLER 0.1.0 · Early development · APIs may change</p>
+            <p>CLER · CaribouLabs</p>
             <p class="footer-links">
-                <a href="https://github.com/cariboulabs/cler/blob/main/License">Apache-2.0 license</a>
-                <a href="https://github.com/cariboulabs/cler/issues">Issues</a>
+                <a href="https://github.com/cariboulabs/cler/blob/main/License">MIT license</a>
             </p>
         </div>
     </footer>

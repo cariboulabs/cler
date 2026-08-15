@@ -3,17 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="CLER is a C++17 DSP flowgraph framework for SDRs and embedded systems.">
+    <meta name="description" content="CLER is a modern C++17 alternative to GNU Radio with ready DSP infrastructure, tested blocks, cross-platform and embedded support, and compact abstractions that AI agents can use to build complete signal chains.">
     <title>CLER — C++ DSP flowgraphs</title>
     <link rel="stylesheet" href="styles/main.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css">
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
     <nav class="nav" aria-label="Primary">
         <a href="index.html" class="nav-brand" aria-label="CLER home">
-            <img src="cler-logo.jpeg" alt="CLER" class="logo" width="113" height="40">
+            <img src="cler-mark.png" alt="" class="logo" width="28" height="28"><span class="wordmark">cler</span>
         </a>
         <div class="nav-tabs">
             <a href="index.html" class="nav-tab" aria-current="page">Home</a>
@@ -27,46 +27,44 @@
         <section class="hero">
             <h1>CLER</h1>
             <p class="tagline">C++17 DSP flowgraphs for SDRs and embedded systems</p>
-            <p class="subtext">Typed channels. Small core. Flowgraph or manual execution.</p>
+            <p class="subtext">Typed channels. Small core. Desktop to bare metal.</p>
         </section>
 
         <section class="band band-muted">
-            <div class="container prose">
+            <div class="container">
                 <h2>What it is</h2>
-                <p>CLER is a template-based DSP framework. A block owns its input channels and exposes a <code>procedure()</code> method. Its output channels are passed to that method, so connections are checked by the compiler.</p>
-                <p>The same block can run in a threaded flowgraph or in a loop you control. The core is header-only and does not need exceptions.</p>
-                <p class="status-note"><strong>Project status:</strong> CLER is in early development. Block names and APIs can change.</p>
+                <p>CLER is a modern, batteries-included DSP framework built for AI agents. Smart abstractions keep code and context small, making end-to-end DSP chains straightforward to build. Scheduling, buffers, device support, plots, and tested DSP blocks are included. The same design runs from desktop to bare metal, with a header-only core and optional dependencies.</p>
             </div>
         </section>
 
         <section class="band">
             <div class="container">
-                <h2>Main parts</h2>
+                <h2>What you get</h2>
                 <div class="principle-grid">
                     <div class="principle">
                         <h3>Typed channels</h3>
-                        <p>Static or heap-backed SPSC queues. Batch and zero-copy access are built in.</p>
+                        <p>Each channel knows what kind of sample it carries, so C++ catches bad connections before the program runs. Samples move in batches, with a zero-copy path when the platform supports it.</p>
                     </div>
                     <div class="principle">
                         <h3>Three schedulers</h3>
-                        <p>One thread per block, a fixed worker pool, or block islands. Affinity is available on Linux.</p>
+                        <p>Give each block its own thread, share a fixed set of workers, or group nearby blocks on the same CPU core. CLER can measure the work and adjust those groups while the graph runs.</p>
                     </div>
                     <div class="principle">
                         <h3>Desktop and embedded</h3>
-                        <p>Linux and macOS, plus task policies for FreeRTOS, ThreadX, and Zephyr. Bare metal uses manual execution.</p>
+                        <p>Linux and macOS, task policies for FreeRTOS, ThreadX, and Zephyr, and manual execution for bare-metal targets.</p>
                     </div>
                     <div class="principle">
-                        <h3>Desktop blocks</h3>
-                        <p>Sources, sinks, SDR drivers, plots, filters, resamplers, channelizers, UDP, and audio.</p>
+                        <h3>Desktop blocks library</h3>
+                        <p>Sources, sinks, SDR drivers, plots, filters, resamplers, channelizers, UDP, and audio for desktop and embedded-Linux applications.</p>
                     </div>
                 </div>
             </div>
         </section>
 
-        <section class="band band-muted">
+        <section class="band band-muted" id="first-graph">
             <div class="container">
-                <h2>A desktop-block example</h2>
-                <p class="prose">This example generates two tones, adds them, limits the rate, and plots the result. It uses the optional GUI build.</p>
+                <h2>What it looks like</h2>
+                <p class="prose">This example generates two tones, adds them, limits the rate, and plots the result. The <code>BlockRunner</code> list defines the connections.</p>
                 <div class="code-block">
                     <button class="copy-button" type="button" onclick="copyCode(this)">Copy</button>
                     <pre><code class="language-cpp line-numbers">#include "cler.hpp"
@@ -76,8 +74,6 @@
 #include "desktop_blocks/plots/plot_timeseries.hpp"
 #include "desktop_blocks/sources/source_cw.hpp"
 #include "desktop_blocks/utils/throttle.hpp"
-#include &lt;chrono&gt;
-#include &lt;thread&gt;
 
 int main() {
     constexpr size_t sample_rate = 1000;
@@ -104,47 +100,44 @@ int main() {
     graph.stop();
 }</code></pre>
                 </div>
-                <p class="prose">A <code>BlockRunner</code> takes a block first, then the downstream channels that receive its outputs.</p>
+                <p class="prose">A runner takes a block first, followed by the downstream channels that receive its outputs. A type mismatch between connected channels is a compile-time error.</p>
             </div>
         </section>
 
-        <section class="band">
+        <section class="band" id="build">
             <div class="container">
-                <h2>First build: core examples</h2>
-                <p class="prose">You need CMake 3.16 or newer, a C++17 compiler, threads, and pkg-config. This path skips GUI and liquid-dsp.</p>
+                <h2>Build the core examples</h2>
+                <p class="prose">You need CMake 3.16, a C++17 compiler, threads, and pkg-config. This build leaves the GUI and liquid-dsp blocks off.</p>
                 <div class="code-block">
                     <button class="copy-button" type="button" onclick="copyCode(this)">Copy</button>
                     <pre><code class="language-bash line-numbers">git clone https://github.com/cariboulabs/cler.git
 cd cler
-mkdir build-core
-cd build-core
-cmake -DCLER_BUILD_BLOCKS_GUI=OFF -DCLER_BUILD_BLOCKS_LIQUID=OFF ..
-make -j4
-./desktop_examples/flowgraph</code></pre>
+cmake -S . -B build-core \
+  -DCLER_BUILD_BLOCKS_GUI=OFF \
+  -DCLER_BUILD_BLOCKS_LIQUID=OFF
+cmake --build build-core -j4
+./build-core/desktop_examples/flowgraph</code></pre>
                 </div>
-
-                <h3>GUI example</h3>
-                <p class="prose">The default build requires OpenGL and X11 on Linux. It uses system GLFW when present and otherwise fetches it. ImGui, ImPlot, and liquid-dsp are fetched while their blocks are enabled.</p>
-                <div class="code-block">
-                    <button class="copy-button" type="button" onclick="copyCode(this)">Copy</button>
-                    <pre><code class="language-bash line-numbers">mkdir build
-cd build
-cmake ..
-make -j4
-./desktop_examples/hello_world</code></pre>
-                </div>
-                <p><a href="learn.html">Read the guide</a> for block rules, channels, schedulers, CMake use, and performance notes.</p>
+                <p class="prose"><a href="learn.html">Continue to the guide</a> for block design, zero-copy channels, scheduler selection, desktop dependencies, and embedded targets.</p>
             </div>
         </section>
+
+        <section class="band band-muted" id="cler-fg">
+            <div class="container">
+                <h2>Integrated flowgraph editor for no-code users</h2>
+                <p class="prose">cler-fg lets users place blocks, connect them, change settings, build, and run without writing the graph by hand. Its modern approach keeps the visual canvas and C++ source in sync, avoiding the generated code and separate project files common in conventional GUI wrappers. It is included with CLER and remains optional.</p>
+                <p><a href="blog/02-cler-fg.html">Learn about cler-fg →</a></p>
+            </div>
+        </section>
+
         <span id="copy-status" class="sr-only" aria-live="polite"></span>
     </main>
 
     <footer class="site-footer">
         <div class="container">
-            <p>CLER 0.1.0 · Early development · APIs may change</p>
+            <p>CLER · CaribouLabs</p>
             <p class="footer-links">
-                <a href="https://github.com/cariboulabs/cler/blob/main/License">Apache-2.0 license</a>
-                <a href="https://github.com/cariboulabs/cler/issues">Issues</a>
+                <a href="https://github.com/cariboulabs/cler/blob/main/License">MIT license</a>
             </p>
         </div>
     </footer>

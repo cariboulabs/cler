@@ -1,11 +1,19 @@
+/* Design tokens shared with cler-fg (tools/flowgraph_gui/app/src/app.css):
+   Caribou red on dark surfaces. Rules read token names only, never a raw color. */
 :root {
-    --cler-red: #c51f32;
-    --cler-red-dark: #9f1828;
-    --cler-black: #1a1a1a;
-    --cler-muted: #626262;
-    --cler-gray: #f5f5f5;
-    --cler-light-gray: #dedede;
-    --cler-white: #fff;
+    color-scheme: dark;
+    --accent: #b81828;
+    --accent-hi: #d11f33;
+    --accent-fg: #ffffff;
+    --link: #ef5364;
+    --bg-0: #0e1116;
+    --bg-1: #161b22;
+    --bg-2: #1e242d;
+    --border: #2a323d;
+    --border-hi: #3a444f;
+    --fg: #e6edf3;
+    --muted: #8b98a9;
+    --faint: #6b7787;
     --max-width: 1200px;
     --prose-width: 74ch;
     --radius: 8px;
@@ -21,14 +29,14 @@ html {
 
 body {
     margin: 0;
-    color: var(--cler-black);
-    background: var(--cler-white);
+    color: var(--fg);
+    background: var(--bg-0);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     line-height: 1.6;
 }
 
 a {
-    color: var(--cler-red);
+    color: var(--link);
     text-underline-offset: 0.15em;
 }
 
@@ -37,7 +45,7 @@ a:hover {
 }
 
 :focus-visible {
-    outline: 3px solid var(--cler-red);
+    outline: 3px solid var(--accent-hi);
     outline-offset: 3px;
 }
 
@@ -47,8 +55,8 @@ a:hover {
     left: 0.5rem;
     z-index: 1000;
     padding: 0.6rem 0.9rem;
-    color: var(--cler-white);
-    background: var(--cler-black);
+    color: var(--fg);
+    background: var(--bg-2);
     border-radius: 4px;
     transform: translateY(-150%);
 }
@@ -66,8 +74,8 @@ a:hover {
     align-items: center;
     min-height: 72px;
     padding: 0.75rem 2rem;
-    background: var(--cler-white);
-    border-bottom: 1px solid var(--cler-light-gray);
+    background: var(--bg-0);
+    border-bottom: 1px solid var(--border);
 }
 
 .nav-brand {
@@ -76,10 +84,22 @@ a:hover {
     align-items: center;
 }
 
+.nav-brand {
+    gap: 0.5rem;
+    color: var(--fg);
+    text-decoration: none;
+}
+
 .logo {
     display: block;
-    width: 113px;
-    height: 40px;
+    width: 28px;
+    height: 28px;
+}
+
+.wordmark {
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
 }
 
 .nav-tabs {
@@ -89,7 +109,7 @@ a:hover {
 
 .nav-tab,
 .github-link {
-    color: var(--cler-black);
+    color: var(--fg);
     font-weight: 600;
     text-decoration: none;
 }
@@ -101,8 +121,8 @@ a:hover {
 
 .nav-tab:hover,
 .nav-tab[aria-current="page"] {
-    color: var(--cler-red);
-    border-bottom-color: var(--cler-red);
+    color: var(--link);
+    border-bottom-color: var(--link);
 }
 
 .github-link {
@@ -110,7 +130,7 @@ a:hover {
 }
 
 .github-link:hover {
-    color: var(--cler-red);
+    color: var(--link);
 }
 
 .container {
@@ -125,7 +145,7 @@ a:hover {
 .hero {
     padding: 5rem 2rem;
     text-align: center;
-    background: linear-gradient(135deg, #fafafa, var(--cler-gray));
+    background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
 }
 
 .hero h1 {
@@ -136,13 +156,13 @@ a:hover {
 
 .hero .tagline {
     margin: 0 0 0.5rem;
-    color: var(--cler-muted);
+    color: var(--muted);
     font-size: clamp(1.2rem, 3vw, 1.6rem);
 }
 
 .hero .subtext {
     margin: 0;
-    color: var(--cler-muted);
+    color: var(--muted);
     font-size: 1.05rem;
 }
 
@@ -150,8 +170,12 @@ a:hover {
     padding: 4rem 0;
 }
 
+.band[id] {
+    scroll-margin-top: 72px;
+}
+
 .band-muted {
-    background: #fafafa;
+    background: var(--bg-1);
 }
 
 h1,
@@ -196,31 +220,31 @@ li {
     margin-bottom: 0.35rem;
 }
 
-.status-note,
 .key-point {
     max-width: var(--prose-width);
     margin: 1rem 0 1.5rem;
     padding: 1rem 1.2rem;
-    background: #fff5f6;
-    border-left: 4px solid var(--cler-red);
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg-1));
+    border-left: 4px solid var(--link);
     border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 .principle-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 1.25rem;
 }
 
 .principle {
     padding: 1.4rem;
-    border: 1px solid var(--cler-light-gray);
+    background: var(--bg-1);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
 }
 
 .principle h3 {
     margin: 0 0 0.6rem;
-    color: var(--cler-red);
+    color: var(--link);
     font-size: 1.15rem;
 }
 
@@ -234,8 +258,8 @@ li {
     margin: 1.4rem 0;
     padding: 1.4rem;
     overflow-x: auto;
-    background: var(--cler-gray);
-    border: 1px solid var(--cler-light-gray);
+    background: var(--bg-1);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
 }
 
@@ -246,9 +270,15 @@ li {
     line-height: 1.45;
 }
 
+.code-block pre[class*="language-"],
 .code-block code {
     padding: 0;
     background: transparent;
+    text-shadow: none;
+}
+
+.code-block .line-numbers .line-numbers-rows {
+    border-right-color: var(--border-hi);
 }
 
 .copy-button {
@@ -257,23 +287,32 @@ li {
     right: 0.7rem;
     z-index: 2;
     padding: 0.45rem 0.85rem;
-    color: var(--cler-white);
-    background: var(--cler-red);
+    color: var(--accent-fg);
+    background: var(--accent);
     border: 0;
     border-radius: 6px;
     cursor: pointer;
 }
 
 .copy-button:hover {
-    background: var(--cler-red-dark);
+    background: var(--accent-hi);
 }
 
 code {
     padding: 0.16rem 0.35rem;
-    background: var(--cler-gray);
+    background: var(--bg-2);
     border-radius: 4px;
     font-family: Monaco, Menlo, "Ubuntu Mono", monospace;
     font-size: 0.9em;
+}
+
+kbd {
+    padding: 0.1rem 0.4rem;
+    background: var(--bg-2);
+    border: 1px solid var(--border-hi);
+    border-radius: 4px;
+    font-family: Monaco, Menlo, "Ubuntu Mono", monospace;
+    font-size: 0.85em;
 }
 
 table {
@@ -288,11 +327,11 @@ td {
     padding: 0.7rem;
     text-align: left;
     vertical-align: top;
-    border: 1px solid var(--cler-light-gray);
+    border: 1px solid var(--border);
 }
 
 th {
-    background: var(--cler-gray);
+    background: var(--bg-1);
 }
 
 .learn-layout {
@@ -310,7 +349,7 @@ th {
 
 .nav-heading {
     margin-bottom: 0.7rem;
-    color: var(--cler-red);
+    color: var(--link);
     font-weight: 700;
 }
 
@@ -327,15 +366,15 @@ th {
 .learn-nav a {
     display: block;
     padding: 0.3rem 0 0.3rem 0.55rem;
-    color: var(--cler-black);
+    color: var(--fg);
     font-size: 0.95rem;
     text-decoration: none;
     border-left: 2px solid transparent;
 }
 
 .learn-nav a:hover {
-    color: var(--cler-red);
-    border-left-color: var(--cler-red);
+    color: var(--link);
+    border-left-color: var(--link);
 }
 
 .mobile-only {
@@ -344,7 +383,7 @@ th {
 
 .nav-toggle {
     padding: 0.4rem 0;
-    color: var(--cler-red);
+    color: var(--link);
     background: transparent;
     border: 0;
     font: inherit;
@@ -358,13 +397,13 @@ th {
 
 .content > .intro {
     max-width: var(--prose-width);
-    color: var(--cler-muted);
+    color: var(--muted);
     font-size: 1.15rem;
 }
 
 .content section {
     padding: 2rem 0;
-    border-bottom: 1px solid var(--cler-light-gray);
+    border-bottom: 1px solid var(--border);
     scroll-margin-top: 88px;
 }
 
@@ -379,15 +418,15 @@ th {
 }
 
 .blog-content,
-.blog-article,
 .not-found {
     max-width: 820px;
 }
 
 .blog-card {
+    margin-bottom: 1.25rem;
     padding: 1.5rem;
-    background: #fafafa;
-    border: 1px solid var(--cler-light-gray);
+    background: var(--bg-1);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
 }
 
@@ -396,14 +435,14 @@ th {
 }
 
 .blog-card h2 a {
-    color: var(--cler-black);
+    color: var(--fg);
 }
 
 .blog-meta,
 .article-meta,
 .archive-label,
 figcaption {
-    color: var(--cler-muted);
+    color: var(--muted);
     font-size: 0.92rem;
 }
 
@@ -414,6 +453,7 @@ figcaption {
 }
 
 .blog-article {
+    max-width: 980px;
     padding-block: 3rem;
 }
 
@@ -422,12 +462,52 @@ figcaption {
 }
 
 .blog-article h1 {
-    margin-bottom: 0.6rem;
-    font-size: clamp(2rem, 5vw, 3rem);
+    max-width: 14ch;
+    margin-bottom: 0.8rem;
+    font-size: clamp(2.6rem, 6vw, 4.6rem);
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+}
+
+.article-dek {
+    max-width: 62ch;
+    color: var(--fg);
+    font-size: clamp(1.15rem, 2.5vw, 1.35rem);
+    line-height: 1.5;
 }
 
 .blog-article section {
     margin-bottom: 2.5rem;
+}
+
+.blog-article section > p,
+.blog-article section > ul,
+.blog-article section > ol {
+    max-width: var(--prose-width);
+}
+
+.comparison-wrap {
+    max-width: 920px;
+    margin: 1.5rem 0;
+    overflow-x: auto;
+}
+
+.comparison-table {
+    min-width: 660px;
+    margin: 0;
+}
+
+.comparison-table th {
+    width: 50%;
+    color: var(--fg);
+}
+
+.comparison-table th:last-child {
+    color: var(--link);
+}
+
+.comparison-table td:first-child {
+    color: var(--muted);
 }
 
 .article-figure {
@@ -438,6 +518,7 @@ figcaption {
     display: block;
     width: 100%;
     height: auto;
+    border: 1px solid var(--border-hi);
     border-radius: var(--radius);
 }
 
@@ -451,8 +532,8 @@ figcaption {
     gap: 2rem;
     margin: 1.5rem 0 2rem;
     padding: 1.5rem;
-    background: var(--cler-gray);
-    border: 1px solid var(--cler-light-gray);
+    background: var(--bg-1);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
 }
 
@@ -463,8 +544,8 @@ figcaption {
     min-height: 92px;
     padding: 0.8rem;
     text-align: center;
-    background: var(--cler-white);
-    border: 1px solid var(--cler-light-gray);
+    background: var(--bg-2);
+    border: 1px solid var(--border-hi);
     border-radius: 6px;
 }
 
@@ -472,14 +553,14 @@ figcaption {
     content: "→";
     position: absolute;
     left: calc(100% + 0.65rem);
-    color: var(--cler-red);
+    color: var(--link);
     font-size: 1.4rem;
     font-weight: 700;
 }
 
 .article-footer {
     padding-top: 1.5rem;
-    border-top: 1px solid var(--cler-light-gray);
+    border-top: 1px solid var(--border);
 }
 
 .not-found {
@@ -497,24 +578,24 @@ figcaption {
 .button {
     display: inline-block;
     padding: 0.7rem 1.1rem;
-    color: var(--cler-white);
-    background: var(--cler-red);
-    border: 2px solid var(--cler-red);
+    color: var(--accent-fg);
+    background: var(--accent);
+    border: 2px solid var(--accent);
     border-radius: 5px;
     font-weight: 600;
     text-decoration: none;
 }
 
 .button.secondary {
-    color: var(--cler-red);
+    color: var(--link);
     background: transparent;
 }
 
 .site-footer {
     padding: 1.5rem 0;
-    color: var(--cler-muted);
-    background: var(--cler-gray);
-    border-top: 1px solid var(--cler-light-gray);
+    color: var(--muted);
+    background: var(--bg-1);
+    border-top: 1px solid var(--border);
 }
 
 .site-footer .container {
@@ -594,7 +675,7 @@ figcaption {
     .sidebar {
         position: static;
         padding: 0.8rem 1rem;
-        background: var(--cler-gray);
+        background: var(--bg-1);
         border-radius: var(--radius);
     }
 

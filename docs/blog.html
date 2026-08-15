@@ -11,7 +11,7 @@
     <a class="skip-link" href="#main-content">Skip to content</a>
     <nav class="nav" aria-label="Primary">
         <a href="index.html" class="nav-brand" aria-label="CLER home">
-            <img src="cler-logo.jpeg" alt="CLER" class="logo" width="113" height="40">
+            <img src="cler-mark.png" alt="" class="logo" width="28" height="28"><span class="wordmark">cler</span>
         </a>
         <div class="nav-tabs">
             <a href="index.html" class="nav-tab">Home</a>
@@ -24,29 +24,32 @@
     <main id="main-content">
         <section class="hero">
             <h1>CLER blog</h1>
-            <p class="subtext">Project notes and case studies</p>
         </section>
 
         <section class="band">
             <div class="container blog-content">
                 <article class="blog-card">
+                    <h2><a href="blog/02-cler-fg.html">The C++ is the flowgraph.</a></h2>
+                    <p class="blog-meta">August 2026</p>
+                    <p>cler-fg displays an existing CLER <code>.cpp</code> as a canvas and writes visual edits back into the source. The article covers the editing model, builds, diagnostics, and the limits of what the canvas can safely change.</p>
+                    <a href="blog/02-cler-fg.html">Read the article →</a>
+                </article>
+
+                <article class="blog-card">
                     <h2><a href="blog/01-tower-listener.html">Tower Listener: narrowband GMSK for heliostat communication</a></h2>
-                    <p class="blog-meta">June 2025 · Use case</p>
+                    <p class="blog-meta">June 2025</p>
                     <p>A 15-channel receiver built as a CLER flowgraph: live or recorded IQ, one resampler, one polyphase channelizer, and a GMSK demodulator per channel.</p>
                     <a href="blog/01-tower-listener.html">Read the article →</a>
                 </article>
-
-                <p>Have a CLER result worth sharing? <a href="https://github.com/cariboulabs/cler/issues/new">Open an issue</a> with the topic and measurements.</p>
             </div>
         </section>
     </main>
 
     <footer class="site-footer">
         <div class="container">
-            <p>CLER 0.1.0 · Early development · APIs may change</p>
+            <p>CLER · CaribouLabs</p>
             <p class="footer-links">
-                <a href="https://github.com/cariboulabs/cler/blob/main/License">Apache-2.0 license</a>
-                <a href="https://github.com/cariboulabs/cler/issues">Issues</a>
+                <a href="https://github.com/cariboulabs/cler/blob/main/License">MIT license</a>
             </p>
         </div>
     </footer>
