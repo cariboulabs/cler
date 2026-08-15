@@ -1,55 +1,22 @@
 <script lang="ts">
   import RailTabs, { type RailTab } from './RailTabs.svelte';
   import { describeCommand, render, type Message, type Proposal } from './agent';
-  import type { AiAgentStatus, ListedModel } from './backend';
+  import type { AgentSession } from './agentSession.svelte';
+  import type { ListedModel } from './backend';
 
   type Props = {
+    session: AgentSession;
     open: boolean;
-    status: AiAgentStatus | null;
-    messages: Message[];
-    pending: number | null;
-    enabled: boolean;
-    note: string;
-    revision: number;
-    selected: string | null;
-    models: ListedModel[];
     ontoggle: () => void;
     ontab: (next: RailTab) => void;
-    onask: (question: string) => void;
-    onstop: () => void;
-    onsignin: () => Promise<string | null>;
-    onlogout: () => void;
-    onmodel: (model: string) => void;
-    onprovider: (provider: string) => void;
-    onretry: (id: number) => void;
-    onaccept: (id: number) => void;
-    onreject: (id: number) => void;
-    onreplan: (id: number) => void;
   };
 
-  const {
-    open,
-    status,
-    messages,
-    pending,
-    enabled,
-    note,
-    revision,
-    selected,
-    models,
-    ontoggle,
-    ontab,
-    onask,
-    onstop,
-    onsignin,
-    onlogout,
-    onmodel,
-    onprovider,
-    onretry,
-    onaccept,
-    onreject,
-    onreplan
-  }: Props = $props();
+  const { session, open, ontoggle, ontab }: Props = $props();
+
+  const status = $derived(session.status);
+  const messages = $derived(session.messages);
+  const pending = $derived(session.pending);
+  const models = $derived(session.models);
 
   let waiting = $state(false);
   let oauthError = $state<string | null>(null);
@@ -82,7 +49,7 @@
   const CEILING = 'one proposal per answer: further tool calls in that turn were dropped';
 
   function stale(proposal: Proposal): boolean {
-    return proposal.state === 'ready' && proposal.baseRevision !== revision;
+    return proposal.state === 'ready' && proposal.baseRevision !== session.revision;
   }
 
   function retryable(message: Message): boolean {
@@ -95,12 +62,12 @@
   let list = $state<HTMLDivElement | null>(null);
 
   const streaming = $derived(pending !== null);
-  const ready = $derived(enabled && status?.available === true);
+  const ready = $derived(session.enabled && status?.available === true);
   const hint = $derived(
     status === null
       ? 'looking for an API key…'
-      : !enabled
-        ? note
+      : !session.enabled
+        ? session.note
         : streaming
           ? 'answering — Stop to interrupt'
           : ''
@@ -118,7 +85,7 @@
     const text = question.trim();
     if (text.length === 0) return;
     draft = '';
-    onask(text);
+    void session.ask(text);
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -162,7 +129,7 @@
             class="model-select"
             data-testid="ai-agent-provider-select"
             value={status.provider}
-            onchange={(event) => onprovider(event.currentTarget.value)}
+            onchange={(event) => void session.setProvider(event.currentTarget.value)}
           >
             {#each PROVIDERS as choice (choice.id)}
               <option value={choice.id}>{choice.label}</option>
@@ -175,7 +142,7 @@
               class="model-select"
               data-testid="ai-agent-model-select"
               value={status.model}
-              onchange={(event) => onmodel(event.currentTarget.value)}
+              onchange={(event) => void session.setModel(event.currentTarget.value)}
             >
               {#each models as model (model.id)}
                 <option value={model.id}>{shortName(model)}</option>
@@ -197,7 +164,7 @@
             data-testid="ai-agent-signin"
             onclick={() => {
               oauthError = null;
-              void onsignin().then((error) => {
+              void session.signIn().then((error) => {
                 oauthError = error;
                 waiting = error === null;
               });
@@ -239,7 +206,7 @@
               <p class="failed" data-testid="ai-agent-error">{message.error}</p>
             {/if}
             {#if retryable(message)}
-              <button data-testid="ai-agent-retry" onclick={() => onretry(message.id)}>
+              <button data-testid="ai-agent-retry" onclick={() => session.retry(message.id)}>
                 Try again
               </button>
             {/if}
@@ -274,16 +241,16 @@
                 {:else if plan.state === 'rejected'}
                   <p class="settled" data-testid="proposal-rejected">rejected — nothing was applied</p>
                 {:else if plan.state === 'refused'}
-                  <button data-testid="proposal-reject" onclick={() => onreject(message.id)}>
+                  <button data-testid="proposal-reject" onclick={() => session.reject(message.id)}>
                     Dismiss
                   </button>
                 {:else if stale(plan)}
                   <p class="faint" data-testid="proposal-stale">{STALE}</p>
                   <div class="choose">
-                    <button data-testid="proposal-recheck" onclick={() => onreplan(message.id)}>
+                    <button data-testid="proposal-recheck" onclick={() => void session.replan(message.id)}>
                       Re-check
                     </button>
-                    <button data-testid="proposal-reject" onclick={() => onreject(message.id)}>
+                    <button data-testid="proposal-reject" onclick={() => session.reject(message.id)}>
                       Reject
                     </button>
                   </div>
@@ -292,9 +259,9 @@
                     <button
                       class="primary"
                       data-testid="proposal-accept"
-                      onclick={() => onaccept(message.id)}>Accept</button
+                      onclick={() => void session.accept(message.id)}>Accept</button
                     >
-                    <button data-testid="proposal-reject" onclick={() => onreject(message.id)}>
+                    <button data-testid="proposal-reject" onclick={() => session.reject(message.id)}>
                       Reject
                     </button>
                   </div>
@@ -317,8 +284,8 @@
         {#if hint}
           <p class="faint" data-testid="ai-agent-hint">{hint}</p>
         {/if}
-        {#if selected}
-          <p class="faint" data-testid="ai-agent-context">about <code>{selected}</code></p>
+        {#if session.selected}
+          <p class="faint" data-testid="ai-agent-context">about <code>{session.selected}</code></p>
         {/if}
         <textarea
           data-testid="ai-agent-input"
@@ -330,13 +297,13 @@
         ></textarea>
         <div class="row">
           {#if status?.available === true && status.method === 'oauth'}
-            <button class="linkish signout" data-testid="ai-agent-logout" onclick={onlogout}>
+            <button class="linkish signout" data-testid="ai-agent-logout" onclick={() => void session.signOut()}>
               Sign out
             </button>
           {/if}
           <span class="grow"></span>
           {#if streaming}
-            <button class="stop" data-testid="ai-agent-stop" onclick={onstop}>Stop</button>
+            <button class="stop" data-testid="ai-agent-stop" onclick={() => session.stop()}>Stop</button>
           {/if}
         </div>
       </div>

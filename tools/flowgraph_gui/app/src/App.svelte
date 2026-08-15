@@ -24,23 +24,9 @@
   import RailTabs, { type RailTab } from './lib/RailTabs.svelte';
   import RoutedEdge from './lib/RoutedEdge.svelte';
   import TypeLegend from './lib/TypeLegend.svelte';
-  import { diffLines, historyOf, type Message, type Proposal, type Usage } from './lib/agent';
+  import { AgentSession } from './lib/agentSession.svelte';
   import {
     applyCommands,
-    aiAgentAsk,
-    aiAgentModels,
-  aiAgentStatus,
-    aiAgentOauthStart,
-    aiAgentOauthLogout,
-    aiAgentStop,
-    onAiAgentAuthChanged,
-    onAiAgentDelta,
-    onAiAgentDone,
-    onAiAgentProposal,
-    previewCommands,
-    type AiAgentProposal,
-    type AiAgentStatus,
-  type ListedModel,
     buildTarget,
     checkDocument,
     closeDocument,
@@ -163,12 +149,10 @@
   const DISK_NOTE = 'this file changed on disk — reload before building or running';
   const NO_SITE = 'no flowgraph site found in this file';
   const DROP_HINT = 'dropped — release on an input port to connect';
-  const NO_SHELL = 'the AI agent runs on your machine — open the desktop shell to use it';
   const UNSAVEABLE = 'the code has a syntax error — fix it before saving';
   const UNPARSED_LOCK =
     'the code has a syntax error — fix it in the drawer, or discard the edit, before the graph moves again';
   const TEXT_DELAY = 300;
-  const MOVED_ON = 'the graph moved on since that proposal — re-check it before applying';
   const RAIL_WIDTH = 44;
   const SIDEBAR_WIDTH = 280;
   const INSPECTOR_WIDTH = 320;
@@ -263,11 +247,6 @@
     );
   });
   let pathsMenuOpen = $state(false);
-  let agentModels = $state<ListedModel[]>([]);
-  let keyStatus = $state.raw<AiAgentStatus | null>(null);
-  let chat = $state.raw<Message[]>([]);
-  let pendingReply = $state<number | null>(null);
-  let turns = 0;
   let generation = 0;
   let opening = 0;
   let alerted = 0;
@@ -282,6 +261,29 @@
   let textTimer: ReturnType<typeof setTimeout> | null = null;
 
   const editable = $derived(desktop && opened !== null);
+
+  const agent = new AgentSession({
+    get path() {
+      return doc.path;
+    },
+    get revision() {
+      return doc.revision;
+    },
+    get editable() {
+      return editable;
+    },
+    get selected() {
+      return selected;
+    },
+    note: viewerNote,
+    get settings() {
+      return libSettings;
+    },
+    announce,
+    apply: submitAll,
+    onSettings: (next) => (libSettings = next),
+    onRefusal: (next) => (refusal = next)
+  });
   const site = $derived<Site | undefined>(doc.model.sites[siteIndex]);
   const viewIds = $derived(siteViewIds(doc.model.sites));
   const viewId = $derived(viewIds[siteIndex] ?? '');
@@ -502,36 +504,14 @@
   });
 
   $effect(() => {
-    void refreshAiAgent();
+    void agent.refreshStatus();
   });
 
   $effect(() => {
     void loadAppSettings();
   });
 
-  $effect(() => {
-    if (!desktop) return;
-    const deltas = onAiAgentDelta((payload) => {
-      if (payload.path !== doc.path || pendingReply === null) return;
-      const target = pendingReply;
-      chat = chat.map((message) =>
-        message.id === target ? { ...message, text: message.text + payload.text } : message
-      );
-    });
-    const ends = onAiAgentDone((payload) => {
-      if (payload.path !== doc.path) return;
-      closeReply(payload.usage, payload.error);
-    });
-    const plans = onAiAgentProposal((payload) => void attachProposal(payload));
-    const auth = onAiAgentAuthChanged((next) => {
-      keyStatus = next;
-    });
-    return () => {
-      void Promise.all([deltas, ends, plans, auth]).then((pending) => {
-        for (const unlisten of pending) unlisten();
-      });
-    };
-  });
+  $effect(() => agent.listen());
 
   $effect(() => {
     const current = site;
@@ -689,7 +669,7 @@
     pendingText = null;
     unparsed = false;
     fault = null;
-    if (fresh && pendingReply !== null) void aiAgentStop(doc.path).catch(() => undefined);
+    if (fresh && agent.pending !== null) agent.stop();
     doc = next;
     generation += 1;
     changedOnDisk = false;
@@ -722,8 +702,7 @@
       siteIndex = cachedSite >= 0 ? cachedSite : 0;
       selected = null;
       selectedEdge = null;
-      chat = [];
-      pendingReply = null;
+      agent.reset();
     }
     clampContext();
     inspector?.discardDrafts();
@@ -754,233 +733,6 @@
     alert = { text: message, at: alerted, tone: 'note' };
   }
 
-  // Asked for when the panel is first opened, not at startup: it is a network call for
-  // a rail tab most sessions never reach.
-  async function refreshModels() {
-    if (!desktop) {
-      agentModels = [];
-      return;
-    }
-    try {
-      agentModels = await aiAgentModels();
-    } catch {
-      agentModels = [];
-    }
-  }
-
-  async function refreshAiAgent() {
-    if (!desktop) {
-      keyStatus = { available: false, provider: 'anthropic', model: '—', reason: NO_SHELL, method: null };
-      return;
-    }
-    try {
-      keyStatus = await aiAgentStatus();
-    } catch (error) {
-      keyStatus = {
-        available: false,
-        provider: 'anthropic',
-        model: '—',
-        reason: describeApplyError(error),
-        method: null
-      };
-    }
-  }
-
-  async function setAiAgentModel(model: string) {
-    try {
-      libSettings = await setAppSettings({ ...libSettings, aiAgentModel: model });
-      await refreshAiAgent();
-    } catch (error) {
-      announce(describeApplyError(error));
-    }
-  }
-
-  async function setAiAgentProvider(provider: string) {
-    if (provider === libSettings.aiAgentProvider) return;
-    stopAiAgent();
-    try {
-      libSettings = await setAppSettings({
-        ...libSettings,
-        aiAgentProvider: provider,
-        aiAgentModel: null
-      });
-      await refreshAiAgent();
-      await refreshModels();
-    } catch (error) {
-      announce(describeApplyError(error));
-    }
-  }
-
-  async function startOauth(): Promise<string | null> {
-    if (!desktop) return NO_SHELL;
-    try {
-      await aiAgentOauthStart();
-      return null;
-    } catch (error) {
-      return describeApplyError(error);
-    }
-  }
-
-  async function logoutOauth() {
-    if (!desktop) return;
-    try {
-      keyStatus = await aiAgentOauthLogout();
-    } catch (error) {
-      keyStatus = {
-        available: false,
-        provider: 'anthropic',
-        model: '—',
-        reason: describeApplyError(error),
-        method: null
-      };
-    }
-    pendingReply = null;
-  }
-
-  function retryAsk(id: number) {
-    const at = chat.findIndex((message) => message.id === id);
-    const asked = at > 0 ? chat[at - 1] : undefined;
-    if (!asked || asked.role !== 'user') return;
-    chat = chat.slice(0, at - 1);
-    void askAiAgent(asked.text);
-  }
-
-  function closeReply(usage: Usage | null, error: string | null) {
-    pendingReply = null;
-    const last = chat.at(-1);
-    if (!last || last.role !== 'assistant') return;
-    chat = [...chat.slice(0, -1), { ...last, usage: usage ?? last.usage, error: error ?? last.error }];
-  }
-
-  async function askAiAgent(question: string) {
-    if (!editable) {
-      announce(viewerNote);
-      return;
-    }
-    if (pendingReply !== null) return;
-    const history = historyOf(chat);
-    const asked: Message = {
-      id: ++turns,
-      role: 'user',
-      text: question,
-      usage: null,
-      error: null,
-      proposal: null
-    };
-    const reply: Message = {
-      id: ++turns,
-      role: 'assistant',
-      text: '',
-      usage: null,
-      error: null,
-      proposal: null
-    };
-    chat = [...chat, asked, reply];
-    pendingReply = reply.id;
-    try {
-      await aiAgentAsk(doc.path, question, history, selected);
-    } catch (error) {
-      closeReply(null, describeApplyError(error));
-    }
-  }
-
-  async function vetted(plan: Proposal, planned: number): Promise<Proposal> {
-    try {
-      const checked = await previewCommands(doc.path, plan.commands, planned);
-      return {
-        ...plan,
-        baseRevision: planned,
-        diff: diffLines(checked.diff),
-        splices: checked.summary.splices,
-        refusal: null,
-        state: 'ready'
-      };
-    } catch (error) {
-      const record = errorRecord(error);
-      if (record?.error === 'references_outside_graph' && typeof record.block === 'string') {
-        refusal = { block: record.block, spans: spansOf(record) };
-      }
-      return {
-        ...plan,
-        baseRevision: planned,
-        diff: [],
-        splices: 0,
-        refusal: describeApplyError(error),
-        state: 'refused'
-      };
-    }
-  }
-
-  async function attachProposal(payload: AiAgentProposal) {
-    if (!editable || payload.path !== doc.path) return;
-    const planned = doc.revision;
-    const plan = await vetted(
-      {
-        rationale: payload.rationale,
-        commands: payload.commands,
-        baseRevision: planned,
-        dropped: payload.dropped,
-        diff: [],
-        splices: 0,
-        refusal: null,
-        state: 'ready',
-        appliedAt: null
-      },
-      planned
-    );
-    const last = chat.at(-1);
-    if (last && last.role === 'assistant' && last.proposal === null) {
-      chat = [...chat.slice(0, -1), { ...last, proposal: plan }];
-      return;
-    }
-    chat = [
-      ...chat,
-      { id: ++turns, role: 'assistant', text: '', usage: null, error: null, proposal: plan }
-    ];
-  }
-
-  function planOf(id: number): Proposal | null {
-    return chat.find((message) => message.id === id)?.proposal ?? null;
-  }
-
-  function setProposal(id: number, next: Proposal) {
-    chat = chat.map((message) => (message.id === id ? { ...message, proposal: next } : message));
-  }
-
-  async function acceptProposal(id: number) {
-    const plan = planOf(id);
-    if (!plan || plan.state !== 'ready') return;
-    if (plan.baseRevision !== doc.revision) {
-      announce(MOVED_ON);
-      return;
-    }
-    const outcome = await submitAll(plan.commands);
-    const settled = planOf(id);
-    if (!settled) return;
-    if (!outcome.ok) {
-      setProposal(id, { ...settled, refusal: outcome.message, state: 'refused' });
-      return;
-    }
-    setProposal(id, { ...settled, state: 'accepted', appliedAt: doc.revision });
-  }
-
-  function rejectProposal(id: number) {
-    const plan = planOf(id);
-    if (!plan || plan.state === 'accepted') return;
-    setProposal(id, { ...plan, state: 'rejected' });
-  }
-
-  async function replanProposal(id: number) {
-    const plan = planOf(id);
-    if (!plan || plan.state !== 'ready') return;
-    setProposal(id, await vetted(plan, doc.revision));
-  }
-
-  function stopAiAgent() {
-    pendingReply = null;
-    void aiAgentStop(doc.path).catch(() => undefined);
-  }
-
   function pickRailTab(next: RailTab) {
     rightTab = next;
     rightOpen = true;
@@ -989,7 +741,7 @@
   function pickLeftTab(next: RailTab) {
     leftTab = next;
     leftOpen = true;
-    if (next === 'ai-agent' && agentModels.length === 0) void refreshModels();
+    if (next === 'ai-agent' && agent.models.length === 0) void agent.refreshModels();
   }
 
   function toggleAiAgent() {
@@ -999,7 +751,7 @@
     }
     leftTab = 'ai-agent';
     leftOpen = true;
-    if (agentModels.length === 0) void refreshModels();
+    if (agent.models.length === 0) void agent.refreshModels();
   }
 
   function toggleChrome() {
@@ -1597,27 +1349,10 @@
 >
   {#if leftTab === 'ai-agent'}
     <AiAgent
+      session={agent}
       open={leftOpen}
-      status={keyStatus}
-      messages={chat}
-      pending={pendingReply}
-      enabled={editable}
-      note={viewerNote}
-      revision={doc.revision}
-      {selected}
-      models={agentModels}
       ontoggle={() => (leftOpen = !leftOpen)}
       ontab={pickLeftTab}
-      onask={(question) => void askAiAgent(question)}
-      onstop={stopAiAgent}
-      onsignin={startOauth}
-      onlogout={() => void logoutOauth()}
-      onmodel={(model) => void setAiAgentModel(model)}
-      onprovider={(provider) => void setAiAgentProvider(provider)}
-      onretry={retryAsk}
-      onaccept={(id) => void acceptProposal(id)}
-      onreject={rejectProposal}
-      onreplan={(id) => void replanProposal(id)}
     />
   {:else}
   <aside class="sidebar" class:collapsed={!leftOpen}>
