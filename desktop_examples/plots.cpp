@@ -12,7 +12,7 @@
 #include "desktop_blocks/plots/plot_cspectrogram.hpp"
 
 int main() {
-    size_t SPS = 200;
+    size_t SPS = 2000;
 
     const size_t GW = 1500;
     const size_t GH = 800;
@@ -29,7 +29,7 @@ int main() {
         10.0f //duration in seconds
     );
 
-    SourceChirpBlock<std::complex<float>> chirp_source("ChirpSource", 1.0f, 20.0f, 80.0f, SPS, 10.0f);
+    SourceChirpBlock<std::complex<float>> chirp_source("ChirpSource", 1.0f, 200.0f, 800.0f, SPS, 4.0f);
     ThrottleBlock<std::complex<float>> chirp_throttle("ChirpThrottle", SPS);
     FanoutBlock<std::complex<float>> chirp_fanout("ChirpFanout", 3);
     ComplexToMagPhaseBlock chirp_c2realimag("ChirpComplex2RealImag", ComplexToMagPhaseBlock::Mode::RealImag);

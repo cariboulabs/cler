@@ -174,6 +174,7 @@ void PlotTimeSeriesBlock::render() {
         _gui_pause.store(!_gui_pause.load(), std::memory_order_release);
     }
 
+    ImPlot::PushStyleVar(ImPlotStyleVar_FitPadding, ImVec2(0.02f, 0.15f));
     if (ImPlot::BeginPlot(name(),ImVec2(-1, -1))) {
         ImPlot::SetupAxis(ImAxis_X1, "Time [s]", ImPlotAxisFlags_AutoFit);
         ImPlot::SetupAxis(ImAxis_Y1, "Y", ImPlotAxisFlags_AutoFit);
@@ -187,6 +188,7 @@ void PlotTimeSeriesBlock::render() {
 
         ImPlot::EndPlot();
     }
+    ImPlot::PopStyleVar();
 
     ImGui::End();
 }
