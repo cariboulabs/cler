@@ -4,9 +4,9 @@
   <p>
     <img src="https://img.shields.io/badge/Ubuntu-supported-brightgreen?logo=ubuntu&logoColor=white" alt="Ubuntu">
     <img src="https://img.shields.io/badge/macOS-supported-brightgreen?logo=apple&logoColor=white" alt="macOS">
-    <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License">
+    <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   </p>
-  <p><a href="https://cariboulabs.github.io/cler/" target="_blank"><strong>Open the Onboarding Page</strong></a></p>
+  <p><a href="https://cariboulabs.github.io/cler/" target="_blank"><strong>Onboarding page</strong></a> · <a href="https://cariboulabs.github.io/cler/try/" target="_blank"><strong>Try cler-fg in your browser</strong></a></p>
 </div>
 
 CLER is a C++ template-based framework for constructing and executing flowgraphs of DSP processing blocks.
@@ -20,7 +20,7 @@ Its goal is to keep a tiny header only core allowing maximal flexibility:
 * Tailored for Embedded Systems -  even MCUs
 * Built for radio, but can also be used for control and dynamic simulations (supports cyclic graphs, and online modifiable params)
 * Cross-Platform
-* Code first, Flowgraph GUI second. While No-code is sweet, it also constrains applications
+* Code first, flowgraph GUI second: `cler-fg` edits the C++ file itself, no project files or generated code
 
 **But embedded devices dont need DSP do they?**
 Embedded Linux aside, most embedded devices traditionally relied on dedicated chips — for fusion, filtering, or modulation. But with today’s powerful SoCs and the rise of agentic AI, it’s often faster, cheaper, and more flexible to move DSP into software. CLER aims to fill that gap.
@@ -29,7 +29,7 @@ Embedded Linux aside, most embedded devices traditionally relied on dedicated ch
 
 **How does it compare to GNURadio or FutureSDR**? CLER takes a hybrid approach — combining the performance optimizations of modern frameworks with embedded-first design. On desktop systems, CLER leverages advanced techniques like doubly-mapped buffers for zero-copy performance that can match or exceed established frameworks. For embedded systems, CLER provide lightweight alternatives, maintaining deterministic behavior even without an MMU. This allows the same codebase to achieve optimal performance across platforms — from high-throughput desktop SDR to resource-constrained MCUs.
 
-Want to try out some examples on a Desktop?
+Want to try out some examples on a desktop?
 ```
 mkdir build
 cd build
@@ -39,7 +39,7 @@ cd desktop_examples
 ./hello_world #(or mass_spring_damper if you want to see something cool)
 ```
 
-⚠️ Just one thing to watch for: Cler’s template-heavy design can produce overwhelming errors, but any LLM can help with the small context window that is CLER. 
+⚠️ One thing to watch for: CLER's template-heavy design can produce long compiler errors. `cler-fg` catches the common mistakes (missing runners, type mismatches) before the compiler does, and any LLM copes well with a codebase this small.
 
 # Okay, but how does it write?
 
@@ -53,7 +53,7 @@ int main() {
     SourceCWBlock<float> source1("CWSource", 1.0f, 1.0f, SPS); //amplitude, frequency
     SourceCWBlock<float> source2("CWSource2", 1.0f, 20.0f, SPS);
     ThrottleBlock<float> throttle("Throttle", SPS);
-    AddBlock<float> adder("Adder", 2); // 2 inputs
+    AddBlock<float, 2> adder("Adder"); // 2 inputs
 
     PlotTimeSeriesBlock plot(
         "Hello World Plot",
@@ -73,16 +73,17 @@ int main() {
 
     flowgraph.run();
 
-    while (gui.should_close() == false) {
+    while (!gui.should_close()) {
         gui.render(flowgraph);
     }
+    flowgraph.stop();
     return 0;
 }
 ```
 
 # Cool, I want to use in my own project
 
-We recommend that you use Cmake's `FetchContent`, and then you can just link against `cler::cler` or `cler::desktop_blocks`. These provide the include directories aswell.
+We recommend CMake's `FetchContent`; then link against `cler::cler` (header-only core) or `cler::desktop_blocks` (core + GUI/plots/hardware blocks). Both carry their include directories.
 ```
 set(CLER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CLER_DEFAULT_MAX_WORKERS 8 CACHE STRING "" FORCE)
@@ -95,7 +96,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cler)
 
-target_link_libraries(my_executable PRIVATE     cler::cler_desktop_blocks)
+target_link_libraries(my_executable PRIVATE cler::desktop_blocks)
 ```
 
 # Things to Know
@@ -111,22 +112,21 @@ CLER is fully supported on **Linux** and **macOS**. Windows users should use [Wi
   - **Simple Setup**: WSL2 takes minutes to install and integrates seamlessly with Windows
 
 * **Schedulers** </br>
-CLER includes three schedulers: **ThreadPerBlock** (default, simple, debuggable), **FixedThreadPool** (better for constrained systems) and **PinnedIslands** (core-pinned, cost-partitioned islands whose idle workers park instead of spinning).  It also has Performance mode which eliminates stats overhead for ultra-high throughput applications.
+CLER includes three schedulers: **ThreadPerBlock** (default, simple, debuggable), **FixedThreadPool** (round-robin workers, good for uniform fan-out) and **PinnedIslands** (core-pinned, cost-partitioned islands whose idle workers park instead of spinning — the pick for 2-core targets). Per-block statistics are opt-in (`collect_detailed_stats`) so the hot path stays clean.
 
 * **Flowgraph vs Streamlined** </br>
 CLER supports two architectural styles:
     * **flowgraph** </br>
-    In flowgraph mode, you manually define each block and the channels that connect them. You then pass the connection structure into a flowgraph that is incharge of running the blocks. Behind the scenees, CLER flowgraph creates an OS thread for every block which constantly calls its `procedure()`. When the call returns an error, it yeilds to other threads before trying again.
+    In flowgraph mode, you define each block and the channels that connect them, then hand the wiring to a flowgraph that runs the blocks through a scheduler (by default one thread per block calling its `procedure()`; a retryable error backs off before trying again).
 
     * **streamlined** </br>
     In streamlined mode, you are in charge of writing the loop, and you are in charge of passing samples from one block to the other.
 
-    When the blocks are simple, the streamlined approach will be faster than the flowgraph becuase of the thread overhead. As a compromise, you can create `superblocks` which combine multiple small blocks.
+    When the blocks are simple, the streamlined approach is faster than the flowgraph because of the thread overhead. As a compromise, you can create `superblocks` which combine multiple small blocks.
     See `streamlined` and  `flowgraph` as examples for the two architectural styles, and `polyphase_channelizer` for a superblock implementation.
 
 * **Desktop Blocks**: </br>
-`desktop_blocks` is a library of useful blocks for quick "plug and play". Its soft depedencies are `liquid`, `imdeargui`(with opengl,glfw).
-To include its headers and link against it, link against `cler::cler_blocks` with CMake.
+`desktop_blocks` is a library of useful blocks for quick "plug and play". Its soft dependencies are `liquid-dsp` and Dear ImGui (with OpenGL/GLFW). Link against `cler::desktop_blocks` with CMake.
 In CLER, it is rather easy to create blocks for specific use cases. As such, the library blocks were decided to be exactly the opposite - broad and general. There, we don't optimize minimal work sizes, and we dont template where we dont have to. Everything that can go on the heap - goes on the heap. These blocks should be GENERAL for quick mockup tests.
 
 * **Buffers & Performance** </br>
@@ -145,11 +145,10 @@ CLER supports four buffer access patterns with dramatically different performanc
     Allows you to inspect (peek) data in the buffer without removing it, then explicitly commit the number of items you've processed.
     The downside is that you can only access data up to the physical end of the ring buffer at a time — so if your logical window wraps, you may need to handle two chunks.
 
-    * **read_dbf/write_dbf (SPECIALIZED)** </br>
-    **Doubly-mapped buffers** provide true zero-copy access when available. Uses virtual memory tricks to present ring buffer data as a contiguous array, eliminating wrap-around handling.
-    **Requirements**: Buffer must be heap-allocated and page-aligned (≥4KB). These methods will throw an exception if DBF is not available.
+    * **read_dbf/write_dbf (the default)** </br>
+    **Doubly-mapped buffers** provide true zero-copy access: virtual memory tricks present the ring buffer as a contiguous array, so there is no wrap-around handling. Requires a heap channel of at least 4 KB; on a too-small channel they assert in debug and return `{nullptr, 0}` in release.
 
-    Generally speaking, prefer dbf as a default if you can, else, go with ReadN/WriteN
+    Prefer dbf by default; fall back to ReadN/WriteN when an external API needs its own contiguous buffer anyway.
 
 # When to Use CLER
 - Sensor fusion (IMU + GPS + barometer)
@@ -160,61 +159,30 @@ CLER supports four buffer access patterns with dramatically different performanc
 
 Bottom line: If you're juggling multiple data streams or your requirements keep changing, flowgraphs save time. If it's a simple pipeline, just write the loop yourself, and then you can use streamlined blocks if it makes things easier.
 
-# Developer Tools
+# cler-fg: the flowgraph editor
 
-CLER includes tools to help visualize and understand your flowgraphs:
+`cler-fg` opens a C++ flowgraph file directly: place blocks from the library, wire them, edit parameters, check, build and run — every gesture is a validated edit of the `.cpp` itself, so there is no project file and no generated code to keep in sync. Ask the built-in AI agent (Ctrl+J) and it proposes the same validated edits.
 
-## Flowgraph GUI
-
-The desktop workbench opens C++ flowgraphs directly and provides visual editing,
-validation, build, and run controls:
+Try it in the browser at <https://cariboulabs.github.io/cler/try/>, or run the desktop app:
 
 ```bash
-cd tools/flowgraph_gui/app
-npm install
-npm run tauri dev
-```
-
-## Flowgraph Diagram CLI
-
-The standalone `cler-mermaid` tool generates Mermaid diagrams from C++ flowgraph code:
-
-```bash
-tools/mermaid/build/cler-mermaid my_flowgraph.cpp -o diagram
+./cler_fg.sh
 ```
 
 # What is missing?
 Below is a wish-list for this library, sorted by importance.
 
 * <ins>Comparing to GnuRadio / FutureSDR:</ins> </br>
-Its important that we know where we stand. We need to measure our performence against the best in the buissness and produce a report.
+It is important that we know where we stand. We need to measure our performance against the best in the business and produce a report.
 
 * <ins>Testing / CI / Profiling:</ins> </br>
-If we are already producing a report, might aswell build a benchmark for core patterns to endure performence doesnt regress with updates
+If we are already producing a report, we might as well build a benchmark for the core patterns so performance does not regress with updates.
 
 * <ins>Blocks for Embedded Systems:</ins>
 Our /desktop_blocks library is built as a broad, general-purpose toolkit for desktop experiments and quick testing — but for real end-node applications, we need an /EmbeddedBlocks.
 
 * <ins>Hardware Support:</ins> </br>
 If we are serious about this, we need to support real hardware: FPGAs, SDRs, DAC/ADC boards, RF transceivers, and similar peripherals. For this, we must ensure support for commodity hardware by introducing source/sink blocks for them.
-
-* <ins>Flowgraph validation:</ins><br/>
-We need to address the current situation where small mistakes can lead to pages of confusing compiler errors. While it’s possible to add validation logic directly into the blocks and flowgraph, this would introduce unnecessary boilerplate and clutter. A better approach is to create an external tool that analyzes the application’s C++ code and validates it:
-
-   - Do all blocks have runners?
-   - Are all runners provided to the flowgraph?
-   - Are there any missing or misconfigured connections?
-   - ...
-
-The parser and validation tooling now lives in `tools/flowgraph_gui/cler-graph`,
-with diagnostics exposed through the desktop workbench.
-
-* <ins>GUI FrontEnd:</ins> </br>
-This is more of a nice to have, but if we are already creating a reflection tool for Flowgraph validation, we could also create an interactive FlowGraph generator.
-Could be some Desktop Application, that scans the /blocks folders, generates an interface markup file for each block, and then uses this information to allow the user to connect blocks on a canvas.
-Importat:
-    - Has to be cross platform.
-    - Will not force blocks to implement markup files. Has to be generated from their .hpp code.
 
 # Contributing
 We welcome any contribution — and constructive criticism too!  
@@ -232,7 +200,7 @@ How to add code:
 
 # Acknowledgements
 Special thanks to:
-* Andrew Drogalis — for the excellent SPSC-Queue implementation that used as our channels.
+* Andrew Drogalis — for the excellent SPSC-Queue implementation used as our channels.
 * Bastian Bloessl and the FutureSDR community — Your design choices inspired some of ours.
 * Joseph D. Gaeddert and the liquid-dsp community — In our opinion, the best DSP library out there by a margin.
 * Omar Ocornut and The Dear ImGui community — A fast "batteries included" GUI library that meets all of our needs.
