@@ -5,94 +5,11 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use cler_graph::{
-    extract_specs, first_fault, unified, ActionQueue, ApplyError, BlockSpec, Command,
-    DocumentSession, FileModel, ParseFault, PatchDirection, SourcePatch, Transaction,
-    SCHEMA_VERSION,
-};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
-use sha2::{Digest, Sha256};
-
-const NEW_DOCUMENT_TEMPLATE: &str = r#"#include "cler.hpp"
-#include "task_policies/cler_desktop_tpolicy.hpp"
-
-#include <chrono>
-#include <thread>
-
-int main() {
-    auto flowgraph = cler::make_desktop_flowgraph();
-
-    cler::FlowGraphConfig config;
-    config.scheduler = cler::SchedulerType::ThreadPerBlock;
-    flowgraph.run(config);
-    while (!flowgraph.is_stopped()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-    return 0;
-}
-"#;
+use cler_graph::session::{self, Document, EditOutcome, Edited, NodeMove};
+use cler_graph::{extract_specs, BlockSpec, Command, PatchDirection};
+use serde_json::{json, Value};
 
 const DESKTOP_ONLY: &str = "needs the desktop app";
-
-struct Document {
-    session: DocumentSession,
-    saved: String,
-    history: ActionQueue<Action>,
-    ui: Value,
-}
-
-#[derive(Clone)]
-enum Action {
-    Source(SourcePatch),
-    MoveNodes { view: String, moves: Vec<NodeMove> },
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-struct Point {
-    x: f64,
-    y: f64,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-struct NodeMove {
-    node: String,
-    from: Point,
-    to: Point,
-}
-
-#[derive(Serialize)]
-struct DocumentModel {
-    sha256: String,
-    #[serde(rename = "hasErrors")]
-    has_errors: bool,
-    #[serde(flatten)]
-    model: FileModel,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DocumentState {
-    path: String,
-    revision: u64,
-    model: DocumentModel,
-    source: String,
-    can_undo: bool,
-    can_redo: bool,
-    dirty: bool,
-    external_change: bool,
-    cache: Value,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct EditOutcome {
-    state: DocumentState,
-    unparsed: bool,
-    fault: Option<ParseFault>,
-}
 
 #[derive(Default)]
 struct World {
@@ -186,7 +103,7 @@ fn document_command(world: &mut World, cmd: &str, args: &Value) -> Result<Value,
                     .get(&path)
                     .cloned()
                     .ok_or_else(|| format!("cannot resolve {path}: not in the browser bundle"))?;
-                let doc = fresh(source)?;
+                let doc = Document::load(source).map_err(|cause| cause.to_string())?;
                 world.docs.insert(path.clone(), doc);
             }
             state(world, &path)
@@ -195,8 +112,12 @@ fn document_command(world: &mut World, cmd: &str, args: &Value) -> Result<Value,
             if world.files.contains_key(&path) {
                 return Err(format!("{path} already exists"));
             }
-            world.files.insert(path.clone(), NEW_DOCUMENT_TEMPLATE.to_string());
-            world.docs.insert(path.clone(), fresh(NEW_DOCUMENT_TEMPLATE.to_string())?);
+            let source = session::NEW_DOCUMENT_TEMPLATE.to_string();
+            world.files.insert(path.clone(), source.clone());
+            world.docs.insert(
+                path.clone(),
+                Document::load(source).map_err(|cause| cause.to_string())?,
+            );
             state(world, &path)
         }
         "close_document" => {
@@ -205,16 +126,11 @@ fn document_command(world: &mut World, cmd: &str, args: &Value) -> Result<Value,
         }
         "reload_document" => {
             let saved = world.files.get(&path).cloned().unwrap_or_default();
-            let doc = doc_mut(world, &path)?;
-            if saved != doc.session.source() {
-                doc.session.reload(saved.clone()).map_err(|cause| cause.to_string())?;
-                doc.history.clear();
-            }
-            doc.saved = saved;
+            doc_mut(&mut world.docs, &path)?.reload(saved)?;
             state(world, &path)
         }
         "save_document" => {
-            let doc = doc_mut(world, &path)?;
+            let doc = doc_mut(&mut world.docs, &path)?;
             doc.saved = doc.session.source().to_string();
             let saved = doc.saved.clone();
             world.files.insert(path.clone(), saved);
@@ -222,26 +138,20 @@ fn document_command(world: &mut World, cmd: &str, args: &Value) -> Result<Value,
         }
         "save_document_as" => {
             let new_path = text(args, "newPath")?;
-            let source = doc_mut(world, &path)?.session.source().to_string();
+            let source = doc_mut(&mut world.docs, &path)?.session.source().to_string();
             world.files.insert(new_path.clone(), source.clone());
-            world.docs.insert(new_path.clone(), fresh(source)?);
+            world.docs.insert(
+                new_path.clone(),
+                Document::load(source).map_err(|cause| cause.to_string())?,
+            );
             state(world, &new_path)
         }
         "save_cache" => {
-            doc_mut(world, &path)?.ui = args.get("ui").cloned().unwrap_or(Value::Null);
+            doc_mut(&mut world.docs, &path)?.ui = args.get("ui").cloned().unwrap_or(Value::Null);
             Ok(Value::Null)
         }
         "palette" => {
-            let doc = doc_mut(world, &path)?;
-            let mut specs = extract_specs(doc.session.source(), &path);
-            let local: Vec<String> = specs.iter().map(|spec| spec.name.clone()).collect();
-            specs.extend(
-                world
-                    .palette
-                    .iter()
-                    .filter(|spec| !local.contains(&spec.name))
-                    .cloned(),
-            );
+            let specs = session::palette(doc_mut(&mut world.docs, &path)?, &path, &world.palette);
             serde_json::to_value(specs).map_err(|cause| cause.to_string())
         }
         "apply_commands" | "preview_commands" => {
@@ -250,127 +160,46 @@ fn document_command(world: &mut World, cmd: &str, args: &Value) -> Result<Value,
                 args.get("commands").cloned().unwrap_or(Value::Array(Vec::new())),
             )
             .map_err(|cause| cause.to_string())?;
-            let includes = add_block_origins(&commands, &world.palette);
-            let doc = doc_mut(world, &path)?;
-            let pending = doc
-                .session
-                .preview_with_includes(
-                    Transaction {
-                        version: SCHEMA_VERSION.to_string(),
-                        base_revision: base,
-                        commands,
-                    },
-                    &includes,
-                )
-                .map_err(|cause| cause.to_string())?;
+            // JS registers palette origins repo-relative, so an origin is already an include path.
+            let includes = session::add_block_origins(&commands, &world.palette);
+            let doc = doc_mut(&mut world.docs, &path)?;
             if cmd == "preview_commands" {
-                return Ok(json!({
-                    "diff": unified(doc.session.source(), pending.source(), pending.splices()),
-                    "summary": { "splices": pending.splices().len() }
-                }));
+                let preview = session::preview(doc, base, commands, &includes)?;
+                return serde_json::to_value(preview).map_err(|cause| cause.to_string());
             }
-            if pending.changes() {
-                let patch = pending
-                    .patch()
-                    .cloned()
-                    .ok_or_else(|| ApplyError::HistoryMismatch.to_string())?;
-                doc.session.commit(pending);
-                doc.history.push(Action::Source(patch));
-            } else {
-                doc.session.commit(pending);
-            }
+            session::apply(doc, base, commands, &includes)?;
             state(world, &path)
         }
         "edit_source" => {
             let base = revision(args)?;
             let source = text(args, "source")?;
-            let doc = doc_mut(world, &path)?;
-            if base != doc.session.revision() {
-                return Err(ApplyError::RevisionMismatch {
-                    base_revision: base,
-                    current_revision: doc.session.revision(),
-                }
-                .to_string());
-            }
-            let pending = match doc.session.preview_text(source.clone()) {
-                Ok(pending) => pending,
-                Err(ApplyError::ProducesParseError) => {
-                    let fault = first_fault(&source);
-                    return serde_json::to_value(EditOutcome {
-                        unparsed: true,
-                        fault,
-                        state: snapshot(&path, doc),
-                    })
-                    .map_err(|cause| cause.to_string());
-                }
-                Err(cause) => return Err(cause.to_string()),
+            let doc = doc_mut(&mut world.docs, &path)?;
+            let (unparsed, fault) = match session::edit(doc, base, &source)? {
+                Edited::Applied => (false, None),
+                Edited::Unparsed(fault) => (true, fault),
             };
-            if pending.changes() {
-                let patch = pending
-                    .patch()
-                    .cloned()
-                    .ok_or_else(|| ApplyError::HistoryMismatch.to_string())?;
-                doc.session.commit(pending);
-                doc.history.push(Action::Source(patch));
-            } else {
-                doc.session.commit(pending);
-            }
             serde_json::to_value(EditOutcome {
-                unparsed: false,
-                fault: None,
-                state: snapshot(&path, doc),
+                unparsed,
+                fault,
+                state: session::snapshot(&path, doc, &[]),
             })
             .map_err(|cause| cause.to_string())
         }
         "move_nodes" => {
             let view = text(args, "view")?;
-            let mut moves: Vec<NodeMove> =
+            let moves: Vec<NodeMove> =
                 serde_json::from_value(args.get("moves").cloned().unwrap_or(Value::Null))
                     .map_err(|cause| cause.to_string())?;
-            moves.retain(|movement| movement.from != movement.to);
-            if view.is_empty() {
-                return Err("node movement requires a view".to_string());
-            }
-            let doc = doc_mut(world, &path)?;
-            if !moves.is_empty() {
-                moves.sort_by(|left, right| left.node.cmp(&right.node));
-                apply_node_moves(&mut doc.ui, &view, &moves, PatchDirection::Forward);
-                doc.history.push(Action::MoveNodes { view, moves });
-            }
+            session::move_nodes(doc_mut(&mut world.docs, &path)?, &view, moves)?;
             state(world, &path)
         }
         "undo" | "redo" => {
-            let doc = doc_mut(world, &path)?;
-            let undo = cmd == "undo";
-            let action = if undo { doc.history.undo() } else { doc.history.redo() }.cloned();
-            let Some(action) = action else {
-                return Err(if undo {
-                    ApplyError::NothingToUndo.to_string()
-                } else {
-                    ApplyError::NothingToRedo.to_string()
-                });
-            };
-            let direction = if undo { PatchDirection::Reverse } else { PatchDirection::Forward };
-            match action {
-                Action::Source(patch) => {
-                    let source = patch
-                        .apply(doc.session.source(), direction)
-                        .map_err(|cause| cause.to_string())?;
-                    let pending = doc
-                        .session
-                        .preview_source(source)
-                        .map_err(|cause| cause.to_string())?;
-                    doc.session.commit(pending);
-                }
-                Action::MoveNodes { view, moves } => {
-                    apply_node_moves(&mut doc.ui, &view, &moves, direction);
-                }
-            }
-            if undo {
-                doc.history.commit_undo();
+            let direction = if cmd == "undo" {
+                PatchDirection::Reverse
             } else {
-                doc.history.commit_redo();
-            }
+                PatchDirection::Forward
+            };
+            session::step(doc_mut(&mut world.docs, &path)?, direction)?;
             state(world, &path)
         }
         _ => Err(format!("unknown command: {cmd}")),
@@ -391,97 +220,13 @@ fn revision(args: &Value) -> Result<u64, String> {
         .ok_or_else(|| "missing baseRevision".to_string())
 }
 
-fn fresh(source: String) -> Result<Document, String> {
-    let session = DocumentSession::load(source.clone()).map_err(|cause| cause.to_string())?;
-    Ok(Document {
-        session,
-        saved: source,
-        history: ActionQueue::default(),
-        ui: Value::Object(Map::new()),
-    })
-}
-
-fn doc_mut<'a>(world: &'a mut World, path: &str) -> Result<&'a mut Document, String> {
-    world
-        .docs
-        .get_mut(path)
+fn doc_mut<'a>(docs: &'a mut HashMap<String, Document>, path: &str) -> Result<&'a mut Document, String> {
+    docs.get_mut(path)
         .ok_or_else(|| format!("no open document for {path}"))
 }
 
 fn state(world: &mut World, path: &str) -> Result<Value, String> {
-    let palette = std::mem::take(&mut world.palette);
-    let doc = doc_mut(world, path);
-    let result = doc.map(|doc| snapshot_with(path, doc, &palette));
-    world.palette = palette;
-    let state = result?;
-    serde_json::to_value(state).map_err(|cause| cause.to_string())
-}
-
-fn snapshot(path: &str, doc: &Document) -> DocumentState {
-    snapshot_with(path, doc, &[])
-}
-
-fn snapshot_with(path: &str, doc: &Document, palette: &[BlockSpec]) -> DocumentState {
-    let model = doc.session.parse_with_palette(palette);
-    DocumentState {
-        path: path.to_string(),
-        revision: doc.session.revision(),
-        model: DocumentModel {
-            sha256: format!("{:x}", Sha256::digest(doc.session.source().as_bytes())),
-            has_errors: model.has_errors,
-            model,
-        },
-        source: doc.session.source().to_string(),
-        can_undo: doc.history.can_undo(),
-        can_redo: doc.history.can_redo(),
-        dirty: doc.session.source() != doc.saved,
-        external_change: false,
-        cache: doc.ui.clone(),
-    }
-}
-
-// Palette origins are repo-relative ("desktop_blocks/…") because JS registers them that
-// way, so the include path is the origin itself.
-fn add_block_origins(commands: &[Command], palette: &[BlockSpec]) -> Vec<String> {
-    commands
-        .iter()
-        .filter_map(|command| match command {
-            Command::AddBlock { type_name, .. } => palette
-                .iter()
-                .find(|spec| {
-                    spec.name == *type_name
-                        || spec.synonyms.iter().any(|synonym| synonym.name == *type_name)
-                })
-                .map(|spec| spec.origin.clone()),
-            _ => None,
-        })
-        .collect()
-}
-
-fn apply_node_moves(ui: &mut Value, view: &str, moves: &[NodeMove], direction: PatchDirection) {
-    let views = object_field(object(ui), "views");
-    let cached_view = object_field(views, view);
-    let positions = object_field(cached_view, "positions");
-    for movement in moves {
-        let point = match direction {
-            PatchDirection::Reverse => &movement.from,
-            PatchDirection::Forward => &movement.to,
-        };
-        positions.insert(movement.node.clone(), json!({ "x": point.x, "y": point.y }));
-    }
-}
-
-fn object(value: &mut Value) -> &mut Map<String, Value> {
-    if !value.is_object() {
-        *value = Value::Object(Map::new());
-    }
-    value.as_object_mut().expect("object was just initialized")
-}
-
-fn object_field<'a>(parent: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
-    object(
-        parent
-            .entry(key.to_string())
-            .or_insert_with(|| Value::Object(Map::new())),
-    )
+    let doc = doc_mut(&mut world.docs, path)?;
+    serde_json::to_value(session::snapshot(path, doc, &world.palette))
+        .map_err(|cause| cause.to_string())
 }

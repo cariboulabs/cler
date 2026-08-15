@@ -7,6 +7,7 @@ pub mod palette_types;
 mod parse;
 mod requirements;
 mod sample_types;
+pub mod session;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
