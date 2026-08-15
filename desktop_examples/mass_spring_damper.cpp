@@ -257,9 +257,9 @@ private:
     float _int_state = 0.0f;
 
     std::atomic<float> _target {10.0f};
-    std::atomic<float> _kp {8.0f};
-    std::atomic<float> _ki {2.0f};
-    std::atomic<float> _kd {5.0f};
+    std::atomic<float> _kp {99.0f};
+    std::atomic<float> _ki {5.0f};
+    std::atomic<float> _kd {19.0f};
     std::atomic<bool>  _feed_forward {false};
 
     ImVec2 _initial_window_position {0.0f, 0.0f};
