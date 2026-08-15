@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cmath>
 #include <complex>
+#include <utility>
 
 constexpr size_t SPS = 100;
 constexpr float DT = 1.0f / static_cast<float>(SPS);
@@ -87,19 +88,10 @@ struct PlantBlock : public cler::BlockBase {
             );
         }
 
-        ImVec2 mass_size = ImVec2(40.0f, 40.0f);
-
-        ImVec2 mass_p0;
-        mass_p0.x = spring_end_x;
-        mass_p0.y = center_y - mass_size.y * 0.5f;
-
-        ImVec2 mass_p1;
-        mass_p1.x = spring_end_x + mass_size.x;
-        mass_p1.y = center_y + mass_size.y * 0.5f;
-
-        ImVec2 mass_center;
-        mass_center.x = (mass_p0.x + mass_p1.x) * 0.5f;
-        mass_center.y = (mass_p0.y + mass_p1.y) * 0.5f;
+        ImVec2 mass_size {40.0f, 40.0f};
+        ImVec2 mass_p0 {spring_end_x, center_y - mass_size.y * 0.5f};
+        ImVec2 mass_p1 {spring_end_x + mass_size.x, center_y + mass_size.y * 0.5f};
+        ImVec2 mass_center {(mass_p0.x + mass_p1.x) * 0.5f, (mass_p0.y + mass_p1.y) * 0.5f};
 
         // Spring coil geometry is generated so it always ends at mass_center
         int num_points = 100;
@@ -107,27 +99,17 @@ struct PlantBlock : public cler::BlockBase {
         float amplitude = 12.0f;
         float cycles = 5.0f; // number of full waves between start and end
 
-        ImVec2 prev;
-        prev.x = spring_start_x;
-        prev.y = center_y;
-
+        ImVec2 prev {spring_start_x, center_y};
         for (int i = 1; i <= num_points; ++i) {
             float t = (float)i / (float)num_points;
-            float x = spring_start_x + t * coil_length;
-            float phase = t * cycles * 2.0f * cler::PI;
-            float y = center_y + sinf(phase) * amplitude;
-
-            draw_list->AddLine(prev, ImVec2(x, y), IM_COL32(255, 215, 0, 255), 3.0f);
-            prev.x = x;
-            prev.y = y;
+            ImVec2 point {spring_start_x + t * coil_length,
+                          center_y + sinf(t * cycles * 2.0f * cler::PI) * amplitude};
+            draw_list->AddLine(prev, point, IM_COL32(255, 215, 0, 255), 3.0f);
+            prev = point;
         }
 
-        ImVec2 shadow_p0;
-        shadow_p0.x = mass_p0.x + 4.0f;
-        shadow_p0.y = mass_p0.y + 4.0f;
-        ImVec2 shadow_p1;
-        shadow_p1.x = mass_p1.x + 4.0f;
-        shadow_p1.y = mass_p1.y + 4.0f;
+        ImVec2 shadow_p0 {mass_p0.x + 4.0f, mass_p0.y + 4.0f};
+        ImVec2 shadow_p1 {mass_p1.x + 4.0f, mass_p1.y + 4.0f};
         draw_list->AddRectFilled(shadow_p0, shadow_p1, IM_COL32(0, 0, 0, 100), 6.0f);
 
         draw_list->AddRectFilled(mass_p0, mass_p1, IM_COL32(200, 50, 50, 255), 6.0f);
@@ -171,6 +153,11 @@ struct ControllerBlock : public cler::BlockBase {
     float kp() const { return _kp.load(std::memory_order_relaxed); }
     float ki() const { return _ki.load(std::memory_order_relaxed); }
     float kd() const { return _kd.load(std::memory_order_relaxed); }
+    void set_gains(float kp, float ki, float kd) {
+        _kp.store(kp, std::memory_order_relaxed);
+        _ki.store(ki, std::memory_order_relaxed);
+        _kd.store(kd, std::memory_order_relaxed);
+    }
 
     cler::Result<cler::Empty, cler::Error> procedure(
         cler::ChannelBase<float>* force_out, cler::ChannelBase<float>* error_out) {
@@ -230,27 +217,25 @@ struct ControllerBlock : public cler::BlockBase {
             _target.store(tmp_target);
         }
 
-        float tmp_kp = _kp.load();
-        if (ImGui::InputFloat("Kp", &tmp_kp, 0.1f, 1.0f)) {
-            _kp.store(tmp_kp);
-        }
-
-        float tmp_ki = _ki.load();
-        if (ImGui::InputFloat("Ki", &tmp_ki, 0.1f, 1.0f)) {
-            _ki.store(tmp_ki);
-        }
-
-        float tmp_kd = _kd.load();
-        if (ImGui::InputFloat("Kd", &tmp_kd, 0.1f, 1.0f)) {
-            _kd.store(tmp_kd);
+        const std::pair<const char*, std::atomic<float>*> gains[] = {
+            {"Kp", &_kp}, {"Ki", &_ki}, {"Kd", &_kd}};
+        for (auto [label, gain] : gains) {
+            float value = gain->load();
+            if (ImGui::InputFloat(label, &value, 0.1f, 1.0f)) {
+                gain->store(value);
+            }
         }
 
         bool feed_forward = _feed_forward.load();
         ImGui::Checkbox("Feed Forward", &feed_forward);
-        if (feed_forward) {
-            _feed_forward.store(true);
-        } else {
-            _feed_forward.store(false);
+        _feed_forward.store(feed_forward);
+
+        if (ImGui::Button("Auto Tune")) {
+            constexpr float WN_CL = 10.0f;
+            set_gains(M * WN_CL * WN_CL - K, WN_CL / 2.0f, 2.0f * WN_CL * M - C);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Pole placement on the known plant: closed loop 10 rad/s, critically damped");
         }
 
         ImGui::End();
@@ -280,7 +265,7 @@ private:
 struct RootLocusBlock : public cler::BlockBase {
     static constexpr bool is_gui = true;
 
-    RootLocusBlock(const char* name, const ControllerBlock* controller)
+    RootLocusBlock(const char* name, ControllerBlock* controller)
         : BlockBase(name), _controller(controller) {}
 
     cler::Result<cler::Empty, cler::Error> procedure() {
@@ -301,18 +286,59 @@ struct RootLocusBlock : public cler::BlockBase {
         ImGui::SetNextWindowSize(_initial_window_size, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(_initial_window_position, ImGuiCond_FirstUseEver);
         ImGui::Begin("Root Locus");
-        ImGui::Text("Closed-loop poles as loop gain sweeps 0..2x (squares: 1x)");
+        ImGui::Text("Branches from open-loop poles (x, gain 0) to zeros (o, gain inf)");
+        ImGui::Text("Drag a square along its branch: kp, ki, kd scale together (kp %.1f  ki %.2f  kd %.2f)",
+                    _kp, _ki, _kd);
         if (ImPlot::BeginPlot("##locus", ImVec2(-1, -1))) {
             ImPlot::SetupAxes("Re [rad/s]", "Im [rad/s]");
+            ImPlot::SetupAxisLimits(ImAxis_X1, -25.0, 3.0, ImPlotCond_Once);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, -22.0, 22.0, ImPlotCond_Once);
+
+            draw_grid();
+
             float zero = 0.0f;
             ImPlot::PlotInfLines("##stability", &zero, 1,
-                                 {ImPlotProp_LineColor, ImVec4(0.7f, 0.2f, 0.2f, 0.8f)});
-            ImPlot::PlotScatter("locus", _re, _im, GAIN_STEPS * ORDER,
+                                 {ImPlotProp_LineColor, ImVec4(0.75f, 0.25f, 0.25f, 0.9f),
+                                  ImPlotProp_LineWeight, 1.5f});
+
+            for (int b = 0; b < ORDER; ++b) {
+                char label[16];
+                snprintf(label, sizeof(label), b == 0 ? "branches" : "##branch%d", b);
+                ImPlot::PlotLine(label, _branch_re[b], _branch_im[b], STEPS,
+                                 {ImPlotProp_LineColor, ImVec4(0.35f, 0.65f, 0.95f, 0.9f),
+                                  ImPlotProp_LineWeight, 2.0f});
+            }
+
+            ImPlot::PlotScatter("open-loop poles", _ol_pole_re, _ol_pole_im, ORDER,
+                                {ImPlotProp_Marker, ImPlotMarker_Cross,
+                                 ImPlotProp_MarkerSize, 7.0f,
+                                 ImPlotProp_LineColor, ImVec4(0.95f, 0.85f, 0.3f, 1.0f)});
+            ImPlot::PlotScatter("open-loop zeros", _ol_zero_re, _ol_zero_im, 2,
                                 {ImPlotProp_Marker, ImPlotMarker_Circle,
-                                 ImPlotProp_MarkerSize, 2.0f});
-            ImPlot::PlotScatter("current gains", _nom_re, _nom_im, ORDER,
+                                 ImPlotProp_MarkerSize, 6.0f,
+                                 ImPlotProp_FillAlpha, 0.0f,
+                                 ImPlotProp_LineColor, ImVec4(0.95f, 0.85f, 0.3f, 1.0f)});
+            ImPlot::PlotScatter("current gains (drag along the locus)", _nom_re, _nom_im, ORDER,
                                 {ImPlotProp_Marker, ImPlotMarker_Square,
-                                 ImPlotProp_MarkerSize, 5.0f});
+                                 ImPlotProp_MarkerSize, 6.0f,
+                                 ImPlotProp_LineColor, ImVec4(0.95f, 0.4f, 0.4f, 1.0f)});
+            for (int r = 0; r < ORDER; ++r) {
+                double px = _nom_re[r];
+                double py = _nom_im[r];
+                if (ImPlot::DragPoint(r, &px, &py, ImVec4(0.95f, 0.4f, 0.4f, 0.9f), 8.0f)) {
+                    int at = nearest_vertex(static_cast<float>(px), static_cast<float>(py));
+                    float g = std::clamp(_g[at % STEPS], 0.1f, 10.0f);
+                    g = std::min({g, MAX_KP / _kp, MAX_KI / _ki, MAX_KD / _kd});
+                    float re = _branch_re[at / STEPS][at % STEPS];
+                    float im = _branch_im[at / STEPS][at % STEPS];
+                    float mag = std::hypot(re, im);
+                    ImGui::BeginTooltip();
+                    ImGui::Text("loop gain %.3gx", g);
+                    ImGui::Text("wn %.2f rad/s   zeta %.2f", mag, mag > 0.0f ? -re / mag : 0.0f);
+                    ImGui::EndTooltip();
+                    _controller->set_gains(_kp * g, _ki * g, _kd * g);
+                }
+            }
             ImPlot::EndPlot();
         }
         ImGui::End();
@@ -324,34 +350,111 @@ struct RootLocusBlock : public cler::BlockBase {
     }
 
 private:
-    static constexpr int GAIN_STEPS = 60;
+    static constexpr int STEPS = 240;
     static constexpr int ORDER = 4;
+    static constexpr double G_MIN = 1e-3;
+    static constexpr double G_MAX = 1e3;
+    static constexpr float MAX_KP = 2000.0f;
+    static constexpr float MAX_KI = 200.0f;
+    static constexpr float MAX_KD = 400.0f;
 
     // Characteristic polynomial of the loop with the filtered PID:
     //   s(tau s+1)(M s^2 + C s + K) + g [ (kp tau + kd) s^2 + (kp + ki tau) s + ki ] = 0
+    void quartic_at(double g, std::complex<double>* roots) const {
+        constexpr double tau = DERIVATIVE_TAU;
+        double a[ORDER + 1] = {
+            g * _ki,
+            K + g * (_kp + _ki * tau),
+            tau * K + C + g * (_kp * tau + _kd),
+            tau * C + M,
+            tau * M,
+        };
+        solve_quartic(a, roots);
+    }
+
     void sweep() {
         constexpr double tau = DERIVATIVE_TAU;
-        for (int step = 1; step <= GAIN_STEPS; ++step) {
-            double g = 2.0 * step / GAIN_STEPS;
-            double a[ORDER + 1] = {
-                g * _ki,
-                K + g * (_kp + _ki * tau),
-                tau * K + C + g * (_kp * tau + _kd),
-                tau * C + M,
-                tau * M,
-            };
+
+        std::complex<double> disc = std::sqrt(std::complex<double>(C * C - 4.0 * M * K, 0.0));
+        std::complex<double> ol_poles[ORDER] = {
+            {0.0, 0.0},
+            {-1.0 / tau, 0.0},
+            (disc - static_cast<double>(C)) / (2.0 * static_cast<double>(M)),
+            (-disc - static_cast<double>(C)) / (2.0 * static_cast<double>(M)),
+        };
+        for (int i = 0; i < ORDER; ++i) {
+            _ol_pole_re[i] = static_cast<float>(ol_poles[i].real());
+            _ol_pole_im[i] = static_cast<float>(ol_poles[i].imag());
+        }
+
+        double zb = _kp + _ki * tau;
+        double za = _kp * tau + _kd;
+        std::complex<double> zdisc = std::sqrt(std::complex<double>(zb * zb - 4.0 * za * _ki, 0.0));
+        std::complex<double> ol_zeros[2] = {
+            (-zb + zdisc) / (2.0 * za),
+            (-zb - zdisc) / (2.0 * za),
+        };
+        for (int i = 0; i < 2; ++i) {
+            _ol_zero_re[i] = static_cast<float>(ol_zeros[i].real());
+            _ol_zero_im[i] = static_cast<float>(ol_zeros[i].imag());
+        }
+
+        std::complex<double> prev[ORDER];
+        for (int i = 0; i < ORDER; ++i) prev[i] = ol_poles[i];
+
+        for (int step = 0; step < STEPS; ++step) {
+            double g = G_MIN * std::pow(G_MAX / G_MIN, step / double(STEPS - 1));
+            _g[step] = static_cast<float>(g);
             std::complex<double> roots[ORDER];
-            solve_quartic(a, roots);
-            for (int r = 0; r < ORDER; ++r) {
-                size_t at = static_cast<size_t>(step - 1) * ORDER + r;
-                _re[at] = static_cast<float>(roots[r].real());
-                _im[at] = static_cast<float>(roots[r].imag());
-                if (step == GAIN_STEPS / 2) {
-                    _nom_re[r] = _re[at];
-                    _nom_im[r] = _im[at];
+            quartic_at(g, roots);
+            match_to(prev, roots);
+            for (int b = 0; b < ORDER; ++b) {
+                _branch_re[b][step] = static_cast<float>(roots[b].real());
+                _branch_im[b][step] = static_cast<float>(roots[b].imag());
+                prev[b] = roots[b];
+            }
+        }
+
+        std::complex<double> nominal[ORDER];
+        quartic_at(1.0, nominal);
+        for (int r = 0; r < ORDER; ++r) {
+            _nom_re[r] = static_cast<float>(nominal[r].real());
+            _nom_im[r] = static_cast<float>(nominal[r].imag());
+        }
+    }
+
+    int nearest_vertex(float x, float y) const {
+        int best = 0;
+        float best_d = 0.0f;
+        for (int b = 0; b < ORDER; ++b) {
+            for (int i = 0; i < STEPS; ++i) {
+                float dx = _branch_re[b][i] - x;
+                float dy = _branch_im[b][i] - y;
+                float d = dx * dx + dy * dy;
+                if ((b == 0 && i == 0) || d < best_d) {
+                    best_d = d;
+                    best = b * STEPS + i;
                 }
             }
         }
+        return best;
+    }
+
+    static void match_to(const std::complex<double>* prev, std::complex<double>* roots) {
+        bool taken[ORDER] = {};
+        std::complex<double> ordered[ORDER];
+        for (int b = 0; b < ORDER; ++b) {
+            int best = -1;
+            double best_d = 0.0;
+            for (int r = 0; r < ORDER; ++r) {
+                if (taken[r]) continue;
+                double d = std::abs(roots[r] - prev[b]);
+                if (best < 0 || d < best_d) { best = r; best_d = d; }
+            }
+            taken[best] = true;
+            ordered[b] = roots[best];
+        }
+        for (int b = 0; b < ORDER; ++b) roots[b] = ordered[b];
     }
 
     static void solve_quartic(const double a[ORDER + 1], std::complex<double>* roots) {
@@ -372,12 +475,50 @@ private:
         }
     }
 
-    const ControllerBlock* _controller;
+    static void draw_grid() {
+        const ImVec4 faint(0.5f, 0.5f, 0.5f, 0.35f);
+        const float R = 40.0f;
+        const float zetas[] = {0.1f, 0.3f, 0.5f, 0.7f, 0.9f};
+        for (float z : zetas) {
+            float xs[2] = {0.0f, -R * z};
+            float ys_up[2] = {0.0f, R * std::sin(std::acos(z))};
+            float ys_dn[2] = {0.0f, -ys_up[1]};
+            char label[24];
+            snprintf(label, sizeof(label), "##zeta%.1f", z);
+            ImPlot::PlotLine(label, xs, ys_up, 2, {ImPlotProp_LineColor, faint});
+            snprintf(label, sizeof(label), "##zetan%.1f", z);
+            ImPlot::PlotLine(label, xs, ys_dn, 2, {ImPlotProp_LineColor, faint});
+            snprintf(label, sizeof(label), "z=%.1f", z);
+            ImPlot::PlotText(label, xs[1], ys_up[1]);
+        }
+        const float radii[] = {5.0f, 10.0f, 15.0f, 20.0f};
+        for (float r : radii) {
+            float cx[41];
+            float cy[41];
+            for (int i = 0; i <= 40; ++i) {
+                float theta = cler::PI / 2.0f + (cler::PI / 40.0f) * i;
+                cx[i] = r * std::cos(theta);
+                cy[i] = r * std::sin(theta);
+            }
+            char label[24];
+            snprintf(label, sizeof(label), "##wn%.0f", r);
+            ImPlot::PlotLine(label, cx, cy, 41, {ImPlotProp_LineColor, faint});
+            snprintf(label, sizeof(label), "%.0f", r);
+            ImPlot::PlotText(label, -r, 0.8f);
+        }
+    }
+
+    ControllerBlock* _controller;
     float _kp = -1.0f;
     float _ki = -1.0f;
     float _kd = -1.0f;
-    float _re[GAIN_STEPS * ORDER] = {};
-    float _im[GAIN_STEPS * ORDER] = {};
+    float _g[STEPS] = {};
+    float _branch_re[ORDER][STEPS] = {};
+    float _branch_im[ORDER][STEPS] = {};
+    float _ol_pole_re[ORDER] = {};
+    float _ol_pole_im[ORDER] = {};
+    float _ol_zero_re[2] = {};
+    float _ol_zero_im[2] = {};
     float _nom_re[ORDER] = {};
     float _nom_im[ORDER] = {};
 
