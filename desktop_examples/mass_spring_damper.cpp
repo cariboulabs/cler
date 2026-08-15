@@ -410,11 +410,11 @@ int main() {
         100.0f
     );
 
-    controller.set_initial_window(0.0f, 0.0f, 200.0f, 400.0f);
-    plot.set_initial_window(200.0f, 0.0f, 600.0f, GH / 2.0f);
-    error_plot.set_initial_window(200.0f, GH / 2.0f, 600.0f, GH / 2.0f);
-    plant.set_initial_window(800.0f, 0.0f, 600.0f, GH / 2.0f);
-    root_locus.set_initial_window(800.0f, GH / 2.0f, 600.0f, GH / 2.0f);
+    plant.set_initial_window(0.0f, 0.0f, GW, 220.0f);
+    controller.set_initial_window(0.0f, 220.0f, 260.0f, GH - 220.0f);
+    plot.set_initial_window(260.0f, 220.0f, 570.0f, (GH - 220.0f) / 2.0f);
+    error_plot.set_initial_window(260.0f, 220.0f + (GH - 220.0f) / 2.0f, 570.0f, (GH - 220.0f) / 2.0f);
+    root_locus.set_initial_window(830.0f, 220.0f, GW - 830.0f, GH - 220.0f);
 
     auto flowgraph = cler::make_desktop_flowgraph(
     cler::BlockRunner(&controller, &throttle.in, &error_plot.in[0]),
