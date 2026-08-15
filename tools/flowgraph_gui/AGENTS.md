@@ -114,13 +114,18 @@ decision it enables, not information it displays.
 
 ## Browser builds
 
-- `docs/try/` — static, read-only example mode (no shell). Regenerate with
-  `npm run build:web` in `app/` after UI or fixture changes and commit the
-  output; the docs site serves it as "Try it in the browser".
-- Hosted full editor — `docker/Dockerfile.web`: the frontend built with
-  `VITE_CLER_WEB_BACKEND=` (same origin) installs `src/lib/webshim.ts`, the
+- `cler-web/` — the document session (open/apply/edit/undo/palette) compiled
+  to `wasm32-wasip1` behind a JSON `cler_invoke` ABI; same command names and
+  reply shapes as the Tauri backend, minus filesystem, build, run and agent
+  (those refuse with "needs the desktop app"). Files and `desktop_blocks/*.hpp`
+  are bundled by `app/src/fixtures/files.ts`; `app/src/lib/wasmbridge.ts`
+  installs it as `__TAURI_INTERNALS__` so the app sees a desktop shell.
+- `docs/try/` — the static site build of that: `npm run build:web` in `app/`
+  (needs `rustup target add wasm32-wasip1` and `WASI_SDK=` a wasi-sdk
+  checkout for tree-sitter's C). Regenerate after UI, fixture, or block-header
+  changes and commit the output. `tests/wasm_session.test.ts` covers the wasm
+  end to end and skips when it is not built.
+- Server-hosted alternative — `docker/Dockerfile.web`: frontend built with
+  `VITE_CLER_WEB_BACKEND=` (same origin) uses `src/lib/webshim.ts`, the
   Tauri-IPC-over-HTTP bridge the e2e tests use, and `e2e_backend <port>
-  --static <dir>` serves both. One shared workspace for every visitor; the AI
-  agent, file dialogs, and Run (no display) stay desktop-only.
-- Codespaces — `.devcontainer/devcontainer.json` builds `Dockerfile.web`,
-  autostarts `cler-fg-web` on 8080 and opens it; one container per visitor.
+  --static <dir>` serves both with real builds. One shared workspace.

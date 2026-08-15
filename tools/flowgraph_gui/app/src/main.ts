@@ -8,6 +8,13 @@ import './app.css';
 const backend = import.meta.env.VITE_CLER_WEB_BACKEND as string | undefined;
 if (backend !== undefined && !inTauri()) shim(backend);
 
+// VITE_CLER_WASM: no server at all — the editor session runs in cler_web.wasm over the bundled examples and block headers.
+if (import.meta.env.VITE_CLER_WASM && !inTauri()) {
+  const { installWasmShell } = await import('./lib/wasmbridge');
+  const { browserFiles } = await import('./fixtures/files');
+  await installWasmShell(browserFiles);
+}
+
 const target = document.getElementById('app');
 if (!target) throw new Error('missing #app mount point');
 

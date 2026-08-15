@@ -1,0 +1,19 @@
+[package]
+name = "cler-web"
+version = "0.1.0"
+edition = "2021"
+description = "Browser build of the flowgraph editor session: cler-graph behind a JSON invoke ABI"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+cler-graph = { path = "../cler-graph" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[profile.release]
+opt-level = "s"
+lto = true

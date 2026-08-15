@@ -1,4 +1,5 @@
 mod apply;
+mod diff;
 mod history;
 pub mod model;
 mod palette;
@@ -16,6 +17,7 @@ pub use apply::{
     ApplyError, ApplyOutcome, BlockParam, Command, InputPort, PatchDirection, PendingApply,
     SourcePatch, Splice, Transaction,
 };
+pub use diff::unified;
 pub use history::{ActionQueue, ACTION_HISTORY_CAPACITY};
 pub use model::{FileModel, Site, SCHEMA_VERSION};
 pub use palette::{extract_specs, palette_specs, source_files};

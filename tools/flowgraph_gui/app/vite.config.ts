@@ -8,7 +8,7 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     watch: { ignored: ['**/target/**', '**/build/**'] },
-    fs: { allow: ['.', '../cler-graph/tests/data', '../../../desktop_examples'] }
+    fs: { allow: ['.', '../cler-graph/tests/data', '../../../desktop_examples', '../../../desktop_blocks'] }
   },
   build: { target: 'es2022' },
   test: {
