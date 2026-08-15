@@ -5,6 +5,7 @@
 // reads it off its own registration URL and mirrors it under emception/*, which is what
 // makes the cross-origin worker bundle loadable at all).
 import * as Comlink from 'comlink';
+import { phase } from './progress';
 
 export const TOOLCHAIN_BASE = 'https://jprendes.github.io/emception/';
 
@@ -17,6 +18,10 @@ export const TOOLCHAIN_PINS: Record<string, string> = {
   '9d1e542b80004e27297f.wasm': '47a2b00defa938d4471ff6ffdbf4d424ee03599db7d8f56590c6223e96191631',
   'cecdfcda360457a8f204.br': '9bd873132b4915a4da34a977a386a4ae68785df34b8cdb9c3d205fae26eeb772'
 };
+
+// Sum of the four pinned files above, so the first-visit download can show a real fraction.
+// Recompute alongside the pins: `curl -sIL <base><name> | grep -i content-length`.
+export const TOOLCHAIN_BYTES = 24_992_393;
 
 // Virtual repo root, and emception's cwd — so every path on the em++ command line is the
 // app's own repo-relative path, and so are the paths in the diagnostics coming back.
@@ -80,6 +85,7 @@ export function compile(
 ): Promise<number> {
   return boot(files, onLine).then(async (em) => {
     await write(em, path, encoder.encode(source));
+    phase({ phase: 'compile', detail: path });
     return exec(em, ['em++', ...CXXFLAGS, '-c', path, '-o', OBJ], onLine);
   });
 }
@@ -88,7 +94,16 @@ export async function link(onLine: Line): Promise<{ code: number; files: Record<
   if (!booting) throw new Error('the C++ toolchain is not running — compile first');
   const em = await booting;
   const argv = ['em++', OBJ, 'lib/libcler_web.a', 'lib/libliquid.a', ...LDFLAGS, '-o', 'app.html'];
-  const code = await exec(em, argv, onLine);
+  phase({ phase: 'link' });
+  // em++ names the tool it is about to run, so wasm-opt is a phase we observe, not one we invent.
+  let optimizing = false;
+  const code = await exec(em, argv, (text) => {
+    if (!optimizing && /wasm-opt/.test(text)) {
+      optimizing = true;
+      phase({ phase: 'optimize' });
+    }
+    onLine(text);
+  });
   const out: Record<string, Uint8Array> = {};
   if (code === 0) {
     for (const name of ARTIFACTS) out[name] = new Uint8Array(await em.fileSystem.readFile(`${ROOT}/${name}`));
@@ -118,11 +133,13 @@ async function start(files: Record<string, string>): Promise<Emception> {
       sink(data.toolchainError);
     } else if (data?.toolchain) {
       bytes += data.bytes ?? 0;
+      phase(bytes >= TOOLCHAIN_BYTES ? { phase: 'boot' } : { phase: 'toolchain', bytes, total: TOOLCHAIN_BYTES });
       sink(`downloading the C++ toolchain (first visit only)… ${(bytes / 1e6).toFixed(1)} MB`);
     }
   };
   navigator.serviceWorker.addEventListener('message', progress);
   sink('starting the in-browser C++ toolchain…');
+  phase({ phase: 'boot' });
   const worker = new Worker(`${base()}emception/emception.worker.bundle.worker.js`);
   const em = Comlink.wrap(worker) as unknown as Emception;
   em.onstdout = Comlink.proxy((text: string) => sink(text));
@@ -140,6 +157,7 @@ async function start(files: Record<string, string>): Promise<Emception> {
   try {
     await Promise.race([em.init(), stalled]);
     sink('unpacking the cler headers and libraries…');
+    phase({ phase: 'stage' });
     await upload(em, files);
   } catch (error) {
     worker.terminate();
@@ -153,10 +171,12 @@ async function start(files: Record<string, string>): Promise<Emception> {
 
 async function upload(em: Emception, files: Record<string, string>): Promise<void> {
   const headers = (await (await fetch(`${base()}payload/headers.json`)).json()) as Record<string, string>;
+  phase({ phase: 'stage', detail: `${Object.keys(headers).length} headers` });
   for (const [path, text] of Object.entries({ ...headers, ...files })) {
     await write(em, path, encoder.encode(text));
   }
   for (const lib of ['libcler_web.a', 'libliquid.a']) {
+    phase({ phase: 'stage', detail: lib });
     const data = await (await fetch(`${base()}payload/${lib}`)).arrayBuffer();
     await write(em, `lib/${lib}`, new Uint8Array(data));
   }

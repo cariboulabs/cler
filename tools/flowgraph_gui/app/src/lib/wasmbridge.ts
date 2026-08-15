@@ -2,6 +2,7 @@
 // full editor with no server. Same JSON invoke shape as e2e_backend / webshim.
 import wasmUrl from '../wasm/cler_web.wasm?url';
 import { compile, link, toolchainBlocked, type Line } from './emception';
+import { phase } from './progress';
 
 type Exports = {
   memory: WebAssembly.Memory;
@@ -191,6 +192,7 @@ export async function installWasmShell(
           if (code !== 0) return code;
           const linked = await link(emit);
           if (linked.code !== 0) return linked.code;
+          phase({ phase: 'store' });
           await store(sha, linked.files);
           return 0;
         });
@@ -205,6 +207,7 @@ export async function installWasmShell(
           target = `built/${sha}/app.html`;
         }
         const jobId = next++;
+        phase({ phase: 'launch' });
         const opened = window.open(target, '_blank', 'popup,width=1280,height=800');
         if (!opened) throw 'the browser blocked the run window — allow popups for this site';
         const inputKey = { inputs: {}, recipeSha256: '' };

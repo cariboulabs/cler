@@ -76,8 +76,25 @@ if (!/cannot reach the C\+\+ toolchain|did not start|worker failed/.test(offline
 if (offline.includes('check finished (exit 0)')) throw new Error('offline check reported success');
 await context.setOffline(false);
 
+// The progress panel must name the phase actually running: cold path starts with the download.
+const phaseSeen = new Set();
+const watchPhases = setInterval(async () => {
+  const phase = await page
+    .evaluate(() => document.querySelector('[data-testid="progress-phase"]')?.getAttribute('data-phase') ?? null)
+    .catch(() => null);
+  if (phase) phaseSeen.add(phase);
+}, 200);
+
 await timed('check (cold, includes the ~25 MB toolchain)', async () => {
   await page.getByTestId('check').click();
+  await page.getByTestId('progress-phase').waitFor({ timeout: 15_000 });
+  await page.waitForFunction(
+    () => document.querySelector('[data-testid="progress-phase"]')?.getAttribute('data-phase') === 'toolchain',
+    null,
+    { timeout: 60_000 }
+  );
+  console.log(`progress: ${await page.getByTestId('progress-phase').innerText()}`);
+  await page.screenshot({ path: path.join(shots, 'progress.png') });
   await page.getByTestId('tab-output').click();
   await page.waitForFunction(
     () => document.querySelector('[data-testid="output-body"]')?.textContent?.includes('check finished'),
@@ -85,12 +102,27 @@ await timed('check (cold, includes the ~25 MB toolchain)', async () => {
     { timeout: 300_000 }
   );
 });
+clearInterval(watchPhases);
 const checked = await output();
+for (const wanted of ['toolchain', 'compile']) {
+  if (!phaseSeen.has(wanted)) throw new Error(`progress panel never showed the ${wanted} phase (saw ${[...phaseSeen]})`);
+}
+console.log(`progress phases seen: ${[...phaseSeen].join(', ')}`);
 
 if (!checked.includes('check finished (exit 0)')) throw new Error(`check failed:\n${checked}`);
 
 await timed('build (compile + link)', async () => {
   await page.getByTestId('build').click();
+  await page.waitForFunction(
+    () =>
+      ['compile', 'link', 'optimize'].includes(
+        document.querySelector('[data-testid="progress-phase"]')?.getAttribute('data-phase') ?? ''
+      ),
+    null,
+    { timeout: 120_000 }
+  );
+  console.log(`progress: ${await page.getByTestId('progress-phase').innerText()}`);
+  await page.screenshot({ path: path.join(shots, 'progress-build.png') });
   await page.getByTestId('tab-output').click();
   await page.waitForFunction(
     () => document.querySelector('[data-testid="output-body"]')?.textContent?.includes('build finished'),

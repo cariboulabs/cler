@@ -134,6 +134,7 @@
     type Span
   } from './lib/schema';
   import type { CodeMark } from './lib/editor';
+  import BuildProgress from './lib/BuildProgress.svelte';
   import CodeDrawer from './lib/CodeDrawer.svelte';
   import type { Tab } from './lib/CodeDrawer.svelte';
   import { fixtureNames } from './fixtures';
@@ -153,6 +154,10 @@
   }
 
   const desktop = inTauri();
+  // ponytail: the wasm shell installs __TAURI_INTERNALS__, so inTauri() is true in the browser
+  // too — this build flag is what separates /try from the desktop app. Progress panel is
+  // browser-only; make it generic if the Tauri jobs ever grow phases worth showing.
+  const inBrowser = !!import.meta.env.VITE_CLER_WASM;
   const NOTE_BROWSER = 'example mode — read-only viewer, editing needs the desktop shell';
   const NOTE_DESKTOP = 'example mode — read-only viewer — use Open file… to edit the real file';
   const viewerNote = desktop ? NOTE_DESKTOP : NOTE_BROWSER;
@@ -235,6 +240,7 @@
   let output = $state.raw<string[]>([]);
   let busy = $state<TaskKind | null>(null);
   let running = $state(false);
+  let taskFail = $state<string | null>(null);
   let targetRefresh = $state(0);
   let rightTab = $state<RailTab>('inspector');
   let leftTab = $state<RailTab>(desktop ? 'ai-agent' : 'settings');
@@ -475,6 +481,11 @@
         if (kind === 'build') targetRefresh += 1;
       }
       output = [...output, `— ${kind} finished (exit ${payload.code ?? 'signal'})`];
+      if (kind !== 'run' && payload.code !== 0) {
+        taskFail =
+          diagnostics.find((entry) => entry.severity === 'error')?.message ??
+          `${kind} failed — the raw log is in Output`;
+      }
     });
     const artifactChanges = onArtifactStatusChange((path) => {
       if (path === doc.path) targetRefresh += 1;
@@ -717,6 +728,7 @@
     output = [];
     busy = null;
     running = false;
+    taskFail = null;
     for (const [kind, jobId] of activeJobs) latestJobs.set(kind, jobId);
     activeJobs.clear();
     targetRefresh += 1;
@@ -1393,6 +1405,7 @@
       return;
     }
     output = [];
+    taskFail = null;
     if (kind !== 'run') diagLines = [];
     if (kind === 'run') running = true;
     else busy = kind;
@@ -1408,7 +1421,8 @@
       activeJobs.delete(kind);
       if (kind === 'run') running = false;
       else busy = null;
-      announce(describeApplyError(error));
+      taskFail = describeApplyError(error);
+      announce(taskFail);
     }
   }
 
@@ -1913,6 +1927,20 @@
           title="Expand code drawer  Ctrl+`"
           onclick={() => (drawerOpen = true)}>⌃ Code</button
         >
+      {/if}
+
+      {#if inBrowser && (busy !== null || running || taskFail !== null)}
+        <BuildProgress
+          kind={busy ?? (running ? 'run' : null)}
+          error={taskFail}
+          bottom={(drawerOpen ? drawerHeight : 26) + 20}
+          onstop={() => void toggleRun()}
+          ondiagnostics={() => {
+            drawerOpen = true;
+            tab = 'diagnostics';
+          }}
+          ondismiss={() => (taskFail = null)}
+        />
       {/if}
 
       {#if drawerMounted}
