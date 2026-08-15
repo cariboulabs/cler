@@ -1,6 +1,7 @@
 // Browser backend: cler-web.wasm behind the Tauri IPC surface, so the app runs the
 // full editor with no server. Same JSON invoke shape as e2e_backend / webshim.
 import wasmUrl from '../wasm/cler_web.wasm?url';
+import { compile, link, type Line } from './emception';
 
 type Exports = {
   memory: WebAssembly.Memory;
@@ -92,9 +93,10 @@ export async function bindWasm(
 export type RunnableExample = { name: string; path: string; source: string };
 
 // Installs window.__TAURI_INTERNALS__ over the wasm so backend.ts sees a desktop shell.
-// `runnable` lists bundled examples with a prebuilt browser build under run/<name>.html;
-// Run pops that build in a new window (the desktop pops a GLFW window) while the source
-// still matches the bundle. Compiling edits in the browser is the next step.
+// `runnable` lists bundled examples with a prebuilt browser build under run/<name>.html; an
+// untouched one runs straight from there. Anything else — an edited example, a new document —
+// is compiled and linked by emception (src/lib/emception.ts) into built/<sha of source>/, which
+// public/cler-sw.js serves out of Cache Storage. Either way Run pops the build in a new window.
 export async function installWasmShell(
   files: Record<string, string>,
   runnable: RunnableExample[] = []
@@ -104,13 +106,35 @@ export async function installWasmShell(
   const listeners = new Map<number, { event: string; handler: number }>();
   const callbacks = new Map<number, (payload: unknown) => void>();
   let next = 1;
-  const emit = (event: string, payload: unknown) => {
+  const emitEvent = (event: string, payload: unknown) => {
     for (const [id, entry] of listeners) {
       if (entry.event === event) callbacks.get(entry.handler)?.({ event, id, payload });
     }
   };
   const windows = new Map<string, { win: Window; jobId: number; timer: number }>();
+  const building = new Map<string, number>();
   const currentSource = (path: string) => (invoke('open_document', { path }) as { source: string }).source;
+
+  // Async tasks the app polls through events: it gets {jobId, inputKey} now and lines later.
+  const job = (kind: 'check' | 'build', path: string, work: (emit: Line) => Promise<number>) => {
+    const jobId = next++;
+    const inputKey = { inputs: {}, recipeSha256: '' };
+    if (kind === 'build') building.set(path, jobId);
+    const emit: Line = (text) => {
+      for (const line of String(text).split('\n')) {
+        if (line.trim()) emitEvent(`${kind}-output`, { jobId, inputKey, path, line });
+      }
+    };
+    const settle = (code: number) => {
+      building.delete(path);
+      emitEvent(`${kind}-finished`, { jobId, inputKey, path, code });
+    };
+    void work(emit).then(settle, (error: unknown) => {
+      emit(error instanceof Error ? error.message : String(error));
+      settle(1);
+    });
+    return { jobId, inputKey };
+  };
   const win = window as unknown as Record<string, unknown>;
   win.__TAURI_INTERNALS__ = {
     invoke: async (cmd: string, args: Record<string, unknown> = {}) => {
@@ -125,35 +149,58 @@ export async function installWasmShell(
         return null;
       }
       const path = args.path as string;
-      const example = runnable.find((entry) => entry.path === path);
+      const pristine = runnable.find((entry) => entry.path === path && entry.source === currentSource(path));
       if (cmd === 'find_target') {
-        if (!example) throw `no browser build for ${path} — Run works on the bundled examples`;
-        if (currentSource(path) !== example.source) {
-          throw 'compiling your edits in the browser lands next — Run works on the unmodified example (undo or reload to get back)';
+        if (pristine) {
+          return {
+            available: true, reason: null, name: pristine.name, buildDir: null,
+            binary: `run/${pristine.name}.html`,
+            artifact: { state: 'ready', artifactPath: `run/${pristine.name}.html` }
+          };
         }
+        const jobId = building.get(path);
+        const artifactPath = `built/${await sha256(currentSource(path))}/app.html`;
         return {
-          available: true,
-          reason: null,
-          name: example.name,
-          buildDir: null,
-          binary: `run/${example.name}.html`,
-          artifact: { state: 'ready', artifactPath: `run/${example.name}.html` }
+          available: true, reason: null,
+          name: path.split('/').pop()?.replace(/\.[^.]+$/, '') ?? 'flowgraph',
+          buildDir: null, binary: null,
+          artifact: jobId !== undefined
+            ? { state: 'building', jobId }
+            : (await built().then((cache) => cache.match(absolute(artifactPath))))
+              ? { state: 'ready', artifactPath }
+              : { state: 'needs_build', reason: 'compile this document in the browser first (Ctrl+B)' }
         };
       }
+      if (cmd === 'check_document') {
+        return job('check', path, (emit) => compile(files, path, currentSource(path), emit));
+      }
+      if (cmd === 'build_target') {
+        return job('build', path, async (emit) => {
+          const source = currentSource(path);
+          const code = await compile(files, path, source, emit);
+          if (code !== 0) return code;
+          const linked = await link(emit);
+          if (linked.code !== 0) return linked.code;
+          await store(await sha256(source), linked.files);
+          return 0;
+        });
+      }
       if (cmd === 'run_target') {
-        if (!example) throw `no browser build for ${path}`;
+        const target = pristine
+          ? `run/${pristine.name}.html`
+          : `built/${await sha256(currentSource(path))}/app.html`;
         const jobId = next++;
-        const opened = window.open(`run/${example.name}.html`, '_blank', 'popup,width=1280,height=800');
+        const opened = window.open(target, '_blank', 'popup,width=1280,height=800');
         if (!opened) throw 'the browser blocked the run window — allow popups for this site';
         const inputKey = { inputs: {}, recipeSha256: '' };
         const timer = window.setInterval(() => {
           if (!opened.closed) return;
           window.clearInterval(timer);
           windows.delete(path);
-          emit('run-finished', { jobId, inputKey, path, code: 0 });
+          emitEvent('run-finished', { jobId, inputKey, path, code: 0 });
         }, 500);
         windows.set(path, { win: opened, jobId, timer });
-        emit('run-output', { jobId, inputKey, path, line: `running run/${example.name}.html in a new window — close it or press Stop` });
+        emitEvent('run-output', { jobId, inputKey, path, line: `running ${target} in a new window — close it or press Stop` });
         return { jobId, inputKey };
       }
       if (cmd === 'stop_target') {
@@ -174,6 +221,24 @@ export async function installWasmShell(
   win.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
     unregisterListener: (_event: string, eventId: number) => listeners.delete(eventId)
   };
+}
+
+// A build lands in Cache Storage under the app's own origin and path; public/cler-sw.js
+// serves built/* from there with the COOP/COEP headers pthreads need in the run window.
+const CACHE = 'cler-built';
+const built = () => caches.open(CACHE);
+const absolute = (path: string) => new URL(path, location.href).pathname;
+
+async function store(sha: string, artifacts: Record<string, Uint8Array>): Promise<void> {
+  const cache = await built();
+  for (const [name, data] of Object.entries(artifacts)) {
+    await cache.put(absolute(`built/${sha}/${name}`), new Response(data as BlobPart));
+  }
+}
+
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
 }
 
 // ponytail: "save" in the browser hands the file to the visitor; there is no disk to write.

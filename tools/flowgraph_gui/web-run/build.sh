@@ -9,7 +9,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
 deps="${CLER_DEPS:-$repo/build/_deps}"        # imgui-src, implot-src, liquid-src from a native configure
 out="$here/out"; run="$here/../app/public/run"   # vite copies public/ into docs/try/
-mkdir -p "$out/obj" "$run"
+payload="$here/../app/public/payload"             # what the in-browser compiler needs (fetched on first Build)
+mkdir -p "$out/obj" "$run" "$payload"
 jobs="$(nproc --ignore=1)"
 
 # emscripten's own port of GLFW; imgui + implot + gui manager + plot blocks + liquid
@@ -51,6 +52,26 @@ build_example() { # name source
   em++ "${CXXFLAGS[@]}" -c "$src" -o "$out/obj/example_$name.o"
   em++ "$out/obj/example_$name.o" "$out/libcler_web.a" "$out/liquid/lib/libliquid.a" "${LDFLAGS[@]}" -o "$run/$name.html"
 }
+echo "== payload for the in-browser compiler"
+cp "$out/libcler_web.a" "$out/liquid/lib/libliquid.a" "$payload/"
+# Headers em++ needs that the app does not already bundle (it bundles desktop_blocks/**/*.hpp).
+# Keys are the paths the in-browser build uses as its virtual repo root.
+CLER_REPO="$repo" CLER_DEPS_DIR="$deps" CLER_LIQUID="$out/liquid/include/liquid/liquid.h" CLER_SHELL="$here/shell.html" \
+python3 - "$payload/headers.json" <<'PY'
+import glob, json, os, sys
+repo, deps = os.environ["CLER_REPO"], os.environ["CLER_DEPS_DIR"]
+out = {}
+for path in glob.glob(f"{repo}/include/**/*.hpp", recursive=True):
+    out[os.path.relpath(path, repo)] = open(path).read()
+for sub in ("imgui-src", "imgui-src/backends", "implot-src"):
+    for path in glob.glob(f"{deps}/{sub}/*.h"):
+        out[f"build/_deps/{sub}/{os.path.basename(path)}"] = open(path).read()
+out["liquid/liquid.h"] = open(os.environ["CLER_LIQUID"]).read()
+out["shell.html"] = open(os.environ["CLER_SHELL"]).read()
+json.dump(out, open(sys.argv[1], "w"))
+print(f"  {len(out)} headers")
+PY
+
 build_example hello_world "$repo/desktop_examples/hello_world.cpp" &
 build_example mass_spring_damper "$repo/desktop_examples/mass_spring_damper.cpp" &
 build_example plots "$repo/desktop_examples/plots.cpp" &

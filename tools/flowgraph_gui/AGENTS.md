@@ -125,12 +125,31 @@ decision it enables, not information it displays.
   checkout for tree-sitter's C). Regenerate after UI, fixture, or block-header
   changes and commit the output. `tests/wasm_session.test.ts` covers the wasm
   end to end and skips when it is not built.
-- Run in the browser — `web-run/build.sh` (needs `EMSDK=` an emsdk checkout
-  with **3.1.24** activated, the version emception ships, so the archives can
-  later feed an in-browser compiler) builds liquid-dsp + GUI/plot blocks into
-  `libcler_web.a` and the examples listed in `src/fixtures/files.ts::RUNNABLE`
-  into `app/public/run/` (→ `docs/try/run/`). `wasmbridge.ts` answers
-  `find_target`/`run_target`: while the source still equals the bundle, Run
-  pops `run/<name>.html` in a new window (pthreads, so the page is made
-  cross-origin-isolated by `public/coi-serviceworker.min.js`); any edit
-  disables Run/Build with the reason until compiling in the browser lands.
+- Run in the browser — `web-run/build.sh` (needs `EMSDK=` an emsdk checkout with
+  **3.1.24** activated, the version emception ships) builds liquid-dsp + GUI/plot
+  blocks into `libcler_web.a`, the examples in `src/fixtures/files.ts::RUNNABLE`
+  into `app/public/run/`, and the *payload* the in-browser compiler needs into
+  `app/public/payload/`: the two archives plus `headers.json` (`include/**`, the
+  imgui/implot headers, `liquid.h`, `shell.html` — `desktop_blocks/**` already
+  ships inside the app bundle). Rerun it after touching those headers or flags;
+  `CXXFLAGS`/`LDFLAGS` in `src/lib/emception.ts` must stay in step with the script.
+- Build in the browser — `src/lib/emception.ts` runs em++ under
+  [emception](https://github.com/jprendes/emception) (clang + lld + the emscripten
+  sysroot, in wasm) over a virtual repo rooted at `/working`, so every path on the
+  command line — and in the diagnostics coming back — is the app's own
+  repo-relative path. The toolchain itself is fetched from `TOOLCHAIN_BASE`
+  (emception's GitHub Pages); self-hosting is a base-URL swap. Compile is `-O2`,
+  link is `-O1` (`-O2` links take minutes).
+- `public/cler-sw.js` is the one service worker: it adds COOP/COEP to every
+  response (the coi-serviceworker trick, MIT), mirrors the cross-origin toolchain
+  under `emception/*` so its worker bundle can resolve its own assets by relative
+  URL, and serves `built/*` out of Cache Storage. `main.ts` registers it and
+  reloads once on the first visit.
+- `wasmbridge.ts` answers `find_target`/`check_document`/`build_target`/`run_target`:
+  a bundled example still equal to the bundle runs straight from `run/<name>.html`;
+  anything else compiles and links into `built/<sha of source>/app.html` and Run
+  pops that. Both run windows are cross-origin isolated, so pthreads work.
+- `web-run/smoke.mjs` is the end-to-end check: `node ../web-run/smoke.mjs` from
+  `app/` after `npm run build:web` serves `docs/` with a header-less
+  `python3 -m http.server` (as Pages does) and drives edit → check → build → run
+  → screenshot in headless Chromium.

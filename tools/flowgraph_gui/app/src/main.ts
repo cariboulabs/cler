@@ -5,12 +5,20 @@ import './app.css';
 
 // VITE_CLER_WASM: no server at all — the editor session runs in cler_web.wasm over the bundled examples and block headers.
 if (import.meta.env.VITE_CLER_WASM && !inTauri()) {
-  // pthreads in the run window need cross-origin isolation; GitHub Pages sends no COOP/COEP
-  // headers, so a service worker adds them (reloads once on first visit).
-  if (!window.crossOriginIsolated) {
-    const coi = document.createElement('script');
-    coi.src = `${import.meta.env.BASE_URL}coi-serviceworker.min.js`;
-    document.head.appendChild(coi);
+  // GitHub Pages sends no COOP/COEP headers, serves nothing under built/, and cannot proxy
+  // the emception toolchain — public/cler-sw.js does all three. The first visit reloads once
+  // so this document itself comes back through it and the page is cross-origin isolated.
+  const { TOOLCHAIN_BASE } = await import('./lib/emception');
+  const base = import.meta.env.BASE_URL;
+  await navigator.serviceWorker.register(
+    `${base}cler-sw.js?toolchain=${encodeURIComponent(TOOLCHAIN_BASE)}`,
+    { scope: base }
+  );
+  await navigator.serviceWorker.ready;
+  if (window.crossOriginIsolated) sessionStorage.removeItem('clerSwReload');
+  else if (!sessionStorage.getItem('clerSwReload')) {
+    sessionStorage.setItem('clerSwReload', '1');
+    location.reload();
   }
   const { installWasmShell } = await import('./lib/wasmbridge');
   const { browserFiles, runnableExamples } = await import('./fixtures/files');
