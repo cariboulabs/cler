@@ -125,7 +125,3 @@ decision it enables, not information it displays.
   checkout for tree-sitter's C). Regenerate after UI, fixture, or block-header
   changes and commit the output. `tests/wasm_session.test.ts` covers the wasm
   end to end and skips when it is not built.
-- Server-hosted alternative — `docker/Dockerfile.web`: frontend built with
-  `VITE_CLER_WEB_BACKEND=` (same origin) uses `src/lib/webshim.ts`, the
-  Tauri-IPC-over-HTTP bridge the e2e tests use, and `e2e_backend <port>
-  --static <dir>` serves both with real builds. One shared workspace.

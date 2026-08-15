@@ -1,5 +1,5 @@
-// Tauri IPC bridge over HTTP: talks to e2e_backend (`/invoke`, `/events/poll`).
-// Must stay a self-contained function — Playwright serialises it via addInitScript.
+// Tauri IPC bridge over HTTP for the e2e backend (`/invoke`, `/events/poll`).
+// Self-contained on purpose — Playwright serialises it via addInitScript.
 export function shim(base: string): void {
   const win = window as unknown as Record<string, unknown>;
   const calls: { cmd: string; args: Record<string, unknown> }[] = [];

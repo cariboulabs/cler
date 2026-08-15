@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { test as base, expect, type Locator, type Page } from 'playwright/test';
-import { shim } from '../src/lib/webshim';
+import { shim } from './webshim';
 
 export { expect };
 
