@@ -131,6 +131,9 @@ decision it enables, not information it displays.
   checkout for tree-sitter's C). Regenerate after UI, fixture, or block-header
   changes and commit the output. `tests/wasm_session.test.ts` covers the wasm
   end to end and skips when it is not built.
+  `build:web` empties the outDir, and `public/run/` + `public/payload/` are gitignored:
+  without a fresh `web-build/build.sh`, copy them back from `docs/cler-fg/try/` into
+  `app/public/` first or the committed Run examples vanish.
 - Run in the browser — `web-build/build.sh` (needs `EMSDK=` an emsdk checkout with
   **3.1.24** activated, the version emception ships) builds liquid-dsp + GUI/plot
   blocks into `libcler_web.a`, the examples in `src/web/files.ts::RUNNABLE`
