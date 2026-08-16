@@ -24,7 +24,7 @@ import {
 import type { Outcome } from './inspector';
 import type { Command, Span } from './schema';
 
-const NO_SHELL = 'the AI agent runs on your machine — open the desktop shell to use it';
+const NO_SHELL = 'the AI agent is only supported in the desktop app — not in the browser';
 const MOVED_ON = 'the graph moved on since that proposal — re-check it before applying';
 
 function unavailable(reason: string): AiAgentStatus {
