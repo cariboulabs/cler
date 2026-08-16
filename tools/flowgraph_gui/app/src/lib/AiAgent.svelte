@@ -19,8 +19,7 @@
   const models = $derived(session.models);
 
   let waiting = $state(false);
-  let oauthError = $state<string | null>(null);
-
+  
   const PROVIDERS = [
     { id: 'anthropic', name: 'Claude', label: 'Claude — key or subscription', oauth: true },
     { id: 'openai', name: 'OpenAI', label: 'OpenAI — API key only', oauth: false },
@@ -33,7 +32,6 @@
     void status?.provider;
     void status?.available;
     waiting = false;
-    oauthError = null;
   });
 
   const chosen = $derived(models.find((one) => one.id === status?.model) ?? null);
@@ -162,11 +160,11 @@
           <button
             class="primary"
             data-testid="ai-agent-signin"
+            disabled={!session.desktop}
+            title={session.desktop ? undefined : status.reason}
             onclick={() => {
-              oauthError = null;
-              void session.signIn().then((error) => {
-                oauthError = error;
-                waiting = error === null;
+              void session.signIn().then((started) => {
+                waiting = started;
               });
             }}
           >
@@ -175,9 +173,6 @@
         {/if}
         {#if status.reason}
           <p class="faint" data-testid="ai-agent-reason">{status.reason}</p>
-        {/if}
-        {#if oauthError}
-          <p class="key-error" data-testid="ai-agent-oauth-error">{oauthError}</p>
         {/if}
       </div>
     {/if}

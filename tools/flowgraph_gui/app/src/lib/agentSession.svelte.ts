@@ -52,7 +52,7 @@ export class AgentSession {
 
   readonly #deps: AgentDeps;
   // the browser build installs __TAURI_INTERNALS__ itself; the agent still needs a real shell
-  readonly #desktop = inTauri() && !import.meta.env.VITE_CLER_WASM;
+  readonly desktop = inTauri() && !import.meta.env.VITE_CLER_WASM;
   #turns = 0;
 
   constructor(deps: AgentDeps) {
@@ -81,7 +81,7 @@ export class AgentSession {
   }
 
   listen(): (() => void) | undefined {
-    if (!this.#desktop) return;
+    if (!this.desktop) return;
     const deltas = onAiAgentDelta((payload) => {
       if (payload.path !== this.#deps.path || this.pending === null) return;
       const target = this.pending;
@@ -105,7 +105,7 @@ export class AgentSession {
   }
 
   async refreshStatus() {
-    if (!this.#desktop) {
+    if (!this.desktop) {
       this.status = unavailable(NO_SHELL);
       return;
     }
@@ -119,7 +119,7 @@ export class AgentSession {
   // Asked for when the panel is first opened, not at startup: it is a network call for
   // a rail tab most sessions never reach.
   async refreshModels() {
-    if (!this.#desktop) {
+    if (!this.desktop) {
       this.models = [];
       return;
     }
@@ -157,18 +157,20 @@ export class AgentSession {
     }
   }
 
-  async signIn(): Promise<string | null> {
-    if (!this.#desktop) return NO_SHELL;
+  // true while the browser holds the login; failures go to the toast
+  async signIn(): Promise<boolean> {
+    if (!this.desktop) return false;
     try {
       await aiAgentOauthStart();
-      return null;
+      return true;
     } catch (error) {
-      return describeApplyError(error);
+      this.#deps.announce(describeApplyError(error));
+      return false;
     }
   }
 
   async signOut() {
-    if (!this.#desktop) return;
+    if (!this.desktop) return;
     try {
       this.status = await aiAgentOauthLogout();
     } catch (error) {
