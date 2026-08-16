@@ -150,14 +150,6 @@ CLER supports four buffer access patterns with dramatically different performanc
 
     Prefer dbf by default; fall back to ReadN/WriteN when an external API needs its own contiguous buffer anyway.
 
-# When to Use CLER
-- Sensor fusion (IMU + GPS + barometer)
-- Audio effects processors
-- FPGA hybrid systems (software handles complex algorithms)
-- Motor controllers with multiple feedback sensors
-- Protocol bridges (UART ↔ SPI ↔ CAN)
-
-Bottom line: If you're juggling multiple data streams or your requirements keep changing, flowgraphs save time. If it's a simple pipeline, just write the loop yourself, and then you can use streamlined blocks if it makes things easier.
 
 # cler-fg: the flowgraph editor
 
