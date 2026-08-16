@@ -38,7 +38,7 @@
         </section>
 
 
-        <section class="band band-muted" id="first-graph">
+        <section class="band" id="first-graph">
             <div class="container">
                 <h2>What it looks like</h2>
                 <p class="prose">This example generates two tones, adds them, limits the rate, and plots the result. The <code>BlockRunner</code> list defines the connections.</p>
@@ -81,7 +81,7 @@ int main() {
             </div>
         </section>
 
-        <section class="band" id="build">
+        <section class="band band-muted" id="build">
             <div class="container">
                 <h2>Build the core examples</h2>
                 <p class="prose">You need CMake 3.16, a C++17 compiler, threads, and pkg-config. This build leaves the GUI and liquid-dsp blocks off.</p>
@@ -99,7 +99,7 @@ cmake --build build-core -j4
             </div>
         </section>
 
-        <section class="band band-muted" id="cler-fg">
+        <section class="band" id="cler-fg">
             <div class="container">
                 <h2>Integrated flowgraph editor</h2>
                 <p>cler-fg is a visual editor for CLER flowgraphs: place blocks, wire them, edit parameters, build, run. There is no generated code and no project file — the canvas is a live view of your C++ source, and every edit lands in that file. Optional, shipped with CLER.</p>

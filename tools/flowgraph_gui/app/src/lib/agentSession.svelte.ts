@@ -51,7 +51,8 @@ export class AgentSession {
   models = $state<ListedModel[]>([]);
 
   readonly #deps: AgentDeps;
-  readonly #desktop = inTauri();
+  // the browser build installs __TAURI_INTERNALS__ itself; the agent still needs a real shell
+  readonly #desktop = inTauri() && !import.meta.env.VITE_CLER_WASM;
   #turns = 0;
 
   constructor(deps: AgentDeps) {
