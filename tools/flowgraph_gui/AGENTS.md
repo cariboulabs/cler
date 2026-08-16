@@ -126,7 +126,7 @@ decision it enables, not information it displays.
   (those refuse with "needs the desktop app"). Files and `desktop_blocks/*.hpp`
   are bundled by `app/src/web/files.ts`; `app/src/web/wasmbridge.ts`
   installs it as `__TAURI_INTERNALS__` so the app sees a desktop shell.
-- `docs/try/` — the static site build of that: `npm run build:web` in `app/`
+- `docs/cler-fg/try/` — the static site build of that: `npm run build:web` in `app/`
   (needs `rustup target add wasm32-wasip1` and `WASI_SDK=` a wasi-sdk
   checkout for tree-sitter's C). Regenerate after UI, fixture, or block-header
   changes and commit the output. `tests/wasm_session.test.ts` covers the wasm
@@ -163,7 +163,7 @@ decision it enables, not information it displays.
   `em.init()` is raced against the worker's own error and a stall watch, since it
   otherwise never settles.
 - `public/emception/` is the vendored toolchain (36.5 MB, MIT OR Apache-2.0, see its
-  `NOTICE`) so `/try` fetches nothing third-party. It is the exact set one Check +
+  `NOTICE`) so `/cler-fg/try` fetches nothing third-party. It is the exact set one Check +
   Build touches: the four entry files named in `TOOLCHAIN_PINS` plus the eleven
   content-hash-named sysroot `.a` archives the pack requests for our link flags —
   the same eleven for every example, since the set follows `payload/flags.json`
@@ -196,4 +196,4 @@ decision it enables, not information it displays.
   `app/` after `npm run build:web` serves `docs/` with a header-less
   `python3 -m http.server` (as Pages does) and drives edit → check → build → run
   → screenshot in headless Chromium. It aborts every request to `TOOLCHAIN_BASE`, so a
-  green run proves `/try` needs nothing third-party.
+  green run proves `/cler-fg/try` needs nothing third-party.

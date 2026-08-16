@@ -29,7 +29,7 @@ const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
 });
 const context = await browser.newContext();
-// /try must be self-contained: the toolchain lives in public/emception/, so any hit on the
+// /cler-fg/try must be self-contained: the toolchain lives in public/emception/, so any hit on the
 // upstream base is a missing vendored file, not a fallback worth exercising.
 await context.route('https://jprendes.github.io/**', (route) => route.abort());
 const page = await context.newPage();
@@ -45,7 +45,7 @@ const clock = (label, work) =>
 const timed = async (label, work) => { clock.t0 = Date.now(); return clock(label, work); };
 const output = () => page.getByTestId('output-body').innerText();
 
-await page.goto(`http://127.0.0.1:${port}/try/`);
+await page.goto(`http://127.0.0.1:${port}/cler-fg/try/`);
 await page.waitForFunction(() => window.crossOriginIsolated, null, { timeout: 30_000 });
 await page.locator('.svelte-flow__node').first().waitFor({ timeout: 30_000 });
 console.log('editor loaded, cross-origin isolated');
@@ -173,7 +173,7 @@ if (!(await popup.evaluate(() => window.crossOriginIsolated))) throw new Error('
 await popup.waitForFunction(() => !document.getElementById('status'), null, { timeout: 120_000 });
 await popup.waitForTimeout(3000);
 await popup.screenshot({ path: path.join(shots, 'run.png') });
-console.log(`run: ${popup.url().split('/try/')[1]} rendering, screenshot in ${shots}/run.png`);
+console.log(`run: ${popup.url().split('/cler-fg/try/')[1]} rendering, screenshot in ${shots}/run.png`);
 await popup.close();
 
 // A syntax error must land on the edited line, in the document's own path.

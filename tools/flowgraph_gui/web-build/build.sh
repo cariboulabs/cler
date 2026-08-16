@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds cler for the browser: liquid-dsp + GUI/plot blocks into libcler_web.a, then each
-# bundled example into app/public/run/<name>.{html,js,wasm,worker.js} (lands in docs/try/run/ via vite).
+# bundled example into app/public/run/<name>.{html,js,wasm,worker.js} (lands in docs/cler-fg/try/run/ via vite).
 # Needs EMSDK pointing at an emsdk checkout with 3.1.24 activated (matches emception).
 set -euo pipefail
 : "${EMSDK:?set EMSDK to an emsdk checkout (3.1.24 activated)}"
@@ -8,7 +8,7 @@ source "$EMSDK/emsdk_env.sh" >/dev/null 2>&1
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
 deps="${CLER_DEPS:-$repo/build/_deps}"        # imgui-src, implot-src, liquid-src from a native configure
-out="$here/out"; run="$here/../app/public/run"   # vite copies public/ into docs/try/
+out="$here/out"; run="$here/../app/public/run"   # vite copies public/ into docs/cler-fg/try/
 payload="$here/../app/public/payload"             # what the in-browser compiler needs (fetched on first Build)
 rm -rf "$out/obj"
 mkdir -p "$out/obj" "$run" "$payload"

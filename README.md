@@ -6,7 +6,7 @@
     <img src="https://img.shields.io/badge/macOS-supported-brightgreen?logo=apple&logoColor=white" alt="macOS">
     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   </p>
-  <p><a href="https://cariboulabs.github.io/cler/" target="_blank"><strong>Onboarding page</strong></a> · <a href="https://cariboulabs.github.io/cler/try/" target="_blank"><strong>Try cler-fg in your browser</strong></a></p>
+  <p><a href="https://cariboulabs.github.io/cler/" target="_blank"><strong>Onboarding page</strong></a> · <a href="https://cariboulabs.github.io/cler/cler-fg/try/" target="_blank"><strong>Try cler-fg in your browser</strong></a></p>
 </div>
 
 CLER is a C++ template-based framework for constructing and executing flowgraphs of DSP processing blocks.
@@ -163,7 +163,7 @@ Bottom line: If you're juggling multiple data streams or your requirements keep 
 
 `cler-fg` opens a C++ flowgraph file directly: place blocks from the library, wire them, edit parameters, check, build and run — every gesture is a validated edit of the `.cpp` itself, so there is no project file and no generated code to keep in sync. Ask the built-in AI agent (Ctrl+J) and it proposes the same validated edits.
 
-Try it in the browser at <https://cariboulabs.github.io/cler/try/>, or run the desktop app:
+Try it in the browser at <https://cariboulabs.github.io/cler/cler-fg/try/>, or run the desktop app:
 
 ```bash
 ./cler_fg.sh

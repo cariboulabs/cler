@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:web": "./build-wasm.sh && VITE_CLER_WASM=1 vite build --base=./ --outDir ../../../docs/try --emptyOutDir",
+    "build:web": "./build-wasm.sh && VITE_CLER_WASM=1 vite build --base=./ --outDir ../../../docs/cler-fg/try --emptyOutDir",
     "tauri": "tauri",
     "test": "vitest run",
     "test:e2e": "playwright test --config tests-e2e/playwright.config.ts"
