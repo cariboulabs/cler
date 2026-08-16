@@ -43,7 +43,7 @@ static std::string snapshot_base_path(const std::string& dir) {
 
 // .dat format: line-oriented text with at most one trailing binary blob. One
 // section per VISIBLE plot with data:
-//   [trigger]     n/pre_ms/post_ms/frame, then CSV time_ms,power_db (t=0 at trigger)
+//   [trigger]     n/pre_ms/post_ms/frame/stride, then CSV time_ms,power_db (t=0 at trigger)
 //   [spectrum]    n_fft, then CSV freq_hz,mag_db (baseband)
 //   [spectrogram] rows/cols/row_seconds/freq_min_hz/freq_max_hz, then
 //                 "BINARY <nbytes>" + raw little-endian float32 dB, row-major, newest row first
@@ -57,11 +57,11 @@ static bool write_snapshot_dat(const std::string& path,
     // Copy out of the blocks first (cheap GUI-thread copy) so no lock is held while writing.
     std::vector<float> trig_y;
     float pre_ms = 0.0f, post_ms = 0.0f;
-    size_t trig_idx = 0, trig_rate = 0;
+    size_t trig_idx = 0, trig_rate = 0, trig_stride = 1;
     unsigned long frame = 0;
     bool have_trig = want_trig &&
                      trig.export_frame(trig_y, pre_ms, post_ms, trig_idx, frame,
-                                       trig_rate);
+                                       trig_rate, trig_stride);
 
     std::vector<float> sp_freq, sp_mag;
     bool have_spec = want_spec && spec.export_spectrum(0, sp_freq, sp_mag);
@@ -90,7 +90,8 @@ static bool write_snapshot_dat(const std::string& path,
 
     f << "# spike snapshot " << ts << "\n"
       << "# format: text sections for the plots visible at snapshot time;\n"
-      << "#   [trigger]     n/pre_ms/post_ms/frame, then CSV time_ms,power_db (trigger at t=0)\n"
+      << "#   [trigger]     n/pre_ms/post_ms/frame/stride, then CSV time_ms,power_db (trigger at t=0);\n"
+      << "#                 stride>1 means each row pair is the (min,max) of that many input samples\n"
       << "#   [spectrum]    n_fft, then CSV freq_hz,mag_db (baseband)\n"
       << "#   [spectrogram] rows/cols/row_seconds/freq range, then 'BINARY <nbytes>'\n"
       << "#                 + raw little-endian float32 dB, row-major, newest row first,\n"
@@ -112,10 +113,15 @@ static bool write_snapshot_dat(const std::string& path,
         std::snprintf(line, sizeof(line), "pre_ms %.6f\npost_ms %.6f\n",
                       static_cast<double>(pre_ms), static_cast<double>(post_ms));
         f << line;
-        f << "frame " << frame << "\n"
+        f << "frame " << frame << "\n";
+        // stride > 1: the frame was too long to store sample-for-sample, so each
+        // point pair is the (min,max) of `stride` input samples. Rows stay
+        // time-ordered; the pair shares a bucket, not a timestamp.
+        f << "stride " << trig_stride << "\n"
           << "# columns: time_ms,power_db\n";
         for (size_t i = 0; i < trig_y.size(); ++i) {
-            double tm = (static_cast<double>(i) - static_cast<double>(trig_idx)) * dt_ms;
+            double tm = (static_cast<double>(Trig::frame_input_index(i, trig_stride))
+                         - static_cast<double>(trig_idx)) * dt_ms;
             std::snprintf(line, sizeof(line), "%.4f,%.3f\n",
                           tm, static_cast<double>(trig_y[i]));
             f << line;

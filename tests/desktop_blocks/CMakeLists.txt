@@ -60,6 +60,15 @@ if (CLER_BUILD_BLOCKS_LIQUID)
     )
 endif()
 
+add_executable(trigger_block_test
+    test_trigger_block.cpp
+)
+
+target_link_libraries(trigger_block_test
+    gtest_main
+    cler::desktop_blocks
+)
+
 add_executable(gui_render_test
     test_gui_render.cpp
 )
@@ -71,6 +80,7 @@ target_link_libraries(gui_render_test
 
 # Register tests with CTest for discovery
 add_test(NAME gui_render_test COMMAND gui_render_test)
+add_test(NAME trigger_block_test COMMAND trigger_block_test)
 add_test(NAME math_blocks_test COMMAND math_blocks_test)
 add_test(NAME utility_blocks_test COMMAND utility_blocks_test)
 add_test(NAME sink_blocks_test COMMAND sink_blocks_test)

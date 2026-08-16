@@ -263,14 +263,21 @@ struct ControlPanel : public cler::BlockBase {
         ImGui::SetNextItemWidth(150);
         changed |= editable("Window (ms)", &_window_ms, 1.0f, _max_window_ms, "%.1f", true);
         ImGui::SameLine();
-        // Capture memory is fixed at startup, so this shrinks at higher rates (refreshed by on_rate_changed()).
-        ImGui::TextDisabled("max %.0f", _max_window_ms);
+        if (_window_stride > 1) {
+            ImGui::TextDisabled("max %.0f | %.3g us/pt", _max_window_ms,
+                                1e6 * static_cast<double>(_window_stride)
+                                    / static_cast<double>(detection_rate()));
+        } else {
+            ImGui::TextDisabled("max %.0f", _max_window_ms);
+        }
         help("Total time span captured and displayed per trigger (pre + post). "
              "This is the scope timebase. To see a whole repeating burst locked in "
              "place, set Window a bit LESS than the burst period and >= the burst "
-             "span. 'max' is the largest window at the CURRENT sample rate: the "
-             "capture buffer is sized once at startup, so raising the rate "
-             "shrinks the reachable window (in ms).");
+             "span. 'max' is a fixed time budget and does NOT move with the sample "
+             "rate. A window too long to store sample-for-sample is captured as a "
+             "min/max envelope instead of being cut short; 'us/pt' then shows the "
+             "time each stored point covers. Detection still runs on every sample, "
+             "so short bursts fire the trigger regardless.");
         changed |= editable("Pre-trigger (%)", &_pretrigger_pct, 0.0f, 90.0f, "%.0f", true);
         help("How much of the Window is shown BEFORE the trigger instant (t=0). "
              "e.g. 10% puts the trigger 10% in from the left.");
@@ -710,10 +717,11 @@ private:
         _zs_bw_mhz = std::min(std::max(_zs_bw_mhz, min_zs_bw_mhz()), hi);
     }
 
-    // Re-derive the reachable window (fixed sample capacity in ms at the DETECTION rate) and re-clamp.
+    // The window ceiling is a fixed time budget now (long frames are stored as
+    // an envelope, not truncated), so it no longer moves with the rate. Only the
+    // capture resolution does -- refreshed here for the readout.
     void refresh_trigger_window() {
-        _max_window_ms = 1000.0f * static_cast<float>(_trig->max_window_samples())
-                       / static_cast<float>(detection_rate());
+        _max_window_ms = _trig->max_window_ms();
         if (_window_ms > _max_window_ms) _window_ms = _max_window_ms;
     }
 
@@ -744,6 +752,9 @@ private:
     }
 
     void push_trigger_config() {
+        // Single choke point for the window/rate pair, so the readout can't
+        // disagree with what the block will actually capture.
+        _window_stride = _trig->stride_for_window_ms(_window_ms, detection_rate());
         _trig->set_config(_threshold_db, _window_ms, _pretrigger_pct,
                           _holdoff_ms,
                           _edge_idx == 0 ? Trig::Edge::Rising : Trig::Edge::Falling,
@@ -796,6 +807,7 @@ private:
     float _holdoff_ms     = 100.0f;
     float _auto_ms        = 200.0f;
     float _max_window_ms  = 200.0f;
+    size_t _window_stride = 1;      // input samples per stored point; >1 = envelope capture
     int   _edge_idx       = 0;  // Rising
     int   _mode_idx       = 2;  // Auto
 
