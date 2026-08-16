@@ -124,9 +124,13 @@ cmake --build build-core -j4
 
         <section class="band band-muted" id="cler-fg">
             <div class="container">
-                <h2>Integrated flowgraph editor for no-code users</h2>
-                <p class="prose">cler-fg lets users place blocks, connect them, change settings, build, and run without writing the graph by hand. Its modern approach keeps the visual canvas and C++ source in sync, avoiding the generated code and separate project files common in conventional GUI wrappers. It is included with CLER and remains optional.</p>
+                <h2>Integrated flowgraph editor</h2>
+                <p class="prose">cler-fg is a visual editor for CLER flowgraphs: place blocks, wire them, edit parameters, build, run. There is no generated code and no project file — the canvas is a live view of your C++ source, and every edit lands in that file. Optional, shipped with CLER.</p>
+                <figure class="article-figure">
+                    <img src="blog/02-cler-fg-hello-world.png" alt="cler-fg with desktop_examples/hello_world.cpp open: two CW sources feeding an adder, a throttle and a plot on the canvas, the code drawer below, the AI agent panel on the left" width="1440" height="900" loading="lazy">
+                </figure>
                 <p><a href="try/">Try it in the browser →</a> &nbsp; <a href="blog/02-cler-fg.html">Learn about cler-fg →</a></p>
+                <p class="prose">The browser version is the full editor, including Build and Run via a wasm C++ toolchain (no hardware blocks). The AI agent needs the desktop app.</p>
             </div>
         </section>
 
