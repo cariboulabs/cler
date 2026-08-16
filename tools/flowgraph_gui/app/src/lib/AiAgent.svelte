@@ -157,21 +157,31 @@
     {#if status !== null && !status.available}
       <div class="setup" data-testid="ai-agent-setup">
         {#if provider?.oauth}
-          <button
-            class="primary"
-            data-testid="ai-agent-signin"
-            disabled={!session.desktop}
-            title={session.desktop ? undefined : status.reason}
-            onclick={() => {
-              void session.signIn().then((started) => {
-                waiting = started;
-              });
-            }}
-          >
-            {waiting ? 'waiting for the browser…' : `Sign in with ${provider.name}`}
-          </button>
+          <span class="action-slot">
+            <button
+              class="primary"
+              data-testid="ai-agent-signin"
+              aria-describedby={session.desktop ? undefined : 'ai-agent-signin-tooltip'}
+              disabled={!session.desktop}
+              onclick={() => {
+                void session.signIn().then((started) => {
+                  waiting = started;
+                });
+              }}
+            >
+              {waiting ? 'waiting for the browser…' : `Sign in with ${provider.name}`}
+            </button>
+            {#if !session.desktop}
+              <span
+                class="blocked-tip"
+                id="ai-agent-signin-tooltip"
+                data-testid="ai-agent-signin-tooltip"
+                role="tooltip">{status.reason}</span
+              >
+            {/if}
+          </span>
         {/if}
-        {#if status.reason}
+        {#if status.reason && session.desktop}
           <p class="faint" data-testid="ai-agent-reason">{status.reason}</p>
         {/if}
       </div>
@@ -425,6 +435,37 @@
     color: var(--danger);
     font-size: 11px;
     margin: 0 0 var(--sp-2);
+  }
+  .action-slot {
+    position: relative;
+    display: flex;
+  }
+  .action-slot .primary {
+    flex: 1;
+  }
+  .blocked-tip {
+    position: absolute;
+    top: calc(100% + var(--sp-2));
+    left: 0;
+    z-index: 1;
+    width: max-content;
+    max-width: 280px;
+    padding: var(--sp-1) var(--sp-2);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-sm);
+    background: var(--bg-2);
+    box-shadow: var(--shadow);
+    color: var(--fg);
+    font-size: 11px;
+    line-height: 1.35;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 100ms ease;
+  }
+  .action-slot:hover .blocked-tip {
+    opacity: 1;
+    visibility: visible;
   }
   .setup p {
     margin: 0;
