@@ -37,29 +37,6 @@
             </div>
         </section>
 
-        <section class="band">
-            <div class="container">
-                <h2>What you get</h2>
-                <div class="principle-grid">
-                    <div class="principle">
-                        <h3>Typed channels</h3>
-                        <p>Each channel knows what kind of sample it carries, so C++ catches bad connections before the program runs. Samples move in batches, with a zero-copy path when the platform supports it.</p>
-                    </div>
-                    <div class="principle">
-                        <h3>Three schedulers</h3>
-                        <p>Give each block its own thread, share a fixed set of workers, or group nearby blocks on the same CPU core. CLER can measure the work and adjust those groups while the graph runs.</p>
-                    </div>
-                    <div class="principle">
-                        <h3>Desktop and embedded</h3>
-                        <p>Linux and macOS, task policies for FreeRTOS, ThreadX, and Zephyr, and manual execution for bare-metal targets.</p>
-                    </div>
-                    <div class="principle">
-                        <h3>Desktop blocks library</h3>
-                        <p>Sources, sinks, SDR drivers, plots, filters, resamplers, channelizers, UDP, and audio for desktop and embedded-Linux applications.</p>
-                    </div>
-                </div>
-            </div>
-        </section>
 
         <section class="band band-muted" id="first-graph">
             <div class="container">
@@ -125,12 +102,12 @@ cmake --build build-core -j4
         <section class="band band-muted" id="cler-fg">
             <div class="container">
                 <h2>Integrated flowgraph editor</h2>
-                <p class="prose">cler-fg is a visual editor for CLER flowgraphs: place blocks, wire them, edit parameters, build, run. There is no generated code and no project file — the canvas is a live view of your C++ source, and every edit lands in that file. Optional, shipped with CLER.</p>
+                <p>cler-fg is a visual editor for CLER flowgraphs: place blocks, wire them, edit parameters, build, run. There is no generated code and no project file — the canvas is a live view of your C++ source, and every edit lands in that file. Optional, shipped with CLER.</p>
                 <figure class="article-figure">
                     <img src="blog/02-cler-fg-hello-world.png" alt="cler-fg with desktop_examples/hello_world.cpp open: two CW sources feeding an adder, a throttle and a plot on the canvas, the code drawer below, the AI agent panel on the left" width="1440" height="900" loading="lazy">
                 </figure>
                 <p><a href="try/">Try it in the browser →</a> &nbsp; <a href="blog/02-cler-fg.html">Learn about cler-fg →</a></p>
-                <p class="prose">The browser version is the full editor, including Build and Run via a wasm C++ toolchain (no hardware blocks). The AI agent needs the desktop app.</p>
+                <p>The browser version is the full editor, including Build and Run via a wasm C++ toolchain (no hardware blocks). The AI agent needs the desktop app.</p>
             </div>
         </section>
 
