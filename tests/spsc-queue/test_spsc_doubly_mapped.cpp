@@ -680,3 +680,31 @@ TEST_F(SPSCQueueDoublyMappedTest, WriteDbfCorrectness) {
         expected += 1.0f;
     }
 }
+// A 2 MB + one-page buffer crosses the huge-page threshold without being a
+// huge-page multiple. The mirror period must still equal the queue capacity,
+// otherwise write_dbf/read_dbf spans that cross the end silently read or
+// write the wrong memory.
+TEST_F(SPSCQueueDoublyMappedTest, MirrorPeriodMatchesCapacityAboveHugePageSize) {
+    dro::SPSCQueue<std::complex<float>> q(1 << 18);
+    if (!q.is_doubly_mapped_) GTEST_SKIP() << "no OS double mapping";
+    const size_t cap = q.capacity_;
+    auto [w, ws] = q.write_dbf();
+    ASSERT_NE(w, nullptr);
+    w[cap + 5] = {42.0f, 7.0f};
+    EXPECT_EQ(w[5], std::complex<float>(42.0f, 7.0f));
+
+    // writeN/readN and dbf must agree across many wraps
+    std::vector<std::complex<float>> tmp(100000);
+    size_t gin = 0, gout = 0, mism = 0;
+    for (int r = 0; r < 40; ++r) {
+        for (size_t i = 0; i < tmp.size(); ++i) tmp[i] = {float((gin + i) % 97), float((gin + i) % 31)};
+        gin += q.writeN(tmp.data(), tmp.size());
+        auto [rp, rs] = q.read_dbf();
+        for (size_t i = 0; i < rs; ++i)
+            if (rp[i] != std::complex<float>(float((gout + i) % 97), float((gout + i) % 31))) ++mism;
+        gout += rs;
+        q.commit_read(rs);
+    }
+    EXPECT_EQ(gin, gout);
+    EXPECT_EQ(mism, 0u);
+}

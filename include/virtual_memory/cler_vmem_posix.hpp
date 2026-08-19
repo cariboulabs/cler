@@ -86,10 +86,11 @@ public:
         bool use_huge_pages = false;
         
         #ifdef MAP_HUGETLB
+        // The mirror period must stay exactly aligned_size (the queue sized its
+        // capacity to it); only take huge pages when that is already a multiple.
         const std::size_t huge_page_size = get_huge_page_size();
-        if (huge_page_size > 0 && aligned_size >= huge_page_size) {
-            // Align to huge page boundary
-            aligned_size = ((size + huge_page_size - 1) / huge_page_size) * huge_page_size;
+        if (huge_page_size > 0 && aligned_size >= huge_page_size &&
+            aligned_size % huge_page_size == 0) {
             use_huge_pages = true;
         }
         #endif
