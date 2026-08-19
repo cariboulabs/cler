@@ -51,6 +51,8 @@ if (CLER_BUILD_BLOCKS_LIQUID)
 
     add_executable(fm_blocks_test test_fm_blocks.cpp)
     target_link_libraries(fm_blocks_test gtest_main cler::desktop_blocks)
+    add_executable(ais_blocks_test test_ais_blocks.cpp)
+    target_link_libraries(ais_blocks_test gtest_main cler::desktop_blocks)
 
     # Channelizer blocks tests
     add_executable(channelizer_blocks_test
@@ -83,6 +85,7 @@ if (CLER_BUILD_BLOCKS_LIQUID)
     add_test(NAME channelizer_blocks_test COMMAND channelizer_blocks_test)
     add_test(NAME resampler_blocks_test COMMAND resampler_blocks_test)
     add_test(NAME fm_blocks_test COMMAND fm_blocks_test)
+    add_test(NAME ais_blocks_test COMMAND ais_blocks_test)
 else()
     message(STATUS "Skipping channelizer_blocks_test because CLER_BUILD_BLOCKS_LIQUID is OFF")
     message(STATUS "Skipping resampler_blocks_test because CLER_BUILD_BLOCKS_LIQUID is OFF")
