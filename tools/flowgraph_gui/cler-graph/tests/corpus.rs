@@ -292,7 +292,7 @@ fn polyphase_channelizer_resolves_constexpr_template_args() {
 fn mass_spring_damper_keeps_the_feedback_cycle() {
     let site = only_site("mass_spring_damper.cpp");
     assert!(site.editable);
-    assert_eq!(site.edges.len(), 5);
+    assert_eq!(site.edges.len(), 6);
 
     let feedback = site.edges_between("fanout", "controller");
     assert_eq!(feedback.len(), 1);
@@ -484,7 +484,7 @@ fn polyphase_channelizer_carries_complex_baseband() {
 #[test]
 fn mass_spring_damper_edges_are_all_float() {
     let site = typed_site("mass_spring_damper.cpp");
-    assert_eq!(sample_types(&site), vec![Some("float"); 5]);
+    assert_eq!(sample_types(&site), vec![Some("float"); 6]);
     assert!(site.edges.iter().all(|e| !e.type_conflict));
 
     let feedback = site.edges_between("fanout", "controller");
