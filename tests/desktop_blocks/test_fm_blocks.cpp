@@ -125,6 +125,27 @@ TEST(RdsBits, EncodeDecodeRoundTrip) {
     EXPECT_EQ(st.blocks_bad, 0u);
 }
 
+TEST(RdsBits, CorruptBlockBDoesNotMisplaceCharacters) {
+    // one clean pass of PS, then the same groups with every B block damaged
+    // and different characters: nothing may change
+    auto clean = make_groups(0x1234, "CLER FM!", "");
+    for (int damaged : {1, 0, 2}) {  // B only; A and B; C and D
+        auto dirty = make_groups(0x1234, "XXXXXXXX", "");
+        for (size_t i = 0; i < dirty.size(); ++i) {
+            const size_t k = i % 4;
+            if (k == static_cast<size_t>(damaged) || (damaged == 0 && k == 1) || (damaged == 2 && k == 3)) dirty[i] ^= 0x4000;
+        }
+        rds::Decoder dec;
+        for (bool b : to_bits(clean)) dec.push_bit(b);
+        ASSERT_STREQ(dec.station().ps, "CLER FM!");
+        const uint32_t groups_before = dec.station().groups_ok;
+        for (bool b : to_bits(dirty)) dec.push_bit(b);
+        EXPECT_STREQ(dec.station().ps, "CLER FM!") << "damaged " << damaged;
+        EXPECT_EQ(dec.station().groups_ok, groups_before);
+        EXPECT_GT(dec.station().blocks_bad, 0u);
+    }
+}
+
 TEST(RdsBits, SyndromeOfValidBlockIsOffset) {
     EXPECT_EQ(rds::Decoder::syndrome(rds::encode_block(0xBEEF, rds::Decoder::OFFSET_B)), rds::Decoder::OFFSET_B);
     EXPECT_NE(rds::Decoder::syndrome(rds::encode_block(0xBEEF, rds::Decoder::OFFSET_B) ^ 0x4000), rds::Decoder::OFFSET_B);

@@ -60,6 +60,7 @@ public:
                 _station.synced = true;
                 _bits = 0;
                 _blocks[0] = _shift >> 10;
+                _valid = 1;
                 _expect = 1;
                 _bad_run = 0;
                 ++_station.blocks_total;
@@ -69,6 +70,7 @@ public:
         if (_bits < 26) return false;
         _bits = 0;
         ++_station.blocks_total;
+        if (_expect == 0) _valid = 0;
         const uint32_t s = syndrome(_shift);
         const int idx = offset_index(s);
         if (idx != _expect) {
@@ -82,10 +84,13 @@ public:
             return false;
         }
         _bad_run = 0;
+        _valid |= 1u << idx;
         _blocks[idx] = _shift >> 10;
         _cprime = (idx == 2 && s == OFFSET_CP);
         _expect = (idx + 1) % 4;
-        if (idx == 3) {
+        // a group is only as good as its worst block: a stale B would send
+        // PS/RT characters to the wrong segment
+        if (idx == 3 && _valid == 0xF) {
             parse_group();
             ++_station.groups_ok;
             return true;
@@ -143,6 +148,7 @@ private:
     uint32_t _bits = 0;
     int _expect = 0;
     int _bad_run = 0;
+    unsigned _valid = 0;
     bool _cprime = false;
     bool _rt_ab = false;
     std::array<uint32_t, 4> _blocks{};
