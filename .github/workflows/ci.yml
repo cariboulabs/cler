@@ -111,7 +111,7 @@ jobs:
     
     - name: Run tests
       working-directory: build
-      run: ctest --build-config ${{ matrix.build_type }} --output-on-failure --parallel
+      run: ctest --build-config ${{ matrix.build_type }} --output-on-failure --parallel --no-tests=error
     
     - name: Upload test results
       if: always()

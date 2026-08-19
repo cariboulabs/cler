@@ -85,7 +85,7 @@ RUN if [ "$COMPILER" = "gcc" ]; then \
     && cmake --build build --parallel
 
 # Run tests
-CMD ["ctest", "--test-dir", "build/tests", "--output-on-failure", "--parallel"]
+CMD ["ctest", "--test-dir", "build/tests", "--output-on-failure", "--parallel", "--no-tests=error"]
 
 # Development environment with all tools
 FROM deps AS development
