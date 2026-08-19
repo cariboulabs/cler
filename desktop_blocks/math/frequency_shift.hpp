@@ -1,5 +1,6 @@
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
+#include <atomic>
 #include <new>
 
 struct FrequencyShiftBlock : public cler::BlockBase {
@@ -22,7 +23,19 @@ struct FrequencyShiftBlock : public cler::BlockBase {
         delete[] _buffer;
     }
 
+    // Thread-safe: applied at the top of the next procedure().
+    void set_frequency_shift(double frequency_shift_hz) {
+        _pending_shift.store(frequency_shift_hz, std::memory_order_relaxed);
+        _shift_dirty.store(true, std::memory_order_release);
+    }
+
+    double frequency_shift() const { return _frequency_shift; }
+
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
+        if (_shift_dirty.exchange(false, std::memory_order_acquire)) {
+            _frequency_shift = _pending_shift.load(std::memory_order_relaxed);
+            _dshift = std::exp(std::complex<float>(0.0, 2.0 * M_PI * _frequency_shift / _sample_rate));
+        }
         // in's buffer_size isn't validated to be >=4KB (custom sizes allowed), so dbf isn't
         // guaranteed available here; readN/writeN into a temp buffer stays correct for any size.
         size_t transferable = std::min({in.size(), out->space(), _buffer_size});
@@ -50,4 +63,6 @@ struct FrequencyShiftBlock : public cler::BlockBase {
         size_t _buffer_size;
         std::complex<float> _shifter{1.0 ,0.0};
         std::complex<float> _dshift;
+        std::atomic<double> _pending_shift{0.0};
+        std::atomic<bool> _shift_dirty{false};
 };

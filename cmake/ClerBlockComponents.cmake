@@ -111,6 +111,12 @@ function(cler_register_standard_block_components)
       desktop_blocks/resamplers/multistage_resampler.hpp
       desktop_blocks/resamplers/rational_resampler.hpp
     )
+    cler_register_block_component(TARGET cler::blocks_modem PATHS
+      desktop_blocks/modem/ber_counter.hpp
+      desktop_blocks/modem/demodulator.hpp
+      desktop_blocks/modem/modulator.hpp
+      desktop_blocks/modem/symbol_source.hpp
+    )
     cler_register_block_component(TARGET cler::blocks_ezgmsk PATHS
       desktop_blocks/ezgmsk/_ezgmsk_demod.h
       desktop_blocks/ezgmsk/_ezgmsk_mod.h
@@ -125,6 +131,9 @@ function(cler_register_standard_block_components)
       desktop_blocks/triggers/trigger_block.hpp
     )
     cler_register_block_component(TARGET cler::blocks_plot_timeseries PATHS desktop_blocks/plots/plot_timeseries.hpp)
+    if(CLER_BUILD_BLOCKS_LIQUID)
+      cler_register_block_component(TARGET cler::blocks_modem_plot PATHS desktop_blocks/modem/plot_constellation.hpp)
+    endif()
     if(CLER_BUILD_BLOCKS_LIQUID)
       cler_register_block_component(TARGET cler::blocks_plots_spectral PATHS
         desktop_blocks/plots/plot_cspectrum.hpp

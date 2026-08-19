@@ -22,6 +22,10 @@ struct AWGNKernel {
         _rng.seed(rd());
     }
 
+    void set_stddev(scalar_type stddev) {
+        _normal_dist = std::normal_distribution<scalar_type>(0.0, stddev);
+    }
+
     T operator()(T x) {
         if constexpr (std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>) {
             auto n_re = _normal_dist(_rng);
