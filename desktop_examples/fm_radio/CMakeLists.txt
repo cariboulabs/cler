@@ -1,6 +1,19 @@
-if (CLER_BUILD_BLOCKS_GUI AND CLER_BUILD_BLOCKS_LIQUID AND HACKRF_FOUND AND PORTAUDIO_FOUND)
+# fm_radio picks its HackRF / Pluto / SoapySDR source at runtime; each is
+# compiled in only if its library was found, asking for a missing one panics.
+if (CLER_BUILD_BLOCKS_GUI AND CLER_BUILD_BLOCKS_LIQUID AND PORTAUDIO_FOUND
+    AND (HACKRF_FOUND OR LIBIIO_FOUND OR SOAPYSDR_FOUND))
     add_executable(fm_radio fm_radio.cpp)
     target_link_libraries(fm_radio PRIVATE cler::desktop_blocks)
+    if (HACKRF_FOUND)
+        target_compile_definitions(fm_radio PRIVATE FM_RADIO_HAVE_HACKRF)
+    endif()
+    if (LIBIIO_FOUND)
+        target_compile_definitions(fm_radio PRIVATE FM_RADIO_HAVE_PLUTO)
+    endif()
+    if (SOAPYSDR_FOUND)
+        target_compile_definitions(fm_radio PRIVATE FM_RADIO_HAVE_SOAPY)
+        target_link_libraries(fm_radio PRIVATE PkgConfig::SOAPYSDR)
+    endif()
 else()
-    message(STATUS "Skipping fm_radio example (needs GUI + liquid + HackRF + PortAudio)")
+    message(STATUS "Skipping fm_radio example (needs GUI + liquid + PortAudio + one of HackRF/libiio/SoapySDR)")
 endif()

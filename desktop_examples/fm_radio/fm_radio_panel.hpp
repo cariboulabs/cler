@@ -2,8 +2,8 @@
 
 #include "cler.hpp"
 #include "desktop_blocks/fm/fm_mpx_decoder.hpp"
-#include "desktop_blocks/sources/source_hackrf.hpp"
 #include "fm_radio_blocks.hpp"
+#include "fm_radio_source.hpp"
 #include "imgui.h"
 
 #include <algorithm>
@@ -24,13 +24,17 @@ struct FmRadioPanel : public cler::BlockBase {
         char ps[9];
     };
 
-    FmRadioPanel(const char* name, SourceHackRFBlock& source, FMMpxDecoderBlock& mpx,
-                 VolumeBlock& volume, double if_offset_hz, double start_hz)
+    FmRadioPanel(const char* name, RadioSource& source, FMMpxDecoderBlock& mpx,
+                 VolumeBlock& volume, double if_offset_hz, double start_hz, double gain_db)
         : cler::BlockBase(name), _src(source), _mpx(mpx), _vol(volume),
-          _if_offset(if_offset_hz), _freq(start_hz) {
-        _lna = source.get_lna_gain();
-        _vga = source.get_vga_gain();
-        _amp = source.get_amp_enable();
+          _if_offset(if_offset_hz), _freq(start_hz), _gain(static_cast<float>(gain_db)) {
+#ifdef FM_RADIO_HAVE_HACKRF
+        if (auto* h = source.hackrf()) {
+            _lna = h->get_lna_gain();
+            _vga = h->get_vga_gain();
+            _amp = h->get_amp_enable();
+        }
+#endif
         _volume = volume.volume();
         _deemph_us = 50;
     }
@@ -113,6 +117,7 @@ struct FmRadioPanel : public cler::BlockBase {
             start_scan();
         }
         if (ImGui::BeginListBox("##stations", ImVec2(-1, 160))) {
+            if (_stations.empty() && _mode != Mode::Scan) ImGui::TextDisabled("no stations yet - press 'scan band'");
             for (size_t i = 0; i < _stations.size(); ++i) {
                 auto& s = _stations[i];
                 if (s.ps[0] == 0 && std::fabs(s.freq_hz - _freq) < 1.0 && st.ps[0]) std::memcpy(s.ps, st.ps, sizeof(s.ps));
@@ -124,11 +129,19 @@ struct FmRadioPanel : public cler::BlockBase {
 
         // --- RF ---
         ImGui::Separator();
-        if (ImGui::SliderInt("LNA", &_lna, 0, 40)) { _lna = (_lna / 8) * 8; _src.set_lna_gain(_lna); }
-        if (ImGui::SliderInt("VGA", &_vga, 0, 62)) { _vga = (_vga / 2) * 2; _src.set_vga_gain(_vga); }
-        if (ImGui::Checkbox("RF amp", &_amp)) _src.set_amp_enable(_amp);
-        ImGui::SameLine();
-        ImGui::Text("overflows %zu", _src.get_overflow_count());
+        ImGui::Text("%s", _src.kind_name());
+#ifdef FM_RADIO_HAVE_HACKRF
+        if (auto* h = _src.hackrf()) {
+            if (ImGui::SliderInt("LNA", &_lna, 0, 40)) { _lna = (_lna / 8) * 8; h->set_lna_gain(_lna); }
+            if (ImGui::SliderInt("VGA", &_vga, 0, 62)) { _vga = (_vga / 2) * 2; h->set_vga_gain(_vga); }
+            if (ImGui::Checkbox("RF amp", &_amp)) h->set_amp_enable(_amp);
+            ImGui::SameLine();
+            ImGui::Text("overflows %zu", _src.overflow_count());
+        }
+#endif
+        if (_src.has_gain()) {
+            if (ImGui::SliderFloat("gain dB", &_gain, 0.0f, 70.0f, "%.0f")) _src.set_gain(_gain);
+        }
         ImGui::End();
     }
 
@@ -148,7 +161,7 @@ private:
         hz = std::clamp(hz, BAND_LO, BAND_HI);
         if (hz == _freq) return;
         _freq = hz;
-        _src.set_frequency(static_cast<uint64_t>(std::llround(_freq + _if_offset)));
+        _src.set_frequency(_freq + _if_offset);
         _mpx.rds_reset();
         _tuned_at = std::chrono::steady_clock::now();
     }
@@ -202,13 +215,14 @@ private:
 
     static constexpr float SEEK_SNR_DB = 12.0f;
 
-    SourceHackRFBlock& _src;
+    RadioSource& _src;
     FMMpxDecoderBlock& _mpx;
     VolumeBlock& _vol;
     double _if_offset;
     double _freq;
     int _lna = 0, _vga = 0;
     bool _amp = false;
+    float _gain = 30.0f;
     float _volume = 1.0f;
     int _deemph_us = 50;
     Mode _mode = Mode::Idle;

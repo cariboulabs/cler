@@ -22,8 +22,6 @@ else()
     message(STATUS "Skipping frequency_shift example because CLER_BUILD_BLOCKS_GUI or CLER_BUILD_BLOCKS_LIQUID is OFF")
 endif()
 
-add_subdirectory(fm_radio)
-
 if (CLER_BUILD_BLOCKS_LIQUID)
     add_subdirectory(ezgmsk)
 else()
@@ -115,6 +113,8 @@ if (UHD_FOUND AND CLER_BUILD_BLOCKS_GUI AND CLER_BUILD_BLOCKS_LIQUID)
 else()
     message(STATUS "Skipping uhd_device - requires UHD and GUI blocks")
 endif()
+
+add_subdirectory(fm_radio)
 
 # spike selects its UHD / HackRF / Pluto source at runtime. Each source is
 # compiled in only if its library was found; asking for a missing one panics
