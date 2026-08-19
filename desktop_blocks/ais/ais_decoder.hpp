@@ -172,10 +172,10 @@ private:
                 _peak = 0.0f;
                 _peak_age = 0;
                 _bursts.fetch_add(1, std::memory_order_relaxed);
-                _sample_mod = static_cast<unsigned int>(((_peak_cnt - static_cast<long>(_win) + _ph) % _sps + _sps) % _sps);
+                _sample_mod = static_cast<unsigned int>(((_peak_cnt - static_cast<int64_t>(_win) + _ph) % _sps + _sps) % _sps);
                 bool done = false;
                 for (size_t j = 0; j < _win; ++j) {
-                    const long c0 = _cnt - static_cast<long>(_win) + static_cast<long>(j);
+                    const int64_t c0 = _cnt - static_cast<int64_t>(_win) + static_cast<int64_t>(j);
                     if (static_cast<unsigned int>(((c0 % _sps) + _sps) % _sps) != _sample_mod) continue;
                     if (decide(_ring[(_w + j) % _win])) done = true;
                 }
@@ -230,11 +230,11 @@ private:
     firfilt_rrrf _rxf = nullptr;
     std::vector<float> _tmpl, _ring;
     size_t _w = 0;
-    long _cnt = 0;
+    int64_t _cnt = 0;   // 32-bit would wrap after ~12 h at 48 kS/s and skew the sampling phase
     float _pw = 0.0f, _nf = 1e9f, _pw_alpha = 0.025f;
     float _peak = 0.0f;
     unsigned int _peak_age = 0;
-    long _peak_cnt = 0;
+    int64_t _peak_cnt = 0;
     unsigned int _ph = 0, _sample_mod = 0;
     float _dc = 0.0f;
     bool _decoding = false, _prev = false;
