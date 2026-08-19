@@ -111,6 +111,10 @@ function(cler_register_standard_block_components)
       desktop_blocks/resamplers/multistage_resampler.hpp
       desktop_blocks/resamplers/rational_resampler.hpp
     )
+    cler_register_block_component(TARGET cler::blocks_ais PATHS
+      desktop_blocks/ais/ais.hpp
+      desktop_blocks/ais/ais_decoder.hpp
+    )
     cler_register_block_component(TARGET cler::blocks_ezgmsk PATHS
       desktop_blocks/ezgmsk/_ezgmsk_demod.h
       desktop_blocks/ezgmsk/_ezgmsk_mod.h
@@ -120,8 +124,11 @@ function(cler_register_standard_block_components)
   endif()
 
   if(CLER_BUILD_BLOCKS_GUI)
+    cler_register_block_component(TARGET cler::blocks_ais_map PATHS desktop_blocks/ais/ais_map.hpp)
     cler_register_block_component(TARGET cler::blocks_gui PATHS
       desktop_blocks/gui/gui_manager.hpp
+      desktop_blocks/gui/coastline_loader.hpp
+      desktop_blocks/gui/map_canvas.hpp
       desktop_blocks/triggers/trigger_block.hpp
     )
     cler_register_block_component(TARGET cler::blocks_plot_timeseries PATHS desktop_blocks/plots/plot_timeseries.hpp)
