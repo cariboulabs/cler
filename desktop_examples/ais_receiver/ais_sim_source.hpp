@@ -21,6 +21,8 @@
 struct AISSimSourceBlock : public cler::BlockBase {
     static constexpr bool may_block = false;
 
+    static constexpr size_t MAX_TX_BITS = 2048;   // training + flags + stuffed 1008-bit frame
+
     struct Ship {
         uint32_t mmsi;
         const char* name;
@@ -47,7 +49,7 @@ struct AISSimSourceBlock : public cler::BlockBase {
             {636000104, "MSC AURORA", "D5AU", 32.810, 34.930, 0.0, 0.0, 2.0, 23.0},
             {428000105, "DOLPHIN 3", "4XDL3", 32.845, 35.020, 6.0, 30.0, 2.5, 30.0},
         }};
-        _burst.reserve(1 << 18);   // longest frame (1008 bits x 250) fits; no growth in procedure()
+        _burst.reserve(MAX_TX_BITS * _sps);   // the longest burst encode_frame can produce; no growth in procedure()
     }
 
     ~AISSimSourceBlock() {
@@ -138,7 +140,7 @@ private:
             w.put(0, 9); w.put(0, 9); w.put(0, 6); w.put(0, 6); w.put(1, 4); w.put(0, 20); w.put(0, 8); w.text("HAIFA", 20); w.put(0, 1); w.put(0, 1);
         }
         _last_payload = w.bytes; _last_payload_len = (w.nbits + 7) / 8;
-        std::array<bool, 2048> tx{};
+        std::array<bool, MAX_TX_BITS> tx{};
         const size_t nb = ais::encode_frame(w.bytes.data(), (w.nbits + 7) / 8, tx.data(), tx.size());
         const double offset_hz = (_uni(_rng) < 0.5 ? -25e3 : 25e3) + 400.0 * (_uni(_rng) - 0.5);
         const float amp = 0.15f + 0.25f * _uni(_rng);
