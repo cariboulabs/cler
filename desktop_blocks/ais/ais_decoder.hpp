@@ -184,7 +184,9 @@ private:
             return false;
         }
 
-        if (static_cast<unsigned int>(_cnt % _sps) != _sample_mod) return false;
+        // _cnt was incremented for this sample, so its index is _cnt - 1: the
+        // same convention the replay loop above uses (c0 = _cnt - _win + j)
+        if (static_cast<unsigned int>((_cnt - 1) % _sps) != _sample_mod) return false;
         const bool done = decide(y);
         const uint32_t frames = _framer.frames_ok() + _framer.frames_bad_crc();
         if (frames != _frames_seen || _syms > 1100 || (_syms > 40 && !_framer.in_frame())) {

@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <cstdlib>
+#include <cstring>
 #include <cmath>
 #include <complex>
 #include <map>
@@ -140,6 +142,25 @@ TEST(AisDecoder, DecodesGmskBurstWithOffsetAndNoise) {
         EXPECT_NEAR(msgs[0].lat, 49.4755767, 1e-5);
         EXPECT_EQ(dec.frames_bad_crc(), 0u);
     }
+}
+
+// The burst decoder replays the preamble window from the ring and then samples
+// live; both must land on the same symbol grid. A one-sample disagreement still
+// decodes at 5 samples/symbol in the clear, so guard it where it hurts: 4
+// samples/symbol at low SNR (3/20 with the grids off by one, 18/20 aligned).
+TEST(AisDecoder, ReplayAndLiveShareTheSymbolGrid) {
+    std::srand(12345);
+    uint8_t p[80];
+    size_t n = ais::from_nmea_payload(kType5, p, sizeof(p));
+    bool tx[2048];
+    size_t nb = ais::encode_frame(p, n, tx, 2048);
+    std::vector<bool> bits(tx, tx + nb);
+    int ok = 0;
+    for (int trial = 0; trial < 20; ++trial) {
+        AISDecoderBlock dec("ais", 9600.0 * 4, 1 << 16);
+        if (run(dec, modulate(bits, 4, 300.0f, 4 * 9600.0f, 0.8f)).size() == 1) ++ok;
+    }
+    EXPECT_GE(ok, 12) << "decoded " << ok << "/20";
 }
 
 #include "desktop_blocks/math/frequency_shift.hpp"
