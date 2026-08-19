@@ -22,6 +22,8 @@ else()
     message(STATUS "Skipping frequency_shift example because CLER_BUILD_BLOCKS_GUI or CLER_BUILD_BLOCKS_LIQUID is OFF")
 endif()
 
+add_subdirectory(fm_radio)
+
 if (CLER_BUILD_BLOCKS_LIQUID)
     add_subdirectory(ezgmsk)
 else()
