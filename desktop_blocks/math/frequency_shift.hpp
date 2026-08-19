@@ -29,8 +29,6 @@ struct FrequencyShiftBlock : public cler::BlockBase {
         _shift_dirty.store(true, std::memory_order_release);
     }
 
-    double frequency_shift() const { return _frequency_shift; }
-
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
         if (_shift_dirty.exchange(false, std::memory_order_acquire)) {
             _frequency_shift = _pending_shift.load(std::memory_order_relaxed);
