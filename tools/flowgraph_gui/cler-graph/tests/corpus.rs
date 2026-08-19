@@ -438,7 +438,7 @@ fn corpus_meets_m0_targets() {
             }
         }
     }
-    assert_eq!(with_sites, 21);
+    assert_eq!(with_sites, 22);
     assert!(
         fully_editable >= 15,
         "only {fully_editable} files fully editable"

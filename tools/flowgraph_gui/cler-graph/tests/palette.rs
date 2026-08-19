@@ -362,6 +362,13 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         PortCount::Fixed(1),
     ),
     (
+        "FMMpxDecoderBlock",
+        1,
+        1,
+        PortCount::Fixed(1),
+        PortCount::Fixed(1),
+    ),
+    (
         "AddBlock",
         1,
         1,
