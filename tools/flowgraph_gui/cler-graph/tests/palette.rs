@@ -652,10 +652,11 @@ const EXPECTED_INLINE: &[(&str, usize, usize, PortCount, PortCount)] = &[
     (
         "ControllerBlock",
         1,
-        1,
+        2,
         PortCount::Fixed(1),
-        PortCount::Fixed(1),
+        PortCount::Fixed(2),
     ),
+    ("RootLocusBlock", 0, 0, PortCount::Fixed(0), PortCount::Fixed(0)),
     (
         "SelectableSourceBlock",
         0,

@@ -19,8 +19,10 @@ test('h) F7 checks the temporary draft and blames the right block without saving
     await field.fill('1.0ff');
     await field.press('Enter');
     expect(work.bytes(file)).not.toContain('1.0ff');
-    await expect(page.getByTestId('check')).toBeEnabled();
     await field.blur();
+    // the blur may still be applying the edit on a slow runner; F7 on a busy
+    // document is a no-op
+    await expect(page.getByTestId('check')).toBeEnabled();
 
     await page.keyboard.press('F7');
     await expect(page.getByTestId('problems')).toHaveAttribute('data-count', '1', {
