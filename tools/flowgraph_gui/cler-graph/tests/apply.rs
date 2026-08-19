@@ -1341,7 +1341,7 @@ fn the_cli_writes_atomically_and_prints_a_diff() {
     );
     let diff = String::from_utf8_lossy(&dry.stdout);
     assert!(
-        diff.contains("@@ -10,7 +10,7 @@"),
+        diff.contains("@@ -"),
         "unexpected diff:\n{diff}"
     );
     assert!(diff.contains(

@@ -1,0 +1,84 @@
+name: Flowgraph GUI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'tools/flowgraph_gui/**'
+      - 'desktop_examples/**'
+      - 'desktop_blocks/**'
+      - 'include/**'
+      - '.github/workflows/gui.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'tools/flowgraph_gui/**'
+      - 'desktop_examples/**'
+      - 'desktop_blocks/**'
+      - 'include/**'
+      - '.github/workflows/gui.yml'
+  workflow_dispatch:
+
+jobs:
+  gui-tests:
+    name: Rust, vitest, e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: tools/flowgraph_gui/app
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: System deps (tauri, cler blocks)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev \
+            libusb-1.0-0-dev libfftw3-dev libglfw3-dev libgl1-mesa-dev libglu1-mesa-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tools/flowgraph_gui/app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            tools/flowgraph_gui/cler-graph
+            tools/flowgraph_gui/app/src-tauri
+
+      # F7 check resolves imgui/implot/liquid headers from a configured build dir
+      - name: Configure cler (fetch deps, no build)
+        working-directory: .
+        run: cmake -B build -S . -DCLER_BUILD_EXAMPLES=OFF
+
+      - run: npm ci
+
+      - name: cargo test (cler-graph)
+        working-directory: tools/flowgraph_gui/cler-graph
+        run: cargo test --quiet
+
+      - name: cargo test (src-tauri)
+        working-directory: tools/flowgraph_gui/app/src-tauri
+        run: cargo test --quiet
+
+      - name: vitest
+        run: npm test
+
+      - name: e2e
+        run: npm run test:e2e
+
+      - name: Upload e2e traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces
+          path: build-e2e-gui/test-results/
