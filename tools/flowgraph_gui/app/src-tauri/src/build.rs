@@ -43,6 +43,8 @@ struct Completion {
 const MARKER: &str = "include/cler.hpp";
 const EXAMPLES: &str = "desktop_examples";
 const STANDARD: &str = "-std=c++17";
+// mirrors the repo's CMake: GCC 12+ warns on hardware_destructive_interference_size
+const CHECK_FLAGS: [&str; 3] = ["-fsyntax-only", "-fdiagnostics-color=never", "-Wno-interference-size"];
 const GRACE: Duration = Duration::from_secs(3);
 const PRODUCER: &str = "cmake";
 const DRAFT_PREFIX: &str = "cler_draft_";
@@ -92,10 +94,7 @@ pub fn check_draft(jobs: &Jobs, path: &str, draft: &Path, emit: Emit) -> Result<
         .map_err(|cause| format!("cannot resolve {}: {cause}", draft.display()))?;
     let root = repo_root(&target).ok_or_else(|| outside(&target))?;
     let mut command = Command::new("g++");
-    command
-        .arg("-fsyntax-only")
-        .arg(STANDARD)
-        .arg("-fdiagnostics-color=never");
+    command.arg(STANDARD).args(CHECK_FLAGS);
     for dir in includes(&root) {
         command.arg(format!("-I{}", dir.display()));
     }
@@ -784,7 +783,8 @@ fn check_input(draft: &Path) -> Result<InputKey, String> {
     Ok(InputKey {
         inputs,
         recipe_sha256: hash_text(&format!(
-            "g++:{STANDARD}:{}:{}",
+            "g++:{STANDARD}:{}:{}:{}",
+            CHECK_FLAGS.join(" "),
             std::env::consts::OS,
             std::env::consts::ARCH
         )),
