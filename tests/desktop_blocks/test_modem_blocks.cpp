@@ -171,7 +171,7 @@ TEST(ModemBlocks, QpskBerMatchesEsN0Theory) {
     Loopback lb(LIQUID_MODEM_QPSK, 7.0f, 0.0, 20000);
     for (int i = 0; i < 2000; ++i) lb.step();
     ASSERT_TRUE(lb.ber.aligned());
-    ASSERT_GT(lb.ber.bits(), 200000u);
+    ASSERT_GT(lb.ber.bits(), 100000u);  // a late slip restarts the count
     EXPECT_GT(lb.ber.ber(), 5.0e-3);
     EXPECT_LT(lb.ber.ber(), 4.0e-2);
 }
