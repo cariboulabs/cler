@@ -106,6 +106,8 @@ function(cler_register_standard_block_components)
       desktop_blocks/channelizers/polyphase_transform_5.hpp
       desktop_blocks/filters/kaiser_lpf.hpp
       desktop_blocks/fm/fm_demod.hpp
+      desktop_blocks/fm/fm_mpx_decoder.hpp
+      desktop_blocks/fm/rds.hpp
       desktop_blocks/resamplers/multistage_resampler.hpp
       desktop_blocks/resamplers/rational_resampler.hpp
     )
