@@ -16,20 +16,12 @@ constexpr unsigned int SPS = 4;
 constexpr float BETA = 0.35f;
 constexpr size_t REF_SYMBOLS = 1023;
 
-// The modulator normalises its RRC taps to unit energy, so the mean output
-// sample power is Es/sps with Es = 1. A complex noise variance of 10^(-snr/10)
-// per sample then gives Es/N0 = snr after the unit-energy matched filter, and
-// AWGNKernel draws that variance as stddev per component.
-float stddev_for_snr_db(float snr_db) {
-    return std::sqrt(0.5f * std::pow(10.0f, -snr_db / 10.0f));
-}
-
 struct Loopback {
     Loopback(modulation_scheme scheme, float snr_db, double freq_offset_hz, size_t skip_symbols)
-        : ref(prbs_symbols(modemcf_get_bps_of(scheme), REF_SYMBOLS)),
+        : ref(prbs_symbols(scheme_bits_per_symbol(scheme), REF_SYMBOLS)),
           src("src", ref),
           mod("mod", scheme, SPS, BETA, 5, 4096),
-          awgn("awgn", stddev_for_snr_db(snr_db), 16384),
+          awgn("awgn", awgn_stddev_for_esn0_db(snr_db), 16384),
           shift("shift", freq_offset_hz, 1.0e6, 16384),
           demod("demod", scheme, SPS, BETA, 5, 0.002f, 0.5f, 16384),
           ber("ber", scheme, ref, skip_symbols),
@@ -49,13 +41,6 @@ struct Loopback {
         }
         ber.procedure();
         return points;
-    }
-
-    static unsigned int modemcf_get_bps_of(modulation_scheme scheme) {
-        modemcf m = modemcf_create(scheme);
-        unsigned int bps = modemcf_get_bps(m);
-        modemcf_destroy(m);
-        return bps;
     }
 
     std::vector<uint8_t> ref;

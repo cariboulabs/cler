@@ -14,6 +14,21 @@
 // mean output sample power is Es/sps with Es = 1 (liquid normalises its
 // constellations to unit average symbol energy). That fixes the SNR convention
 // the AWGN level and the EVM estimate are quoted against.
+inline unsigned int scheme_bits_per_symbol(modulation_scheme scheme) {
+    modemcf m = modemcf_create(scheme);
+    if (!m) cler::panic("unsupported modulation scheme");
+    const unsigned int bps = modemcf_get_bps(m);
+    modemcf_destroy(m);
+    return bps;
+}
+
+// Per-component stddev of complex AWGN for a target Es/N0, given the unit-energy
+// pulse normalisation above: the complex noise variance is 10^(-esn0/10), which
+// after the unit-energy matched filter is exactly N0 against Es = 1.
+inline float awgn_stddev_for_esn0_db(float esn0_db) {
+    return std::sqrt(0.5f * std::pow(10.0f, -esn0_db / 10.0f));
+}
+
 struct ModulatorBlock : public cler::BlockBase {
     cler::Channel<uint8_t> in;
 
