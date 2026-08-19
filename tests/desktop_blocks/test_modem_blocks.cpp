@@ -120,3 +120,91 @@ TEST(ModemBlocks, ConstellationCountMatchesSymbols) {
     EXPECT_GT(n_symbols, 1000u);
     EXPECT_EQ(n_symbols, n_points);
 }
+
+// The GUI sliders reach the DSP thread through set_noise_stddev()/
+// set_frequency_shift(), applied at the top of the next procedure(). Nothing
+// else in the suite exercises that deferred-apply path.
+TEST(ModemBlocks, AwgnStddevSetterTakesEffect) {
+    NoiseAWGNBlock<std::complex<float>> awgn("awgn", 0.0f, 16384);
+    cler::Channel<std::complex<float>> out(16384);
+
+    auto measure = [&]() {
+        for (size_t i = 0; i < 8192; ++i) awgn.in.push({0.0f, 0.0f});
+        awgn.procedure(&out);
+        double acc = 0.0;
+        size_t n = out.size();
+        for (size_t i = 0; i < n; ++i) {
+            std::complex<float> v;
+            out.pop(v);
+            acc += std::norm(v);
+        }
+        return acc / static_cast<double>(n);  // complex variance = 2*sigma^2
+    };
+
+    EXPECT_LT(measure(), 1e-12);
+    awgn.set_noise_stddev(0.5f);
+    EXPECT_NEAR(measure(), 0.5, 0.05);
+}
+
+TEST(ModemBlocks, FrequencyShiftSetterTakesEffect) {
+    FrequencyShiftBlock shift("shift", 0.0, 1000.0, 16384);
+    cler::Channel<std::complex<float>> out(16384);
+
+    auto phase_step = [&]() {
+        for (size_t i = 0; i < 8; ++i) shift.in.push({1.0f, 0.0f});
+        shift.procedure(&out);
+        std::complex<float> a, b;
+        out.pop(a);
+        out.pop(b);
+        while (out.size()) { std::complex<float> junk; out.pop(junk); }
+        return std::arg(b * std::conj(a));
+    };
+
+    EXPECT_NEAR(phase_step(), 0.0f, 1e-5f);
+    shift.set_frequency_shift(125.0);  // fs/8 -> pi/4 per sample
+    EXPECT_NEAR(phase_step(), static_cast<float>(M_PI) / 4.0f, 1e-4f);
+}
+
+// Pins the SNR convention: QPSK at Es/N0 = 7 dB has BER ~1.3e-2, while the same
+// number read as Eb/N0 would give ~8e-4. The band separates the two.
+TEST(ModemBlocks, QpskBerMatchesEsN0Theory) {
+    Loopback lb(LIQUID_MODEM_QPSK, 7.0f, 0.0, 20000);
+    for (int i = 0; i < 2000; ++i) lb.step();
+    ASSERT_TRUE(lb.ber.aligned());
+    ASSERT_GT(lb.ber.bits(), 200000u);
+    EXPECT_GT(lb.ber.ber(), 5.0e-3);
+    EXPECT_LT(lb.ber.ber(), 4.0e-2);
+}
+
+// A carrier-loop cycle slip must not pin the reported BER at ~0.5 for the rest
+// of the run: alignment is dropped and re-acquired against the new rotation.
+TEST(ModemBlocks, BerCounterRecoversFromAConstellationSlip) {
+    std::vector<uint8_t> ref = prbs_symbols(2, REF_SYMBOLS);
+    BERCounterBlock ber("ber", LIQUID_MODEM_QPSK, ref, 0);
+
+    size_t pos = 0;
+    bool went_unaligned = false;
+    auto feed = [&](size_t n, bool slipped) {
+        for (size_t i = 0; i < n; ++i) {
+            uint8_t s = ref[pos];
+            if (++pos == ref.size()) pos = 0;
+            ber.in.push(slipped ? static_cast<uint8_t>(s ^ 3u) : s);
+            if (ber.in.size() == 256) {
+                ber.procedure();
+                if (!ber.aligned()) went_unaligned = true;
+            }
+        }
+        ber.procedure();
+    };
+
+    feed(4096, false);
+    ASSERT_TRUE(ber.aligned());
+    ASSERT_GT(ber.bits(), 0u);
+    ASSERT_EQ(ber.bit_errors(), 0u);
+
+    // A 180-degree slip: every symbol now decodes to its complement.
+    feed(40960, true);
+    EXPECT_TRUE(went_unaligned) << "the slip never cost alignment";
+    EXPECT_TRUE(ber.aligned());
+    EXPECT_LT(ber.ber(), 0.01) << "stale rotation still being counted";
+}

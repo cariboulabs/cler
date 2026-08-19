@@ -21,6 +21,13 @@
 // bijection of the constellation onto itself are dropped, which leaves exactly
 // the ambiguities the carrier loop can actually settle on (180 deg for BPSK,
 // 90 deg multiples for QPSK/QAM, 45 deg multiples for 8-PSK).
+//
+// Alignment is held, not assumed: a decision-directed carrier loop cycle-slips
+// at moderate SNR, and every symbol after the slip is counted against the wrong
+// rotation (BER pinned at ~0.5 for the rest of the run). The symbol error rate
+// over the last HOLD_SYMBOLS is therefore checked against a threshold looser
+// than acquisition's; failing it drops back to searching and restarts the count,
+// since the corrupted stretch has already polluted it.
 struct BERCounterBlock : public cler::BlockBase {
     cler::Channel<uint8_t> in;
 
@@ -79,6 +86,7 @@ struct BERCounterBlock : public cler::BlockBase {
         if (_reset_request.exchange(false, std::memory_order_relaxed)) {
             _window.clear();
             _skipped = 0;
+            _hold_count = _hold_errors = 0;
             _aligned.store(false, std::memory_order_relaxed);
             _bits.store(0, std::memory_order_relaxed);
             _errors.store(0, std::memory_order_relaxed);
@@ -107,12 +115,28 @@ struct BERCounterBlock : public cler::BlockBase {
     }
 
 private:
+    static constexpr size_t HOLD_SYMBOLS = 1024;
+
     void count(uint8_t rx) {
         const uint8_t expect = _perms[_perm_index][_ref[_pos]];
         const unsigned int diff = static_cast<unsigned int>(rx ^ expect) & ((1u << _bps) - 1u);
         _errors.fetch_add(static_cast<uint64_t>(__builtin_popcount(diff)), std::memory_order_relaxed);
         _bits.fetch_add(_bps, std::memory_order_relaxed);
         if (++_pos == _ref.size()) _pos = 0;
+
+        if (rx != expect) ++_hold_errors;
+        if (++_hold_count == HOLD_SYMBOLS) {
+            // Acquisition needs a symbol error rate below 1/5; holding tolerates
+            // up to 2/5, so a marginal link does not chatter in and out.
+            const bool lost = _hold_errors * 5 > HOLD_SYMBOLS * 2;
+            _hold_count = _hold_errors = 0;
+            if (lost) {
+                _aligned.store(false, std::memory_order_relaxed);
+                _window.clear();
+                _bits.store(0, std::memory_order_relaxed);
+                _errors.store(0, std::memory_order_relaxed);
+            }
+        }
     }
 
     void align() {
@@ -138,6 +162,7 @@ private:
         if (best_errors * 5 < W) {
             _perm_index = best_perm;
             _pos = (best_delay + W) % P;
+            _hold_count = _hold_errors = 0;
             _aligned.store(true, std::memory_order_relaxed);
         }
         _window.clear();
@@ -153,6 +178,8 @@ private:
     size_t _skipped = 0;
     size_t _pos = 0;
     size_t _perm_index = 0;
+    size_t _hold_count = 0;
+    size_t _hold_errors = 0;
 
     std::atomic<bool> _aligned{false};
     std::atomic<bool> _reset_request{false};
