@@ -144,6 +144,48 @@ TEST(AisDecoder, DecodesGmskBurstWithOffsetAndNoise) {
     }
 }
 
+// HDLC edge cases the DSP tests cannot reach: a stuffed 0 immediately before
+// the closing flag, an abort (7 ones), and back-to-back frames sharing a flag.
+TEST(AisBits, DeframerStuffingAbortAndSharedFlag) {
+    // payload whose last data bits are five 1s, so the transmitter stuffs a 0
+    // right before the closing flag
+    const uint8_t p[4] = {0x00, 0x11, 0x22, 0xF8};
+    bool tx[512];
+    size_t nb = ais::encode_frame(p, sizeof(p), tx, sizeof(tx));
+    // NRZI is differential, so a slice must be fed with the level that preceded
+    // it in tx, otherwise the splice inverts the slice's first bit
+    auto feed = [&tx](ais::Deframer& d, size_t from, size_t n) {
+        int got = 0;
+        bool prev = from ? tx[from - 1] : false;
+        for (size_t i = from; i < from + n; ++i) { bool bit = !(tx[i] ^ prev); prev = tx[i]; if (d.push_bit(bit)) ++got; }
+        return got;
+    };
+    ais::Deframer d;
+    ASSERT_EQ(feed(d, 0, nb), 1);
+    ASSERT_EQ(d.length(), sizeof(p));
+    EXPECT_EQ(0, std::memcmp(d.payload(), p, sizeof(p)));
+
+    // back-to-back frames, without the training and idle padding: flag..flag
+    // twice (double flag between them), then with the closing flag shared
+    const size_t fn = nb - 48;   // tx[24 .. nb-24) is flag..data..flag
+    ais::Deframer d2;
+    EXPECT_EQ(feed(d2, 24, fn) + feed(d2, 24, fn), 2);
+    EXPECT_EQ(d2.frames_bad_crc(), 0u);
+    ais::Deframer d4;
+    EXPECT_EQ(feed(d4, 24, fn) + feed(d4, 32, fn - 8), 2);
+    EXPECT_EQ(d4.frames_bad_crc(), 0u);
+
+    // seven ones abort the frame in progress: no frame, and no bad-CRC either
+    ais::Deframer d3;
+    for (int i = 0; i < 8; ++i) d3.push_bit((0x7E >> (7 - i)) & 1);
+    ASSERT_TRUE(d3.in_frame());
+    for (int i = 0; i < 40; ++i) EXPECT_FALSE(d3.push_bit(i % 3 == 0));
+    for (int i = 0; i < 7; ++i) EXPECT_FALSE(d3.push_bit(true));
+    EXPECT_FALSE(d3.in_frame());
+    EXPECT_EQ(d3.frames_ok(), 0u);
+    EXPECT_EQ(d3.frames_bad_crc(), 0u);
+}
+
 // The burst decoder replays the preamble window from the ring and then samples
 // live; both must land on the same symbol grid. A one-sample disagreement still
 // decodes at 5 samples/symbol in the clear, so guard it where it hurts: 4
