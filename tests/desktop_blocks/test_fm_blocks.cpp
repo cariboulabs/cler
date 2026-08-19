@@ -129,11 +129,18 @@ TEST(RdsBits, CorruptBlockBDoesNotMisplaceCharacters) {
     // one clean pass of PS, then the same groups with every B block damaged
     // and different characters: nothing may change
     auto clean = make_groups(0x1234, "CLER FM!", "");
+    // damage the decoder cannot correct: scattered bits whose syndrome is not
+    // in the burst table (checked, so the test does not depend on the table)
+    uint32_t damage = 0;
+    for (uint32_t cand : {0x2000004u, 0x1000010u, 0x0800020u, 0x0400001u}) {
+        if (rds::Decoder::correct(rds::encode_block(0, rds::Decoder::OFFSET_B) ^ cand, rds::Decoder::OFFSET_B) == 0) { damage = cand; break; }
+    }
+    ASSERT_NE(damage, 0u);
     for (int damaged : {1, 0, 2}) {  // B only; A and B; C and D
         auto dirty = make_groups(0x1234, "XXXXXXXX", "");
         for (size_t i = 0; i < dirty.size(); ++i) {
             const size_t k = i % 4;
-            if (k == static_cast<size_t>(damaged) || (damaged == 0 && k == 1) || (damaged == 2 && k == 3)) dirty[i] ^= 0x4000;
+            if (k == static_cast<size_t>(damaged) || (damaged == 0 && k == 1) || (damaged == 2 && k == 3)) dirty[i] ^= damage;
         }
         rds::Decoder dec;
         for (bool b : to_bits(clean)) dec.push_bit(b);
@@ -187,4 +194,24 @@ TEST(FmMpxDecoder, RdsOverMpx) {
     EXPECT_STREQ(st.rt, rt.c_str());
     EXPECT_GT(st.groups_ok, 10u);
     EXPECT_LT(st.blocks_bad, st.blocks_total / 10 + 1);
+}
+
+TEST(RdsBits, ShortBurstErrorsAreCorrected) {
+    const uint32_t block = rds::encode_block(0xBEEF, rds::Decoder::OFFSET_B);
+    for (int len = 1; len <= rds::Decoder::MAX_BURST; ++len) {
+        for (int pos = 0; pos + len <= 26; ++pos) {
+            const uint32_t burst = ((1u << len) - 1u) << pos;  // all-ones burst
+            EXPECT_EQ(rds::Decoder::correct(block ^ burst, rds::Decoder::OFFSET_B), block) << "len " << len << " pos " << pos;
+            const uint32_t ends = ((1u << (len - 1)) | 1u) << pos;  // only the ends set
+            EXPECT_EQ(rds::Decoder::correct(block ^ ends, rds::Decoder::OFFSET_B), block) << "ends len " << len << " pos " << pos;
+        }
+    }
+    // a stream where every B block carries a single flipped bit still decodes
+    auto groups = make_groups(0x1234, "CLER FM!", "HELLO");
+    for (size_t i = 1; i < groups.size(); i += 4) groups[i] ^= 1u << (i % 26);
+    rds::Decoder dec;
+    for (bool b : to_bits(groups)) dec.push_bit(b);
+    EXPECT_STREQ(dec.station().ps, "CLER FM!");
+    EXPECT_GT(dec.station().blocks_corrected, 10u);
+    EXPECT_EQ(dec.station().blocks_bad, 0u);
 }

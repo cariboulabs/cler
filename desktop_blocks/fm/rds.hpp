@@ -19,6 +19,7 @@ struct Station {
     char rt[65] = {};      // radiotext (up to 64 chars)
     uint32_t groups_ok = 0;
     uint32_t blocks_bad = 0;
+    uint32_t blocks_corrected = 0;
     uint32_t blocks_total = 0;
 };
 
@@ -36,6 +37,22 @@ public:
             if (reg & 0x400u) reg ^= 0x5B9u;
         }
         return reg & 0x3FF;
+    }
+
+    // Burst error correction: the syndrome of the received block XOR the
+    // expected offset is the syndrome of the error pattern alone; a table maps
+    // it back to the burst. The code can correct 5-bit bursts, but with
+    // random (not bursty) bit errors every extra table entry is a chance to
+    // turn an uncorrectable block into a valid-looking wrong one, so only
+    // bursts up to MAX_BURST bits are corrected (single-bit errors dominate).
+    // Returns the corrected block, or 0 when the syndrome is not a short burst.
+    static constexpr int MAX_BURST = 2;
+    static uint32_t correct(uint32_t block, uint32_t offset) {
+        static const BurstTable table;
+        const uint32_t s = (syndrome(block) ^ offset) & 0x3FF;
+        if (s == 0) return block;
+        const uint32_t e = table.at(s);
+        return e ? (block ^ e) : 0;
     }
 
     static int offset_index(uint32_t s) {
@@ -74,6 +91,15 @@ public:
         const uint32_t s = syndrome(_shift);
         const int idx = offset_index(s);
         if (idx != _expect) {
+            // a block that matches another offset is a sync slip, not noise
+            const uint32_t want = _expect == 0 ? OFFSET_A : _expect == 1 ? OFFSET_B : _expect == 2 ? OFFSET_C : OFFSET_D;
+            uint32_t fixed = idx < 0 ? correct(_shift, want) : 0;
+            if (!fixed && idx < 0 && _expect == 2) fixed = correct(_shift, OFFSET_CP);
+            if (fixed) {
+                ++_station.blocks_corrected;
+                _shift = fixed;
+                return accept(_shift, syndrome(_shift));
+            }
             ++_station.blocks_bad;
             if (++_bad_run >= 4 * 4) {
                 _station.synced = false;
@@ -83,9 +109,19 @@ public:
             }
             return false;
         }
+        return accept(_shift, s);
+    }
+
+    const Station& station() const { return _station; }
+
+    void reset() { *this = Decoder{}; }
+
+private:
+    bool accept(uint32_t block, uint32_t s) {
+        const int idx = offset_index(s);
         _bad_run = 0;
         _valid |= 1u << idx;
-        _blocks[idx] = _shift >> 10;
+        _blocks[idx] = block >> 10;
         _cprime = (idx == 2 && s == OFFSET_CP);
         _expect = (idx + 1) % 4;
         // a group is only as good as its worst block: a stale B would send
@@ -98,11 +134,24 @@ public:
         return false;
     }
 
-    const Station& station() const { return _station; }
+    struct BurstTable {
+        std::array<uint32_t, 1024> map{};
+        BurstTable() {
+            // shortest burst wins a collision; bursts start and end with a set bit
+            for (int len = 1; len <= MAX_BURST; ++len) {
+                for (uint32_t pat = 1u << (len - 1); pat < (1u << len); ++pat) {
+                    if (!(pat & 1u)) continue;
+                    for (int pos = 0; pos + len <= 26; ++pos) {
+                        const uint32_t e = pat << pos;
+                        const uint32_t s = syndrome(e);
+                        if (map[s] == 0) map[s] = e;
+                    }
+                }
+            }
+        }
+        uint32_t at(uint32_t s) const { return map[s & 0x3FF]; }
+    };
 
-    void reset() { *this = Decoder{}; }
-
-private:
     void parse_group() {
         const uint32_t a = _blocks[0], b = _blocks[1], c = _blocks[2], d = _blocks[3];
         _station.pi = static_cast<uint16_t>(a);
