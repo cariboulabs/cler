@@ -39,9 +39,11 @@ struct FanoutBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSpaceOrSamples;
         }
 
-        auto copy_to_output = [read_ptr, min_write_size](auto* out) {
+        // clang (C++17) cannot capture a structured binding in a lambda
+        const T* src = read_ptr;
+        auto copy_to_output = [src, min_write_size](auto* out) {
             auto [write_ptr, write_size] = out->write_dbf();
-            std::memcpy(write_ptr, read_ptr, min_write_size * sizeof(T));
+            std::memcpy(write_ptr, src, min_write_size * sizeof(T));
             out->commit_write(min_write_size);
         };
         (copy_to_output(outs), ...);
