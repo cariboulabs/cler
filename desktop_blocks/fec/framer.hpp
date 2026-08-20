@@ -54,21 +54,23 @@ struct PacketFramerBlock : public cler::BlockBase {
     unsigned int frame_samples() const { return _frame_samples; }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
-        bool progress = false;
         if (_remaining == 0) {
             if (in.size() < _packet_bytes) {
                 return cler::Error::NotEnoughSamples;
+            }
+            // Consume the packet only once its first samples can leave, so a
+            // stalled output never strands a packet inside the generator.
+            if (out->space() == 0) {
+                return cler::Error::NotEnoughSpace;
             }
             in.readN(_payload.data(), _packet_bytes);
             flexframegen_assemble(_fg, _header, _payload.data(), static_cast<unsigned int>(_packet_bytes));
             _frame_samples = flexframegen_getframelen(_fg);
             _remaining = _frame_samples;
-            progress = true;
         }
         const size_t n = std::min({_remaining, out->space(), _samples.size()});
         if (n == 0) {
-            return progress ? cler::Result<cler::Empty, cler::Error>(cler::Empty{})
-                            : cler::Result<cler::Empty, cler::Error>(cler::Error::NotEnoughSpace);
+            return cler::Error::NotEnoughSpace;
         }
         flexframegen_write_samples(_fg, _samples.data(), static_cast<unsigned int>(n));
         out->writeN(_samples.data(), n);
