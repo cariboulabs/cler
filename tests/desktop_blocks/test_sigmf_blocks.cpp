@@ -344,3 +344,58 @@ TEST(SigMFMeta, WrapsAnExistingCs8CaptureWithoutTouchingTheSamples) {
     EXPECT_FLOAT_EQ(read_back[3].real(), static_cast<float>(raw[6]) / 128.0f);
     remove_recording(base);
 }
+
+#include "desktop_blocks/sigmf/recorder_sigmf.hpp"
+
+TEST(SigMFRecorder, StartStopWritesAReadableRecording) {
+    const std::string prefix = testing::TempDir() + "/rec";
+    SigMFRecorderBlock rec("rec", 48000.0, 1 << 16);
+
+    auto feed = [&](size_t n, float scale) {
+        size_t fed = 0;
+        while (fed < n) {
+            auto [w, ws] = rec.in.write_dbf();
+            size_t k = std::min(ws, n - fed);
+            for (size_t i = 0; i < k; ++i) {
+                const float v = static_cast<float>((fed + i) % 100) / 100.0f * scale;
+                w[i] = {v, -v};
+            }
+            rec.in.commit_write(k);
+            fed += k;
+            while (rec.procedure().is_ok()) {}
+        }
+    };
+
+    feed(1000, 1.0f);   // idle: drained, not written
+    EXPECT_EQ(rec.samples(), 0u);
+
+    ASSERT_TRUE(rec.start(prefix, 100e6));
+    EXPECT_FALSE(rec.start(prefix, 100e6));
+    feed(5000, 0.5f);
+    EXPECT_EQ(rec.samples(), 5000u);
+    const std::string base = rec.base();
+    rec.stop();
+    feed(1000, 1.0f);
+    EXPECT_EQ(rec.samples(), 5000u);
+
+    auto meta = sigmf::read_meta(base + ".sigmf-meta");
+    EXPECT_EQ(meta.datatype, sigmf::Datatype::ci16_le);
+    EXPECT_DOUBLE_EQ(meta.sample_rate, 48000.0);
+    EXPECT_DOUBLE_EQ(meta.center_frequency(), 100e6);
+
+    SourceSigMFBlock<std::complex<float>> src("src", base.c_str(), false, 1 << 16);
+    cler::Channel<std::complex<float>> out(1 << 16);
+    size_t got = 0;
+    float max_err = 0.0f;
+    while (src.procedure(&out).is_ok()) {
+        auto [r, rs] = out.read_dbf();
+        for (size_t i = 0; i < rs; ++i) {
+            const float v = static_cast<float>((got + i) % 100) / 100.0f * 0.5f;
+            max_err = std::max(max_err, std::abs(r[i].real() - v));
+        }
+        got += rs;
+        out.commit_read(rs);
+    }
+    EXPECT_EQ(got, 5000u);
+    EXPECT_LT(max_err, 2.0f / 32768.0f);
+}

@@ -5,6 +5,7 @@
 #include "desktop_blocks/gui/cler_palette.hpp"
 #include "desktop_blocks/math/frequency_shift.hpp"
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
+#include "desktop_blocks/sigmf/recorder_sigmf.hpp"
 #include "desktop_blocks/sources/source_hackrf.hpp"
 #include "imgui.h"
 
@@ -23,9 +24,9 @@ struct ScannerPanel : public cler::BlockBase {
 
     ScannerPanel(const char* name, SourceHackRFBlock& source, FrequencyShiftBlock& shift,
                  AnalogDemodBlock& demod, PlotCSpectrumBlock& spectrum,
-                 double center_hz, double rate_hz)
+                 SigMFRecorderBlock& recorder, double center_hz, double rate_hz)
         : cler::BlockBase(name), _src(source), _shift(shift), _demod(demod), _spectrum(spectrum),
-          _center(center_hz), _rate(rate_hz) {
+          _recorder(recorder), _center(center_hz), _rate(rate_hz) {
         _lna = source.get_lna_gain();
         _vga = source.get_vga_gain();
         _amp = source.get_amp_enable();
@@ -94,6 +95,17 @@ struct ScannerPanel : public cler::BlockBase {
             ImGui::EndListBox();
         }
 
+        // --- recording ---
+        ImGui::SeparatorText("Record (SigMF, full band)");
+        if (_recorder.recording()) {
+            std::snprintf(buf, sizeof(buf), "stop  %.1f s  %s", _recorder.samples() / _rate, _recorder.base().c_str());
+            ImGui::PushStyleColor(ImGuiCol_Button, danger);
+            if (ImGui::Button(buf, ImVec2(-1, 0))) _recorder.stop();
+            ImGui::PopStyleColor();
+        } else if (ImGui::Button("record", ImVec2(-1, 0))) {
+            _recorder.start("scanner", _center);
+        }
+
         // --- RF ---
         ImGui::SeparatorText("HackRF");
         if (ImGui::SliderInt("LNA", &_lna, 0, 40, "%d dB")) { _lna = (_lna / 8) * 8; _src.set_lna_gain(_lna); }
@@ -134,8 +146,10 @@ private:
 
     SourceHackRFBlock& _src;
     FrequencyShiftBlock& _shift;
+
     AnalogDemodBlock& _demod;
     PlotCSpectrumBlock& _spectrum;
+    SigMFRecorderBlock& _recorder;
     double _center, _rate, _offset = 0.0;
     int _lna = 0, _vga = 0;
     bool _amp = false;

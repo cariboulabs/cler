@@ -9,6 +9,7 @@
 #include "desktop_blocks/math/frequency_shift.hpp"
 #include "desktop_blocks/resamplers/rational_resampler.hpp"
 #include "desktop_blocks/demod/analog_demod.hpp"
+#include "desktop_blocks/sigmf/recorder_sigmf.hpp"
 #include "desktop_blocks/sinks/sink_audio.hpp"
 #include "desktop_blocks/utils/fanout.hpp"
 #include "desktop_blocks/plots/plot_cspectrum.hpp"
@@ -58,23 +59,25 @@ int main(int argc, char** argv) {
     // source -> fanout(spectrum, waterfall, tuner); tuner: shift -> 1/10 -> demod -> audio
     SourceHackRFBlock source("HackRF", static_cast<uint64_t>(center_hz),
                              static_cast<uint32_t>(rate_hz), lna, vga, amp, size_t{1} << 21);
-    FanoutBlock<std::complex<float>> fanout("RF fanout", 3, 1 << 20);
+    FanoutBlock<std::complex<float>> fanout("RF fanout", 4, 1 << 20);
     PlotCSpectrumBlock spectrum("Spectrum (double-click to tune)", {"RF"}, static_cast<size_t>(rate_hz), 4096);
     PlotCSpectrogramBlock waterfall("Waterfall", {"RF"}, static_cast<size_t>(rate_hz), 2048, 600);
     FrequencyShiftBlock shift("Tune shift", 0.0, rate_hz, 1 << 18);
     RationalResamplerBlock<1, 10, 160> channel("Channel", 60.0f, 1 << 18);
     AnalogDemodBlock demod("Demod", rate_hz / 10.0, mode, 1 << 16);
     SinkAudioBlock audio("Audio", 48000.0, paNoDevice, 4096, 1, 0.3);
-    ScannerPanel panel("Scanner", source, shift, demod, spectrum, center_hz, rate_hz);
+    SigMFRecorderBlock recorder("Recorder", rate_hz, 1 << 20);
+    ScannerPanel panel("Scanner", source, shift, demod, spectrum, recorder, center_hz, rate_hz);
 
     auto fg = cler::make_desktop_flowgraph(
         cler::BlockRunner(&source, &fanout.in),
-        cler::BlockRunner(&fanout, &spectrum.in[0], &waterfall.in[0], &shift.in),
+        cler::BlockRunner(&fanout, &spectrum.in[0], &waterfall.in[0], &shift.in, &recorder.in),
         cler::BlockRunner(&spectrum),
         cler::BlockRunner(&waterfall),
         cler::BlockRunner(&shift, &channel.in),
         cler::BlockRunner(&channel, &demod.in),
         cler::BlockRunner(&demod, &audio.in),
+        cler::BlockRunner(&recorder),
         cler::BlockRunner(&audio),
         cler::BlockRunner(&panel));
 
