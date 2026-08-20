@@ -102,6 +102,7 @@ inline bool uncompressed_position(const char* s, size_t n, Packet& p) {
     if (lon_d < 0 || lon_m < 0 || s[14] != '.' || !is_digit(s[15])) return false;
     const int lon_h = is_digit(s[16]) ? (s[15] - '0') * 10 + (s[16] - '0') : (s[15] - '0') * 10;
     if ((s[7] != 'N' && s[7] != 'S') || (s[17] != 'E' && s[17] != 'W')) return false;
+    if (lat_d > 90 || lon_d > 180 || lat_m > 59 || lon_m > 59) return false;
     p.lat = lat_d + (lat_m + lat_h / 100.0) / 60.0;
     p.lon = lon_d + (lon_m + lon_h / 100.0) / 60.0;
     if (s[7] == 'S') p.lat = -p.lat;
@@ -198,6 +199,7 @@ inline bool mice(const char* dest, const char* info, size_t n, Packet& p) {
         d[i] = mice_digit(dest[i], &bit[i]);
         if (d[i] < 0) return false;
     }
+    if (d[0] * 10 + d[1] > 90 || d[2] * 10 + d[3] > 59) return false;
     p.lat = d[0] * 10 + d[1] + (d[2] * 10 + d[3] + (d[4] * 10 + d[5]) / 100.0) / 60.0;
     if (!bit[3]) p.lat = -p.lat;                       // byte 4: 0-9 = south
 

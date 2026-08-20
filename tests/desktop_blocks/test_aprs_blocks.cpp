@@ -278,6 +278,12 @@ TEST(AprsBits, CompressedPositionAndMalformedReport) {
     EXPECT_FALSE(p.has_altitude);
     EXPECT_NEAR(p.course, 200.0f, 1e-3);
 
+    // out-of-range degrees or minutes are not a position either
+    const char* oor = "!9943.49N/18246.22W-";
+    std::memcpy(frame + 16, oor, std::strlen(oor));
+    ASSERT_TRUE(aprs::parse(frame, 16 + std::strlen(oor), p));
+    EXPECT_FALSE(p.has_position);
+
     // a truncated uncompressed report must not fall through to base-91 and
     // invent a position
     const char* bad = "!*249.20N/0350";
