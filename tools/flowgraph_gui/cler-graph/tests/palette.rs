@@ -342,6 +342,13 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         PortCount::TemplateArg(0),
     ),
     (
+        "AnalogDemodBlock",
+        1,
+        1,
+        PortCount::Fixed(1),
+        PortCount::Fixed(1),
+    ),
+    (
         "EZGmskDemodBlock",
         1,
         0,
