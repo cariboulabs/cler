@@ -122,10 +122,11 @@ TEST(AprsBits, RejectsNonUiAndShortFrames) {
     EXPECT_FALSE(aprs::parse(frame, 15, p));
 }
 
-// The APRS 1.01 spec's worked Mic-E example: destination address "S32U6T"
-// carries latitude 33 25.64 N, longitude offset 0, west. The longitude, speed
-// and course octets are built from the documented encoding.
-TEST(AprsBits, MicEDestinationFromSpecExample) {
+// A Mic-E frame built byte by byte from the spec's encoding tables, not from
+// this file's encoder: destination "S32U6T" carries latitude 33 25.64 N (digit
+// + message bit per character), N/S in character 4, longitude offset 0 in
+// character 5 and W/E in character 6.
+TEST(AprsBits, MicEDestinationHandBuilt) {
     uint8_t frame[64] = {};
     aprs::encode_address("S32U6T", 0, false, frame);
     aprs::encode_address("W1AW", 7, true, frame + 7);
@@ -151,6 +152,43 @@ TEST(AprsBits, MicEDestinationFromSpecExample) {
     EXPECT_NEAR(p.course, 251.0f, 1e-3);
     EXPECT_EQ(p.symbol_code, '>');
     EXPECT_EQ(p.symbol_table, '/');
+}
+
+// The two longitude-degree special cases the spec calls out, which the encoder
+// below never emits (its search finds the plain form first): with the offset
+// bit set, byte-28+100 landing in 180-189 means subtract 80, and in 190-199
+// means subtract 190. Both are legal on air; a receiver has to handle them.
+TEST(AprsBits, MicELongitudeOffsetSpecialCases) {
+    auto build = [](const char* dest6, uint8_t lon_deg, uint8_t lon_min, uint8_t lon_hun,
+                    uint8_t* frame) {
+        aprs::encode_address(dest6, 0, false, frame);
+        aprs::encode_address("W1AW", 0, true, frame + 7);
+        frame[14] = 0x03;
+        frame[15] = 0xF0;
+        // speed 20 kn, course 251 deg, car symbol
+        const uint8_t info[] = {'`', lon_deg, lon_min, lon_hun,
+                                static_cast<uint8_t>(2 + 28 + 80), static_cast<uint8_t>(2 + 28),
+                                static_cast<uint8_t>(51 + 28), '>', '/'};
+        std::memcpy(frame + 16, info, sizeof(info));
+        return 16 + sizeof(info);
+    };
+    uint8_t frame[64] = {};
+    aprs::Packet p;
+
+    // "S32UVT": character 5 is 'V' (digit 6, bit 1) so the offset is +100, and
+    // 'l' - 28 + 100 = 180, in the 180-189 window -> 100 degrees. West.
+    size_t n = build("S32UVT", 'l', 7 + 88, 44 + 28, frame);
+    ASSERT_TRUE(aprs::parse(frame, n, p));
+    ASSERT_TRUE(p.has_position);
+    EXPECT_NEAR(p.lat, 33 + 25.64 / 60.0, 1e-6);
+    EXPECT_NEAR(p.lon, -(100 + 7.44 / 60.0), 1e-6);
+
+    // "S32UV4": offset +100 again, character 6 is '4' (bit 0) so east, and
+    // '{' - 28 + 100 = 195, in the 190-199 window -> 5 degrees.
+    n = build("S32UV4", '{', 30 + 28, 0 + 28, frame);
+    ASSERT_TRUE(aprs::parse(frame, n, p));
+    ASSERT_TRUE(p.has_position);
+    EXPECT_NEAR(p.lon, 5 + 30.0 / 60.0, 1e-6);
 }
 
 TEST(AprsBits, MicEEncoderRoundTrip) {
