@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Run cler DSP flowgraphs in the browser: desktop examples compiled to WebAssembly, no install, no hardware.">
+<title>cler demos — run DSP flowgraphs in the browser</title>
+<link rel="icon" href="../cler-mark.png">
+<style>
+  /* desktop_blocks/gui/cler_palette.hpp */
+  :root {
+    --bg0: #0e1116; --bg1: #161b22; --bg2: #1e242d;
+    --border: #2a323d; --border-hi: #3a444f;
+    --fg: #e6edf3; --muted: #8b98a9; --faint: #6b7787;
+    --accent: #2b5fa8; --accent-hi: #3987e5; --accent-bg: #16283c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg0); color: var(--fg);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  a { color: var(--accent-hi); }
+  nav {
+    display: flex; align-items: center; gap: 20px; padding: 12px 24px;
+    background: var(--bg1); border-bottom: 1px solid var(--border);
+  }
+  nav .brand { display: flex; align-items: center; gap: 8px; color: var(--fg); text-decoration: none; font-weight: 600; }
+  nav .brand img { width: 24px; height: 24px; }
+  nav a.tab { color: var(--muted); text-decoration: none; font-size: 14px; }
+  nav a.tab:hover, nav a.tab[aria-current] { color: var(--fg); }
+  nav .spacer { flex: 1; }
+  header { max-width: 1100px; margin: 0 auto; padding: 44px 24px 8px; }
+  header h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: -0.5px; }
+  header p { margin: 0; color: var(--muted); max-width: 62ch; }
+  header .note { margin-top: 12px; color: var(--faint); font-size: 13px; }
+  main {
+    max-width: 1100px; margin: 0 auto; padding: 28px 24px 64px;
+    display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+  .card {
+    display: flex; flex-direction: column; background: var(--bg1);
+    border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    color: inherit; text-decoration: none;
+  }
+  .card:hover { border-color: var(--accent-hi); }
+  .card img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; object-position: top left; background: var(--bg2); }
+  .card .body { padding: 14px 16px 16px; }
+  .card h2 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; }
+  .card .run { margin-top: 12px; display: inline-block; font-size: 13px; color: var(--accent-hi); }
+  footer { max-width: 1100px; margin: 0 auto; padding: 0 24px 56px; color: var(--faint); font-size: 13px; }
+</style>
+</head>
+<body>
+<nav>
+  <a class="brand" href="../index.html"><img src="../cler-mark.png" alt="">cler</a>
+  <a class="tab" href="../index.html">Home</a>
+  <a class="tab" href="../learn.html">Learn</a>
+  <a class="tab" href="index.html" aria-current="page">Demos</a>
+  <a class="tab" href="../cler-fg/try/">Try cler-fg</a>
+  <span class="spacer"></span>
+  <a class="tab" href="https://github.com/cariboulabs/cler" target="_blank" rel="noreferrer">GitHub</a>
+</nav>
+
+<header>
+  <h1>Demos</h1>
+  <p>Desktop examples from <code>desktop_examples/</code>, compiled unmodified to WebAssembly. They run
+     in the page — same flowgraph, same blocks, same ImGui/ImPlot front end as the native binaries.</p>
+  <p class="note">Each demo is a few MB and needs a browser with SharedArrayBuffer (any current
+     Chrome, Firefox or Safari). No radio hardware is involved; every source is synthetic.</p>
+</header>
+
+<main>
+  <a class="card" href="../cler-fg/try/run/hello_world.html">
+    <img src="img/hello_world.jpg" alt="Two summed sine waves on a live time-series plot" loading="lazy">
+    <div class="body">
+      <h2>hello world</h2>
+      <p>Two CW sources, an adder and a time-series plot — the smallest flowgraph cler runs.</p>
+      <span class="run">Run in browser →</span>
+    </div>
+  </a>
+
+  <a class="card" href="../cler-fg/try/run/plots.html">
+    <img src="img/plots.jpg" alt="Time series, spectrum and spectrogram plots side by side" loading="lazy">
+    <div class="body">
+      <h2>plots</h2>
+      <p>CW and chirp sources feeding every plot block: time series, complex spectrum, spectrogram.</p>
+      <span class="run">Run in browser →</span>
+    </div>
+  </a>
+
+  <a class="card" href="../cler-fg/try/run/mass_spring_damper.html">
+    <img src="img/mass_spring_damper.jpg" alt="Animated spring-mass plant with PID controls and a root locus" loading="lazy">
+    <div class="body">
+      <h2>mass spring damper</h2>
+      <p>A PID control loop around a simulated plant, with live gains and a draggable root locus.</p>
+      <span class="run">Run in browser →</span>
+    </div>
+  </a>
+
+  <a class="card" href="../cler-fg/try/run/polyphase_channelizer.html">
+    <img src="img/polyphase_channelizer.jpg" alt="Wideband input spectrum above five channelized outputs" loading="lazy">
+    <div class="body">
+      <h2>polyphase channelizer</h2>
+      <p>Five tones in a 2 MHz band split into channels by one polyphase filter bank.</p>
+      <span class="run">Run in browser →</span>
+    </div>
+  </a>
+
+  <a class="card" href="../cler-fg/try/run/modem_loopback.html">
+    <img src="img/modem_loopback.jpg" alt="QPSK constellation with EVM, SNR and BER readouts" loading="lazy">
+    <div class="body">
+      <h2>modem loopback</h2>
+      <p>PRBS symbols through QPSK, AWGN and a carrier offset, demodulated live — drag the sliders
+         and watch EVM and BER move.</p>
+      <span class="run">Run in browser →</span>
+    </div>
+  </a>
+
+  <a class="card" href="../cler-fg/try/run/ais_receiver.html">
+    <img src="img/ais_receiver.jpg" alt="Ship map over a coastline beside the 162 MHz band spectrum" loading="lazy">
+    <div class="body">
+      <h2>AIS receiver</h2>
+      <p>Both AIS channels demodulated out of one 2.4 MS/s stream onto a live ship map. In the browser
+         the stream comes from the built-in simulator instead of a HackRF.</p>
+      <span class="run">Run in browser →</span>
+    </div>
+  </a>
+</main>
+
+<footer>
+  Built with <a href="https://emscripten.org/">Emscripten</a> from
+  <a href="https://github.com/cariboulabs/cler/tree/main/desktop_examples">desktop_examples/</a>.
+  To edit and rebuild an example in the browser, use <a href="../cler-fg/try/">cler-fg</a>.
+</footer>
+</body>
+</html>
