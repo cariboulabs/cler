@@ -98,6 +98,14 @@ if (CLER_BUILD_BLOCKS_LIQUID)
       cler::blocks_ais_map)
   endif()
 
+  add_subdirectory(aprs)
+  target_link_libraries(cler_desktop_blocks INTERFACE
+    cler::blocks_aprs)
+  if (CLER_BUILD_BLOCKS_GUI)
+    target_link_libraries(cler_desktop_blocks INTERFACE
+      cler::blocks_aprs_map)
+  endif()
+
   add_subdirectory(filters)
   target_link_libraries(cler_desktop_blocks INTERFACE
     cler::blocks_filters)
