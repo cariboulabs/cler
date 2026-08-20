@@ -483,6 +483,20 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         PortCount::Fixed(1),
     ),
     (
+        "SinkSigMFBlock",
+        1,
+        0,
+        PortCount::Fixed(1),
+        PortCount::Fixed(0),
+    ),
+    (
+        "SourceSigMFBlock",
+        0,
+        1,
+        PortCount::Fixed(0),
+        PortCount::Fixed(1),
+    ),
+    (
         "SinkAudioBlock",
         1,
         0,
