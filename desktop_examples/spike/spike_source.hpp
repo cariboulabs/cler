@@ -75,7 +75,7 @@ struct SpikeSourceBlock : public cler::BlockBase, public ISource {
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
         return std::visit([&](auto& src) -> cler::Result<cler::Empty, cler::Error> {
-            if constexpr (holds_no_source<decltype(src)>()) {
+            if constexpr (std::is_same_v<std::decay_t<decltype(src)>, std::monostate>) {
                 cler::panic("spike: procedure() on an empty source");
             } else {
                 return src.procedure(out);
@@ -85,7 +85,7 @@ struct SpikeSourceBlock : public cler::BlockBase, public ISource {
 
     double actual_sample_rate() const override {
         return std::visit([](const auto& src) -> double {
-            if constexpr (holds_no_source<decltype(src)>()) {
+            if constexpr (std::is_same_v<std::decay_t<decltype(src)>, std::monostate>) {
                 cler::panic("spike: actual_sample_rate() on an empty source");
             }
 #ifdef SPIKE_HAVE_UHD
@@ -124,7 +124,7 @@ struct SpikeSourceBlock : public cler::BlockBase, public ISource {
 
     size_t get_overflow_count() const override {
         return std::visit([](const auto& src) -> size_t {
-            if constexpr (holds_no_source<decltype(src)>()) {
+            if constexpr (std::is_same_v<std::decay_t<decltype(src)>, std::monostate>) {
                 cler::panic("spike: get_overflow_count() on an empty source");
             }
 #ifdef SPIKE_HAVE_PLUTO
@@ -149,11 +149,6 @@ struct SpikeSourceBlock : public cler::BlockBase, public ISource {
     }
 
 private:
-    template <typename Src>
-    static constexpr bool holds_no_source() {
-        return std::is_same_v<std::decay_t<Src>, std::monostate>;
-    }
-
 #ifdef SPIKE_HAVE_HACKRF
     static constexpr int HACKRF_LNA_MAX_DB  = 40;
     static constexpr int HACKRF_LNA_STEP_DB = 8;
