@@ -133,10 +133,18 @@ inline bool compressed_position(const char* s, size_t n, Packet& p) {
     p.symbol_table = s[0];
     p.symbol_code = s[9];
     p.has_position = true;
-    // cs: course/speed when c is in '!'..'z' and the compression type says so
+    // cs: course/speed when c is in '!'..'z' ('{' would be a radio range, a
+    // space means no data). The compression type byte's NMEA source field
+    // (bits 4-3) reading GGA means cs is an altitude in feet instead.
     if (s[10] >= '!' && s[10] <= 'z' && s[11] >= '!' && s[11] <= '{') {
-        p.course = static_cast<float>((s[10] - 33) * 4);
-        p.speed = static_cast<float>(std::pow(1.08, s[11] - 33) - 1.0);
+        if (s[12] >= '!' && s[12] <= '{' && ((s[12] - 33) & 0x18) == 0x10) {
+            const int cs = (s[10] - 33) * 91 + (s[11] - 33);
+            p.altitude_ft = static_cast<int>(std::pow(1.002, cs));   // the spec truncates
+            p.has_altitude = true;
+        } else {
+            p.course = static_cast<float>((s[10] - 33) * 4);
+            p.speed = static_cast<float>(std::pow(1.08, s[11] - 33) - 1.0);
+        }
     }
     return true;
 }

@@ -220,6 +220,26 @@ TEST(AprsBits, CompressedPositionAndMalformedReport) {
     EXPECT_EQ(p.symbol_code, '>');
     EXPECT_LT(p.speed, 0.0f);
 
+    // the same position with the spec's worked altitude example in the cs
+    // field: compression type '1' has NMEA source GGA (bits 4-3 = 10), so
+    // "S]" is 1.002^(50*91+60) = 10004 feet, not a course and speed
+    const char* gga = "!/5L!!<*e8>S]1";
+    std::memcpy(frame + 16, gga, std::strlen(gga));
+    ASSERT_TRUE(aprs::parse(frame, 16 + std::strlen(gga), p));
+    ASSERT_TRUE(p.has_position);
+    EXPECT_NEAR(p.lat, 49.5, 1e-5);
+    ASSERT_TRUE(p.has_altitude);
+    EXPECT_EQ(p.altitude_ft, 10004);
+    EXPECT_LT(p.course, 0.0f);
+    EXPECT_LT(p.speed, 0.0f);
+
+    // the same cs with an RMC compression type (bits 4-3 = 11) is course/speed
+    const char* rmc = "!/5L!!<*e8>S]9";
+    std::memcpy(frame + 16, rmc, std::strlen(rmc));
+    ASSERT_TRUE(aprs::parse(frame, 16 + std::strlen(rmc), p));
+    EXPECT_FALSE(p.has_altitude);
+    EXPECT_NEAR(p.course, 200.0f, 1e-3);
+
     // a truncated uncompressed report must not fall through to base-91 and
     // invent a position
     const char* bad = "!*249.20N/0350";
