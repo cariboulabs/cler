@@ -129,6 +129,10 @@ function(cler_register_standard_block_components)
       desktop_blocks/ais/ais.hpp
       desktop_blocks/ais/ais_decoder.hpp
     )
+    cler_register_block_component(TARGET cler::blocks_aprs PATHS
+      desktop_blocks/aprs/aprs.hpp
+      desktop_blocks/aprs/afsk_demod.hpp
+    )
     cler_register_block_component(TARGET cler::blocks_ezgmsk PATHS
       desktop_blocks/ezgmsk/_ezgmsk_demod.h
       desktop_blocks/ezgmsk/_ezgmsk_mod.h
@@ -139,6 +143,7 @@ function(cler_register_standard_block_components)
 
   if(CLER_BUILD_BLOCKS_GUI)
     cler_register_block_component(TARGET cler::blocks_ais_map PATHS desktop_blocks/ais/ais_map.hpp)
+    cler_register_block_component(TARGET cler::blocks_aprs_map PATHS desktop_blocks/aprs/aprs_map.hpp)
     cler_register_block_component(TARGET cler::blocks_gui PATHS
       desktop_blocks/gui/gui_manager.hpp
       desktop_blocks/gui/coastline_loader.hpp
