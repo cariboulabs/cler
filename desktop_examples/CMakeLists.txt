@@ -119,6 +119,7 @@ endif()
 
 add_subdirectory(fm_radio)
 add_subdirectory(ais_receiver)
+add_subdirectory(scanner)
 
 # spike selects its UHD / HackRF / Pluto source at runtime. Each source is
 # compiled in only if its library was found; asking for a missing one panics

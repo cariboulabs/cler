@@ -81,6 +81,10 @@ if (CLER_BUILD_BLOCKS_LIQUID)
   target_link_libraries(cler_desktop_blocks INTERFACE
     cler::blocks_fm)
 
+  add_subdirectory(demod)
+  target_link_libraries(cler_desktop_blocks INTERFACE
+    cler::blocks_demod)
+
   add_subdirectory(ais)
   target_link_libraries(cler_desktop_blocks INTERFACE
     cler::blocks_ais)

@@ -117,6 +117,9 @@ function(cler_register_standard_block_components)
       desktop_blocks/linear_modem/modulator.hpp
       desktop_blocks/linear_modem/symbol_source.hpp
     )
+    cler_register_block_component(TARGET cler::blocks_demod PATHS
+      desktop_blocks/demod/analog_demod.hpp
+    )
     cler_register_block_component(TARGET cler::blocks_ais PATHS
       desktop_blocks/ais/ais.hpp
       desktop_blocks/ais/ais_decoder.hpp
