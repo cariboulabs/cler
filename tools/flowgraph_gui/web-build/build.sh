@@ -49,13 +49,14 @@ for src in "${lib_sources[@]}"; do
 done; wait
 rm -f "$out/libcler_web.a"; emar rcs "$out/libcler_web.a" "${objs[@]}"
 
-build_example() { # name source
-  local name="$1" src="$2"
+build_example() { # name source [extra link flags...]
+  local name="$1" src="$2"; shift 2
   echo "== example $name"
   em++ "${CXXFLAGS[@]}" -c "$src" -o "$out/obj/example_$name.o"
-  em++ "$out/obj/example_$name.o" "$out/libcler_web.a" "$out/liquid/lib/libliquid.a" "${LDFLAGS[@]}" -o "$run/$name.html"
+  em++ "$out/obj/example_$name.o" "$out/libcler_web.a" "$out/liquid/lib/libliquid.a" "${LDFLAGS[@]}" "$@" -o "$run/$name.html"
   chmod 644 "$run/$name".*
 }
+cp "$here/coi-sw.js" "$run/coi-sw.js"   # COOP/COEP for pages opened straight from docs/demos/
 echo "== payload for the in-browser compiler"
 cp "$out/libcler_web.a" "$out/liquid/lib/libliquid.a" "$payload/"
 # The same flags, against the virtual repo the browser compiles in ($VIRTUAL_REPO_ROOT
@@ -91,5 +92,9 @@ build_example hello_world "$repo/desktop_examples/hello_world.cpp" &
 build_example mass_spring_damper "$repo/desktop_examples/mass_spring_damper.cpp" &
 build_example plots "$repo/desktop_examples/plots.cpp" &
 build_example polyphase_channelizer "$repo/desktop_examples/polyphase_channelizer.cpp" &
+build_example modem_loopback "$repo/desktop_examples/modem_loopback.cpp" &
+# the map's coastlines are read from a relative path, so they ride along in the wasm bundle
+build_example ais_receiver "$repo/desktop_examples/ais_receiver/ais_receiver.cpp" \
+  --embed-file "$repo/desktop_blocks/adsb/coastlines_map/ne_110m_coastline.shp@adsb_coastlines/ne_110m_coastline.shp" &
 wait
 ls -la "$run"

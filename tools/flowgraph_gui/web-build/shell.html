@@ -22,6 +22,17 @@
     onRuntimeInitialized: function () { Module.setStatus(''); }
   };
   window.addEventListener('error', function (event) { statusElement.textContent = 'error: ' + event.message; });
+  // pthreads need SharedArrayBuffer, which needs COOP/COEP. Inside /cler-fg/try/ the app's
+  // service worker already supplies them; opened on its own (from the gallery) this page
+  // installs coi-sw.js next to itself and reloads once under it.
+  if (window.crossOriginIsolated) sessionStorage.removeItem('clerCoiReload');
+  else if (navigator.serviceWorker && !sessionStorage.getItem('clerCoiReload')) {
+    statusElement.textContent = 'installing cross-origin isolation…';
+    sessionStorage.setItem('clerCoiReload', '1');
+    navigator.serviceWorker.register('coi-sw.js')
+      .then(function () { return navigator.serviceWorker.ready; })
+      .then(function () { location.reload(); });
+  }
 </script>
 {{{ SCRIPT }}}
 </body>

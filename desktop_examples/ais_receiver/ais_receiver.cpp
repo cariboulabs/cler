@@ -23,7 +23,11 @@
 
 int main(int argc, char** argv) {
     constexpr double RF_RATE = 2.4e6, CENTER = 162.0e6, CH_OFFSET = 25e3, CH_RATE = 48e3;
+#ifdef __EMSCRIPTEN__
+    AISSourceBlock::Kind kind = AISSourceBlock::Kind::Sim;  // no radio in a browser
+#else
     AISSourceBlock::Kind kind = AISSourceBlock::Kind::HackRF;
+#endif
     bool amp = true;
     int lna = 40, vga = 30;
     float lat = 32.83f, lon = 35.0f;
