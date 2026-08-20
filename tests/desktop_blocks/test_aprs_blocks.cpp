@@ -202,6 +202,33 @@ TEST(AprsBits, StatusAndTimestampedPosition) {
     EXPECT_STREQ(p.comment, "mobile");
 }
 
+TEST(AprsBits, CompressedPositionAndMalformedReport) {
+    uint8_t frame[128] = {};
+    aprs::encode_address("APCLER", 0, false, frame);
+    aprs::encode_address("4X1RF", 9, true, frame + 7);
+    frame[14] = 0x03;
+    frame[15] = 0xF0;
+    // base-91: 49.5 N, 72.75 W -> (90-lat)*380926 = "5L!!", (lon+180)*190463 = "<*e8"
+    const char* info = "!/5L!!<*e8>  T";
+    std::memcpy(frame + 16, info, std::strlen(info));
+    aprs::Packet p;
+    ASSERT_TRUE(aprs::parse(frame, 16 + std::strlen(info), p));
+    ASSERT_TRUE(p.has_position);
+    EXPECT_NEAR(p.lat, 49.5, 1e-5);
+    EXPECT_NEAR(p.lon, -72.75, 1e-5);
+    EXPECT_EQ(p.symbol_table, '/');
+    EXPECT_EQ(p.symbol_code, '>');
+    EXPECT_LT(p.speed, 0.0f);
+
+    // a truncated uncompressed report must not fall through to base-91 and
+    // invent a position
+    const char* bad = "!*249.20N/0350";
+    std::memcpy(frame + 16, bad, std::strlen(bad));
+    std::memset(frame + 16 + std::strlen(bad), 0, 16);
+    ASSERT_TRUE(aprs::parse(frame, 16 + std::strlen(bad), p));
+    EXPECT_FALSE(p.has_position);
+}
+
 // The HDLC layer is ais::Deframer; what differs from AIS is the preamble --
 // a real TNC keys up with flags, not a 0101 training sequence.
 TEST(AprsBits, FrameRoundTripThroughFlagPreamble) {

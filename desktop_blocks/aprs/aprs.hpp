@@ -114,7 +114,10 @@ inline bool uncompressed_position(const char* s, size_t n, Packet& p) {
 
 // base-91 compressed position: "/YYYYXXXX$csT", 13 characters
 inline bool compressed_position(const char* s, size_t n, Packet& p) {
+    // the leading octet is the symbol table id; anything else is a malformed
+    // report, not a compressed one
     if (n < 13) return false;
+    if (!(s[0] == '/' || s[0] == '\\' || (s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'j'))) return false;
     auto b91 = [&](int at, int len) {
         long v = 0;
         for (int i = 0; i < len; ++i) {
