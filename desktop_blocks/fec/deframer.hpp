@@ -38,6 +38,8 @@ struct PacketDeframerBlock : public cler::BlockBase {
 
     size_t packet_bytes() const { return _packet_bytes; }
 
+    // Counter getters read liquid's stats struct unsynchronized: call them from
+    // the thread running procedure(), or after the flowgraph has stopped.
     unsigned int frames_detected() const { return flexframesync_get_framedatastats(_fs).num_frames_detected; }
     unsigned int headers_valid() const { return flexframesync_get_framedatastats(_fs).num_headers_valid; }
     unsigned int payloads_valid() const { return flexframesync_get_framedatastats(_fs).num_payloads_valid; }
