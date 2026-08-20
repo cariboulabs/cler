@@ -25,7 +25,7 @@ struct AnalogDemodBlock : public cler::BlockBase {
                      size_t buffer_size = 0)
         : cler::BlockBase(name),
           in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size),
-          _fs(channel_rate), _mode(mode), _requested(mode)
+          _mode(mode), _requested(mode)
     {
         if (buffer_size > 0 && buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
             cler::panic("Buffer size too small for doubly-mapped buffers");
@@ -36,15 +36,22 @@ struct AnalogDemodBlock : public cler::BlockBase {
         }
         _decim = static_cast<unsigned int>(std::lround(d));
 
-        // audio lowpass for the WBFM decimator and the complex predecimator
-        unsigned int h_len = estimate_req_filter_len(0.05f, 60.0f);
+        // Anti-alias lowpass shared by the WBFM audio decimator and the complex
+        // predecimator: flat to 15 kHz (WBFM mono audio), >=60 dB by 24 kHz so
+        // nothing folds into the 48 kHz output. liquid centres the transition
+        // band on fc, so both edges are rate-derived; a fixed transition width
+        // aliases as soon as channel_rate exceeds ~360 kHz.
+        float taps[MAX_TAPS];
+        const float df = static_cast<float>(9e3 / channel_rate);
+        unsigned int h_len = estimate_req_filter_len(df, 60.0f);
         if (h_len % 2 == 0) ++h_len;
-        liquid_firdes_kaiser(h_len, static_cast<float>(15e3 / channel_rate), 60.0f, 0.0f, _taps);
+        if (h_len > MAX_TAPS) cler::panic("AnalogDemodBlock: anti-alias filter too long");
+        liquid_firdes_kaiser(h_len, static_cast<float>(19.5e3 / channel_rate), 60.0f, 0.0f, taps);
         float dc = 0.0f;
-        for (unsigned int i = 0; i < h_len; ++i) dc += _taps[i];
-        for (unsigned int i = 0; i < h_len; ++i) _taps[i] /= dc;
-        _audio_decim = firdecim_rrrf_create(_decim, _taps, h_len);
-        _iq_decim = firdecim_crcf_create(_decim, _taps, h_len);
+        for (unsigned int i = 0; i < h_len; ++i) dc += taps[i];
+        for (unsigned int i = 0; i < h_len; ++i) taps[i] /= dc;
+        _audio_decim = firdecim_rrrf_create(_decim, taps, h_len);
+        _iq_decim = firdecim_crcf_create(_decim, taps, h_len);
         _wbfm = freqdem_create(static_cast<float>(75e3 / channel_rate));
         _nbfm = freqdem_create(static_cast<float>(2.5e3 / AUDIO_RATE));
         _ssb_bpf = firfilt_crcf_create_kaiser(129, static_cast<float>(1.6e3 / AUDIO_RATE), 60.0f, 0.0f);
@@ -161,11 +168,9 @@ private:
         _am_dc = 0.0f;
     }
 
-    double _fs;
     unsigned int _decim = 5;
     Mode _mode;
     std::atomic<Mode> _requested;
-    float _taps[MAX_TAPS];
     float _mpx[MAX_DECIM];
     firdecim_rrrf _audio_decim = nullptr;
     firdecim_crcf _iq_decim = nullptr;

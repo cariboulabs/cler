@@ -66,6 +66,23 @@ TEST(AnalogDemod, WbfmRecoversTone) {
     EXPECT_GT(p / (total_power(a) + 1e-12), 0.9);
 }
 
+// A 26 kHz modulating tone at 768 kHz (decim 16) must be stopped by the audio
+// decimator, not folded to 48-26 = 22 kHz. A transition width fixed in
+// normalised units leaves only ~20 dB of rejection at 24 kHz at this rate.
+TEST(AnalogDemod, WbfmDecimatorRejectsAlias) {
+    AnalogDemodBlock d("d", 768e3, AnalogDemodBlock::Mode::WBFM, 1 << 16);
+    std::vector<std::complex<float>> iq(static_cast<size_t>(768e3));
+    double phase = 0.0;
+    for (size_t i = 0; i < iq.size(); ++i) {
+        const double m = std::sin(2.0 * M_PI * 26e3 * i / 768e3);
+        phase += 2.0 * M_PI * 75e3 * m / 768e3;
+        iq[i] = {static_cast<float>(std::cos(phase)), static_cast<float>(std::sin(phase))};
+    }
+    auto a = run(d, iq);
+    ASSERT_GT(a.size(), 20000u);
+    EXPECT_LT(tone_power(a, 22000.0, 48000.0), 1e-5);
+}
+
 TEST(AnalogDemod, AmRecoversTone) {
     AnalogDemodBlock d("d", kChannelRate, AnalogDemodBlock::Mode::AM, 1 << 16);
     std::vector<std::complex<float>> iq(static_cast<size_t>(kChannelRate));
