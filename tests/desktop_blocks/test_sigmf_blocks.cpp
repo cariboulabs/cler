@@ -166,7 +166,8 @@ TEST(SigMFMeta, DatatypeMappingAndPathDerivation) {
 
 TEST(SigMFBlocks, ComplexRoundTripPerDatatype) {
     const std::vector<std::complex<float>> reference = complex_tone(5000);
-    const sigmf::Datatype types[] = {sigmf::Datatype::cf32_le, sigmf::Datatype::ci16_le};
+    const sigmf::Datatype types[] = {sigmf::Datatype::cf32_le, sigmf::Datatype::ci16_le,
+                                     sigmf::Datatype::ci8, sigmf::Datatype::cu8};
     for (sigmf::Datatype datatype : types) {
         std::string base = unique_base();
         {
@@ -189,31 +190,41 @@ TEST(SigMFBlocks, ComplexRoundTripPerDatatype) {
             if (datatype == sigmf::Datatype::cf32_le) {
                 EXPECT_EQ(read_back[i], reference[i]) << "sample " << i;
             } else {
-                EXPECT_NEAR(read_back[i].real(), reference[i].real(), 1.0f / 32768.0f) << "sample " << i;
-                EXPECT_NEAR(read_back[i].imag(), reference[i].imag(), 1.0f / 32768.0f) << "sample " << i;
+                float tolerance = 1.0f / 32768.0f;
+                if (datatype == sigmf::Datatype::ci8) tolerance = 1.0f / 128.0f;
+                if (datatype == sigmf::Datatype::cu8) tolerance = 1.0f / 127.5f;
+                EXPECT_NEAR(read_back[i].real(), reference[i].real(), tolerance) << "sample " << i;
+                EXPECT_NEAR(read_back[i].imag(), reference[i].imag(), tolerance) << "sample " << i;
             }
         }
         remove_recording(base);
     }
 }
 
-TEST(SigMFBlocks, RealRampRoundTripThroughRi16) {
+TEST(SigMFBlocks, RealRampRoundTripPerDatatype) {
     std::vector<float> ramp(4096);
     for (size_t i = 0; i < ramp.size(); ++i) {
         ramp[i] = -1.0f + 2.0f * static_cast<float>(i) / static_cast<float>(ramp.size());
     }
-    std::string base = unique_base();
-    {
-        SinkSigMFBlock<float> sink("SigMFSink", base.c_str(), 48000.0, 0.0, sigmf::Datatype::ri16_le);
-        drain(sink, ramp);
+    for (sigmf::Datatype datatype : {sigmf::Datatype::rf32_le, sigmf::Datatype::ri16_le}) {
+        std::string base = unique_base();
+        {
+            SinkSigMFBlock<float> sink("SigMFSink", base.c_str(), 48000.0, 0.0, datatype);
+            drain(sink, ramp);
+        }
+        SourceSigMFBlock<float> source("SigMFSource", base.c_str());
+        EXPECT_EQ(source.datatype(), datatype);
+        std::vector<float> read_back = pull(source, ramp.size());
+        ASSERT_EQ(read_back.size(), ramp.size());
+        for (size_t i = 0; i < ramp.size(); ++i) {
+            if (datatype == sigmf::Datatype::rf32_le) {
+                EXPECT_EQ(read_back[i], ramp[i]) << "sample " << i;
+            } else {
+                EXPECT_NEAR(read_back[i], ramp[i], 1.0f / 32768.0f) << "sample " << i;
+            }
+        }
+        remove_recording(base);
     }
-    SourceSigMFBlock<float> source("SigMFSource", base.c_str());
-    std::vector<float> read_back = pull(source, ramp.size());
-    ASSERT_EQ(read_back.size(), ramp.size());
-    for (size_t i = 0; i < ramp.size(); ++i) {
-        EXPECT_NEAR(read_back[i], ramp[i], 1.0f / 32768.0f) << "sample " << i;
-    }
-    remove_recording(base);
 }
 
 TEST(SigMFBlocks, IntegerDatatypesSurviveExactly) {
