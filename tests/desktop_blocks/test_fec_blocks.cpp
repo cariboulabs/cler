@@ -136,7 +136,7 @@ TEST(FECBlocks, DecoderHonoursProgressContractUnderBackpressure) {
 // Drives framer -> (optional noise) -> deframer by hand and returns the
 // recovered byte stream.
 std::vector<uint8_t> loopback(const std::vector<uint8_t>& packets, size_t packet_bytes,
-                              float noise_stddev, size_t out_capacity) {
+                              float noise_stddev, size_t out_capacity, int drain_every = 1) {
     PacketFramerBlock framer("framer", packet_bytes, LIQUID_MODEM_QPSK, LIQUID_CRC_32,
                              LIQUID_FEC_NONE, LIQUID_FEC_HAMMING128, 8 * packet_bytes);
     NoiseAWGNBlock<std::complex<float>> awgn("awgn", noise_stddev, 8192);
@@ -159,15 +159,23 @@ std::vector<uint8_t> loopback(const std::vector<uint8_t>& packets, size_t packet
         framer.procedure(&awgn.in);
         awgn.procedure(&deframer.in);
         deframer.procedure(&out);
-        while (out.size() > 0) {
-            uint8_t b;
-            out.pop(b);
-            received.push_back(b);
+        // Draining every nth pass leaves the output channel full across calls,
+        // so payloads have to sit in the deframer's staging ring.
+        if (i % drain_every == 0) {
+            while (out.size() > 0) {
+                uint8_t b;
+                out.pop(b);
+                received.push_back(b);
+            }
         }
-        if (sent == total && framer.in.size() == 0 && awgn.in.size() == 0 && deframer.in.size() == 0) {
+        if (sent == total && framer.in.size() == 0 && awgn.in.size() == 0 &&
+            deframer.in.size() == 0 && out.size() == 0) {
             break;
         }
     }
+    // Payloads the callback delivered with nowhere to put them; the byte stream
+    // downstream loses its packet alignment forever if this is ever nonzero.
+    EXPECT_EQ(deframer.payloads_dropped(), 0u);
     received.resize(std::min(received.size(), packets.size()));
     return received;
 }
@@ -202,9 +210,9 @@ TEST(FramingBlocks, SmallOutputChannelStillRecoversEveryPacket) {
     constexpr size_t PACKET_BYTES = 48;
     constexpr size_t NUM_PACKETS = 20;
     const auto packets = random_bytes(NUM_PACKETS * PACKET_BYTES, 31);
-    // Output holds a single packet, so the deframer must stage and drain rather
-    // than lose payloads the callback delivers.
-    EXPECT_EQ(loopback(packets, PACKET_BYTES, 0.0f, PACKET_BYTES), packets);
+    // Output holds a quarter of a packet and is emptied only every 32nd pass, so
+    // frames keep completing while the deframer has nowhere to put them.
+    EXPECT_EQ(loopback(packets, PACKET_BYTES, 0.0f, PACKET_BYTES / 4, 32), packets);
 }
 
 TEST(FramingBlocks, FramerNeverSplitsAFrameUnderBackpressure) {
@@ -253,6 +261,8 @@ TEST(FramingBlocks, CorruptFrameCountsAsDetectedButNotValid) {
         awgn.procedure(&deframer.in);
         deframer.procedure(&out);
     }
+    // Without this the test would also pass if nothing were detected at all.
+    EXPECT_GT(deframer.frames_detected(), 0u);
     EXPECT_EQ(out.size(), 0u);
     EXPECT_EQ(deframer.payloads_valid(), 0u);
 }
