@@ -129,6 +129,26 @@ TEST(AnalogDemod, AmSwitchOnCarrierDoesNotThump) {
     EXPECT_LT(peak, 0.1f);
 }
 
+// same, on a modulated carrier: the mute ends near a modulation peak (20 ms is
+// a whole number of 800 Hz cycles), so a carrier estimate that latched one
+// sample instead of averaging hands the tracker an offset it leaks for ~40 ms
+TEST(AnalogDemod, AmSwitchOnModulatedCarrierDoesNotThump) {
+    AnalogDemodBlock d("d", kChannelRate, AnalogDemodBlock::Mode::AM, 1 << 16);
+    std::vector<std::complex<float>> iq(static_cast<size_t>(kChannelRate));
+    for (size_t i = 0; i < iq.size(); ++i) {
+        const double m = 1.0 + 0.6 * std::cos(2.0 * M_PI * 800.0 * i / kChannelRate);
+        iq[i] = {static_cast<float>(0.5 * m), 0.0f};
+    }
+    auto a = run(d, iq);
+    ASSERT_GT(a.size(), 20000u);
+    float peak = 0.0f, steady = 0.0f;
+    for (size_t i = 0; i < a.size(); ++i) {
+        peak = std::max(peak, std::fabs(a[i]));
+        if (i > a.size() * 3 / 4) steady = std::max(steady, std::fabs(a[i]));
+    }
+    EXPECT_LT(peak, steady * 1.2f) << "peak " << peak << " steady " << steady;
+}
+
 TEST(AnalogDemod, UsbRecoversToneAndRejectsLsb) {
     // a USB voice tone at +1 kHz: complex exponential at +1 kHz
     AnalogDemodBlock d("d", kChannelRate, AnalogDemodBlock::Mode::USB, 1 << 16);

@@ -113,9 +113,10 @@ struct AnalogDemodBlock : public cler::BlockBase {
                     firdecim_crcf_execute(_iq_decim,
                         const_cast<liquid_float_complex*>(rptr + f * _decim), &z);
                     const float mag = std::abs(z);
-                    // while muted the carrier estimate tracks exactly, so the
-                    // 42 ms tracker starts settled instead of thumping
-                    if (f < _settle) _am_dc = mag;
+                    // while muted the carrier estimate is a running mean, so
+                    // the 42 ms tracker is handed the carrier level (not one
+                    // modulation peak) and starts settled instead of thumping
+                    if (f < _settle) _am_dc += (mag - _am_dc) / static_cast<float>(++_am_n);
                     else _am_dc += 0.0005f * (mag - _am_dc);
                     wptr[f] = 4.0f * (mag - _am_dc);
                 }
@@ -178,6 +179,7 @@ private:
             static_cast<float>(2.0 * M_PI * 1.6e3 / AUDIO_RATE) * (m == Mode::LSB ? -1.0f : 1.0f));
         _de = 0.0f;
         _am_dc = 0.0f;
+        _am_n = 0;
         _settle = static_cast<size_t>(AUDIO_RATE * 0.02);
     }
 
@@ -191,5 +193,5 @@ private:
     firfilt_crcf _ssb_bpf = nullptr;
     nco_crcf _ssb_nco = nullptr;
     float _deemph_alpha = 0.0f, _de = 0.0f, _am_dc = 0.0f;
-    size_t _settle = 0;
+    size_t _settle = 0, _am_n = 0;
 };
