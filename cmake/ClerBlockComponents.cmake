@@ -93,6 +93,11 @@ function(cler_register_standard_block_components)
     desktop_blocks/utils/throttle.hpp
     desktop_blocks/utils/throughput.hpp
   )
+  cler_register_block_component(TARGET cler::blocks_sigmf PATHS
+    desktop_blocks/sigmf/sigmf.hpp
+    desktop_blocks/sigmf/source_sigmf.hpp
+    desktop_blocks/sigmf/sink_sigmf.hpp
+  )
   cler_register_block_component(TARGET cler::blocks_udp PATHS
     desktop_blocks/udp/shared.hpp
     desktop_blocks/udp/source_udp.hpp
