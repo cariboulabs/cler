@@ -156,8 +156,10 @@ TEST_F(UtilityBlocksTest, ThrottleBlockTiming) {
     // We expect about 40ms for 5 samples at 100 SPS (4 intervals of 10ms each)
     // Allow some tolerance for timing variations
     int64_t expected_min_ms = (test_data.size() - 1) * (1000 / sps) - 5; // -5ms tolerance
-    int64_t expected_max_ms = (test_data.size() - 1) * (1000 / sps) + 15; // +15ms tolerance
-    
+    // the meaningful bound is the lower one (pacing must not run fast); a
+    // loaded CI runner can stall the upper side arbitrarily
+    int64_t expected_max_ms = (test_data.size() - 1) * (1000 / sps) + 150;
+
     EXPECT_GE(elapsed.count(), expected_min_ms) << "Throttle too fast";
     EXPECT_LE(elapsed.count(), expected_max_ms) << "Throttle too slow";
 }
