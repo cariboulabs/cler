@@ -42,7 +42,7 @@ struct PacketDeframerBlock : public cler::BlockBase {
     unsigned int frames_detected() const { return flexframesync_get_framedatastats(_fs).num_frames_detected; }
     unsigned int headers_valid() const { return flexframesync_get_framedatastats(_fs).num_headers_valid; }
     unsigned int payloads_valid() const { return flexframesync_get_framedatastats(_fs).num_payloads_valid; }
-    // Payloads that passed the CRC but could not be staged (output backed up).
+    // Payloads that passed the CRC but found no staging room; should stay zero.
     uint64_t payloads_dropped() const { return _dropped.load(std::memory_order_relaxed); }
 
     // Signal quality of the last accepted payload; safe to read from another thread.
@@ -60,7 +60,11 @@ struct PacketDeframerBlock : public cler::BlockBase {
             progress = true;
         }
 
-        if (_staging.space() >= _packet_bytes) {
+        // Feed only once the previous chunk's payloads have all left: one
+        // execute() can complete several frames, and the staging ring is the
+        // only place they can go. Backing up here backpressures the framer
+        // instead of dropping a packet.
+        if (_staging.size() == 0) {
             const size_t n = std::min(in.size(), _samples.size());
             if (n > 0) {
                 in.readN(_samples.data(), n);

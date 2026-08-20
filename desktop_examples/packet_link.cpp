@@ -171,6 +171,8 @@ int main(int argc, char** argv) {
     std::printf("packet_link: %zu packets x %zu bytes, offset %.0f Hz at %.0f S/s\n",
                 num_packets, packet_bytes, offset_hz, sample_rate);
 
+    // AWGNKernel seeds itself from std::random_device, so only the zero-noise
+    // point is reproducible; that is the one the exit status gates on.
     std::printf("noiseless\n");
     const double clean = run_point(packets, packet_bytes, num_packets, 0.0f, offset_hz, sample_rate);
     std::printf("  success %.1f %%\n", 100.0 * clean);

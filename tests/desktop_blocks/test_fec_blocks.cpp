@@ -62,11 +62,16 @@ TEST(FECBlocks, RoundTripEveryAvailableScheme) {
     }
 }
 
-TEST(FECBlocks, ConvolutionalAndReedSolomonNeedLibfec) {
-    // Documents what this liquid build offers: fec_create() returns NULL for
-    // these, so the blocks panic rather than silently degrade.
-    EXPECT_FALSE(fec_scheme_available(LIQUID_FEC_CONV_V27));
-    EXPECT_FALSE(fec_scheme_available(LIQUID_FEC_RS_M8));
+TEST(FECBlocks, ConvolutionalAndReedSolomonRoundTripWhenLibfecIsPresent) {
+    // liquid only compiles these codecs against libfec; without it fec_create()
+    // returns NULL and the blocks panic rather than silently degrade.
+    for (fec_scheme scheme : {LIQUID_FEC_CONV_V27, LIQUID_FEC_RS_M8}) {
+        if (!fec_scheme_available(scheme)) {
+            GTEST_SKIP() << "no libfec in this liquid build";
+        }
+        const auto payload = random_bytes(PAYLOAD_BYTES, 43);
+        EXPECT_EQ(decode_block(scheme, encode_block(scheme, payload)), payload);
+    }
 }
 
 TEST(FECBlocks, SingleBitErrorIsCorrected) {
