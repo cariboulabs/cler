@@ -491,6 +491,13 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         PortCount::Fixed(1),
     ),
     (
+        "SigMFRecorderBlock",
+        1,
+        0,
+        PortCount::Fixed(1),
+        PortCount::Fixed(0),
+    ),
+    (
         "SinkSigMFBlock",
         1,
         0,
