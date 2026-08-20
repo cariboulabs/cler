@@ -25,19 +25,17 @@ test('h) F7 checks the temporary draft and blames the right block without saving
     await expect(page.getByTestId('check')).toBeEnabled();
 
     // the action silently ignores a press that lands during a transient
-    // disabled flicker, so press until the check visibly produces diagnostics
-    await expect
-      .poll(
-        async () => {
-          await page.keyboard.press('F7');
-          return page
-            .getByTestId('problems')
-            .getAttribute('data-count')
-            .catch(() => null);
-        },
-        { timeout: 90_000, intervals: [15_000] }
-      )
-      .toBe('1');
+    // disabled flicker, so retry — but never re-press once diagnostics exist
+    // (a new press clears them and restarts the check)
+    let count: string | null = null;
+    for (let attempt = 0; attempt < 3 && count === null; attempt++) {
+      await page.keyboard.press('F7');
+      count = await page
+        .getByTestId('problems')
+        .getAttribute('data-count', { timeout: 30_000 })
+        .catch(() => null);
+    }
+    expect(count).toBe('1');
     await page.getByTestId('tab-diagnostics').click();
     await expect(rows.first()).toBeVisible({ timeout: 90_000 });
     await expect(rows.first()).toContainText('numeric literal');
