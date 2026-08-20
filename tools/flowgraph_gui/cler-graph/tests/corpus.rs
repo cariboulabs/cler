@@ -407,7 +407,7 @@ fn corpus_meets_m0_targets() {
             }
         }
     }
-    assert!(files.len() >= 22, "corpus shrank: {} files", files.len());
+    assert!(files.len() >= 23, "corpus shrank: {} files", files.len());
 
     let mut with_sites = 0;
     let mut fully_editable = 0;
@@ -438,7 +438,7 @@ fn corpus_meets_m0_targets() {
             }
         }
     }
-    assert_eq!(with_sites, 22);
+    assert_eq!(with_sites, 23);
     assert!(
         fully_editable >= 15,
         "only {fully_editable} files fully editable"
