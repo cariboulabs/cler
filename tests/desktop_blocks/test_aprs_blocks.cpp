@@ -240,6 +240,32 @@ TEST(AprsBits, StatusAndTimestampedPosition) {
     EXPECT_STREQ(p.comment, "mobile");
 }
 
+// Position ambiguity blanks minutes from the right; each level is a coarser
+// but still valid position, not a report to be thrown away.
+TEST(AprsBits, UncompressedPositionAmbiguity) {
+    uint8_t frame[128] = {};
+    aprs::encode_address("APRS", 0, false, frame);
+    aprs::encode_address("W1AW", 0, true, frame + 7);
+    frame[14] = 0x03;
+    frame[15] = 0xF0;
+    const struct { const char* info; double lat, lon; } cases[] = {
+        {"!3325.64N/07207.44W-", 33 + 25.64 / 60.0, -(72 + 7.44 / 60.0)},
+        {"!3325.6 N/07207.4 W-", 33 + 25.60 / 60.0, -(72 + 7.40 / 60.0)},
+        {"!3325.  N/07207.  W-", 33 + 25.0 / 60.0, -(72 + 7.0 / 60.0)},
+        {"!332 .  N/0720 .  W-", 33 + 20.0 / 60.0, -(72 + 0.0 / 60.0)},
+        {"!33  .  N/072  .  W-", 33.0, -72.0},
+    };
+    for (const auto& c : cases) {
+        aprs::Packet p;
+        const size_t len = std::strlen(c.info);
+        std::memcpy(frame + 16, c.info, len);
+        ASSERT_TRUE(aprs::parse(frame, 16 + len, p)) << c.info;
+        ASSERT_TRUE(p.has_position) << c.info;
+        EXPECT_NEAR(p.lat, c.lat, 1e-6) << c.info;
+        EXPECT_NEAR(p.lon, c.lon, 1e-6) << c.info;
+    }
+}
+
 TEST(AprsBits, CompressedPositionAndMalformedReport) {
     uint8_t frame[128] = {};
     aprs::encode_address("APCLER", 0, false, frame);
@@ -279,7 +305,7 @@ TEST(AprsBits, CompressedPositionAndMalformedReport) {
     EXPECT_NEAR(p.course, 200.0f, 1e-3);
 
     // out-of-range degrees or minutes are not a position either
-    const char* oor = "!9943.49N/18246.22W-";
+    const char* oor = "!9030.00N/07207.44W-";   // 90 deg 30 min is off the planet
     std::memcpy(frame + 16, oor, std::strlen(oor));
     ASSERT_TRUE(aprs::parse(frame, 16 + std::strlen(oor), p));
     EXPECT_FALSE(p.has_position);

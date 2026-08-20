@@ -103,7 +103,10 @@ struct APRSMapBlock : public cler::BlockBase {
             ImGui::TextColored(accent_hi, "%s", st.callsign);
             if (st.path[0]) { ImGui::SameLine(); ImGui::TextDisabled("via %s", st.path); }
             if (st.speed >= 0.0f) ImGui::Text("%.0f kn  %.0f deg", st.speed, st.course < 0.0f ? 0.0f : st.course);
-            if (st.has_altitude) { ImGui::SameLine(0, 12); ImGui::Text("%d ft", st.altitude_ft); }
+            if (st.has_altitude) {
+                if (st.speed >= 0.0f) ImGui::SameLine(0, 12);   // a GGA compressed report has an altitude but no speed
+                ImGui::Text("%d ft", st.altitude_ft);
+            }
             ImGui::TextWrapped("%s", st.comment[0] ? st.comment : "");
         }
         ImGui::EndChild();

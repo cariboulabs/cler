@@ -91,22 +91,33 @@ inline int num(const char* s, int n) {
     return v;
 }
 
+// as num(), but a position-ambiguity blank counts as a zero in its column
+inline int num_amb(const char* s, int n) {
+    int v = 0;
+    for (int i = 0; i < n; ++i) {
+        if (s[i] == ' ') { v *= 10; continue; }
+        if (!is_digit(s[i])) return -1;
+        v = v * 10 + (s[i] - '0');
+    }
+    return v;
+}
+
 // "DDMM.hhN/DDDMM.hhW$" -> lat, lon, symbol. 19 characters.
 inline bool uncompressed_position(const char* s, size_t n, Packet& p) {
     if (n < 19) return false;
-    const int lat_d = num(s, 2), lat_m = num(s + 2, 2);
-    if (lat_d < 0 || lat_m < 0 || s[4] != '.' || !is_digit(s[5])) return false;
-    // minutes may be ambiguity-blanked ("33  .  N"); the digits we have suffice
-    const int lat_h = is_digit(s[6]) ? (s[5] - '0') * 10 + (s[6] - '0') : (s[5] - '0') * 10;
-    const int lon_d = num(s + 9, 3), lon_m = num(s + 12, 2);
-    if (lon_d < 0 || lon_m < 0 || s[14] != '.' || !is_digit(s[15])) return false;
-    const int lon_h = is_digit(s[16]) ? (s[15] - '0') * 10 + (s[16] - '0') : (s[15] - '0') * 10;
+    // minutes and their hundredths may be ambiguity-blanked from the right
+    // ("3325.6 ", "3325.  ", "332 .  ", "33  .  "), degrees never are
+    const int lat_d = num(s, 2), lat_m = num_amb(s + 2, 2), lat_h = num_amb(s + 5, 2);
+    if (lat_d < 0 || lat_m < 0 || lat_h < 0 || s[4] != '.') return false;
+    const int lon_d = num(s + 9, 3), lon_m = num_amb(s + 12, 2), lon_h = num_amb(s + 15, 2);
+    if (lon_d < 0 || lon_m < 0 || lon_h < 0 || s[14] != '.') return false;
     if ((s[7] != 'N' && s[7] != 'S') || (s[17] != 'E' && s[17] != 'W')) return false;
-    if (lat_d > 90 || lon_d > 180 || lat_m > 59 || lon_m > 59) return false;
-    p.lat = lat_d + (lat_m + lat_h / 100.0) / 60.0;
-    p.lon = lon_d + (lon_m + lon_h / 100.0) / 60.0;
-    if (s[7] == 'S') p.lat = -p.lat;
-    if (s[17] == 'W') p.lon = -p.lon;
+    if (lat_m > 59 || lon_m > 59) return false;
+    const double lat = lat_d + (lat_m + lat_h / 100.0) / 60.0;
+    const double lon = lon_d + (lon_m + lon_h / 100.0) / 60.0;
+    if (lat > 90.0 || lon > 180.0) return false;
+    p.lat = s[7] == 'S' ? -lat : lat;
+    p.lon = s[17] == 'W' ? -lon : lon;
     p.symbol_table = s[8];
     p.symbol_code = s[18];
     p.has_position = true;
@@ -199,9 +210,10 @@ inline bool mice(const char* dest, const char* info, size_t n, Packet& p) {
         d[i] = mice_digit(dest[i], &bit[i]);
         if (d[i] < 0) return false;
     }
-    if (d[0] * 10 + d[1] > 90 || d[2] * 10 + d[3] > 59) return false;
-    p.lat = d[0] * 10 + d[1] + (d[2] * 10 + d[3] + (d[4] * 10 + d[5]) / 100.0) / 60.0;
-    if (!bit[3]) p.lat = -p.lat;                       // byte 4: 0-9 = south
+    if (d[2] * 10 + d[3] > 59) return false;
+    const double lat = d[0] * 10 + d[1] + (d[2] * 10 + d[3] + (d[4] * 10 + d[5]) / 100.0) / 60.0;
+    if (lat > 90.0) return false;
+    p.lat = bit[3] ? lat : -lat;                       // byte 4: 0-9 = south
 
     int lon_d = static_cast<unsigned char>(info[0]) - 28;
     if (bit[4]) lon_d += 100;                          // byte 5: P-Z = +100 deg
