@@ -133,6 +133,13 @@ function(cler_register_standard_block_components)
       desktop_blocks/aprs/aprs.hpp
       desktop_blocks/aprs/afsk_demod.hpp
     )
+    cler_register_block_component(TARGET cler::blocks_fec PATHS
+      desktop_blocks/fec/deframer.hpp
+      desktop_blocks/fec/fec.hpp
+      desktop_blocks/fec/fec_decoder.hpp
+      desktop_blocks/fec/fec_encoder.hpp
+      desktop_blocks/fec/framer.hpp
+    )
     cler_register_block_component(TARGET cler::blocks_ezgmsk PATHS
       desktop_blocks/ezgmsk/_ezgmsk_demod.h
       desktop_blocks/ezgmsk/_ezgmsk_mod.h

@@ -26,6 +26,9 @@ else()
 endif()
 
 if (CLER_BUILD_BLOCKS_LIQUID)
+    add_executable(packet_link packet_link.cpp)
+    target_link_libraries(packet_link PRIVATE cler::desktop_blocks)
+
     add_subdirectory(ezgmsk)
 else()
     message(STATUS "Skipping ezgmsk example because CLER_BUILD_BLOCKS_LIQUID is OFF")
