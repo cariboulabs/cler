@@ -48,6 +48,17 @@ double total_power(const std::vector<float>& a) {
     return p / static_cast<double>(a.size() - skip);
 }
 
+std::vector<std::complex<float>> fm_tone(double audio_hz, double dev_hz) {
+    std::vector<std::complex<float>> iq(static_cast<size_t>(kChannelRate));
+    double phase = 0.0;
+    for (size_t i = 0; i < iq.size(); ++i) {
+        const double m = std::sin(2.0 * M_PI * audio_hz * i / kChannelRate);
+        phase += 2.0 * M_PI * dev_hz * m / kChannelRate;
+        iq[i] = {static_cast<float>(std::cos(phase)), static_cast<float>(std::sin(phase))};
+    }
+    return iq;
+}
+
 }  // namespace
 
 TEST(AnalogDemod, WbfmRecoversTone) {
@@ -82,6 +93,17 @@ TEST(AnalogDemod, WbfmDecimatorRejectsAlias) {
     auto a = run(d, iq);
     ASSERT_GT(a.size(), 20000u);
     EXPECT_LT(tone_power(a, 22000.0, 48000.0), 1e-5);
+}
+
+// 50 us de-emphasis: 5 kHz should come out sqrt((1+(2*pi*5k*tau)^2)/(1+(2*pi*1k*tau)^2))
+// = 1.78x below 1 kHz. 75 us would give 2.3x, none 1.0x.
+TEST(AnalogDemod, WbfmDeemphasisSlope) {
+    AnalogDemodBlock lo("lo", kChannelRate, AnalogDemodBlock::Mode::WBFM, 1 << 16);
+    AnalogDemodBlock hi("hi", kChannelRate, AnalogDemodBlock::Mode::WBFM, 1 << 16);
+    const double p1 = tone_power(run(lo, fm_tone(1000.0, 75e3)), 1000.0, 48000.0);
+    const double p5 = tone_power(run(hi, fm_tone(5000.0, 75e3)), 5000.0, 48000.0);
+    const double ratio = std::sqrt(p1 / p5);
+    EXPECT_NEAR(ratio, 1.78, 0.18) << "amplitude ratio " << ratio;
 }
 
 TEST(AnalogDemod, AmRecoversTone) {
@@ -124,6 +146,15 @@ TEST(AnalogDemod, UsbRecoversToneAndRejectsLsb) {
     AnalogDemodBlock d2("d2", kChannelRate, AnalogDemodBlock::Mode::LSB, 1 << 16);
     auto b = run(d2, iq);
     EXPECT_LT(total_power(b), total_power(a) * 0.05);
+
+    // and mirrored: LSB recovers a -1 kHz tone that USB rejects, so a dead
+    // LSB path cannot pass the check above
+    for (size_t i = 0; i < iq.size(); ++i) iq[i] = std::conj(iq[i]);
+    AnalogDemodBlock d3("d3", kChannelRate, AnalogDemodBlock::Mode::LSB, 1 << 16);
+    auto c = run(d3, iq);
+    EXPECT_GT(tone_power(c, 1000.0, 48000.0), 0.02);
+    AnalogDemodBlock d4("d4", kChannelRate, AnalogDemodBlock::Mode::USB, 1 << 16);
+    EXPECT_LT(total_power(run(d4, iq)), total_power(c) * 0.05);
 }
 
 TEST(AnalogDemod, ModeSwitchTakesEffect) {

@@ -15,7 +15,8 @@
 //          50 us de-emphasis
 //   NBFM : decimate to audio rate first, quadrature demod (2.5 kHz deviation)
 //   AM   : decimate, magnitude, DC block
-//   USB/LSB: decimate, +/-1.5 kHz shift, 0.2-3 kHz bandpass, real part
+//   USB/LSB: decimate, then a +/-1.6 kHz frequency-translated 1.6 kHz
+//          lowpass (= 0..3.2 kHz for USB, -3.2..0 for LSB), real part
 // Mode switches are applied between procedure() calls; each switch resets the
 // per-mode state and mutes 20 ms of audio, so the filter fill and the AM
 // carrier estimate settle into silence instead of a full-scale thump.
@@ -125,8 +126,9 @@ struct AnalogDemodBlock : public cler::BlockBase {
                     liquid_float_complex z;
                     firdecim_crcf_execute(_iq_decim,
                         const_cast<liquid_float_complex*>(rptr + f * _decim), &z);
-                    // shift the 0.2-3 kHz sideband to be symmetric around DC,
-                    // bandpass, then shift back into the audible range
+                    // mix down, filter, mix up with one NCO phase per sample: the
+                    // e^{-j.theta.n}/e^{+j.theta.n} cancel and the taps become
+                    // h[k]e^{j.theta.k}, i.e. a lowpass translated to +/-1.6 kHz
                     nco_crcf_mix_down(_ssb_nco, z, &z);
                     firfilt_crcf_push(_ssb_bpf, z);
                     firfilt_crcf_execute(_ssb_bpf, &z);
