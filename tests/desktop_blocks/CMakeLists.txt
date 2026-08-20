@@ -28,6 +28,16 @@ target_link_libraries(sink_blocks_test
     cler::desktop_blocks
 )
 
+# SigMF blocks tests
+add_executable(sigmf_blocks_test
+    test_sigmf_blocks.cpp
+)
+
+target_link_libraries(sigmf_blocks_test
+    gtest_main
+    cler::desktop_blocks
+)
+
 # Noise blocks tests
 add_executable(noise_blocks_test
     test_noise_blocks.cpp
@@ -85,6 +95,7 @@ add_test(NAME math_blocks_test COMMAND math_blocks_test)
 add_test(NAME utility_blocks_test COMMAND utility_blocks_test)
 add_test(NAME sink_blocks_test COMMAND sink_blocks_test)
 add_test(NAME noise_blocks_test COMMAND noise_blocks_test)
+add_test(NAME sigmf_blocks_test COMMAND sigmf_blocks_test)
 
 if (CLER_BUILD_BLOCKS_LIQUID)
     add_test(NAME channelizer_blocks_test COMMAND channelizer_blocks_test)
