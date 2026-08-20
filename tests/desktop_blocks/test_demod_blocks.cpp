@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <complex>
+#include <algorithm>
 #include <vector>
 #include "cler.hpp"
 #include "desktop_blocks/demod/analog_demod.hpp"
@@ -94,6 +95,16 @@ TEST(AnalogDemod, AmRecoversTone) {
     const double p = tone_power(a, 800.0, 48000.0);
     EXPECT_GT(p, 0.05);
     EXPECT_GT(p / (total_power(a) + 1e-12), 0.9);
+}
+
+TEST(AnalogDemod, AmSwitchOnCarrierDoesNotThump) {
+    AnalogDemodBlock d("d", kChannelRate, AnalogDemodBlock::Mode::AM, 1 << 16);
+    std::vector<std::complex<float>> iq(static_cast<size_t>(kChannelRate / 4), {0.5f, 0.0f});
+    auto a = run(d, iq);
+    ASSERT_GT(a.size(), 1000u);
+    float peak = 0.0f;
+    for (float v : a) peak = std::max(peak, std::fabs(v));
+    EXPECT_LT(peak, 0.1f);
 }
 
 TEST(AnalogDemod, UsbRecoversToneAndRejectsLsb) {

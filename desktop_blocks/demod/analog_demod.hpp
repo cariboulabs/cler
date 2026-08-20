@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <algorithm>
 #include <complex>
 
 // Runtime-switchable analog demodulator: complex channel at `channel_rate`
@@ -16,7 +17,8 @@
 //   AM   : decimate, magnitude, DC block
 //   USB/LSB: decimate, +/-1.5 kHz shift, 0.2-3 kHz bandpass, real part
 // Mode switches are applied between procedure() calls; each switch resets the
-// per-mode state, one click of silence instead of a filter transient.
+// per-mode state and mutes 20 ms of audio, so the filter fill and the AM
+// carrier estimate settle into silence instead of a full-scale thump.
 struct AnalogDemodBlock : public cler::BlockBase {
     enum class Mode { WBFM, NBFM, AM, USB, LSB };
     cler::Channel<std::complex<float>> in;
@@ -110,7 +112,10 @@ struct AnalogDemodBlock : public cler::BlockBase {
                     firdecim_crcf_execute(_iq_decim,
                         const_cast<liquid_float_complex*>(rptr + f * _decim), &z);
                     const float mag = std::abs(z);
-                    _am_dc += 0.0005f * (mag - _am_dc);
+                    // while muted the carrier estimate tracks exactly, so the
+                    // 42 ms tracker starts settled instead of thumping
+                    if (f < _settle) _am_dc = mag;
+                    else _am_dc += 0.0005f * (mag - _am_dc);
                     wptr[f] = 4.0f * (mag - _am_dc);
                 }
                 break;
@@ -130,6 +135,11 @@ struct AnalogDemodBlock : public cler::BlockBase {
                     wptr[f] = 2.0f * z.real();
                 }
                 break;
+        }
+        if (_settle) {
+            const size_t n = std::min(_settle, frames);
+            std::fill(wptr, wptr + n, 0.0f);
+            _settle -= n;
         }
         in.commit_read(frames * _decim);
         out->commit_write(frames);
@@ -166,6 +176,7 @@ private:
             static_cast<float>(2.0 * M_PI * 1.6e3 / AUDIO_RATE) * (m == Mode::LSB ? -1.0f : 1.0f));
         _de = 0.0f;
         _am_dc = 0.0f;
+        _settle = static_cast<size_t>(AUDIO_RATE * 0.02);
     }
 
     unsigned int _decim = 5;
@@ -178,4 +189,5 @@ private:
     firfilt_crcf _ssb_bpf = nullptr;
     nco_crcf _ssb_nco = nullptr;
     float _deemph_alpha = 0.0f, _de = 0.0f, _am_dc = 0.0f;
+    size_t _settle = 0;
 };
