@@ -22,10 +22,10 @@
 // The power normalisation is what makes EVM meaningful: liquid's constellations
 // have unit average symbol energy, so scaling the recovered symbols to unit mean
 // power puts them on the same scale as the ideal points.
-struct DemodulatorBlock : public cler::BlockBase {
+struct LinearDemodulatorBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
 
-    DemodulatorBlock(const char* name,
+    LinearDemodulatorBlock(const char* name,
                      modulation_scheme scheme,
                      unsigned int sps,
                      float beta,
@@ -35,11 +35,11 @@ struct DemodulatorBlock : public cler::BlockBase {
                      size_t buffer_size = 8192)
         : cler::BlockBase(name), in(buffer_size), _lock_evm(lock_evm) {
         if (sps < 2) {
-            cler::panic("DemodulatorBlock requires samples/symbol >= 2");
+            cler::panic("LinearDemodulatorBlock requires samples/symbol >= 2");
         }
         _mod = modemcf_create(scheme);
         if (!_mod) {
-            cler::panic("DemodulatorBlock: unsupported modulation scheme");
+            cler::panic("LinearDemodulatorBlock: unsupported modulation scheme");
         }
         _agc = agc_crcf_create();
         agc_crcf_set_bandwidth(_agc, 1e-3f);
@@ -58,7 +58,7 @@ struct DemodulatorBlock : public cler::BlockBase {
         _last_rate_time = std::chrono::steady_clock::now();
     }
 
-    ~DemodulatorBlock() {
+    ~LinearDemodulatorBlock() {
         nco_crcf_destroy(_nco);
         symsync_crcf_destroy(_sync);
         agc_crcf_destroy(_agc);

@@ -1,6 +1,6 @@
 // Digital modem loopback: PRBS symbols -> linear modulation -> AWGN and a
 // carrier offset -> demodulation, with a live constellation, EVM/SNR and BER.
-//   ./modem_loopback [--scheme bpsk|qpsk|psk8|qam16|qam64] [--snr <dB>]
+//   ./linear_modem_loopback [--scheme bpsk|qpsk|psk8|qam16|qam64] [--snr <dB>]
 //                    [--offset <Hz>] [--rate <S/s>] [--sps <n>] [--screenshot <png>]
 // The modulation scheme is fixed at start-up (the modem objects are built once);
 // SNR and carrier offset are live sliders.
@@ -10,11 +10,11 @@
 #include "desktop_blocks/gui/cler_palette.hpp"
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include "desktop_blocks/math/frequency_shift.hpp"
-#include "desktop_blocks/modem/ber_counter.hpp"
-#include "desktop_blocks/modem/demodulator.hpp"
-#include "desktop_blocks/modem/modulator.hpp"
-#include "desktop_blocks/modem/plot_constellation.hpp"
-#include "desktop_blocks/modem/symbol_source.hpp"
+#include "desktop_blocks/linear_modem/ber_counter.hpp"
+#include "desktop_blocks/linear_modem/demodulator.hpp"
+#include "desktop_blocks/linear_modem/modulator.hpp"
+#include "desktop_blocks/linear_modem/plot_constellation.hpp"
+#include "desktop_blocks/linear_modem/symbol_source.hpp"
 #include "desktop_blocks/noise/awgn.hpp"
 #include "desktop_blocks/utils/throttle.hpp"
 
@@ -30,7 +30,7 @@ struct ModemPanel : public cler::BlockBase {
 
     ModemPanel(const char* name, const char* scheme_name, unsigned int bps,
                NoiseAWGNBlock<std::complex<float>>& awgn, FrequencyShiftBlock& shift,
-               DemodulatorBlock& demod, BERCounterBlock& ber, PlotConstellationBlock& plot,
+               LinearDemodulatorBlock& demod, BERCounterBlock& ber, PlotConstellationBlock& plot,
                float snr_db, float offset_hz, double symbol_rate)
         : cler::BlockBase(name), _scheme_name(scheme_name), _bps(bps), _awgn(awgn),
           _shift(shift), _demod(demod), _ber(ber), _plot(plot), _snr_db(snr_db),
@@ -98,7 +98,7 @@ private:
     unsigned int _bps;
     NoiseAWGNBlock<std::complex<float>>& _awgn;
     FrequencyShiftBlock& _shift;
-    DemodulatorBlock& _demod;
+    LinearDemodulatorBlock& _demod;
     BERCounterBlock& _ber;
     PlotConstellationBlock& _plot;
     float _snr_db, _offset_hz;
@@ -128,17 +128,17 @@ int main(int argc, char** argv) {
 
     const modulation_scheme scheme = liquid_getopt_str2mod(scheme_name.c_str());
     if (scheme == LIQUID_MODEM_UNKNOWN) {
-        std::cerr << "modem_loopback: unknown scheme '" << scheme_name << "'\n";
+        std::cerr << "linear_modem_loopback: unknown scheme '" << scheme_name << "'\n";
         return 1;
     }
 
     const unsigned int bps = scheme_bits_per_symbol(scheme);
     SymbolSourceBlock source("PRBS symbols", prbs_symbols(bps, 1023));
-    ModulatorBlock modulator("Modulator", scheme, sps, beta, 5, 8192);
+    LinearModulatorBlock modulator("Modulator", scheme, sps, beta, 5, 8192);
     ThrottleBlock<std::complex<float>> throttle("Throttle", static_cast<size_t>(sample_rate), 16384);
     NoiseAWGNBlock<std::complex<float>> awgn("AWGN", awgn_stddev_for_esn0_db(snr_db), 16384);
     FrequencyShiftBlock offset("Carrier offset", offset_hz, sample_rate, 16384);
-    DemodulatorBlock demodulator("Demodulator", scheme, sps, beta, 5, 0.002f, 0.5f, 16384);
+    LinearDemodulatorBlock demodulator("Demodulator", scheme, sps, beta, 5, 0.002f, 0.5f, 16384);
     BERCounterBlock ber("BER", scheme, prbs_symbols(bps, 1023), 4000);
     PlotConstellationBlock constellation("Constellation", 2048, 8192);
     ModemPanel panel("Modem", scheme_name.c_str(), bps, awgn, offset, demodulator, ber,

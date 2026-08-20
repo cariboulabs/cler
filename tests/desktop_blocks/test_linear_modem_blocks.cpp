@@ -4,10 +4,10 @@
 #include <vector>
 #include "cler.hpp"
 #include "desktop_blocks/math/frequency_shift.hpp"
-#include "desktop_blocks/modem/ber_counter.hpp"
-#include "desktop_blocks/modem/demodulator.hpp"
-#include "desktop_blocks/modem/modulator.hpp"
-#include "desktop_blocks/modem/symbol_source.hpp"
+#include "desktop_blocks/linear_modem/ber_counter.hpp"
+#include "desktop_blocks/linear_modem/demodulator.hpp"
+#include "desktop_blocks/linear_modem/modulator.hpp"
+#include "desktop_blocks/linear_modem/symbol_source.hpp"
 #include "desktop_blocks/noise/awgn.hpp"
 
 namespace {
@@ -45,10 +45,10 @@ struct Loopback {
 
     std::vector<uint8_t> ref;
     SymbolSourceBlock src;
-    ModulatorBlock mod;
+    LinearModulatorBlock mod;
     NoiseAWGNBlock<std::complex<float>> awgn;
     FrequencyShiftBlock shift;
-    DemodulatorBlock demod;
+    LinearDemodulatorBlock demod;
     BERCounterBlock ber;
     cler::Channel<std::complex<float>> constellation;
 };
@@ -102,8 +102,8 @@ TEST(ModemBlocks, EvmTracksSnr) {
 TEST(ModemBlocks, ConstellationCountMatchesSymbols) {
     std::vector<uint8_t> ref = prbs_symbols(2, REF_SYMBOLS);
     SymbolSourceBlock src("src", ref);
-    ModulatorBlock mod("mod", LIQUID_MODEM_QPSK, SPS, BETA, 5, 4096);
-    DemodulatorBlock demod("demod", LIQUID_MODEM_QPSK, SPS, BETA, 5, 0.002f, 0.5f, 16384);
+    LinearModulatorBlock mod("mod", LIQUID_MODEM_QPSK, SPS, BETA, 5, 4096);
+    LinearDemodulatorBlock demod("demod", LIQUID_MODEM_QPSK, SPS, BETA, 5, 0.002f, 0.5f, 16384);
     cler::Channel<uint8_t> symbols(8192);
     cler::Channel<std::complex<float>> constellation(8192);
 

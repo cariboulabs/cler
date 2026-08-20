@@ -93,9 +93,9 @@ if (CLER_BUILD_BLOCKS_LIQUID)
   target_link_libraries(cler_desktop_blocks INTERFACE
     cler::blocks_filters)
 
-  add_subdirectory(modem)
+  add_subdirectory(linear_modem)
   target_link_libraries(cler_desktop_blocks INTERFACE
-    cler::blocks_modem)
+    cler::blocks_linear_modem)
 endif()
 
 if (CLER_BUILD_BLOCKS_GUI)

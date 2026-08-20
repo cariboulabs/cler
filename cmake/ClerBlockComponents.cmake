@@ -111,11 +111,11 @@ function(cler_register_standard_block_components)
       desktop_blocks/resamplers/multistage_resampler.hpp
       desktop_blocks/resamplers/rational_resampler.hpp
     )
-    cler_register_block_component(TARGET cler::blocks_modem PATHS
-      desktop_blocks/modem/ber_counter.hpp
-      desktop_blocks/modem/demodulator.hpp
-      desktop_blocks/modem/modulator.hpp
-      desktop_blocks/modem/symbol_source.hpp
+    cler_register_block_component(TARGET cler::blocks_linear_modem PATHS
+      desktop_blocks/linear_modem/ber_counter.hpp
+      desktop_blocks/linear_modem/demodulator.hpp
+      desktop_blocks/linear_modem/modulator.hpp
+      desktop_blocks/linear_modem/symbol_source.hpp
     )
     cler_register_block_component(TARGET cler::blocks_ais PATHS
       desktop_blocks/ais/ais.hpp
@@ -139,7 +139,7 @@ function(cler_register_standard_block_components)
     )
     cler_register_block_component(TARGET cler::blocks_plot_timeseries PATHS desktop_blocks/plots/plot_timeseries.hpp)
     if(CLER_BUILD_BLOCKS_LIQUID)
-      cler_register_block_component(TARGET cler::blocks_modem_plot PATHS desktop_blocks/modem/plot_constellation.hpp)
+      cler_register_block_component(TARGET cler::blocks_linear_modem_plot PATHS desktop_blocks/linear_modem/plot_constellation.hpp)
     endif()
     if(CLER_BUILD_BLOCKS_LIQUID)
       cler_register_block_component(TARGET cler::blocks_plots_spectral PATHS

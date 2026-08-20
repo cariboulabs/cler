@@ -374,6 +374,31 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         1,
         1,
         PortCount::Fixed(1),
+    (
+        "BERCounterBlock",
+        1,
+        0,
+        PortCount::Fixed(1),
+    (
+        "LinearDemodulatorBlock",
+        1,
+        2,
+        PortCount::Fixed(1),
+    (
+        "LinearModulatorBlock",
+        1,
+        1,
+        PortCount::Fixed(1),
+    (
+        "PlotConstellationBlock",
+        1,
+        0,
+        PortCount::Fixed(1),
+    (
+        "SymbolSourceBlock",
+        0,
+        1,
+        PortCount::Fixed(0),
         PortCount::Fixed(1),
     ),
     (
@@ -398,39 +423,14 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         PortCount::Fixed(1),
     ),
     ("GainBlock", 1, 1, PortCount::Fixed(1), PortCount::Fixed(1)),
-    (
-        "BERCounterBlock",
-        1,
-        0,
-        PortCount::Fixed(1),
         PortCount::Fixed(0),
     ),
-    (
-        "DemodulatorBlock",
-        1,
-        2,
-        PortCount::Fixed(1),
         PortCount::Fixed(2),
     ),
-    (
-        "ModulatorBlock",
-        1,
-        1,
-        PortCount::Fixed(1),
         PortCount::Fixed(1),
     ),
-    (
-        "PlotConstellationBlock",
-        1,
-        0,
-        PortCount::Fixed(1),
         PortCount::Fixed(0),
     ),
-    (
-        "SymbolSourceBlock",
-        0,
-        1,
-        PortCount::Fixed(0),
         PortCount::Fixed(1),
     ),
     (

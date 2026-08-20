@@ -29,10 +29,10 @@ inline float awgn_stddev_for_esn0_db(float esn0_db) {
     return std::sqrt(0.5f * std::pow(10.0f, -esn0_db / 10.0f));
 }
 
-struct ModulatorBlock : public cler::BlockBase {
+struct LinearModulatorBlock : public cler::BlockBase {
     cler::Channel<uint8_t> in;
 
-    ModulatorBlock(const char* name,
+    LinearModulatorBlock(const char* name,
                    modulation_scheme scheme,
                    unsigned int sps,
                    float beta,
@@ -40,11 +40,11 @@ struct ModulatorBlock : public cler::BlockBase {
                    size_t buffer_size = 4096)
         : cler::BlockBase(name), in(buffer_size), _sps(sps) {
         if (sps < 2) {
-            cler::panic("ModulatorBlock requires samples/symbol >= 2");
+            cler::panic("LinearModulatorBlock requires samples/symbol >= 2");
         }
         _mod = modemcf_create(scheme);
         if (!_mod) {
-            cler::panic("ModulatorBlock: unsupported modulation scheme");
+            cler::panic("LinearModulatorBlock: unsupported modulation scheme");
         }
 
         const unsigned int h_len = 2 * sps * filter_delay_symbols + 1;
@@ -60,7 +60,7 @@ struct ModulatorBlock : public cler::BlockBase {
         _samp_scratch.resize(_sym_scratch.size() * sps);
     }
 
-    ~ModulatorBlock() {
+    ~LinearModulatorBlock() {
         firinterp_crcf_destroy(_interp);
         modemcf_destroy(_mod);
     }

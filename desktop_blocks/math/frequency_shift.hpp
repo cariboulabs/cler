@@ -1,3 +1,5 @@
+#pragma once
+
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include <atomic>
