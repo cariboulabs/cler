@@ -134,15 +134,14 @@ TEST_F(UtilityBlocksTest, ThrottleBlockTiming) {
     
     auto start_time = std::chrono::high_resolution_clock::now();
     
-    // Process samples one by one
+    // A loaded machine can owe several samples by the first call, so one
+    // procedure() may emit more than one; drain until all five arrived.
     std::vector<float> output_data;
-    for (size_t i = 0; i < test_data.size(); i++) {
+    while (output_data.size() < test_data.size()) {
         auto result = throttle_block.procedure(&output);
         EXPECT_TRUE(result.is_ok());
-        
         float sample;
-        ASSERT_TRUE(output.try_pop(sample));
-        output_data.push_back(sample);
+        while (output.try_pop(sample)) output_data.push_back(sample);
     }
     
     auto end_time = std::chrono::high_resolution_clock::now();
