@@ -27,7 +27,8 @@ if (CLER_BUILD_BLOCKS_LIQUID)
 
   FetchContent_Declare(liquid
     GIT_REPOSITORY https://github.com/jgaeddert/liquid-dsp
-    GIT_TAG        master
+    # pinned: unpinned master made CI results change between runs
+    GIT_TAG        03d052b89b543e6d5f9a882139ba19f7683bcd29
     GIT_SHALLOW    TRUE
     GIT_PROGRESS   TRUE
   )
