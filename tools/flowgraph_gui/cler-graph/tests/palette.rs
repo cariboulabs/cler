@@ -335,6 +335,14 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
     ),
     ("AISMapBlock", 1, 0, PortCount::CtorArg(1), PortCount::Fixed(0)),
     (
+        "AFSKDemodBlock",
+        1,
+        1,
+        PortCount::Fixed(1),
+        PortCount::Fixed(1),
+    ),
+    ("APRSMapBlock", 1, 0, PortCount::Fixed(1), PortCount::Fixed(0)),
+    (
         "PolyphaseChannelizerBlock",
         1,
         1,
