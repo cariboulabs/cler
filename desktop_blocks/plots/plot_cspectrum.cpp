@@ -230,6 +230,11 @@ void PlotCSpectrumBlock::render() {
             _axis_refit = false;
         }
 
+        if (ImPlot::IsPlotHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            _click_hz = ImPlot::GetPlotMousePos().x;
+            _click_pending = true;
+        }
+
         for (size_t i = 0; i < _num_inputs; ++i) {
             memcpy(_liquid_inout,
                    _snapshot_buffers[i],
