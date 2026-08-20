@@ -29,7 +29,9 @@
   else if (navigator.serviceWorker && !sessionStorage.getItem('clerCoiReload')) {
     statusElement.textContent = 'installing cross-origin isolation…';
     sessionStorage.setItem('clerCoiReload', '1');
-    navigator.serviceWorker.register('coi-sw.js').then(function () { location.reload(); });
+    navigator.serviceWorker.register('coi-sw.js')
+      .then(function () { return navigator.serviceWorker.ready; })
+      .then(function () { location.reload(); });
   }
 </script>
 {{{ SCRIPT }}}
