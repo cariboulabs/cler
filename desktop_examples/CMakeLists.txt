@@ -38,6 +38,9 @@ else()
     message(STATUS "Skipping mass_spring_damper example because CLER_BUILD_BLOCKS_GUI is OFF")
 endif()
 
+add_executable(sigmf_tools sigmf_tools.cpp)
+target_link_libraries(sigmf_tools PRIVATE cler::desktop_blocks)
+
 add_executable(udp udp.cpp)
 target_link_libraries(udp PRIVATE cler::desktop_blocks)
 

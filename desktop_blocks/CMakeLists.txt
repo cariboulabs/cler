@@ -67,6 +67,11 @@ else()
   message(STATUS "Skipping GUI blocks because CLER_BUILD_BLOCKS_GUI is OFF")
 endif()
 
+add_subdirectory(sigmf)
+target_link_libraries(cler_desktop_blocks INTERFACE
+  cler::blocks_sigmf
+)
+
 add_subdirectory(udp)
 target_link_libraries(cler_desktop_blocks INTERFACE
   cler::blocks_udp
