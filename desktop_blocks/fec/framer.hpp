@@ -5,7 +5,6 @@
 #include "liquid.h"
 #include <algorithm>
 #include <cstdint>
-#include <cstring>
 #include <vector>
 
 // Packets in, complex baseband out, using liquid's flexframegen: preamble,
@@ -43,7 +42,6 @@ struct PacketFramerBlock : public cler::BlockBase {
         }
         _payload.resize(_packet_bytes);
         _samples.resize(CHUNK);
-        std::memset(_header, 0, sizeof(_header));
     }
 
     ~PacketFramerBlock() { flexframegen_destroy(_fg); }
@@ -64,7 +62,10 @@ struct PacketFramerBlock : public cler::BlockBase {
                 return cler::Error::NotEnoughSpace;
             }
             in.readN(_payload.data(), _packet_bytes);
-            flexframegen_assemble(_fg, _header, _payload.data(), static_cast<unsigned int>(_packet_bytes));
+            // NULL header: flexframegen zero-fills its own user header, whose
+            // length (FLEXFRAME_H_USER_DEFAULT) is a liquid internal. Passing a
+            // local array of a guessed size makes assemble() over-read it.
+            flexframegen_assemble(_fg, nullptr, _payload.data(), static_cast<unsigned int>(_packet_bytes));
             _frame_samples = flexframegen_getframelen(_fg);
             _remaining = _frame_samples;
         }
@@ -85,7 +86,6 @@ private:
     size_t _remaining = 0;
     unsigned int _frame_samples = 0;
     flexframegen _fg = nullptr;
-    unsigned char _header[8];
     std::vector<uint8_t> _payload;
     std::vector<std::complex<float>> _samples;
 };

@@ -85,8 +85,7 @@ static float frame_sample_power(size_t packet_bytes) {
     flexframegenprops_init_default(&props);
     flexframegen fg = flexframegen_create(&props);
     std::vector<uint8_t> payload(packet_bytes, 0xA5);
-    unsigned char header[8] = {0};
-    flexframegen_assemble(fg, header, payload.data(), static_cast<unsigned int>(packet_bytes));
+    flexframegen_assemble(fg, nullptr, payload.data(), static_cast<unsigned int>(packet_bytes));
     const unsigned int n = flexframegen_getframelen(fg);
     std::vector<std::complex<float>> buf(n);
     flexframegen_write_samples(fg, buf.data(), n);
