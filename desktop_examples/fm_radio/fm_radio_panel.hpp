@@ -111,8 +111,9 @@ struct FmRadioPanel : public cler::BlockBase {
         ImGui::SetWindowFontScale(1.0f);
         if (st.rt[0]) ImGui::TextWrapped("%s", st.rt);
         else ImGui::TextDisabled("%s", st.synced ? "no radiotext yet" : "no RDS");
-        ImGui::TextDisabled("PI %04X   PTY %s   groups %u   block errors %.0f%%", st.pi, rds::pty_name(st.pty),
-                            st.groups_ok, st.blocks_total ? 100.0 * st.blocks_bad / st.blocks_total : 0.0);
+        ImGui::TextDisabled("PI %04X   PTY %s   groups %u   blocks bad %.0f%%  corrected %.0f%%", st.pi, rds::pty_name(st.pty),
+                            st.groups_ok, st.blocks_total ? 100.0 * st.blocks_bad / st.blocks_total : 0.0,
+                            st.blocks_total ? 100.0 * st.blocks_corrected / st.blocks_total : 0.0);
 
         // --- presets ---
         ImGui::SeparatorText("Stations");
