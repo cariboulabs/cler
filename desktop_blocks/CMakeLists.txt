@@ -82,6 +82,10 @@ if (CLER_BUILD_BLOCKS_LIQUID)
   target_link_libraries(cler_desktop_blocks INTERFACE
     cler::blocks_ezgmsk)
 
+  add_subdirectory(fec)
+  target_link_libraries(cler_desktop_blocks INTERFACE
+    cler::blocks_fec)
+
   add_subdirectory(fm)
   target_link_libraries(cler_desktop_blocks INTERFACE
     cler::blocks_fm)
