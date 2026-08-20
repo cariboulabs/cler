@@ -253,13 +253,39 @@ TEST(FramingBlocks, CorruptFrameCountsAsDetectedButNotValid) {
     const auto packet = random_bytes(PACKET_BYTES, 41);
     framer.in.writeN(packet.data(), packet.size());
 
-    // Heavy noise: the preamble still correlates but neither header nor payload
-    // survives, so no payload reaches the output.
-    NoiseAWGNBlock<std::complex<float>> awgn("awgn", 1.0f, 8192);
-    for (int i = 0; i < 4000 && framer.in.size() + awgn.in.size() + deframer.in.size() > 0; ++i) {
-        framer.procedure(&awgn.in);
-        awgn.procedure(&deframer.in);
-        deframer.procedure(&out);
+    // Corrupt deterministically: keep the preamble clean so detection is
+    // guaranteed, zero the second half of the frame so the payload cannot
+    // survive (unseeded AWGN heavy enough to kill the payload sometimes killed
+    // the preamble too, and the detected count read 0).
+    std::vector<std::complex<float>> frame;
+    {
+        cler::Channel<std::complex<float>> tmp(1 << 15);
+        while (framer.in.size() > 0 || frame.empty()) {
+            framer.procedure(&tmp);
+            auto [r, rs] = tmp.read_dbf();
+            frame.insert(frame.end(), r, r + rs);
+            tmp.commit_read(rs);
+            if (rs == 0) break;
+        }
+    }
+    ASSERT_GT(frame.size(), 600u);
+    for (size_t i = frame.size() / 2; i < frame.size(); ++i) frame[i] = {0.0f, 0.0f};
+    size_t pos = 0;
+    while (pos < frame.size()) {
+        auto [w, ws] = deframer.in.write_dbf();
+        const size_t n = std::min(ws, frame.size() - pos);
+        for (size_t i = 0; i < n; ++i) w[i] = frame[pos + i];
+        deframer.in.commit_write(n);
+        pos += n;
+        while (deframer.procedure(&out).is_ok()) {}
+    }
+    // flush the synchronizer's filter delay
+    {
+        auto [w, ws] = deframer.in.write_dbf();
+        const size_t n = std::min<size_t>(ws, 2048);
+        for (size_t i = 0; i < n; ++i) w[i] = {0.0f, 0.0f};
+        deframer.in.commit_write(n);
+        while (deframer.procedure(&out).is_ok()) {}
     }
     // Without this the test would also pass if nothing were detected at all.
     EXPECT_GT(deframer.frames_detected(), 0u);
