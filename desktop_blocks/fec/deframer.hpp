@@ -20,10 +20,9 @@ struct PacketDeframerBlock : public cler::BlockBase {
 
     PacketDeframerBlock(const char* name,
                         size_t packet_bytes,
-                        size_t staging_packets = 64,
                         size_t buffer_size = 8192)
         : cler::BlockBase(name), in(buffer_size), _packet_bytes(packet_bytes),
-          _staging(packet_bytes * (staging_packets == 0 ? 1 : staging_packets)) {
+          _staging(packet_bytes * STAGING_PACKETS) {
         if (packet_bytes == 0 || packet_bytes > LIQUID_MAX_PAYLOAD_LEN) {
             cler::panic("PacketDeframerBlock: packet_bytes out of range");
         }
@@ -78,6 +77,10 @@ struct PacketDeframerBlock : public cler::BlockBase {
 
 private:
     static constexpr size_t CHUNK = 4096;
+    // A CHUNK-sample execute() completes at most ~7 frames (the shortest
+    // flexframe of any modulation is >600 samples), and the callback cannot
+    // backpressure, so staging is sized well past that and is not tunable.
+    static constexpr size_t STAGING_PACKETS = 64;
 
     static int on_frame(unsigned char* /*header*/, int header_valid,
                         unsigned char* payload, unsigned int payload_len, int payload_valid,

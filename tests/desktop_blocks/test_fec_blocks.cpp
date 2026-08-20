@@ -140,7 +140,7 @@ std::vector<uint8_t> loopback(const std::vector<uint8_t>& packets, size_t packet
     PacketFramerBlock framer("framer", packet_bytes, LIQUID_MODEM_QPSK, LIQUID_CRC_32,
                              LIQUID_FEC_NONE, LIQUID_FEC_HAMMING128, 8 * packet_bytes);
     NoiseAWGNBlock<std::complex<float>> awgn("awgn", noise_stddev, 8192);
-    PacketDeframerBlock deframer("deframer", packet_bytes, 64, 8192);
+    PacketDeframerBlock deframer("deframer", packet_bytes, 8192);
     cler::Channel<uint8_t> out(out_capacity);
 
     std::vector<uint8_t> received;
@@ -240,7 +240,7 @@ TEST(FramingBlocks, FramerNeverSplitsAFrameUnderBackpressure) {
 TEST(FramingBlocks, CorruptFrameCountsAsDetectedButNotValid) {
     constexpr size_t PACKET_BYTES = 48;
     PacketFramerBlock framer("framer", PACKET_BYTES);
-    PacketDeframerBlock deframer("deframer", PACKET_BYTES, 64, 8192);
+    PacketDeframerBlock deframer("deframer", PACKET_BYTES, 8192);
     cler::Channel<uint8_t> out(4 * PACKET_BYTES);
     const auto packet = random_bytes(PACKET_BYTES, 41);
     framer.in.writeN(packet.data(), packet.size());
