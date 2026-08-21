@@ -51,7 +51,7 @@ int main() {
         "CW-SpectrogramPlot",
         {"CW", "Chirp"},
         SPS,
-        128, // buffer size for FFT
+        256, // buffer size for FFT
         100 // tall
     );
 

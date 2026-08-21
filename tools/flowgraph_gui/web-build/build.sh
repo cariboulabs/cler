@@ -92,7 +92,7 @@ build_example hello_world "$repo/desktop_examples/hello_world.cpp" &
 build_example mass_spring_damper "$repo/desktop_examples/mass_spring_damper.cpp" &
 build_example plots "$repo/desktop_examples/plots.cpp" &
 build_example polyphase_channelizer "$repo/desktop_examples/polyphase_channelizer.cpp" &
-build_example modem_loopback "$repo/desktop_examples/modem_loopback.cpp" &
+build_example modem_loopback "$repo/desktop_examples/linear_modem_loopback.cpp" &
 # the map's coastlines are read from a relative path, so they ride along in the wasm bundle
 build_example ais_receiver "$repo/desktop_examples/ais_receiver/ais_receiver.cpp" \
   --embed-file "$repo/desktop_blocks/adsb/coastlines_map/ne_110m_coastline.shp@adsb_coastlines/ne_110m_coastline.shp" &
