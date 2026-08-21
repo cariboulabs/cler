@@ -49,13 +49,6 @@ PlotCSpectrumBlock::PlotCSpectrumBlock(const char* name,
         new (&in[i]) cler::Channel<std::complex<float>>(_buffer_size);
     }
 
-    _signal_channels = static_cast<cler::Channel<std::complex<float>>*>(
-        ::operator new[](_num_inputs * sizeof(cler::Channel<std::complex<float>>))
-    );
-    for (size_t i = 0; i < _num_inputs; ++i) {
-        new (&_signal_channels[i]) cler::Channel<std::complex<float>>(_buffer_size);
-    }
-
     // Snapshot buffers only need FFT-length, not the full ring size.
     _snapshot_buffers = new std::complex<float>*[_num_inputs];
     for (size_t i = 0; i < _num_inputs; ++i) {
@@ -88,9 +81,7 @@ PlotCSpectrumBlock::~PlotCSpectrumBlock() {
     using ComplexChannel = cler::Channel<std::complex<float>>;
     for (size_t i = 0; i < _num_inputs; ++i) {
         in[i].~ComplexChannel();
-        _signal_channels[i].~ComplexChannel();
     }
-    ::operator delete[](_signal_channels);
 
     for (size_t i = 0; i < _num_inputs; ++i) {
         delete[] _snapshot_buffers[i];
@@ -135,71 +126,63 @@ cler::Result<cler::Empty, cler::Error> PlotCSpectrumBlock::procedure() {
         return cler::Error::NotEnoughSamples;
     }
 
-    for (size_t i = 0; i < _num_inputs; ++i) {
-        size_t commit_size = (_signal_channels[i].size() + work_size > _buffer_size)
-            ? (_signal_channels[i].size() + work_size - _buffer_size) : 0;
+    const bool update_snapshot = !_gui_pause.load(std::memory_order_acquire);
 
-        // Zero-copy when both sides expose a contiguous dbf span; otherwise
-        // fall back one side at a time down to a readN/writeN copy.
+    for (size_t i = 0; i < _num_inputs; ++i) {
+        const std::complex<float>* src;
         auto [read_ptr, read_size] = in[i].read_dbf();
-        if (read_ptr && read_size >= work_size) {
-            auto [write_ptr, write_size] = _signal_channels[i].write_dbf();
-            if (write_ptr && write_size >= work_size) {
-                _signal_channels[i].commit_read(commit_size);
-                std::memcpy(write_ptr, read_ptr, work_size * sizeof(std::complex<float>));
-                _signal_channels[i].commit_write(work_size);
-                in[i].commit_read(work_size);
-            } else {
-                _signal_channels[i].commit_read(commit_size);
-                _signal_channels[i].writeN(read_ptr, work_size);
-                in[i].commit_read(work_size);
-            }
+        bool dbf = (read_ptr && read_size >= work_size);
+        if (dbf) {
+            src = read_ptr;
         } else {
             in[i].readN(_tmp_buffer, work_size);
-            _signal_channels[i].commit_read(commit_size);
-            _signal_channels[i].writeN(_tmp_buffer, work_size);
+            src = _tmp_buffer;
+        }
+
+        if (update_snapshot) {
+            std::lock_guard<std::mutex> lock(_snapshot_mutex);
+            if (work_size >= _n_fft_samples) {
+                std::memcpy(_snapshot_buffers[i],
+                            src + work_size - _n_fft_samples,
+                            _n_fft_samples * sizeof(std::complex<float>));
+            } else {
+                std::memmove(_snapshot_buffers[i],
+                             _snapshot_buffers[i] + work_size,
+                             (_n_fft_samples - work_size) * sizeof(std::complex<float>));
+                std::memcpy(_snapshot_buffers[i] + _n_fft_samples - work_size,
+                            src, work_size * sizeof(std::complex<float>));
+            }
+        }
+
+        if (dbf) {
+            in[i].commit_read(work_size);
         }
     }
 
     _samples_counter += work_size;
+
+    if (update_snapshot) {
+        std::lock_guard<std::mutex> lock(_snapshot_mutex);
+        _snapshot_ready_size = std::min(_snapshot_ready_size + work_size, _n_fft_samples);
+    }
     return cler::Empty{};
 }
 
 
 void PlotCSpectrumBlock::render() {
     if (!_visible) return;
-    // Skip the snapshot while paused so the displayed data stays frozen even
-    // though procedure() keeps draining input underneath.
-    size_t available = 0;
 
-    if (!_gui_pause.load(std::memory_order_acquire) && _snapshot_mutex.try_lock()) {
-        available = _signal_channels[0].size();
-        for (size_t i = 1; i < _num_inputs; ++i) {
-            size_t a = _signal_channels[i].size();
-            if (a != available) {
-                available = std::min(available, a);
-            }
-        }
-
-        _snapshot_ready_size = available;
-
-        if (available >= _n_fft_samples) {
-            for (size_t i = 0; i < _num_inputs; ++i) {
-                auto [ptr, size] = _signal_channels[i].read_dbf();
-                // FFT window is the newest _n_fft_samples samples in the ring.
-                memcpy(_snapshot_buffers[i],
-                       ptr + size - _n_fft_samples, 
-                       _n_fft_samples * sizeof(std::complex<float>));
-            }
-        }
-         _snapshot_mutex.unlock();
+    size_t snapshot_ready;
+    {
+        std::lock_guard<std::mutex> lock(_snapshot_mutex);
+        snapshot_ready = _snapshot_ready_size;
     }
 
-    if (_snapshot_ready_size < _n_fft_samples) {
+    if (snapshot_ready < _n_fft_samples) {
         next_window_geometry();
         ImGui::Begin(name());
         ImGui::Text("Not enough samples for FFT. Need at least %zu, got %zu.",
-                    _n_fft_samples, _snapshot_ready_size);
+                    _n_fft_samples, snapshot_ready);
         ImGui::End();
         return;
     }
@@ -236,9 +219,12 @@ void PlotCSpectrumBlock::render() {
         }
 
         for (size_t i = 0; i < _num_inputs; ++i) {
-            memcpy(_liquid_inout,
-                   _snapshot_buffers[i],
-                   _n_fft_samples * sizeof(std::complex<float>));
+            {
+                std::lock_guard<std::mutex> lock(_snapshot_mutex);
+                memcpy(_liquid_inout,
+                       _snapshot_buffers[i],
+                       _n_fft_samples * sizeof(std::complex<float>));
+            }
 
             float coherent_gain = 0.0f;
             for (size_t n = 0; n < _n_fft_samples; ++n) {

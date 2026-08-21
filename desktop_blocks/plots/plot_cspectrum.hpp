@@ -73,8 +73,6 @@ private:
     size_t _buffer_size;
     SpectralWindow _window_type;
 
-    cler::Channel<std::complex<float>>* _signal_channels;
-
     std::aligned_storage_t<sizeof(cler::Channel<std::complex<float>>), alignof(cler::Channel<std::complex<float>>)> _in_storage[MAX_INPUT_CHANNEL_SLOTS];
 
     std::complex<float>** _snapshot_buffers = nullptr;
