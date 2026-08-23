@@ -29,6 +29,8 @@ struct SpectrumFrame {
 // Headless spectrum: FFT in procedure(), window + power average over up to
 // `avg` consecutive frames, at most `fps` frames per second. A tap off a
 // fanout: it drains its input every call and never backpressures the chain.
+// Samples accumulate across calls until avg*n are held, so a scheduler handing
+// out small spans still produces frames.
 struct SpectrumBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
 
@@ -36,17 +38,16 @@ struct SpectrumBlock : public cler::BlockBase {
                   float db_min = -120.0f, float db_step = 0.5f, size_t avg = 4,
                   SpectralWindow window = SpectralWindow::Hann, size_t buffer_size = 0)
         : cler::BlockBase(name),
-          in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size),
+          in(buffer_size == 0 ? std::max(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>), 4 * n_fft) : buffer_size),
           _n(n_fft), _avg(avg == 0 ? 1 : avg), _db_min(db_min), _db_step(db_step),
           _min_interval(std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0 / (fps > 0.0f ? fps : 20.0f)))),
           _rate(rate_hz), _center(0.0), _gen(0),
-          _buf(n_fft), _window(n_fft), _power(n_fft)
+          _acc(n_fft * (avg == 0 ? 1 : avg)), _buf(n_fft), _window(n_fft), _power(n_fft)
     {
         if (n_fft < 16 || n_fft > SpectrumFrame::MAX_N || (n_fft & (n_fft - 1)) != 0) {
             cler::panic("SpectrumBlock: n_fft must be a power of two in [16, 4096]");
         }
         if (db_step <= 0.0f) cler::panic("SpectrumBlock: db_step must be positive");
-        if (in.space() < n_fft) cler::panic("SpectrumBlock: input buffer smaller than n_fft");
         float gain = 0.0f;
         for (size_t i = 0; i < n_fft; ++i) {
             _window[i] = spectral_window_function(window, static_cast<float>(i) / static_cast<float>(n_fft - 1));
@@ -67,15 +68,21 @@ struct SpectrumBlock : public cler::BlockBase {
         auto [rptr, rsize] = in.read_dbf();
         if (rsize == 0) return cler::Error::NotEnoughSamples;
 
+        const size_t keep = std::min(rsize, _acc.size() - _held);
+        std::copy_n(rptr + rsize - keep, keep, _acc.data() + _held);
+        _held += keep;
+        in.commit_read(rsize);
+
+        if (_held < _acc.size()) return cler::Empty{};
+        _held = 0;
         const auto now = std::chrono::steady_clock::now();
-        if (rsize >= _n && now - _last >= _min_interval) {
+        if (now - _last >= _min_interval) {
             auto [wptr, wsize] = out->write_dbf();
             if (wsize > 0) {
-                const size_t frames = std::min(_avg, rsize / _n);
-                const std::complex<float>* tail = rptr + rsize - frames * _n;
+                const size_t frames = _avg;
                 std::fill(_power.begin(), _power.end(), 0.0f);
                 for (size_t f = 0; f < frames; ++f) {
-                    for (size_t i = 0; i < _n; ++i) _buf[i] = tail[f * _n + i] * _window[i];
+                    for (size_t i = 0; i < _n; ++i) _buf[i] = _acc[f * _n + i] * _window[i];
                     fft_execute(_plan);
                     for (size_t i = 0; i < _n; ++i) _power[i] += std::norm(_buf[i]);
                 }
@@ -97,7 +104,6 @@ struct SpectrumBlock : public cler::BlockBase {
                 _last = now;
             }
         }
-        in.commit_read(rsize);
         return cler::Empty{};
     }
 
@@ -113,7 +119,8 @@ private:
     std::chrono::steady_clock::time_point _last;
     std::atomic<double> _rate, _center;
     std::atomic<uint32_t> _gen;
-    std::vector<std::complex<float>> _buf;
+    size_t _held = 0;
+    std::vector<std::complex<float>> _acc, _buf;
     std::vector<float> _window, _power;
     fftplan _plan = nullptr;
 };
