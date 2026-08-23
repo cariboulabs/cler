@@ -1,5 +1,5 @@
 // Headless end-to-end check of the websdr client against the real binary on the
-// simulator source. Needs playwright (from tools/flowgraph_gui/app/node_modules):
+// simulator source. Exits 77 (ctest SKIP) when playwright is not installed:
 //   WEBSDR_BIN=build/desktop_examples/websdr/websdr \
 //   NODE_PATH=tools/flowgraph_gui/app/node_modules node desktop_examples/websdr/client_tests/e2e.mjs
 import { spawn } from 'node:child_process';
@@ -7,12 +7,14 @@ import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const require = createRequire(import.meta.url);
-const { chromium } = require('playwright');
+let chromium;
+try { ({ chromium } = require('playwright')); } catch { console.log('SKIP: playwright not installed'); process.exit(77); }
 
 const bin = process.env.WEBSDR_BIN;
 if (!bin) { console.error('WEBSDR_BIN not set'); process.exit(2); }
 const port = 18000 + Math.floor(Math.random() * 1000);
 const proc = spawn(bin, ['--source', 'none', '--port', String(port)], { stdio: ['ignore', 'pipe', 'pipe'] });
+process.on('exit', () => proc.kill());
 let log = '';
 proc.stdout.on('data', (d) => (log += d));
 proc.stderr.on('data', (d) => (log += d));
@@ -25,7 +27,7 @@ for (let i = 0; i < 50; ++i) {
   if (i === 49) fail('server never came up');
 }
 
-const browser = await chromium.launch({ channel: 'chrome' });
+const browser = await chromium.launch();
 const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));

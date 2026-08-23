@@ -26,9 +26,10 @@ Service: `sudo cp misc/websdr/cler-websdr.service /etc/systemd/system/`,
 The unit persists the last device/tuning in /var/lib/cler-websdr/state.json.
 `websdr --version` and `GET /health` tell you which build is running.
 
-HackRF as a non-root user needs the udev rule from libhackrf
-(`/usr/lib/udev/rules.d/53-hackrf.rules`, group plugdev) — already there on
-Debian/Ubuntu/Raspberry Pi OS once `hackrf` is installed.
+HackRF as a non-root user needs libhackrf's udev rule (Debian/Ubuntu/Raspberry
+Pi OS ship it as `/lib/udev/rules.d/60-libhackrf0.rules` with the `libhackrf0`
+package; a source build installs `53-hackrf.rules`); the service user must be
+in `plugdev`.
 
 Alternative for a LAN with no browser requirement: run SoapySDRServer on the
 box and point the desktop scanner at `driver=remote` — all DSP on the laptop.
