@@ -80,6 +80,7 @@ namespace cler {
         virtual size_t peek_read(const T*& ptr1, size_t& size1, const T*& ptr2, size_t& size2) = 0;
         virtual void commit_read(size_t count) = 0;
         virtual void commit_write(size_t count) = 0;
+        virtual void reset() = 0;
         virtual std::pair<const T*, std::size_t> read_dbf() = 0;
         virtual std::pair<T*, std::size_t> write_dbf() = 0;
         virtual std::size_t producer_thread_cumulative_write_count() const = 0;
@@ -112,6 +113,7 @@ namespace cler {
         }
         void commit_read(size_t count) override { _queue.commit_read(count); }
         void commit_write(size_t count) override { _queue.commit_write(count); }
+        void reset() override { _queue.reset(); }
 
         std::pair<const T*, std::size_t> read_dbf() override { return _queue.read_dbf(); }
         std::pair<T*, std::size_t> write_dbf() override { return _queue.write_dbf(); }
@@ -495,6 +497,13 @@ namespace cler {
 
         bool is_stopped() const {
             return _stop_flag.load(std::memory_order_acquire);
+        }
+
+        void reset() {
+            assert((is_stopped() || _active_task_count == 0) && "FlowGraph::reset() while running");
+            std::apply([](auto&... runners) {
+                (std::apply([](auto*... outs) { (outs->reset(), ...); }, runners.outputs), ...);
+            }, _runners);
         }
 
         const FlowGraphConfig& config() const { return _config; }

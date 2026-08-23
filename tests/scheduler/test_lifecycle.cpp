@@ -199,6 +199,39 @@ TEST(LifecycleTest, RunStopRunWorksForEachScheduler) {
     }
 }
 
+// a fast source into a slow sink leaves the channel full when stopped; reset()
+// empties it so a reconfigured graph does not replay stale samples
+TEST(LifecycleTest, ResetEmptiesChannelsAndRunResumes) {
+    for (const auto& config : all_schedulers()) {
+        CountingSource source("Source");
+        CountingSink sink("Sink", kCapacity);
+        auto fg = cler::make_desktop_flowgraph(
+            cler::BlockRunner(&source, &sink.in),
+            cler::BlockRunner(&sink)
+        );
+
+        fg.reset();
+        EXPECT_EQ(sink.in.size(), 0u);
+
+        fg.run(config);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        fg.stop();
+        float one = 1.0f;
+        while (sink.in.space() >= 1) sink.in.push(one);
+        ASSERT_GT(sink.in.size(), 0u) << scheduler_name(config);
+
+        fg.reset();
+        EXPECT_EQ(sink.in.size(), 0u) << scheduler_name(config);
+        EXPECT_EQ(sink.in.read_dbf().second, 0u) << scheduler_name(config);
+
+        const size_t before = sink.consumed();
+        fg.run(config);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        fg.stop();
+        EXPECT_GT(sink.consumed(), before) << scheduler_name(config);
+    }
+}
+
 TEST(LifecycleTest, OnlyMayBlockBlocksStopCleanly) {
     for (const auto& config : all_schedulers()) {
         BlockingSource source("BlockingSource");

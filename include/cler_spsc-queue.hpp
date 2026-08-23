@@ -383,6 +383,15 @@ public:
     return true;
   }
 
+  // Drops everything queued. Only when neither side is running.
+  void reset() noexcept {
+    const auto writeIndex = writer_.writeIndex_.load(std::memory_order_acquire);
+    reader_.readIndex_.store(writeIndex, std::memory_order_release);
+    reader_.writeIndexCache_ = writeIndex;
+    reader_.dbfLastReadIndex_ = writeIndex;
+    writer_.readIndexCache_ = writeIndex;
+  }
+
   [[nodiscard]] std::size_t size() const noexcept {
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_acquire);
     const auto readIndex = reader_.readIndex_.load(std::memory_order_acquire);
