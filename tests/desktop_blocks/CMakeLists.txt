@@ -136,3 +136,16 @@ if(HACKRF_FOUND)
 else()
     message(STATUS "Skipping hackrf_blocks_test because HACKRF_FOUND is OFF")
 endif()
+
+if (CLER_BUILD_BLOCKS_WEB)
+    add_executable(web_blocks_test test_web_blocks.cpp)
+    target_link_libraries(web_blocks_test gtest_main cler::desktop_blocks)
+    add_test(NAME web_blocks_test COMMAND web_blocks_test)
+endif()
+
+find_program(NODE_EXECUTABLE node)
+if (NODE_EXECUTABLE)
+    add_test(NAME websdr_client_test COMMAND ${NODE_EXECUTABLE} --test
+        ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/proto.test.mjs
+        ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/panel.test.mjs)
+endif()

@@ -1,0 +1,8 @@
+if (CLER_BUILD_BLOCKS_WEB)
+    include(${PROJECT_SOURCE_DIR}/cmake/EmbedFiles.cmake)
+    add_executable(web_demo web_demo.cpp)
+    target_link_libraries(web_demo PRIVATE cler::desktop_blocks)
+    cler_embed_dir(web_demo ${CMAKE_CURRENT_SOURCE_DIR}/client websdr_client_files.hpp WEBSDR_CLIENT_FILES)
+else()
+    message(STATUS "Skipping websdr examples because CLER_BUILD_BLOCKS_WEB is OFF")
+endif()

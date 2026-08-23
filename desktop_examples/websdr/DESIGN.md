@@ -138,10 +138,13 @@ no-store` on the client files.
 ### Security (phase 1, not later)
 
 - Bind `127.0.0.1` by default. `--bind` for a LAN.
-- WebSocket upgrade rejected unless `Origin` is the server's own `host:port`.
-  Any page on the laptop can open `ws://localhost:8080`; the tunnel does not stop that.
-- `--token`: required whenever bind is not loopback; client sends it as
-  `Sec-WebSocket-Protocol` / `?token=`; `/recordings` requires it too.
+- WebSocket upgrade rejected unless `Origin` is the server's own `host:port`, and
+  without a token the `Host` header must name loopback or the bind address (DNS
+  rebinding sends a matching Origin+Host pair for evil.com). Any page on the laptop
+  can open `ws://localhost:8080`; the tunnel does not stop that.
+- `--token`: required whenever bind is not loopback; client sends it as `?token=`
+  (IXWebSocket does not echo `Sec-WebSocket-Protocol`); `/health` and `/recordings`
+  require it too, client files stay open.
 - Record/play accept bare filenames in `--record-dir` only.
 - One controller: first socket (or the one presenting the token) may `set`;
   others are viewers and see `state.role="view"`. Controller leaves → next in line.

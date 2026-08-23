@@ -1,0 +1,29 @@
+if (CMAKE_SCRIPT_MODE_FILE)
+  set(body "#pragma once\n#include \"desktop_blocks/web/web_server.hpp\"\nnamespace {\n")
+  set(table "")
+  set(i 0)
+  foreach(path IN LISTS FILES)
+    get_filename_component(name "${path}" NAME)
+    file(READ "${path}" hex HEX)
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," hex "${hex}")
+    string(APPEND body "const unsigned char ${VAR}_f${i}[] = {${hex}0};\n")
+    string(APPEND table "    {\"${name}\", reinterpret_cast<const char*>(${VAR}_f${i}), sizeof(${VAR}_f${i}) - 1},\n")
+    math(EXPR i "${i} + 1")
+  endforeach()
+  string(APPEND body "}\nstatic const web::EmbeddedFile ${VAR}[] = {\n${table}};\nstatic const size_t ${VAR}_COUNT = ${i};\n")
+  file(WRITE "${OUT}" "${body}")
+  return()
+endif()
+
+set(CLER_EMBED_SCRIPT "${CMAKE_CURRENT_LIST_FILE}")
+
+function(cler_embed_dir target dir header var)
+  file(GLOB files CONFIGURE_DEPENDS "${dir}/*.html" "${dir}/*.js" "${dir}/*.css")
+  set(out "${CMAKE_CURRENT_BINARY_DIR}/${header}")
+  add_custom_command(OUTPUT "${out}"
+    COMMAND ${CMAKE_COMMAND} -DOUT=${out} -DVAR=${var} "-DFILES=${files}" -P ${CLER_EMBED_SCRIPT}
+    DEPENDS ${files} ${CLER_EMBED_SCRIPT}
+    COMMENT "Embedding ${dir} into ${header}" VERBATIM)
+  target_sources(${target} PRIVATE "${out}")
+  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+endfunction()
