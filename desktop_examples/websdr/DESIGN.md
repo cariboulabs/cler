@@ -281,6 +281,13 @@ nginx + basic auth in front if a client insists.
 
 Each phase = a branch, a worker, critic review, merge.
 
+Phase 1 measured 2026-08-23: Raspberry Pi 4 (bullseye, cmake 3.18, native build),
+`--source sim --rate 2.4e6`, 20 fps spectrum + 48 kHz audio through `ssh -L` to a
+laptop: 115–140 % of one core total, of which the Sim generator is roughly a third
+(gdb sampling; no perf on that kernel) — DSP chain ≈ 0.8–1.0 core. i7-14700K with
+a HackRF at 2.4–2.5 MS/s: 13–17 % of one core. Cross-compile toolchain:
+`cmake/toolchains/rpi-aarch64.cmake`.
+
 Phase 1 as built: the sample rate is fixed per run (`--rate`, state file); the
 UI shows it read-only. Changing it from the browser is a phase 2/3 item (it is
 a stop/reconfigure/run like a source switch).
