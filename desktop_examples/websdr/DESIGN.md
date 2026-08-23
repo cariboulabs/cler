@@ -278,6 +278,10 @@ nginx + basic auth in front if a client insists.
 
 Each phase = a branch, a worker, critic review, merge.
 
+Phase 1 as built: the sample rate is fixed per run (`--rate`, state file); the
+UI shows it read-only. Changing it from the browser is a phase 2/3 item (it is
+a stop/reconfigure/run like a source switch).
+
 ## Decisions
 
 - Every source cler already has is in scope: HackRF, Pluto, UHD, CaribouLite, Soapy,

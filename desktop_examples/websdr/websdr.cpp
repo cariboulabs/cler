@@ -1,5 +1,5 @@
 // Browser receiver: SourceMux -> fanout -> {spectrum, shift -> resampler -> demod} -> WebSink.
-//   ./websdr [--source sim|hackrf[:serial]] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]
+//   ./websdr [--source sim|hackrf[:serial]|none] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]
 //            [--gain NAME=V]... [--port N] [--bind ADDR] [--token T] [--client-dir DIR]
 //            [--record-dir DIR] [--state-file FILE] [--version]
 #include "cler.hpp"
@@ -35,16 +35,15 @@
 
 static std::atomic<bool> g_run{true};
 
-static constexpr double CHANNEL_RATE = 240e3;
-static constexpr double CHANNEL_BW = 240e3;
-static constexpr double IF_OFFSET = 400e3;   // keeps the SDR's DC spike out of the channel
+static constexpr double CHANNEL_HZ = 240e3;    // demod input rate and channel width
+static constexpr double IF_OFFSET = 400e3;     // keeps the SDR's DC spike out of the channel
 
-static AnalogDemodBlock::Mode parse_mode(const std::string& m) {
-    if (m == "NBFM") return AnalogDemodBlock::Mode::NBFM;
-    if (m == "AM") return AnalogDemodBlock::Mode::AM;
-    if (m == "USB") return AnalogDemodBlock::Mode::USB;
-    if (m == "LSB") return AnalogDemodBlock::Mode::LSB;
-    return AnalogDemodBlock::Mode::WBFM;
+static bool parse_mode(const std::string& m, AnalogDemodBlock::Mode& out) {
+    for (auto mode : {AnalogDemodBlock::Mode::WBFM, AnalogDemodBlock::Mode::NBFM, AnalogDemodBlock::Mode::AM,
+                      AnalogDemodBlock::Mode::USB, AnalogDemodBlock::Mode::LSB}) {
+        if (m == AnalogDemodBlock::mode_name(mode)) { out = mode; return true; }
+    }
+    return false;
 }
 
 static double passband_for(AnalogDemodBlock::Mode m) {
@@ -87,33 +86,46 @@ struct App {
     web::WebServer& srv;
     WebSinkBlock sink;
 
-    double rate, center = 100e6, offset = 0.0;
-    AnalogDemodBlock::Mode mode = AnalogDemodBlock::Mode::WBFM;
+    std::string record_dir, state_file;
+    std::vector<std::pair<std::string, double>> gains;
+    double rate, center, offset = 0.0;
+    AnalogDemodBlock::Mode mode;
     uint32_t gen = 0;
     bool running = false, switching = false, lost = false;
     SourceMux::Kind kind = SourceMux::Kind::None;
-    std::string id, state_file;
-    std::vector<std::pair<std::string, double>> gains;
+    std::string id;
+    std::vector<SourceMux::DeviceInfo> devices;
+    std::vector<SourceMux::Control> caps;
 
     App(web::WebServer& server, double rate_hz, double freq_hz, AnalogDemodBlock::Mode m)
-        : spec("Spectrum", rate_hz, 1024, 20.0f),
+        : spec("Spectrum", rate_hz, 1024, 20.0f, -120.0f, 0.5f, 4, SpectralWindow::Hann, 1 << 16),
           shift("Tune shift", 0.0, rate_hz, 1 << 18),
-          resamp("Channel", static_cast<float>(CHANNEL_RATE / rate_hz), 60.0f, 1 << 18),
-          demod("Demod", CHANNEL_RATE, m, 1 << 16),
+          resamp("Channel", static_cast<float>(CHANNEL_HZ / rate_hz), 60.0f, 1 << 18),
+          demod("Demod", CHANNEL_HZ, m, 1 << 16),
           srv(server), sink("Web sink", server),
           rate(rate_hz), center(freq_hz), mode(m) {}
 
     double tuned() const { return center + offset; }
+    std::string source() const { return running ? source_id(kind, id) : ""; }
+
+    void rescan() { devices = src.enumerate(); caps = src.capabilities(); }
+
+    void bump_gen() {
+        ++gen;
+        srv.set_gen(gen);
+        spec.set_gen(gen);
+        spec.set_center(center);
+    }
 
     std::string state_json() {
         web::JsonWriter w;
-        w.begin_obj().key("gen").num(gen).key("source").str(running ? source_id(kind, id) : "")
+        w.begin_obj().key("gen").num(gen).key("source").str(source())
          .key("freq").num(tuned()).key("center").num(center).key("offset").num(offset)
          .key("passband").num(passband_for(mode)).key("rate").num(rate)
          .key("mode").str(AnalogDemodBlock::mode_name(mode))
          .key("switching").boolean(switching).key("source_lost").boolean(lost)
          .key("recording").boolean(false);
-        for (const auto& c : src.capabilities()) {
+        for (const auto& c : caps) {
             if (c.id == "freq" || c.id == "rate") continue;
             w.key(c.id).num(c.value);
         }
@@ -124,7 +136,7 @@ struct App {
     std::string hello_json() {
         web::JsonWriter w;
         w.begin_obj().key("sources").begin_arr();
-        for (const auto& d : src.enumerate()) {
+        for (const auto& d : devices) {
             w.begin_obj().key("id").str(source_id(d.kind, d.id)).key("kind").str(SourceMux::kind_name(d.kind))
              .key("label").str(d.label).key("available").boolean(true).end();
         }
@@ -132,7 +144,7 @@ struct App {
         w.begin_obj().key("id").str("mode").key("label").str("mode").key("type").str("enum").key("options").begin_arr();
         for (const char* m : {"WBFM", "NBFM", "AM", "USB", "LSB"}) w.str(m);
         w.end().end();
-        for (const auto& c : src.capabilities()) {
+        for (const auto& c : caps) {
             w.begin_obj().key("id").str(c.id).key("label").str(c.label).key("type").str(c.type);
             if (!c.unit.empty()) w.key("unit").str(c.unit);
             if (c.type == "enum") { w.key("options").begin_arr(); for (const auto& o : c.options) w.str(o); w.end(); }
@@ -144,63 +156,81 @@ struct App {
         return w.out.substr(1, w.out.size() - 2);
     }
 
-    void publish() {
-        ++gen;
-        srv.set_gen(gen);
-        spec.set_gen(gen);
-        spec.set_center(center);
-        srv.set_hello_extra(hello_json());
+    // state to every tab; hello too when the device list or controls changed
+    void publish(bool hello = false) {
+        caps = src.capabilities();
         srv.set_state(state_json());
+        if (hello) { srv.set_hello_extra(hello_json()); srv.resend_hello(); }
         web::JsonWriter h;
-        h.begin_obj().key("source").str(running ? source_id(kind, id) : "").key("rate").num(rate)
+        h.begin_obj().key("source").str(source()).key("rate").num(rate)
          .key("overflows").num(static_cast<double>(src.overflows())).key("recording").boolean(false)
          .key("free_disk").num(free_disk(record_dir)).end();
         srv.set_health_extra(h.out.substr(1, h.out.size() - 2));
-        save_state();
+        if (running) save_state();
     }
 
-    std::string record_dir;
-
     template <typename FG>
-    bool select(FG& fg, SourceMux::Kind k, const std::string& dev, double freq_hz, double rate_hz) {
+    bool select(FG& fg, SourceMux::Kind k, const std::string& dev, double freq_hz, double rate_hz, bool quiet = false) {
         switching = true;
         srv.set_state(state_json());
         if (running) { fg.stop(); running = false; }
         const bool ok = src.select(k, dev, freq_hz, rate_hz);
         switching = false;
         kind = k; id = dev;
+        rescan();
         if (!ok) {
-            srv.send_error("source", "could not open " + source_id(k, dev));
-            publish();
+            if (!quiet) { srv.send_error("source", "could not open " + source_id(k, dev)); publish(true); }
             return false;
         }
         rate = src.rate(); center = src.center(); offset = 0.0; lost = false;
         for (const auto& g : gains) src.set(g.first, g.second);
-        resamp.set_ratio(static_cast<float>(CHANNEL_RATE / rate));
+        resamp.set_ratio(static_cast<float>(CHANNEL_HZ / rate));
         spec.set_rate(rate);
         shift.set_sample_rate(rate);
-        shift.set_frequency_shift(0.0);
+        tune_to(freq_hz);
         fg.reset();
         fg.run();
         running = true;
-        publish();
+        publish(true);
         return true;
     }
 
+    bool fits(double off) const {
+        return std::fabs(off) + CHANNEL_HZ / 2.0 <= rate / 2.0 && std::fabs(off) >= CHANNEL_HZ / 2.0 + 20e3;
+    }
+
     void tune_offset(double hz) {
-        if (std::fabs(hz) + CHANNEL_BW / 2.0 > rate / 2.0) { tune_to(center + hz); return; }
+        if (!fits(hz)) { tune_to(center + hz); return; }
         offset = hz;
         shift.set_frequency_shift(-offset);
+        bump_gen();
     }
 
     void tune_to(double hz) {
-        center = std::clamp(hz - IF_OFFSET, 1e6, 6e9);
-        src.set("freq", center);
-        const double back = hz - center;
-        if (std::fabs(back) + CHANNEL_BW / 2.0 <= rate / 2.0) {
-            offset = back;
-            shift.set_frequency_shift(-offset);
+        if (rate < 2 * IF_OFFSET + CHANNEL_HZ) {
+            center = std::clamp(hz, 1e6, 6e9);
+            offset = 0.0;
+        } else if (fits(hz - center)) {
+            offset = hz - center;
+        } else {
+            center = std::clamp(hz - IF_OFFSET, 1e6, 6e9);
+            offset = hz - center;
         }
+        src.set("freq", center);
+        shift.set_frequency_shift(-offset);
+        bump_gen();
+    }
+
+    bool set_control(const std::string& key, double v) {
+        for (const auto& c : caps) {
+            if (c.id != key) continue;
+            if (c.ro) return false;
+            src.set(key, v);
+            for (auto& g : gains) if (g.first == key) { g.second = v; return true; }
+            gains.emplace_back(key, v);
+            return true;
+        }
+        return false;
     }
 
     void save_state() {
@@ -208,7 +238,7 @@ struct App {
         web::JsonWriter w;
         w.begin_obj().key("source").str(source_id(kind, id)).key("freq").num(tuned()).key("rate").num(rate)
          .key("mode").str(AnalogDemodBlock::mode_name(mode));
-        for (const auto& c : src.capabilities()) if (!c.ro && c.id != "freq") w.key(c.id).num(c.value);
+        for (const auto& c : caps) if (!c.ro && c.id != "freq") w.key(c.id).num(c.value);
         w.end();
         std::ofstream(state_file) << w.out;
     }
@@ -219,8 +249,8 @@ int main(int argc, char** argv) {
     o.files = WEBSDR_CLIENT_FILES;
     o.file_count = WEBSDR_CLIENT_FILES_COUNT;
     o.version = WEBSDR_VERSION;
-    std::string source, record_dir, state_file, mode_s = "WBFM";
-    double freq = 100e6, rate = 2.4e6;
+    std::string source, record_dir, state_file, mode_s;
+    double freq = 0, rate = 0;
     std::vector<std::pair<std::string, double>> gains;
     for (int i = 1; i < argc; ++i) {
         auto next = [&](const char* flag) -> const char* { return (!std::strcmp(argv[i], flag) && i + 1 < argc) ? argv[++i] : nullptr; };
@@ -241,7 +271,7 @@ int main(int argc, char** argv) {
         else if (const char* v = next("--record-dir")) record_dir = v;
         else if (const char* v = next("--state-file")) state_file = v;
         else {
-            std::fprintf(stderr, "Usage: %s [--source sim|hackrf[:serial]] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]\n"
+            std::fprintf(stderr, "Usage: %s [--source sim|hackrf[:serial]|none] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]\n"
                                  "          [--gain NAME=V]... [--port N] [--bind ADDR] [--token T] [--client-dir DIR]\n"
                                  "          [--record-dir DIR] [--state-file FILE] [--version]\n", argv[0]);
             return std::strcmp(argv[i], "--help") == 0 ? 0 : 1;
@@ -253,18 +283,32 @@ int main(int argc, char** argv) {
         web::Fields fields;
         if (f && web::json_parse_object(ss.str(), fields)) {
             if (source.empty()) source = web::json_str(fields, "source");
-            freq = web::json_num(fields, "freq", freq);
-            rate = web::json_num(fields, "rate", rate);
-            mode_s = web::json_str(fields, "mode", mode_s);
-            for (const auto& [k, v] : fields)
-                if (k != "source" && k != "freq" && k != "rate" && k != "mode") gains.emplace_back(k, std::atof(v.c_str()));
+            if (freq == 0) freq = web::json_num(fields, "freq");
+            if (rate == 0) rate = web::json_num(fields, "rate");
+            if (mode_s.empty()) mode_s = web::json_str(fields, "mode");
+            for (const auto& [k, v] : fields) {
+                if (k == "source" || k == "freq" || k == "rate" || k == "mode") continue;
+                bool given = false;
+                for (const auto& g : gains) given = given || g.first == k;
+                if (!given) gains.emplace_back(k, std::atof(v.c_str()));
+            }
         }
+    }
+    if (freq == 0) freq = 100e6;
+    if (rate == 0) rate = 2.4e6;
+    if (mode_s.empty()) mode_s = "WBFM";
+    AnalogDemodBlock::Mode mode;
+    if (!parse_mode(mode_s, mode)) { std::fprintf(stderr, "unknown --mode %s\n", mode_s.c_str()); return 1; }
+    SourceMux::Kind k = SourceMux::Kind::None; std::string id;
+    if (!source.empty() && source != "none" && !parse_source(source, k, id)) {
+        std::fprintf(stderr, "unknown --source %s\n", source.c_str());
+        return 1;
     }
     std::signal(SIGINT, [](int) { g_run = false; });
     std::signal(SIGTERM, [](int) { g_run = false; });
 
     web::WebServer srv(o);
-    App app(srv, rate, freq, parse_mode(mode_s));
+    App app(srv, rate, freq, mode);
     app.gains = gains;
     app.record_dir = record_dir;
     app.state_file = state_file;
@@ -278,19 +322,19 @@ int main(int argc, char** argv) {
         cler::BlockRunner(&app.demod, &app.sink.audio),
         cler::BlockRunner(&app.sink));
 
-    app.publish();
+    app.rescan();
+    app.publish(true);
     srv.start();
     std::printf("websdr %s on http://%s:%d/\n", WEBSDR_VERSION, o.bind.c_str(), o.port);
 
-    SourceMux::Kind k; std::string id;
-    if (!source.empty() && source != "none") {
-        if (!parse_source(source, k, id)) { std::fprintf(stderr, "unknown --source %s\n", source.c_str()); return 1; }
-        app.select(fg, k, id, freq, rate);
-    } else if (source.empty()) {
+    const bool auto_pick = source.empty();
+    auto pick_only_device = [&]() {
         std::vector<SourceMux::DeviceInfo> real;
-        for (const auto& d : app.src.enumerate()) if (d.kind != SourceMux::Kind::Sim) real.push_back(d);
+        for (const auto& d : app.devices) if (d.kind != SourceMux::Kind::Sim) real.push_back(d);
         if (real.size() == 1) app.select(fg, real[0].kind, real[0].id, freq, rate);
-    }
+    };
+    if (k != SourceMux::Kind::None) app.select(fg, k, id, freq, rate);
+    else if (auto_pick) pick_only_device();
 
     using clock = std::chrono::steady_clock;
     auto last_stats = clock::now(), last_retry = clock::now();
@@ -301,36 +345,47 @@ int main(int argc, char** argv) {
             if (!web::json_parse_object(ctl, f)) continue;
             const std::string t = web::json_str(f, "t");
             if (t == "set") {
-                if (web::json_find(f, "freq")) app.tune_to(web::json_num(f, "freq"));
-                if (web::json_find(f, "offset")) app.tune_offset(web::json_num(f, "offset"));
-                if (web::json_find(f, "mode")) { app.mode = parse_mode(web::json_str(f, "mode")); app.demod.set_mode(app.mode); }
                 for (const auto& [key, val] : f) {
-                    if (key == "t" || key == "freq" || key == "offset" || key == "mode" || key == "rate") continue;
+                    if (key == "t") continue;
                     const double v = val == "true" ? 1.0 : val == "false" ? 0.0 : std::atof(val.c_str());
-                    app.src.set(key, v);
-                    bool seen = false;
-                    for (auto& g : app.gains) if (g.first == key) { g.second = v; seen = true; }
-                    if (!seen) app.gains.emplace_back(key, v);
+                    if (key == "freq") app.tune_to(v);
+                    else if (key == "offset") app.tune_offset(v);
+                    else if (key == "mode") {
+                        AnalogDemodBlock::Mode m;
+                        if (parse_mode(web::json_str(f, "mode"), m)) { app.mode = m; app.demod.set_mode(m); }
+                        else srv.send_error("set", "unknown mode");
+                    }
+                    else if (!app.set_control(key, v)) srv.send_error("set", "unknown or read-only control " + key);
                 }
                 app.publish();
             } else if (t == "source") {
-                if (parse_source(web::json_str(f, "id"), k, id)) { app.lost = false; app.select(fg, k, id, app.tuned(), app.rate); }
+                if (parse_source(web::json_str(f, "id"), k, id)) app.select(fg, k, id, app.tuned(), app.rate);
                 else srv.send_error("source", "unknown source");
             } else if (t == "rescan") {
-                app.publish();
+                app.rescan();
+                app.publish(true);
             }
         }
         const auto now = clock::now();
         if (now - last_stats >= std::chrono::seconds(1)) {
             last_stats = now;
-            if (app.running && app.src.lost() && !app.lost) { app.lost = true; app.publish(); }
+            if (app.running && app.src.lost()) {
+                app.lost = true;
+                fg.stop();
+                app.running = false;
+                app.src.close();
+                srv.send_error("source", "source lost, retrying");
+                app.rescan();
+                app.publish(true);
+            }
             web::JsonWriter w;
             w.begin_obj().key("overflows").num(static_cast<double>(app.src.overflows())).key("source_lost").boolean(app.lost).end();
             srv.set_stats_extra(w.out.substr(1, w.out.size() - 2));
         }
-        if (app.lost && now - last_retry >= std::chrono::seconds(2)) {
+        if (!app.running && now - last_retry >= std::chrono::seconds(2)) {
             last_retry = now;
-            app.select(fg, app.kind, app.id, app.tuned(), app.rate);
+            if (app.kind != SourceMux::Kind::None) app.select(fg, app.kind, app.id, app.tuned(), app.rate, true);
+            else if (auto_pick) { app.rescan(); pick_only_device(); }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
