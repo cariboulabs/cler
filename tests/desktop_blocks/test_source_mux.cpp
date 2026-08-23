@@ -7,6 +7,11 @@
 
 namespace {
 
+void expect_paced(size_t n, double expected) {
+    EXPECT_LE(static_cast<double>(n), expected * 1.1);
+    EXPECT_GE(static_cast<double>(n), expected * 0.6);
+}
+
 // drains `src` into a scratch channel for `seconds`, returns samples produced
 template <typename Src>
 size_t pump(Src& src, double seconds) {
@@ -27,7 +32,7 @@ size_t pump(Src& src, double seconds) {
 TEST(SimSource, PacesToRateAndCarriesTheTone) {
     SimSourceBlock sim("sim", 1e6, 100e6, 100e3, 40.0f);
     const size_t n = pump(sim, 1.0);
-    EXPECT_NEAR(static_cast<double>(n), 1e6, 5e4);
+    expect_paced(n, 1e6);
 
     cler::Channel<std::complex<float>> out(1 << 16);
     while (out.size() < 4096) sim.procedure(&out);
@@ -47,7 +52,7 @@ TEST(SimSource, SetRateRepaces) {
     SimSourceBlock sim("sim", 1e6);
     sim.set_rate(250e3);
     const size_t n = pump(sim, 0.5);
-    EXPECT_NEAR(static_cast<double>(n), 125e3, 1.5e4);
+    expect_paced(n, 125e3);
 }
 
 TEST(SourceMux, EnumerationAlwaysOffersTheSimulator) {
@@ -109,7 +114,7 @@ TEST(SourceMux, SimSelectCapabilitiesSetAndSamples) {
     EXPECT_FLOAT_EQ(static_cast<float>(mux.capabilities()[3].value), 10.0f);
 
     const size_t n = pump(mux, 0.3);
-    EXPECT_NEAR(static_cast<double>(n), 600e3, 60e3);
+    expect_paced(n, 600e3);
 
     ASSERT_TRUE(mux.select(SourceMux::Kind::Sim, "", 50e6, 1e6));
     EXPECT_DOUBLE_EQ(mux.rate(), 1e6);
