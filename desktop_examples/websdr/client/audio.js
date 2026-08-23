@@ -4,14 +4,16 @@ export class AudioPlayer {
     this.node = null;
     this.stats = { bufferedMs: 0, underruns: 0, dropped: 0 };
     this.gain = 1;
-    this.pending = [];
+    this.sampleRate = 0;
   }
   get running() { return !!this.ctx && this.ctx.state === 'running'; }
   async start() {
     if (!this.ctx) {
-      this.ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+      const AC = window.AudioContext || window.webkitAudioContext;
+      try { this.ctx = new AC({ sampleRate: 48000 }); } catch { this.ctx = new AC(); }
+      this.sampleRate = this.ctx.sampleRate;
       await this.ctx.audioWorklet.addModule('/client/audio_worklet.js');
-      this.node = new AudioWorkletNode(this.ctx, 'pcm-player', { outputChannelCount: [1] });
+      this.node = new AudioWorkletNode(this.ctx, 'pcm-player', { outputChannelCount: [1], processorOptions: { inputRate: 48000 } });
       this.node.port.onmessage = (e) => { this.stats = e.data; };
       this.node.connect(this.ctx.destination);
       this.node.port.postMessage({ gain: this.gain });

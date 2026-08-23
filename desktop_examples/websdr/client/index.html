@@ -88,11 +88,11 @@ const seqSpec = new SeqTracker(), seqAudio = new SeqTracker();
 let ws = null, backoff = 500, statsTimer = 0;
 
 const wf = new Waterfall($('spec'), $('wf'), {
-  onTune: (hz) => send(encodeSet({ freq: hz })),
-  onPan: (dHz) => { if (state.st.freq !== undefined) send(encodeSet({ freq: state.st.freq + dHz })); },
+  onTune: (hz) => { if (state.role === 'ctl') send(encodeSet({ freq: hz })); },
+  onPan: (dHz) => { if (state.role === 'ctl' && state.st.freq !== undefined) send(encodeSet({ freq: state.st.freq + dHz })); },
   onView: (v) => { prefs.view = v; savePrefs(); }
 });
-if (prefs.view) wf.setView(prefs.view.x0, prefs.view.x1);
+if (prefs.view && Number.isFinite(prefs.view.x0) && Number.isFinite(prefs.view.x1) && prefs.view.x0 >= 0 && prefs.view.x1 <= 1 && prefs.view.x0 < prefs.view.x1) wf.setView(prefs.view.x0, prefs.view.x1);
 audio.setGain(prefs.volume ?? 0.8);
 $('vol').value = prefs.volume ?? 0.8;
 $('vol').oninput = () => { audio.setGain(Number($('vol').value)); prefs.volume = Number($('vol').value); savePrefs(); };
@@ -112,7 +112,7 @@ function connect() {
   ws.onclose = () => { state.connected = false; $('conn').textContent = 'offline'; $('conn').className = 'pill bad'; audio.flush(); setTimeout(connect, backoff); backoff = Math.min(8000, backoff * 2); };
   ws.onerror = () => ws.close();
   ws.onmessage = (e) => {
-    if (typeof e.data === 'string') { onText(JSON.parse(e.data)); return; }
+    if (typeof e.data === 'string') { let m; try { m = JSON.parse(e.data); } catch { return; } onText(m); return; }
     const f = decodeFrame(e.data);
     if (!f) return;
     if (f.type === 0) { toast(`protocol version ${f.ver} not supported`); ws.close(); return; }
@@ -199,10 +199,10 @@ $('freq').onchange = () => {
 };
 $('devbtn').onclick = () => { renderDevices(); $('devices').classList.remove('hidden'); };
 $('devclose').onclick = () => $('devices').classList.add('hidden');
-$('rescan').onclick = () => send(JSON.stringify({ t: 'rescan' }));
+$('rescan').onclick = () => { if (state.role === 'ctl') send(JSON.stringify({ t: 'rescan' })); };
 $('listen').onclick = async () => { await audio.start(); $('listen').classList.add('hidden'); };
 $('listen').classList.remove('hidden');
-setInterval(() => { $('s-audio').textContent = audio.running ? `audio: ${audio.stats.bufferedMs} ms buffered · underruns ${audio.stats.underruns} · dropped ${audio.stats.dropped}` : 'audio: off'; }, 500);
+setInterval(() => { $('s-audio').textContent = audio.running ? `audio: ${audio.stats.bufferedMs} ms buffered · underruns ${audio.stats.underruns} · dropped ${audio.stats.dropped}${audio.sampleRate && audio.sampleRate !== 48000 ? ` · resampled to ${audio.sampleRate} Hz` : ''}` : 'audio: off'; }, 500);
 connect();
 </script>
 </body>
