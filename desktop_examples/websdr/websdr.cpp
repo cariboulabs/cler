@@ -59,8 +59,11 @@ static bool parse_source(const std::string& s, SourceMux::Kind& kind, std::strin
     const size_t c = s.find(':');
     const std::string k = s.substr(0, c);
     id = c == std::string::npos ? "" : s.substr(c + 1);
-    if (k == "sim") { kind = SourceMux::Kind::Sim; return true; }
-    if (k == "hackrf") { kind = SourceMux::Kind::HackRF; return true; }
+    for (auto kk : {SourceMux::Kind::HackRF, SourceMux::Kind::Pluto, SourceMux::Kind::UHD,
+                    SourceMux::Kind::Cariboulite, SourceMux::Kind::Soapy, SourceMux::Kind::SigMF,
+                    SourceMux::Kind::Sim}) {
+        if (k == SourceMux::kind_name(kk)) { kind = kk; return true; }
+    }
     return false;
 }
 
