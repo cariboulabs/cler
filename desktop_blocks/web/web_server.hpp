@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
-#include "desktop_blocks/web/spectrum_frame.hpp"
+#include "desktop_blocks/spectrum/spectrum_frame.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -54,6 +54,7 @@ public:
     void set_gen(uint32_t gen) { _gen.store(gen, std::memory_order_relaxed); }
     void set_state(const std::string& json_object);
     void set_hello_extra(const std::string& json_fragment);
+    void resend_hello();
     void set_stats_extra(const std::string& json_fragment);
     void set_health_extra(const std::string& json_fragment);
     void send_error(const std::string& code, const std::string& msg);

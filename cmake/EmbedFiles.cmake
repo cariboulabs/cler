@@ -17,13 +17,19 @@ endif()
 
 set(CLER_EMBED_SCRIPT "${CMAKE_CURRENT_LIST_FILE}")
 
-function(cler_embed_dir target dir header var)
+function(cler_embed_dir lib dir header var)
   file(GLOB files CONFIGURE_DEPENDS "${dir}/*.html" "${dir}/*.js" "${dir}/*.css")
   set(out "${CMAKE_CURRENT_BINARY_DIR}/${header}")
   add_custom_command(OUTPUT "${out}"
     COMMAND ${CMAKE_COMMAND} -DOUT=${out} -DVAR=${var} "-DFILES=${files}" -P ${CLER_EMBED_SCRIPT}
     DEPENDS ${files} ${CLER_EMBED_SCRIPT}
     COMMENT "Embedding ${dir} into ${header}" VERBATIM)
-  target_sources(${target} PRIVATE "${out}")
-  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+  add_custom_target(${lib}_gen DEPENDS "${out}")
+  add_library(${lib} INTERFACE)
+  target_include_directories(${lib} INTERFACE "${CMAKE_CURRENT_BINARY_DIR}")
+endfunction()
+
+function(cler_embed_link target lib)
+  target_link_libraries(${target} PRIVATE ${lib})
+  add_dependencies(${target} ${lib}_gen)
 endfunction()

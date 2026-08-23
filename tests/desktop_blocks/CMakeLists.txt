@@ -149,3 +149,14 @@ if (NODE_EXECUTABLE)
         ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/proto.test.mjs
         ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/panel.test.mjs)
 endif()
+
+if (TARGET websdr)
+    if (NODE_EXECUTABLE)
+        add_test(NAME websdr_e2e_test COMMAND ${CMAKE_COMMAND} -E env
+            WEBSDR_BIN=$<TARGET_FILE:websdr> NODE_PATH=${PROJECT_SOURCE_DIR}/tools/flowgraph_gui/app/node_modules
+            ${NODE_EXECUTABLE} ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/e2e.mjs)
+    else()
+        add_test(NAME websdr_e2e_test COMMAND sh -c "echo SKIP: node not found; exit 77")
+    endif()
+    set_tests_properties(websdr_e2e_test PROPERTIES SKIP_RETURN_CODE 77)
+endif()

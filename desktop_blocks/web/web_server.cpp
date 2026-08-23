@@ -272,6 +272,16 @@ void WebServer::set_state(const std::string& json_object) {
 }
 
 void WebServer::set_hello_extra(const std::string& json_fragment) { std::lock_guard<std::mutex> lock(_mutex); _hello_extra = json_fragment; }
+
+void WebServer::resend_hello() {
+    std::vector<std::pair<std::shared_ptr<ix::WebSocket>, std::string>> out;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        for (auto& kv : _impl->clients)
+            if (auto sp = kv.second->ws.lock()) out.emplace_back(sp, hello_for(*kv.second));
+    }
+    for (auto& p : out) p.first->sendText(p.second);
+}
 void WebServer::set_stats_extra(const std::string& json_fragment) { std::lock_guard<std::mutex> lock(_mutex); _stats_extra = json_fragment; }
 void WebServer::set_health_extra(const std::string& json_fragment) { std::lock_guard<std::mutex> lock(_mutex); _health_extra = json_fragment; }
 

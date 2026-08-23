@@ -83,7 +83,7 @@ struct SourceMux : public cler::BlockBase {
                 return true;
 #endif
             case Kind::Sim:
-                _v.emplace<SimSourceBlock>("sim", rate_hz, freq_hz);
+                _v.emplace<SimSourceBlock>("sim", rate_hz, freq_hz, 400e3);
                 return true;
             default:
                 return false;

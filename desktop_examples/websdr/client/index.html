@@ -109,7 +109,7 @@ function connect() {
   ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => { state.connected = true; backoff = 500; $('conn').textContent = 'online'; $('conn').className = 'pill ok'; send(encodeHello(token)); seqSpec.reset(); seqAudio.reset(); audio.flush(); };
-  ws.onclose = () => { state.connected = false; $('conn').textContent = 'offline'; $('conn').className = 'pill bad'; audio.flush(); setTimeout(connect, backoff); backoff = Math.min(8000, backoff * 2); };
+  ws.onclose = () => { state.connected = false; state.hello = null; $('conn').textContent = 'offline'; $('conn').className = 'pill bad'; audio.flush(); setTimeout(connect, backoff); backoff = Math.min(8000, backoff * 2); };
   ws.onerror = () => ws.close();
   ws.onmessage = (e) => {
     if (typeof e.data === 'string') { let m; try { m = JSON.parse(e.data); } catch { return; } onText(m); return; }
@@ -125,13 +125,14 @@ function connect() {
 function onText(m) {
   if (m.t === 'hello') {
     if (m.proto !== 1) { toast(`server protocol ${m.proto}, client 1`); return; }
+    const first = !state.hello;
     state.hello = m; state.sources = m.sources || []; state.role = m.role;
     $('s-ver').textContent = m.version ? `server ${m.version}` : '';
     state.model = panel.buildModel(m.controls, m.state);
     renderControls();
     applyState({ ...(m.state || {}), role: m.role });
     renderDevices();
-    $('devices').classList.toggle('hidden', !!(m.state && m.state.source));
+    if (first) $('devices').classList.toggle('hidden', !!(m.state && m.state.source));
   } else if (m.t === 'state') {
     applyState(m);
   } else if (m.t === 'stats') {

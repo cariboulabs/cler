@@ -3,6 +3,7 @@
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include "desktop_blocks/plots/spectral_windows.hpp"
+#include "desktop_blocks/spectrum/spectrum_frame.hpp"
 #include "liquid.h"
 
 #include <algorithm>
@@ -12,19 +13,6 @@
 #include <complex>
 #include <cstdint>
 #include <vector>
-
-// One averaged power spectrum, dB quantised to u8 on a fixed scale so a
-// consumer can draw an axis without autoscale: dB = db_min + bins[i] * db_step.
-// Fixed-size so it is a POD channel element; n <= MAX_N bins are valid.
-struct SpectrumFrame {
-    static constexpr size_t MAX_N = 4096;
-    uint32_t gen;
-    double center_hz;
-    double rate_hz;
-    uint16_t n;
-    float db_min, db_step;
-    uint8_t bins[MAX_N];
-};
 
 // Headless spectrum: FFT in procedure(), window + power average over up to
 // `avg` consecutive frames, at most `fps` frames per second. A tap off a
