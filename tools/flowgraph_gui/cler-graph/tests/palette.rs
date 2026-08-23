@@ -708,6 +708,13 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         PortCount::Fixed(1),
         PortCount::Fixed(1),
     ),
+    (
+        "WebSinkBlock",
+        2,
+        0,
+        PortCount::Fixed(2),
+        PortCount::Fixed(0),
+    ),
 ];
 
 #[test]

@@ -80,14 +80,14 @@ static double free_disk(const std::string& dir) {
 }
 
 struct App {
-    SourceMux src{"Source"};
-    FanoutBlock<std::complex<float>> fan{"RF fanout", 2, 1 << 20};
-    SpectrumBlock spec;
-    FrequencyShiftBlock shift;
-    MultiStageResamplerBlock<std::complex<float>> resamp;
-    AnalogDemodBlock demod;
+    SourceMux& src;
+    FanoutBlock<std::complex<float>>& fan;
+    SpectrumBlock& spec;
+    FrequencyShiftBlock& shift;
+    MultiStageResamplerBlock<std::complex<float>>& resamp;
+    AnalogDemodBlock& demod;
     web::WebServer& srv;
-    WebSinkBlock sink;
+    WebSinkBlock& sink;
 
     std::string record_dir, state_file;
     std::vector<std::pair<std::string, double>> gains;
@@ -100,12 +100,10 @@ struct App {
     std::vector<SourceMux::DeviceInfo> devices;
     std::vector<SourceMux::Control> caps;
 
-    App(web::WebServer& server, double rate_hz, double freq_hz, AnalogDemodBlock::Mode m)
-        : spec("Spectrum", rate_hz, 1024, 20.0f, -120.0f, 0.5f, 4, SpectralWindow::Hann, 1 << 16),
-          shift("Tune shift", 0.0, rate_hz, 1 << 18),
-          resamp("Channel", static_cast<float>(CHANNEL_HZ / rate_hz), 60.0f, 1 << 18),
-          demod("Demod", CHANNEL_HZ, m, 1 << 16),
-          srv(server), sink("Web sink", server),
+    App(SourceMux& s, FanoutBlock<std::complex<float>>& f, SpectrumBlock& sp, FrequencyShiftBlock& sh,
+        MultiStageResamplerBlock<std::complex<float>>& r, AnalogDemodBlock& d, web::WebServer& server,
+        WebSinkBlock& k, double rate_hz, double freq_hz, AnalogDemodBlock::Mode m)
+        : src(s), fan(f), spec(sp), shift(sh), resamp(r), demod(d), srv(server), sink(k),
           rate(rate_hz), center(freq_hz), mode(m) {}
 
     double tuned() const { return center + offset; }
@@ -324,19 +322,26 @@ int main(int argc, char** argv) {
         o.token = hex;
     }
     web::WebServer srv(o);
-    App app(srv, rate, freq, mode);
+    SourceMux src("Source");
+    FanoutBlock<std::complex<float>> fan("RF fanout", 2, 1 << 20);
+    SpectrumBlock spec("Spectrum", rate, 1024, 20.0f, -120.0f, 0.5f, 4, SpectralWindow::Hann, 1 << 16);
+    FrequencyShiftBlock shift("Tune shift", 0.0, rate, 1 << 18);
+    MultiStageResamplerBlock<std::complex<float>> resamp("Channel", static_cast<float>(CHANNEL_HZ / rate), 60.0f, 1 << 18);
+    AnalogDemodBlock demod("Demod", CHANNEL_HZ, mode, 1 << 16);
+    WebSinkBlock sink("Web sink", srv);
+    App app(src, fan, spec, shift, resamp, demod, srv, sink, rate, freq, mode);
     app.gains = gains;
     app.record_dir = record_dir;
     app.state_file = state_file;
 
     auto fg = cler::make_desktop_flowgraph(
-        cler::BlockRunner(&app.src, &app.fan.in),
-        cler::BlockRunner(&app.fan, &app.spec.in, &app.shift.in),
-        cler::BlockRunner(&app.spec, &app.sink.spectrum),
-        cler::BlockRunner(&app.shift, &app.resamp.in),
-        cler::BlockRunner(&app.resamp, &app.demod.in),
-        cler::BlockRunner(&app.demod, &app.sink.audio),
-        cler::BlockRunner(&app.sink));
+        cler::BlockRunner(&src, &fan.in),
+        cler::BlockRunner(&fan, &spec.in, &shift.in),
+        cler::BlockRunner(&spec, &sink.spectrum),
+        cler::BlockRunner(&shift, &resamp.in),
+        cler::BlockRunner(&resamp, &demod.in),
+        cler::BlockRunner(&demod, &sink.audio),
+        cler::BlockRunner(&sink));
 
     app.rescan();
     app.publish(true);
