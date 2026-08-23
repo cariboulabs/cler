@@ -19,6 +19,7 @@ struct FrequencyShiftBlock : public cler::BlockBase {
         }
 
         _dshift = std::exp(std::complex<float>(0.0, 2.0 * M_PI * _frequency_shift / _sample_rate));
+        _pending_shift.store(frequency_shift_hz, std::memory_order_relaxed);
     }
 
     ~FrequencyShiftBlock() {
@@ -28,6 +29,12 @@ struct FrequencyShiftBlock : public cler::BlockBase {
     // Thread-safe: applied at the top of the next procedure().
     void set_frequency_shift(double frequency_shift_hz) {
         _pending_shift.store(frequency_shift_hz, std::memory_order_relaxed);
+        _shift_dirty.store(true, std::memory_order_release);
+    }
+
+    // Only while the graph is stopped.
+    void set_sample_rate(double sample_rate_hz) {
+        _sample_rate = sample_rate_hz;
         _shift_dirty.store(true, std::memory_order_release);
     }
 
