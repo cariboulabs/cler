@@ -59,8 +59,11 @@ static bool parse_source(const std::string& s, SourceMux::Kind& kind, std::strin
     const size_t c = s.find(':');
     const std::string k = s.substr(0, c);
     id = c == std::string::npos ? "" : s.substr(c + 1);
-    if (k == "sim") { kind = SourceMux::Kind::Sim; return true; }
-    if (k == "hackrf") { kind = SourceMux::Kind::HackRF; return true; }
+    for (auto kk : {SourceMux::Kind::HackRF, SourceMux::Kind::Pluto, SourceMux::Kind::UHD,
+                    SourceMux::Kind::Cariboulite, SourceMux::Kind::Soapy, SourceMux::Kind::SigMF,
+                    SourceMux::Kind::Sim}) {
+        if (k == SourceMux::kind_name(kk)) { kind = kk; return true; }
+    }
     return false;
 }
 
@@ -183,6 +186,7 @@ struct App {
             return false;
         }
         rate = src.rate(); center = src.center(); offset = 0.0; lost = false;
+        if (std::fabs(center - freq_hz) > rate) freq_hz = center + IF_OFFSET;
         for (const auto& g : gains) src.set(g.first, g.second);
         resamp.set_ratio(static_cast<float>(CHANNEL_HZ / rate));
         spec.set_rate(rate);
@@ -217,6 +221,7 @@ struct App {
             offset = hz - center;
         }
         src.set("freq", center);
+        center = src.center();
         shift.set_frequency_shift(-offset);
         bump_gen();
     }
