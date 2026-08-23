@@ -51,7 +51,8 @@ TEST(SimSource, SetRateRepaces) {
 }
 
 TEST(SourceMux, EnumerationAlwaysOffersTheSimulator) {
-    auto devs = SourceMux::enumerate();
+    SourceMux mux("mux");
+    auto devs = mux.enumerate();
     ASSERT_FALSE(devs.empty());
     bool sim = false;
     for (auto& d : devs) if (d.kind == SourceMux::Kind::Sim) sim = true;
@@ -68,9 +69,21 @@ TEST(SourceMux, EmptyMuxIsIdle) {
     EXPECT_DOUBLE_EQ(mux.rate(), 0.0);
 }
 
+TEST(SourceMux, SelectOfAMissingBackendFailsCleanly) {
+    SourceMux mux("mux");
+    EXPECT_FALSE(mux.select(SourceMux::Kind::Cariboulite, "", 100e6, 2e6));
+    EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
+#ifdef CLER_HAS_HACKRF
+    EXPECT_FALSE(mux.select(SourceMux::Kind::HackRF, "no-such-serial", 100e6, 2.4e6));
+    EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
+#endif
+    EXPECT_TRUE(mux.select(SourceMux::Kind::Sim, "", 100e6, 2e6));
+    EXPECT_EQ(mux.kind(), SourceMux::Kind::Sim);
+}
+
 TEST(SourceMux, SimSelectCapabilitiesSetAndSamples) {
     SourceMux mux("mux");
-    mux.select(SourceMux::Kind::Sim, "", 100e6, 2e6);
+    ASSERT_TRUE(mux.select(SourceMux::Kind::Sim, "", 100e6, 2e6));
     EXPECT_EQ(mux.kind(), SourceMux::Kind::Sim);
     EXPECT_DOUBLE_EQ(mux.rate(), 2e6);
     EXPECT_DOUBLE_EQ(mux.center(), 100e6);
@@ -81,6 +94,9 @@ TEST(SourceMux, SimSelectCapabilitiesSetAndSamples) {
     EXPECT_EQ(caps[0].id, "freq");
     EXPECT_EQ(caps[0].type, "range");
     EXPECT_DOUBLE_EQ(caps[0].value, 100e6);
+    EXPECT_FALSE(caps[0].ro);
+    EXPECT_EQ(caps[1].id, "rate");
+    EXPECT_TRUE(caps[1].ro);
     EXPECT_EQ(caps[2].id, "tone_hz");
 
     mux.set("freq", 101e6);
@@ -93,7 +109,7 @@ TEST(SourceMux, SimSelectCapabilitiesSetAndSamples) {
     const size_t n = pump(mux, 0.3);
     EXPECT_NEAR(static_cast<double>(n), 600e3, 60e3);
 
-    mux.select(SourceMux::Kind::Sim, "", 50e6, 1e6);
+    ASSERT_TRUE(mux.select(SourceMux::Kind::Sim, "", 50e6, 1e6));
     EXPECT_DOUBLE_EQ(mux.rate(), 1e6);
     EXPECT_DOUBLE_EQ(mux.center(), 50e6);
     mux.close();
@@ -102,19 +118,23 @@ TEST(SourceMux, SimSelectCapabilitiesSetAndSamples) {
 
 #ifdef CLER_HAS_HACKRF
 TEST(SourceMux, HackRFIfPresent) {
-    auto devs = SourceMux::enumerate();
+    SourceMux mux("mux");
+    auto devs = mux.enumerate();
     const SourceMux::DeviceInfo* hack = nullptr;
     for (auto& d : devs) if (d.kind == SourceMux::Kind::HackRF) hack = &d;
     if (!hack) GTEST_SKIP() << "no HackRF connected";
 
-    SourceMux mux("mux");
-    mux.select(SourceMux::Kind::HackRF, hack->id, 100e6, 2.4e6);
+    ASSERT_TRUE(mux.select(SourceMux::Kind::HackRF, hack->id, 100e6, 2.4e6));
     EXPECT_EQ(mux.kind(), SourceMux::Kind::HackRF);
     EXPECT_DOUBLE_EQ(mux.rate(), 2.4e6);
     EXPECT_FALSE(mux.lost());
+    auto again = mux.enumerate();
+    ASSERT_EQ(again.size(), 2u);
+    EXPECT_EQ(again[0].id, hack->id);
     auto caps = mux.capabilities();
     ASSERT_EQ(caps.size(), 5u);
     EXPECT_EQ(caps[1].type, "enum");
+    EXPECT_TRUE(caps[1].ro);
     EXPECT_EQ(caps[4].id, "amp");
     EXPECT_EQ(caps[4].type, "bool");
     mux.set("lna", 24);

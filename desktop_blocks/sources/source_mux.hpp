@@ -7,7 +7,6 @@
 #endif
 
 #include <complex>
-#include <cstring>
 #include <string>
 #include <variant>
 #include <vector>
@@ -49,15 +48,16 @@ struct SourceMux : public cler::BlockBase {
         }
     }
 
-    static std::vector<DeviceInfo> enumerate() {
+    std::vector<DeviceInfo> enumerate() const {
         std::vector<DeviceInfo> out;
 #ifdef CLER_HAS_HACKRF
-        if (hackrf_init() == HACKRF_SUCCESS) {
+        if (std::holds_alternative<SourceHackRFBlock>(_v)) {
+            out.push_back({Kind::HackRF, _id, "HackRF " + short_serial(_id)});
+        } else if (hackrf_init() == HACKRF_SUCCESS) {
             if (hackrf_device_list_t* list = hackrf_device_list()) {
                 for (int i = 0; i < list->devicecount; ++i) {
-                    const char* serial = list->serial_numbers[i] ? list->serial_numbers[i] : "";
-                    std::string tail = std::strlen(serial) > 8 ? std::string(serial + std::strlen(serial) - 8) : serial;
-                    out.push_back({Kind::HackRF, serial, "HackRF " + tail});
+                    const std::string serial = list->serial_numbers[i] ? list->serial_numbers[i] : "";
+                    out.push_back({Kind::HackRF, serial, "HackRF " + short_serial(serial)});
                 }
                 hackrf_device_list_free(list);
             }
@@ -68,25 +68,25 @@ struct SourceMux : public cler::BlockBase {
         return out;
     }
 
-    // Graph must be stopped. Closes the current device, opens the new one.
-    void select(Kind kind, const std::string& id, double freq_hz, double rate_hz) {
+    // Graph must be stopped. Closes the current device, opens the new one;
+    // false (and no source) if the device is gone, busy or not compiled in.
+    bool select(Kind kind, const std::string& id, double freq_hz, double rate_hz) {
         _v.emplace<std::monostate>();
         _id = id;
         switch (kind) {
 #ifdef CLER_HAS_HACKRF
             case Kind::HackRF:
+                if (!SourceHackRFBlock::can_open(id.empty() ? nullptr : id.c_str())) return false;
                 _v.emplace<SourceHackRFBlock>("hackrf", static_cast<uint64_t>(freq_hz + 0.5),
                                               static_cast<uint32_t>(rate_hz + 0.5), 40, 16, false, 0,
                                               id.empty() ? nullptr : id.c_str());
-                break;
+                return true;
 #endif
             case Kind::Sim:
                 _v.emplace<SimSourceBlock>("sim", rate_hz, freq_hz);
-                break;
-            case Kind::None:
-                break;
+                return true;
             default:
-                cler::panic("SourceMux: backend not compiled in");
+                return false;
         }
     }
 
@@ -145,14 +145,14 @@ struct SourceMux : public cler::BlockBase {
         std::vector<Control> c;
         if (auto* s = std::get_if<SimSourceBlock>(&_v)) {
             c.push_back(range("freq", "Frequency", "Hz", 0, 6e9, 1, s->center()));
-            c.push_back(range("rate", "Sample rate", "Hz", 48e3, 20e6, 1, s->rate()));
+            c.push_back(range("rate", "Sample rate", "Hz", 48e3, 20e6, 1, s->rate(), true));
             c.push_back(range("tone_hz", "Tone offset", "Hz", -10e6, 10e6, 1, s->tone_hz()));
             c.push_back(range("snr_db", "SNR", "dB", -20, 80, 1, s->snr_db()));
         }
 #ifdef CLER_HAS_HACKRF
         if (auto* h = std::get_if<SourceHackRFBlock>(&_v)) {
             c.push_back(range("freq", "Frequency", "Hz", 1e6, 6e9, 1, static_cast<double>(h->get_frequency())));
-            Control r = range("rate", "Sample rate", "Hz", 2e6, 20e6, 0, h->get_sample_rate());
+            Control r = range("rate", "Sample rate", "Hz", 2e6, 20e6, 0, h->get_sample_rate(), true);
             r.type = "enum";
             for (const char* o : {"2000000", "2400000", "4000000", "8000000", "10000000", "12500000", "16000000", "20000000"}) r.options.push_back(o);
             c.push_back(r);
@@ -187,11 +187,15 @@ struct SourceMux : public cler::BlockBase {
 
 private:
     static Control range(const char* id, const char* label, const char* unit,
-                         double min, double max, double step, double value) {
+                         double min, double max, double step, double value, bool ro = false) {
         Control c;
         c.id = id; c.label = label; c.type = "range"; c.unit = unit;
-        c.min = min; c.max = max; c.step = step; c.value = value;
+        c.min = min; c.max = max; c.step = step; c.value = value; c.ro = ro;
         return c;
+    }
+
+    static std::string short_serial(const std::string& s) {
+        return s.size() > 8 ? s.substr(s.size() - 8) : s;
     }
 
     std::variant<std::monostate,

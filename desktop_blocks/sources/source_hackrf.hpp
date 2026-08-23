@@ -126,6 +126,17 @@ struct SourceHackRFBlock : public cler::BlockBase {
         return cler::Empty{};
     }
 
+    // Opens and closes the device without streaming, so a caller that cannot
+    // afford the constructor's panic (busy, unplugged) can ask first.
+    static bool can_open(const char* serial = nullptr) {
+        if (hackrf_init() != HACKRF_SUCCESS) return false;
+        hackrf_device* dev = nullptr;
+        const int r = serial && *serial ? hackrf_open_by_serial(serial, &dev) : hackrf_open(&dev);
+        if (r == HACKRF_SUCCESS) hackrf_close(dev);
+        hackrf_exit();
+        return r == HACKRF_SUCCESS;
+    }
+
     uint64_t get_frequency() const { return _freq_hz; }
     uint32_t get_sample_rate() const { return _samp_rate_hz; }
     int get_lna_gain() const { return _lna_gain_db; }
