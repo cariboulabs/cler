@@ -2,6 +2,7 @@
 
 #include "desktop_blocks/web/spectrum_frame.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -104,6 +105,7 @@ inline std::string json_escape(const std::string& s) {
 }
 
 inline std::string json_number(double v) {
+    if (!std::isfinite(v)) return "null";
     char b[32];
     std::snprintf(b, sizeof(b), "%.10g", v);
     return b;

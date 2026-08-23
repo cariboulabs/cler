@@ -37,9 +37,7 @@ struct ClientStats {
     uint64_t spectrum_dropped = 0, audio_dropped = 0;
 };
 
-// HTTP + WebSocket front end. Producer side (push_*) is lock-free rings fed by the WebSink block;
-// the server thread drains them at 50 Hz and fans out. Control messages from the controller
-// socket land in a mailbox the app polls from its own thread.
+// push_* are single-producer (one cler worker) into SPSC rings; call set_on_control before start().
 class WebServer {
 public:
     explicit WebServer(ServerOptions opts);
