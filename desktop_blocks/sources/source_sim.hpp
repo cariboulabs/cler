@@ -7,7 +7,6 @@
 #include <complex>
 #include <random>
 #include <thread>
-#include <vector>
 
 // A stand-in SDR: one complex tone at `tone_hz` above centre, in white noise,
 // paced to real time so the rest of the graph behaves as with hardware.
@@ -18,14 +17,13 @@ struct SimSourceBlock : public cler::BlockBase {
     SimSourceBlock(const char* name, double rate_hz, double center_hz = 100e6,
                    double tone_hz = 100e3, float snr_db = 30.0f)
         : cler::BlockBase(name), _rate(rate_hz), _center(center_hz),
-          _tone(tone_hz), _snr_db(snr_db), _buffer(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>)),
-          _rng(12345)
+          _tone(tone_hz), _snr_db(snr_db), _rng(12345)
     {
         if (rate_hz <= 0.0) cler::panic("SimSourceBlock: rate must be positive");
     }
 
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<std::complex<float>>* out) {
-        const size_t space = std::min(out->space(), _buffer.size());
+        auto [wptr, space] = out->write_dbf();
         if (space == 0) return cler::Error::NotEnoughSpace;
 
         const double rate = _rate.load(std::memory_order_relaxed);
@@ -42,12 +40,12 @@ struct SimSourceBlock : public cler::BlockBase {
         const std::complex<double> rot = std::polar(1.0, inc);
         const float sigma = std::pow(10.0f, -_snr_db.load(std::memory_order_relaxed) / 20.0f) / std::sqrt(2.0f);
         for (size_t i = 0; i < n; ++i) {
-            _buffer[i] = {static_cast<float>(_phasor.real()) + sigma * _gauss(_rng),
-                          static_cast<float>(_phasor.imag()) + sigma * _gauss(_rng)};
+            wptr[i] = {static_cast<float>(_phasor.real()) + sigma * _gauss(_rng),
+                       static_cast<float>(_phasor.imag()) + sigma * _gauss(_rng)};
             _phasor *= rot;
         }
         _phasor /= std::abs(_phasor);
-        out->writeN(_buffer.data(), n);
+        out->commit_write(n);
         _emitted += n;
         if (due - _emitted > rate / 10.0) _epoch = clock::now() - to_duration(_emitted, rate);
         return cler::Empty{};
@@ -57,7 +55,12 @@ struct SimSourceBlock : public cler::BlockBase {
     double center() const { return _center.load(std::memory_order_relaxed); }
     double tone_hz() const { return _tone.load(std::memory_order_relaxed); }
     float snr_db() const { return _snr_db.load(std::memory_order_relaxed); }
-    void set_rate(double hz) { _rate.store(hz, std::memory_order_relaxed); _started = false; }
+    // Graph stopped only: restarts the pacing epoch.
+    void set_rate(double hz) {
+        if (hz <= 0.0) cler::panic("SimSourceBlock: rate must be positive");
+        _rate.store(hz, std::memory_order_relaxed);
+        _started = false;
+    }
     void set_center(double hz) { _center.store(hz, std::memory_order_relaxed); }
     void set_tone_hz(double hz) { _tone.store(hz, std::memory_order_relaxed); }
     void set_snr_db(float db) { _snr_db.store(db, std::memory_order_relaxed); }
@@ -74,7 +77,6 @@ private:
 
     std::atomic<double> _rate, _center, _tone;
     std::atomic<float> _snr_db;
-    std::vector<std::complex<float>> _buffer;
     std::complex<double> _phasor{1.0, 0.0};
     std::mt19937 _rng;
     std::normal_distribution<float> _gauss{0.0f, 1.0f};
