@@ -6,7 +6,9 @@
 #include <ixwebsocket/IXNetSystem.h>
 #include <ixwebsocket/IXWebSocket.h>
 
+#include <cctype>
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -19,6 +21,18 @@ bool is_loopback(const std::string& host) {
     return host == "127.0.0.1" || host == "localhost" || host == "::1";
 }
 
+std::string percent_decode(const std::string& s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '%' && i + 2 < s.size() && std::isxdigit(static_cast<unsigned char>(s[i + 1])) && std::isxdigit(static_cast<unsigned char>(s[i + 2]))) {
+            out += static_cast<char>(std::stoi(s.substr(i + 1, 2), nullptr, 16));
+            i += 2;
+        } else if (s[i] == '+') out += ' ';
+        else out += s[i];
+    }
+    return out;
+}
+
 std::string query_param(const std::string& uri, const std::string& name) {
     const size_t q = uri.find('?');
     if (q == std::string::npos) return "";
@@ -27,7 +41,7 @@ std::string query_param(const std::string& uri, const std::string& name) {
         size_t amp = uri.find('&', i);
         if (amp == std::string::npos) amp = uri.size();
         const size_t eq = uri.find('=', i);
-        if (eq != std::string::npos && eq < amp && uri.compare(i, eq - i, name) == 0) return uri.substr(eq + 1, amp - eq - 1);
+        if (eq != std::string::npos && eq < amp && uri.compare(i, eq - i, name) == 0) return percent_decode(uri.substr(eq + 1, amp - eq - 1));
         i = amp + 1;
     }
     return "";
@@ -36,6 +50,11 @@ std::string query_param(const std::string& uri, const std::string& name) {
 std::string strip_scheme(const std::string& origin) {
     const size_t p = origin.find("://");
     return p == std::string::npos ? origin : origin.substr(p + 3);
+}
+
+std::string host_part(const std::string& host_port) {
+    if (!host_port.empty() && host_port[0] == '[') { const size_t e = host_port.find(']'); return e == std::string::npos ? host_port : host_port.substr(1, e - 1); }
+    return host_port.substr(0, host_port.find(':'));
 }
 
 const char* content_type(const std::string& name) {
@@ -62,13 +81,13 @@ struct WebServer::Client {
     std::weak_ptr<ix::WebSocket> ws;
     uint64_t order = 0;
     bool controller = false;
-    int ping_misses = 0;
-    ClientStats stats;
+    std::atomic<int> ping_misses{0};
+    std::atomic<uint64_t> spectrum_dropped{0}, audio_dropped{0};
 };
 
 struct WebServer::Impl {
     std::unique_ptr<ix::HttpServer> srv;
-    std::map<ix::WebSocket*, Client> clients;
+    std::map<ix::WebSocket*, std::shared_ptr<Client>> clients;
     uint64_t next_order = 0;
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     std::vector<uint8_t> buf = std::vector<uint8_t>(64 * 1024);
@@ -94,6 +113,9 @@ void WebServer::start() {
         h["Cache-Control"] = "no-store";
         std::string path = req->uri.substr(0, req->uri.find('?'));
         if (path == "/health") {
+            if (!_opts.token.empty() && query_param(req->uri, "token") != _opts.token) {
+                return std::make_shared<ix::HttpResponse>(401, "Unauthorized", ix::HttpErrorCode::Ok, h, "token required");
+            }
             h["Content-Type"] = "application/json";
             const auto up = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - _impl->started).count();
             std::string body;
@@ -106,12 +128,12 @@ void WebServer::start() {
             return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, h, body);
         }
         std::string name = path == "/" ? "index.html" : path.rfind("/client/", 0) == 0 ? path.substr(8) : "";
-        if (name.empty() || name.find('/') != std::string::npos || name.find("..") != std::string::npos) {
+        if (name.empty() || name[0] == '.' || name.find('/') != std::string::npos || name.find("..") != std::string::npos) {
             return std::make_shared<ix::HttpResponse>(404, "Not Found", ix::HttpErrorCode::Ok, h, "not found");
         }
         std::string body;
         bool found = false;
-        if (!_opts.client_dir.empty()) {
+        if (!_opts.client_dir.empty() && std::filesystem::is_regular_file(_opts.client_dir + "/" + name)) {
             std::ifstream f(_opts.client_dir + "/" + name, std::ios::binary);
             if (f) { std::ostringstream ss; ss << f.rdbuf(); body = ss.str(); found = true; }
         }
@@ -129,20 +151,22 @@ void WebServer::start() {
             auto hdr = [&](const char* k) { auto it = info.headers.find(k); return it == info.headers.end() ? std::string() : it->second; };
             const std::string origin = strip_scheme(hdr("Origin")), host = hdr("Host");
             if (!origin.empty() && origin != host) { ws.close(1008, "origin"); return; }
-            if (!_opts.token.empty()) {
-                const std::string t = query_param(info.uri, "token");
-                if (t != _opts.token && info.protocol != _opts.token && hdr("Sec-WebSocket-Protocol") != _opts.token) { ws.close(1008, "token"); return; }
-            }
+            if (_opts.token.empty()) {
+                const std::string hp = host_part(host);
+                if (!is_loopback(hp) && hp != _opts.bind) { ws.close(1008, "host"); return; }
+            } else if (query_param(info.uri, "token") != _opts.token) { ws.close(1008, "token"); return; }
             std::shared_ptr<ix::WebSocket> sp;
             for (auto& c : _impl->srv->getClients()) if (c.get() == &ws) sp = c;
             std::string hello;
             {
                 std::lock_guard<std::mutex> lock(_mutex);
-                Client& c = _impl->clients[&ws];
+                auto cp = std::make_shared<Client>();
+                _impl->clients[&ws] = cp;
+                Client& c = *cp;
                 c.ws = sp;
                 c.order = _impl->next_order++;
                 bool have_ctl = false;
-                for (auto& kv : _impl->clients) have_ctl = have_ctl || kv.second.controller;
+                for (auto& kv : _impl->clients) have_ctl = have_ctl || kv.second->controller;
                 c.controller = !have_ctl;
                 hello = hello_for(c);
             }
@@ -156,13 +180,13 @@ void WebServer::start() {
                 std::lock_guard<std::mutex> lock(_mutex);
                 auto it = _impl->clients.find(&ws);
                 if (it == _impl->clients.end()) return;
-                const bool was_ctl = it->second.controller;
+                const bool was_ctl = it->second->controller;
                 _impl->clients.erase(it);
                 if (was_ctl && !_impl->clients.empty()) {
                     auto best = _impl->clients.begin();
-                    for (auto i = _impl->clients.begin(); i != _impl->clients.end(); ++i) if (i->second.order < best->second.order) best = i;
-                    best->second.controller = true;
-                    target = best->second.ws.lock();
+                    for (auto i = _impl->clients.begin(); i != _impl->clients.end(); ++i) if (i->second->order < best->second->order) best = i;
+                    best->second->controller = true;
+                    target = best->second->ws.lock();
                     promote = "{\"t\":\"state\",\"role\":\"ctl\"" + (_state.empty() ? "" : "," + object_inner(_state)) + "}";
                 }
             }
@@ -172,7 +196,7 @@ void WebServer::start() {
         if (msg->type == ix::WebSocketMessageType::Pong) {
             std::lock_guard<std::mutex> lock(_mutex);
             auto it = _impl->clients.find(&ws);
-            if (it != _impl->clients.end()) it->second.ping_misses = 0;
+            if (it != _impl->clients.end()) it->second->ping_misses = 0;
             return;
         }
         if (msg->type != ix::WebSocketMessageType::Message || msg->binary) return;
@@ -184,7 +208,7 @@ void WebServer::start() {
         {
             std::lock_guard<std::mutex> lock(_mutex);
             auto it = _impl->clients.find(&ws);
-            ctl = it != _impl->clients.end() && it->second.controller;
+            ctl = it != _impl->clients.end() && it->second->controller;
         }
         if (t != "set" && t != "source" && t != "rescan" && t != "record" && t != "play") {
             ws.sendText("{\"t\":\"error\",\"code\":\"unknown\",\"msg\":\"unknown message type\"}");
@@ -239,8 +263,8 @@ void WebServer::set_state(const std::string& json_object) {
         _state = json_object;
         const std::string inner = object_inner(_state);
         for (auto& kv : _impl->clients) {
-            if (auto sp = kv.second.ws.lock()) {
-                out.emplace_back(sp, std::string("{\"t\":\"state\",\"role\":\"") + (kv.second.controller ? "ctl" : "view") + "\"" + (inner.empty() ? "" : "," + inner) + "}");
+            if (auto sp = kv.second->ws.lock()) {
+                out.emplace_back(sp, std::string("{\"t\":\"state\",\"role\":\"") + (kv.second->controller ? "ctl" : "view") + "\"" + (inner.empty() ? "" : "," + inner) + "}");
             }
         }
     }
@@ -268,7 +292,7 @@ size_t WebServer::client_count() const { std::lock_guard<std::mutex> lock(_mutex
 ClientStats WebServer::total_dropped() const {
     std::lock_guard<std::mutex> lock(_mutex);
     ClientStats s{_spectrum_dropped, _audio_dropped};
-    for (auto& kv : _impl->clients) { s.spectrum_dropped += kv.second.stats.spectrum_dropped; s.audio_dropped += kv.second.stats.audio_dropped; }
+    for (auto& kv : _impl->clients) { s.spectrum_dropped += kv.second->spectrum_dropped; s.audio_dropped += kv.second->audio_dropped; }
     return s;
 }
 
@@ -282,7 +306,7 @@ void WebServer::broadcast(const std::string& text) {
     std::vector<std::shared_ptr<ix::WebSocket>> targets;
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        for (auto& kv : _impl->clients) if (auto sp = kv.second.ws.lock()) targets.push_back(sp);
+        for (auto& kv : _impl->clients) if (auto sp = kv.second->ws.lock()) targets.push_back(sp);
     }
     for (auto& t : targets) t->sendText(text);
 }
@@ -290,57 +314,57 @@ void WebServer::broadcast(const std::string& text) {
 void WebServer::tick_loop() {
     using namespace std::chrono;
     uint32_t tick = 0;
-    std::vector<std::pair<std::shared_ptr<ix::WebSocket>, Client*>> targets;
+    std::vector<std::pair<std::shared_ptr<ix::WebSocket>, std::shared_ptr<Client>>> targets;
+    std::vector<std::string> texts;
+    std::string stats_extra;
     while (_running.load(std::memory_order_relaxed)) {
         const auto next = steady_clock::now() + milliseconds(20);
         ++tick;
         {
             std::lock_guard<std::mutex> lock(_mutex);
             targets.clear();
-            for (auto& kv : _impl->clients) if (auto sp = kv.second.ws.lock()) targets.emplace_back(sp, &kv.second);
+            for (auto& kv : _impl->clients) if (auto sp = kv.second->ws.lock()) targets.emplace_back(sp, kv.second);
+            texts.assign(_text.begin(), _text.end());
+            _text.clear();
+            stats_extra = _stats_extra;
+        }
 
-            auto [sptr, ssize] = _spec.read_dbf();
-            for (size_t i = 0; i < ssize; ++i) {
-                const size_t len = encode_spectrum(sptr[i], _seq_spec++, _impl->buf.data(), _impl->buf.size());
-                const size_t limit = 4 * len;
-                for (auto& t : targets) {
-                    if (t.first->bufferedAmount() > limit) { ++t.second->stats.spectrum_dropped; continue; }
-                    t.first->sendBinary(ix::IXWebSocketSendData(reinterpret_cast<const char*>(_impl->buf.data()), len));
-                }
+        auto [sptr, ssize] = _spec.read_dbf();
+        for (size_t i = 0; i < ssize; ++i) {
+            const size_t len = encode_spectrum(sptr[i], _seq_spec++, _impl->buf.data(), _impl->buf.size());
+            for (auto& t : targets) {
+                if (t.first->bufferedAmount() > 4 * len) { ++t.second->spectrum_dropped; continue; }
+                t.first->sendBinary(ix::IXWebSocketSendData(reinterpret_cast<const char*>(_impl->buf.data()), len));
             }
-            if (ssize) _spec.commit_read(ssize);
+        }
+        if (ssize) _spec.commit_read(ssize);
 
-            for (;;) {
-                auto [aptr, asize] = _audio.read_dbf();
-                if (asize < AUDIO_CHUNK) break;
-                const size_t len = encode_audio(_gen.load(std::memory_order_relaxed), _seq_audio++, aptr, AUDIO_CHUNK, _impl->buf.data(), _impl->buf.size());
-                _audio.commit_read(AUDIO_CHUNK);
-                const size_t limit = 25 * len;
-                for (auto& t : targets) {
-                    if (t.first->bufferedAmount() > limit) { ++t.second->stats.audio_dropped; continue; }
-                    t.first->sendBinary(ix::IXWebSocketSendData(reinterpret_cast<const char*>(_impl->buf.data()), len));
-                }
+        for (;;) {
+            auto [aptr, asize] = _audio.read_dbf();
+            if (asize < AUDIO_CHUNK) break;
+            const size_t len = encode_audio(_gen.load(std::memory_order_relaxed), _seq_audio++, aptr, AUDIO_CHUNK, _impl->buf.data(), _impl->buf.size());
+            _audio.commit_read(AUDIO_CHUNK);
+            for (auto& t : targets) {
+                if (t.first->bufferedAmount() > 25 * len) { ++t.second->audio_dropped; continue; }
+                t.first->sendBinary(ix::IXWebSocketSendData(reinterpret_cast<const char*>(_impl->buf.data()), len));
             }
+        }
 
-            while (!_text.empty()) {
-                for (auto& t : targets) t.first->sendText(_text.front());
-                _text.pop_front();
-            }
+        for (auto& text : texts) for (auto& t : targets) t.first->sendText(text);
 
-            if (tick % 50 == 0) {
-                for (auto& t : targets) {
-                    t.first->sendText("{\"t\":\"stats\",\"spectrum_dropped\":" + std::to_string(t.second->stats.spectrum_dropped) +
-                                      ",\"audio_dropped\":" + std::to_string(t.second->stats.audio_dropped) +
-                                      ",\"clients\":" + std::to_string(targets.size()) +
-                                      (_stats_extra.empty() ? "" : "," + _stats_extra) + "}");
-                }
+        if (tick % 50 == 0) {
+            for (auto& t : targets) {
+                t.first->sendText("{\"t\":\"stats\",\"spectrum_dropped\":" + std::to_string(t.second->spectrum_dropped) +
+                                  ",\"audio_dropped\":" + std::to_string(t.second->audio_dropped) +
+                                  ",\"clients\":" + std::to_string(targets.size()) +
+                                  (stats_extra.empty() ? "" : "," + stats_extra) + "}");
             }
-            if (tick % 250 == 0) {
-                for (auto& t : targets) {
-                    if (t.second->ping_misses >= 2) { t.first->close(1001, "ping timeout"); continue; }
-                    ++t.second->ping_misses;
-                    t.first->ping("");
-                }
+        }
+        if (tick % 250 == 0) {
+            for (auto& t : targets) {
+                if (t.second->ping_misses >= 2) { t.first->close(1001, "ping timeout"); continue; }
+                ++t.second->ping_misses;
+                t.first->ping("");
             }
         }
         std::this_thread::sleep_until(next);

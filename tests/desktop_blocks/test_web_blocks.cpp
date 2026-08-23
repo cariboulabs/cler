@@ -182,9 +182,42 @@ TEST(WebServerTest, OriginAndTokenRejected) {
     ASSERT_TRUE(no_token.wait([&] { return no_token.closed; }));
     EXPECT_TRUE(no_token.texts.empty());
 
-    TestClient ok(base + "?token=s3cret", "http://127.0.0.1:" + std::to_string(port));
+    TestClient ok(base + "?token=s3cr%65t", "http://127.0.0.1:" + std::to_string(port));
     ASSERT_TRUE(ok.wait([&] { return !ok.texts.empty(); }));
     EXPECT_NE(ok.text_with("hello").find("\"role\":\"ctl\""), std::string::npos);
+
+    ix::HttpClient http;
+    EXPECT_EQ(http.get("http://127.0.0.1:" + std::to_string(port) + "/health", http.createRequest())->statusCode, 401);
+    EXPECT_EQ(http.get("http://127.0.0.1:" + std::to_string(port) + "/health?token=s3cret", http.createRequest())->statusCode, 200);
+    EXPECT_EQ(http.get("http://127.0.0.1:" + std::to_string(port) + "/", http.createRequest())->statusCode, 404);  // no client files in this test, but not 401
+    srv.stop();
+}
+
+TEST(WebServerTest, RebindingHostRejectedWithoutToken) {
+    const int port = free_port();
+    ServerOptions o; o.port = port;
+    WebServer srv(o);
+    srv.start();
+    const std::string hp = "evil.example:" + std::to_string(port);
+    ix::WebSocket ws;
+    ws.setUrl("ws://127.0.0.1:" + std::to_string(port) + "/");
+    ix::WebSocketHttpHeaders h; h["Host"] = hp; h["Origin"] = "http://" + hp;
+    ws.setExtraHeaders(h);
+    ws.disableAutomaticReconnection();
+    std::mutex m; std::condition_variable cv; bool closed = false; uint16_t code = 0; int texts = 0;
+    ws.setOnMessageCallback([&](const ix::WebSocketMessagePtr& msg) {
+        std::lock_guard<std::mutex> lock(m);
+        if (msg->type == ix::WebSocketMessageType::Close) { closed = true; code = msg->closeInfo.code; }
+        if (msg->type == ix::WebSocketMessageType::Message) ++texts;
+        cv.notify_all();
+    });
+    ws.start();
+    std::unique_lock<std::mutex> lock(m);
+    ASSERT_TRUE(cv.wait_for(lock, std::chrono::seconds(3), [&] { return closed; }));
+    EXPECT_EQ(code, 1008);
+    EXPECT_EQ(texts, 0);
+    lock.unlock();
+    ws.stop();
     srv.stop();
 }
 
