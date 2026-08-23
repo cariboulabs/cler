@@ -119,6 +119,26 @@ TEST(AnalogDemod, AmRecoversTone) {
     EXPECT_GT(p / (total_power(a) + 1e-12), 0.9);
 }
 
+// a strong carrier must not clip and a 10x level change must not change the
+// audio level: the output is the modulation depth, not the carrier
+TEST(AnalogDemod, AmOutputIsModulationDepthRegardlessOfCarrier) {
+    auto peak_for = [](float carrier) {
+        AnalogDemodBlock d("d", kChannelRate, AnalogDemodBlock::Mode::AM, 1 << 16);
+        std::vector<std::complex<float>> iq(static_cast<size_t>(kChannelRate));
+        for (size_t i = 0; i < iq.size(); ++i) {
+            const double m = 1.0 + 0.6 * std::sin(2.0 * M_PI * 800.0 * i / kChannelRate);
+            iq[i] = {static_cast<float>(carrier * m), 0.0f};
+        }
+        auto a = run(d, iq);
+        float peak = 0.0f;
+        for (size_t i = a.size() / 2; i < a.size(); ++i) peak = std::max(peak, std::fabs(a[i]));
+        return peak;
+    };
+    const float weak = peak_for(0.3f), strong = peak_for(3.0f);
+    EXPECT_NEAR(weak, 0.6f, 0.05f);
+    EXPECT_NEAR(strong, 0.6f, 0.05f);
+}
+
 TEST(AnalogDemod, AmSwitchOnCarrierDoesNotThump) {
     AnalogDemodBlock d("d", kChannelRate, AnalogDemodBlock::Mode::AM, 1 << 16);
     std::vector<std::complex<float>> iq(static_cast<size_t>(kChannelRate / 4), {0.5f, 0.0f});

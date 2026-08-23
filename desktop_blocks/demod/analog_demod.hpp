@@ -14,7 +14,7 @@
 //   WBFM : quadrature demod at channel rate, audio lowpass + decimate,
 //          50 us de-emphasis
 //   NBFM : decimate to audio rate first, quadrature demod (2.5 kHz deviation)
-//   AM   : decimate, magnitude, DC block
+//   AM   : decimate, magnitude, carrier-normalised (AGC), DC block
 //   USB/LSB: decimate, then a +/-1.6 kHz frequency-translated 1.6 kHz
 //          lowpass (= 0..3.2 kHz for USB, -3.2..0 for LSB), real part
 // Mode switches are applied between procedure() calls; each switch resets the
@@ -118,7 +118,10 @@ struct AnalogDemodBlock : public cler::BlockBase {
                     // modulation peak) and starts settled instead of thumping
                     if (f < _settle) _am_dc += (mag - _am_dc) / static_cast<float>(++_am_n);
                     else _am_dc += 0.0005f * (mag - _am_dc);
-                    wptr[f] = 4.0f * (mag - _am_dc);
+                    // divide by the carrier so the output is the modulation
+                    // depth whatever the signal level; below AM_AGC_FLOOR the
+                    // gain is pinned so an empty channel does not become hiss
+                    wptr[f] = (mag - _am_dc) / std::max(_am_dc, AM_AGC_FLOOR);
                 }
                 break;
             case Mode::USB:
@@ -166,6 +169,7 @@ private:
     static constexpr double AUDIO_RATE = 48e3;
     static constexpr size_t MAX_DECIM = 16;
     static constexpr unsigned int MAX_TAPS = 512;
+    static constexpr float AM_AGC_FLOOR = 0.25f;
 
     void apply_mode(Mode m) {
         _mode = m;
