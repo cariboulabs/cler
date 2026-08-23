@@ -1,6 +1,7 @@
 # websdr — cler receiver in a browser, over ssh
 
-Status: plan, nothing built. 2026-08-23.
+Status: plan v2 after three independent critiques (architecture, ops/security,
+frontend/protocol). Nothing built. 2026-08-23.
 
 ## Goal
 
@@ -13,158 +14,241 @@ All DSP stays native on the box; the browser only draws and plays.
 Use cases: client deployments (headless box in a rack/field), remote debugging of
 an installed receiver, demos without installing anything on the viewer's machine.
 
-## Non-goals (phase 1)
+## Non-goals
 
-- Auth, TLS, multi-user arbitration — the ssh tunnel is the auth. `--bind 0.0.0.0`
-  for a trusted LAN is the only concession.
-- Streaming raw IQ to the browser. Bandwidth and CPU both say no; record on the box.
-- WebUSB (SDR plugged into the browser machine). Same client could serve it later;
-  not now.
-- Replacing the ImGui apps. This is a sibling front-end, not a port.
+- Multi-user arbitration beyond "one controller, N viewers". TLS. Accounts.
+- Streaming raw IQ to the browser. Record on the box instead.
+- Client-side demodulation (no-sdr's model). cler's value is the native block chain.
+- WebUSB (SDR on the browser machine). The same client could serve it later.
+- Replacing the ImGui apps. Sibling front-end, not a port.
+
+## Prior art, and what to borrow
+
+- **no-sdr** (Go + SolidJS, MIT): shared server FFT, per-client IQ sub-band with
+  browser demod; FFT delta+deflate, audio ADPCM/Opus, ~12 KB/s per client; binary
+  type-byte frames server→client, JSON client→server; audio-gated streams; demo
+  simulator source; profiles. Borrow: protocol shape, fps caps, sim source, profiles.
+- **OpenWebRX / OpenWebRX+** (Python + csdr, AGPL): the UX everyone knows. Ideas only.
+- **BrowSDR** (Rust/wasm, AGPL), **wavelet-lab/websdr** (TS, WebUSB): the
+  SDR-in-the-browser-machine case. Later WebUSB mode only.
+- **SpyServer / SDR++ server / rtl_tcp / SoapyRemote**: IQ to a native client.
+  SoapyRemote is the zero-code LAN fallback ("run the ImGui scanner on the laptop
+  against a remote SDR") — say so in the README.
+- **Libraries**: IXWebSocket (BSD; HTTP + WS, thread-safe `send`, no libuv; one
+  FetchContent) — decided, not uWebSockets. libopus (BSD) and zlib for the WAN
+  profile later. Leaflet (BSD) if a map is ever embedded.
 
 ## Architecture
 
 ```
- remote box (native cler)                          laptop
- ┌───────────────────────────────────────────┐     ┌──────────────┐
- │ SourceMux ─┬─> FFT ───────> WebServer ────┼ ws ─┤ index.html   │
- │  hackrf    ├─> AnalogDemod ─┘  ^  |       │     │  waterfall   │
- │  pluto     ├─> decoders (RDS, │  │ ctl    │     │  audio       │
- │  uhd       │   ADS-B, AIS…) ──┘  │        │     │  controls    │
- │  soapy     └─> SigMFRecorder     │        │     │  decoder tabs│
- │  sigmf file (playback) <─────────┘        │     └──────────────┘
- └───────────────────────────────────────────┘
+ remote box (native cler)                                   laptop
+ ┌──────────────────────────────────────────────────────┐   ┌─────────────────┐
+ │ main thread: owns WebServer + current Receiver<Src>  │   │ index.html      │
+ │                                                      │   │ + 4 ES modules  │
+ │  Receiver<Src> (one flowgraph, rebuilt on switch)    │   │  waterfall      │
+ │   Src ─> Fanout ─┬─> SpectrumBlock ──> WebSink ──┐   │   │  audio worklet  │
+ │                  ├─> Shift ─> Resamp ─> Demod ───┤   │   │  control panel  │
+ │                  ├─> decoders ─> JSON adapters ──┤   │   │  decoder tabs   │
+ │                  └─> SigMFRecorder               │   │   └─────────────────┘
+ │                                                  v   │
+ │  WebServer (own thread, outlives graphs) ── ws/http ─┼─ ssh -L ──────────┘
+ └──────────────────────────────────────────────────────┘
 ```
 
-Three new pieces; everything else exists.
+### Sources: SoapySDR + SigMF file + Sim. No SourceMux.
 
-### 1. `WebServerBlock` (desktop_blocks/web/)
+`SourceSoapySDRBlock` already covers HackRF, Pluto, UHD, CaribouLite (its only
+driver is a Soapy module) and enumerates devices, gains by name, ranges, antennas.
+That *is* the capabilities abstraction; the plan does not reinvent it per vendor.
+Three source kinds: `Soapy`, `SigMF` (playback), `Sim` (tone + noise, ~40 lines,
+for CI, Playwright, client-side UI work and demos with no hardware).
 
-HTTP + WebSocket on one port. Serves the static client (embedded in the binary
-via a generated header, so the box needs no files). One WebSocket per browser
-tab; N tabs fine, all see the same stream, last control write wins.
+Needed additions to the Soapy block: `set_gain(name, value)` (only the aggregate
+exists today), getters for current values, and a `lost()` flag when the stream
+errors so the app can report "source lost" and reopen instead of exiting.
 
-Library: uWebSockets via FetchContent (C++17, does HTTP + WS, tiny, fine on RPi).
-Fallback if it fights the build: hand-rolled RFC 6455 over a blocking socket
-(~300 lines), since we only need text + binary frames, no extensions.
+Native `SourceHackRFBlock` stays in the repo; websdr uses it only if the RPi
+measurement shows SoapyHackRF costing real CPU.
 
-Inputs are cler channels, so the server is an ordinary sink:
-- `Channel<SpectrumFrame>` — 1024 × uint8 dB (or configurable N), ~20 fps
-- `Channel<float>` audio 48 kHz mono → PCM16 chunks of 20 ms
-- `Channel<Text>` decoded lines (RDS, ADS-B JSON, AIS JSON, APRS JSON) — one channel
-  type, `{stream, payload}`; browser routes by `stream`
-Outputs: control requests go into a lock-free mailbox read by the app thread,
-same pattern as `AnalogDemodBlock::set_mode()` (atomic request, applied between
-procedure calls). The server never touches DSP state directly.
+### Source switch = rebuild the flowgraph
 
-The block is `may_block`-free: uWS runs its own event loop thread; `procedure()`
-just moves ring data into per-socket send buffers with backpressure (drop
-spectrum frames when the tab is slow, never audio — audio queue bounded, oldest
-dropped with a counter shown in the UI).
-
-### 2. `SourceMux` — runtime source selection
-
-`desktop_examples/spike/spike_source.hpp` already does this (variant over
-UHD/HackRF/Pluto with `request_configure`). Promote it to a desktop block
-(`desktop_blocks/sources/source_mux.hpp`), add SoapySDR and SigMF-file, and
-have it *describe* itself:
+Nothing in cler re-derives rates: resampler ratios, `AnalogDemodBlock`'s channel
+rate, the recorder's rate are all constructor-fixed, and `FlowGraph::stop()` leaves
+stale samples in channels. So the receiver is one object:
 
 ```cpp
-struct SourceCapabilities {          // what the UI renders, per source
-    double freq_min_hz, freq_max_hz;
-    std::vector<double> sample_rates;             // discrete list or empty = continuous
-    double rate_min_hz, rate_max_hz;
-    struct Gain { const char* name; double min, max, step; };  // "lna","vga","amp" / "gain" / "rx"
-    std::vector<Gain> gains;
-    bool has_bandwidth, has_antenna, has_agc;
-    std::vector<std::string> antennas;
-    bool is_file;                                 // playback: shows position/loop/speed instead of RF controls
+template <class Src> struct Receiver {
+    Src src; FanoutBlock fan; SpectrumBlock spec; FrequencyShiftBlock shift;
+    MultiStageResamplerBlock resamp;   // runtime ratio: source rate -> 240 kHz
+    AnalogDemodBlock demod;            // fixed 240 kHz = 5 x 48 kHz
+    SigMFRecorderBlock rec; WebSinkBlock sink; cler::FlowGraph fg;
 };
+std::variant<std::monostate, Receiver<SourceSoapySDRBlock>,
+             Receiver<SourceSigMFBlock>, Receiver<SimSourceBlock>> rx;
 ```
 
-The client gets this JSON on connect and on source switch and builds the control
-panel from it — no per-source UI code in the browser. HackRF shows lna/vga/amp,
-Pluto shows one gain + bandwidth, UHD adds antenna, SigMF file shows a transport
-bar. The box lists which sources are compiled in and plugged in (`hackrf_device_list`,
-iio scan, uhd find, Soapy enumerate) so the dropdown only offers what will open.
+Main thread: stop → destroy → construct → run. `WebServer` lives outside and
+keeps sockets, `/health` and `/recordings` alive while no graph runs; the UI sees
+`state.switching=true`. Switching is refused while recording. The internal rate is
+pinned at 240 kHz (scanner's choice), so any source rate works through the
+runtime-ratio resampler; the spectrum runs at the source rate.
 
-Switching sources = tear down the variant, construct the new one, restart the
-flowgraph segment. Spike already does it; the FFT/demod chain re-derives rates.
-Restart latency of ~1 s is fine.
+All control (tune, gains, mode, switch, record) is applied on the main thread
+between `procedure()` calls — atomics/mailbox, the `AnalogDemodBlock::set_mode`
+pattern. The server thread never touches DSP state.
 
-### 3. Client (desktop_examples/websdr/client/index.html)
+### SpectrumBlock (new, phase 1)
 
-One file, vanilla JS, no build step (the repo already carries one heavy web app;
-this one must stay trivial to serve from a C++ binary). Canvas waterfall + spectrum
-line, WebAudio ring for PCM16, control panel generated from capabilities JSON,
-decoder tabs rendered from `Text` streams (RDS as a line, ADS-B/AIS/APRS as tables
-with a minimal Leaflet-free SVG map — or no map in phase 1). Click on spectrum =
-tune; drag = pan; wheel = zoom into the FFT span. State persists in `localStorage`.
+`PlotCSpectrumBlock` does its FFT in `render()` on the GUI thread; there is no
+headless spectrum today. `SpectrumBlock`: procedure-side FFT (liquid), window,
+averaging, fps cap, emits `SpectrumFrame{gen, center, rate, n, db_min, db_step,
+u8 bins[n]}` on a `Channel<SpectrumFrame>`. N=1024, 20 fps default. The ImGui
+plots can reuse it later.
 
-## Protocol (WebSocket)
+### WebSinkBlock + WebServer
 
-Binary frames, first byte = type:
-- `0x01` spectrum: `u8 type, u32 seq, f64 center_hz, f64 span_hz, u16 n, u8[n] dB`
-- `0x02` audio: `u8 type, u32 seq, i16[960]` (20 ms @ 48 k)
-Text frames = JSON:
-- server→client: `{"t":"hello", caps, state}`, `{"t":"state", ...}` (freq, rate, gains,
-  mode, recording, source), `{"t":"text","stream":"rds","data":...}`, `{"t":"error",...}`
-- client→server: `{"t":"set", "freq":..}`, `{"t":"source","kind":"hackrf","args":{}}`,
-  `{"t":"record","on":true,"path":...}`, `{"t":"play","path":...,"pos":..}`,
-  `{"t":"mode":"NBFM"}`
-Server echoes `state` after every accepted change so all tabs converge.
+`WebSinkBlock` is a normal cler sink inside each Receiver: every call it drains
+**all** its inputs (spectrum frames, 48 kHz audio, JSON text) whether or not a
+client is connected — it never backpressures the DSP chain (else Fanout stalls and
+the SDR ring overflows). It copies into preallocated SPSC rings owned by the
+`WebServer` (producer = cler worker, consumer = server thread), no allocation in
+`procedure()`.
+
+`WebServer` (IXWebSocket, own thread, ticks at 50 Hz): drains the rings, fans out
+to sockets with per-socket bounded queues. Drops happen only at the socket edge —
+spectrum frames and audio chunks alike, each counted per socket and reported in
+`stats`. A slow tab cannot play real-time audio anyway. Ping every 5 s, close on
+two misses. Socket list mutated only on the server thread.
+
+HTTP: `/` (client), `/health` (JSON: version, git sha, uptime, source, rate,
+overflows, recording, free disk), `/recordings/<name>` (GET, bare filenames only,
+resolved inside `--record-dir`, `..` and separators rejected), `Cache-Control:
+no-store` on the client files.
+
+### Security (phase 1, not later)
+
+- Bind `127.0.0.1` by default. `--bind` for a LAN.
+- WebSocket upgrade rejected unless `Origin` is the server's own `host:port`.
+  Any page on the laptop can open `ws://localhost:8080`; the tunnel does not stop that.
+- `--token`: required whenever bind is not loopback; client sends it as
+  `Sec-WebSocket-Protocol` / `?token=`; `/recordings` requires it too.
+- Record/play accept bare filenames in `--record-dir` only.
+- One controller: first socket (or the one presenting the token) may `set`;
+  others are viewers and see `state.role="view"`. Controller leaves → next in line.
+
+### Client
+
+`client/index.html` + `proto.js`, `waterfall.js`, `audio.js`, `panel.js`. Vanilla
+ES modules, **no npm dependencies in client/**, no build step. CMake globs
+`client/*` into one generated header so the binary is self-contained;
+`--client-dir` serves from disk for development.
+
+- Waterfall: ring of raw u8 rows (1024 × 1024 = 1 MB) repainted on zoom/resize,
+  2D canvas + `putImageData`, devicePixelRatio aware. Spectrum line above with
+  passband and offset marker, dB axis from `db_min/db_step`.
+- Interaction mirrors the ImGui scanner: double-click = set tuning offset within
+  the span (hardware retunes only when the 240 kHz channel would clip the band
+  edge); drag on waterfall = retune hardware centre on release; wheel = client-side
+  view zoom only.
+- Audio: `AudioContext({sampleRate:48000})` (Safari resamples), an AudioWorklet fed
+  Int16 chunks, jitter buffer target 100 ms, refill after underrun, trim > 300 ms;
+  persistent "click to listen" overlay (autoplay policy) that also resumes the
+  context; flush + refill on `seq` gap, reconnect or `gen` change; buffer depth and
+  drop counters shown.
+- Control panel generated from `hello.controls`. Reconnect with backoff and full
+  re-handshake. `localStorage` holds client prefs only (zoom, colormap, volume,
+  tab); tuning is server truth from `hello`/`state`.
+- Tests: `proto.js`/`panel.js` are pure → `node --test`, zero deps. One Playwright
+  spec (already a devDependency in tools/flowgraph_gui/app) launches the binary with
+  `--source sim`, asserts hello/state and that waterfall rows arrive. Headless.
+
+## Protocol v1
+
+All multi-byte binary fields little-endian. Every binary frame starts
+`u8 type, u8 ver=1, u32 gen, u32 seq`. `gen` is bumped by the server on every
+accepted change (tune, source, rate); the client drops frames whose `gen` is not
+the current one and clears the waterfall when center/rate/n change.
+
+- `0x01` spectrum: header, `f64 center_hz, f64 rate_hz, u16 n, f32 db_min,
+  f32 db_step, u8[n]`
+- `0x02` audio: header, `u8 codec (0 = pcm16 48k mono), i16[960]` (20 ms)
+
+JSON text frames:
+- server→client
+  - `hello`: `{proto:1, version, sources:[{id,kind,label,available}], source,
+    controls:[{id,label,type:"range"|"enum"|"bool",min,max,step|options,unit,ro}],
+    state, codecs:["pcm16"], spectrum:{n,fps}, role}` — re-sent whole on source switch
+  - `state`: `{gen, source, freq, rate, mode, <control id>: value..., recording,
+    switching, role}` — echoed after every accepted change; all tabs converge
+  - `stats` (1 Hz): `{audio_dropped, spectrum_dropped, buffered_ms, overflows,
+    rec_bytes, free_bytes, pos (file)}`
+  - `text`: `{stream:"rds"|"adsb"|..., data}`
+  - `error`: `{code, msg}`
+- client→server
+  - `hello`: `{proto:1, token?, accept:{codecs:[...]}}`
+  - `set`: `{<control id>: value, ...}` incl. `freq`, `mode`, `offset`
+  - `source`: `{id}`; `rescan`: `{}`
+  - `record`: `{on, name?}`; `play`: `{name, pos?, pause?, loop?}`
+
+Codec/fps negotiation lives in `hello` from day one so the WAN profile (phase 5)
+adds `pcm16@24k`/`opus`, smaller/slower spectrum, without a flag day.
 
 ## Record / playback
 
-- Record: existing `SigMFRecorderBlock` (scanner already has the Record button).
-  Server exposes start/stop, filename, bytes written, free disk. Files land in
-  `--record-dir` on the box; the UI lists them.
-- Playback: `SourceSigMFBlock` behind SourceMux. Transport: position, loop, pause,
-  speed (1x only in phase 1). Center freq/rate come from the SigMF meta, RF
-  controls disabled. Demod/decoders work unchanged since they see the same ring.
-- Download a recording to the laptop: plain HTTP GET `/recordings/<name>.sigmf-data`
-  from the same server — the tunnel carries it.
+- Record: `SigMFRecorderBlock` (ci16_le → 12 MB/s at 3 MS/s; USB SSD, not SD).
+  `statvfs` checked at start and every 64 MB; stops cleanly at a 200 MB floor and
+  reports. Filename server-generated (`<utc>_<freq>.sigmf-*`), optional client
+  prefix. Listing + download through the same server.
+- Playback: `SourceSigMFBlock` behind a `ThrottleBlock` (the source has no pacing),
+  plus new `seek(pos)`, `pause()`, `loop` and an `ended()` flag (today EOF parks
+  on `NotEnoughSamples` forever). RF controls `ro`; a `transport` control group.
+  Demod/decoders unchanged — same 240 kHz chain.
+
+## Failure modes the server must handle
+
+- Source lost (USB yanked, stream error): `state.source_lost=true`, auto-reopen
+  every 2 s, never exit. Overflow counters in `stats`.
+- Disk full: recorder stops itself, `error` + `state.recording=false`.
+- Tab closed / half-open through ssh: ping/pong reaps it; per-socket queues bounded.
+- Source switch while recording: refused with `error`.
+- Two controllers: impossible by construction (role).
+
+## Ops
+
+- `cler-websdr --source soapy:driver=hackrf|sigmf:<name>|sim --freq --rate --gain
+  NAME=V... --mode --port --bind --token --record-dir --client-dir --state-file`.
+- `--state-file` persists last tuning/gains/mode as JSON; reboot comes up where it
+  was. Config file only if a client asks; systemd `EnvironmentFile` covers it.
+- `--version` prints git sha + build date; `/health` returns the same plus live state.
+- `misc/websdr/cler-websdr.service` (Restart=on-failure, dedicated user, udev notes
+  for HackRF/Pluto/USRP) ships with phase 1.
+- RPi build notes + measured CPU at 2.5 MS/s before phase 1 is called done.
 
 ## Phases
 
-1. **Scanner in a tab** — HackRF only, FFT + waterfall + AnalogDemod audio +
-   click-to-tune, WebServerBlock, client. Runs on the x86 box first, then RPi.
-   Done when: FM station audible in the laptop browser through `ssh -L`, CPU on
-   RPi measured at 2.5 MS/s.
-2. **SourceMux + capabilities UI** — Pluto/UHD/Soapy/file, generated control panel,
-   device enumeration, source switch at runtime.
-3. **Record / playback** — SigMF start/stop, recordings list, playback transport,
-   HTTP download.
-4. **Decoders as tabs** — RDS text, ADS-B/AIS/APRS tables (JSON feeds from the
-   existing blocks), packet_link/modem stats. Map in the browser later.
-5. **Ops** — `--bind`, systemd unit for the box, `cler-websdr` CLI with the same
-   args as spike, RPi build notes, a gallery entry (screenshot only — it is not a
-   wasm demo).
+1. **Scanner in a tab** — Soapy (HackRF) + Sim sources chosen by argv (no runtime
+   switch yet), SpectrumBlock, WebSinkBlock + WebServer (IXWebSocket), protocol v1
+   incl. `gen`/version/Origin/token/role, client (waterfall, audio worklet,
+   generated panel from Soapy caps, double-click tune), `/health`, `--version`,
+   systemd unit, node + Playwright tests. Done when: FM station audible in the
+   laptop browser through `ssh -L`, Playwright green on the sim source, RPi CPU
+   number recorded.
+2. **Record / playback** — recorder start/stop with disk guard, listing, download,
+   SigMF source pacing/seek/pause/loop/ended, transport controls.
+3. **Runtime source switching** — Receiver variant rebuild, enumeration, `rescan`,
+   Pluto/UHD/CaribouLite verified through Soapy on whatever hardware is on the desk,
+   `set_gain(name)` on the Soapy block.
+4. **Decoders as tabs** — JSON adapter blocks for RDS, ADS-B, AIS, APRS, modem/FEC
+   stats; tables in the browser. Map later.
+5. **WAN profile + polish** — `pcm16@24k`, Opus, deflated spectrum rows, fps/N
+   negotiation driven by send-queue depth; `--state-file`; gallery entry (screenshot,
+   it is not a wasm demo); SoapyRemote note in README.
 
-Each phase = a branch, a worker, critic review, merge; the usual.
-
-## Risks / decisions to make
-
-- **uWebSockets on RPi / macOS CI**: needs libuv or its own epoll backend and
-  zlib. If it drags, the hand-rolled WS is the escape hatch — decide in phase 1
-  after one afternoon.
-- **Audio latency**: WebAudio ring + 20 ms chunks + tunnel ≈ 100–300 ms. Fine for
-  listening, not for full-duplex. Accepted.
-- **Source switch = flowgraph restart**: cler flowgraphs are compile-time; runtime
-  source change means the variant trick (spike) with fixed downstream rates, or
-  stopping/starting the whole graph. Spike's approach is proven; reuse.
-- **CPU on the RPi**: FFT 1024 @ 20 fps is nothing; AnalogDemod at 2–3 MS/s was
-  measured fine in the scanner. SigMF recording at 3 MS/s cs8 = 6 MB/s — SD card
-  write speed is the limit, USB SSD recommended.
-- **Several clients fighting**: last write wins, state broadcast. Good enough
-  behind a tunnel. Not revisiting until a client asks.
-- **Where the code lives**: blocks in `desktop_blocks/web/` and
-  `desktop_blocks/sources/source_mux.hpp`; app + client in `desktop_examples/websdr/`.
-  The flowgraph GUI can list it like any example.
+Each phase = a branch, a worker, critic review, merge.
 
 ## Decisions
 
-- Phase 2 covers every source cler already has: HackRF, SoapySDR, CaribouLite, UHD,
-  Pluto, plus SigMF file. (Alon, 2026-08-23.)
-- Phase 1 on the x86 bench box, RPi measured before phase 1 is called done.
-- Decoder tabs are tables first; a browser map is phase 4+.
+- Phase 3 covers every source cler already has: HackRF, SoapySDR, CaribouLite, UHD,
+  Pluto, plus SigMF file — all through the Soapy block. (Alon, 2026-08-23.)
+- Phase 1 on the x86 bench box; RPi measured before phase 1 is called done.
+- Tables before maps. IXWebSocket, not uWebSockets. No SourceMux. Rebuild on switch.
