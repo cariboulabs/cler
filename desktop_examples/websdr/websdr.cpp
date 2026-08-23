@@ -183,6 +183,7 @@ struct App {
             return false;
         }
         rate = src.rate(); center = src.center(); offset = 0.0; lost = false;
+        if (std::fabs(center - freq_hz) > rate) freq_hz = center + IF_OFFSET;
         for (const auto& g : gains) src.set(g.first, g.second);
         resamp.set_ratio(static_cast<float>(CHANNEL_HZ / rate));
         spec.set_rate(rate);
@@ -217,6 +218,7 @@ struct App {
             offset = hz - center;
         }
         src.set("freq", center);
+        center = src.center();
         shift.set_frequency_shift(-offset);
         bump_gen();
     }

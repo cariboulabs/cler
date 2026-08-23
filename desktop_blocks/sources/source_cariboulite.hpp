@@ -98,7 +98,11 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             return CaribouLite::DetectBoard(&ver, name, guid);
         }
 
-        void set_frequency(float hz) { _radio->SetFrequency(hz); }
+        bool in_range(float hz) {
+            for (const auto& r : _radio->GetFrequencyRange()) if (hz > r.fmin() && hz < r.fmax()) return true;
+            return false;
+        }
+        void set_frequency(float hz) { if (in_range(hz)) _radio->SetFrequency(hz); }
         void set_rx_gain(float db) { _radio->SetRxGain(db); }
         void set_agc(bool on) { _radio->SetAgc(on); }
         void set_bandwidth(float hz) { _radio->SetRxBandwidth(hz); }
