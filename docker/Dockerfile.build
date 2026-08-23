@@ -1,0 +1,27 @@
+# Build cler targets for any architecture/distro under qemu:
+#   docker buildx build --platform linux/arm64 --build-arg BASE=debian:bullseye --build-arg TARGETS=websdr \
+#     -f docker/Dockerfile.build --target out -o out/linux-arm64 .
+ARG BASE=debian:bullseye
+FROM ${BASE} AS build
+ARG CARIBOULITE=1
+ARG TARGETS=websdr
+ARG CMAKE_ARGS="-DCLER_BUILD_BLOCKS_GUI=OFF -DBUILD_SHARED_LIBS=OFF -DBUILD_STATIC_LIBS=ON"
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git ca-certificates pkg-config \
+    libusb-1.0-0-dev libfftw3-dev libhackrf-dev libiio-dev libsoapysdr-dev libzmq3-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN if [ "$CARIBOULITE" = 1 ]; then \
+      git clone --depth 1 --recursive https://github.com/cariboulabs/cariboulite /tmp/cariboulite \
+      && cmake -S /tmp/cariboulite/software/libcariboulite -B /tmp/cariboulite/build -DCMAKE_BUILD_TYPE=Release \
+      && cmake --build /tmp/cariboulite/build -j"$(nproc)" && cmake --install /tmp/cariboulite/build \
+      && rm -rf /tmp/cariboulite; fi
+ENV PKG_CONFIG_PATH=/lib/pkgconfig:/usr/local/lib/pkgconfig
+WORKDIR /src
+COPY . .
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${CMAKE_ARGS} \
+    && cmake --build build -j"$(nproc)" --target ${TARGETS} \
+    && mkdir -p /out && for t in ${TARGETS}; do find build -type f -name "$t" -perm -u+x -exec cp {} /out/ \; ; done
+
+FROM scratch AS out
+COPY --from=build /out/ /

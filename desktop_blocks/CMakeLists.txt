@@ -35,7 +35,11 @@ if (CLER_BUILD_BLOCKS_LIQUID)
 
   add_library(blocks_liquid INTERFACE)
   add_library(cler::blocks_liquid ALIAS blocks_liquid)
-  target_link_libraries(blocks_liquid INTERFACE cler::blocks_core liquid)
+  if(TARGET liquid)
+    target_link_libraries(blocks_liquid INTERFACE cler::blocks_core liquid)
+  else()
+    target_link_libraries(blocks_liquid INTERFACE cler::blocks_core liquid-static)
+  endif()
 endif()
 
 #so any block that wants can use this..
