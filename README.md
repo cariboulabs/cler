@@ -111,6 +111,9 @@ FetchContent_MakeAvailable(cler)
 target_link_libraries(my_executable PRIVATE cler::desktop_blocks)
 ```
 
+All build options and their help text: `cmake -LH -N build | grep -A1 CLER_` after a configure.
+Cross-compiling for a Raspberry Pi: `cmake -S . -B build-rpi -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/rpi-aarch64.cmake` (see the file header for the sysroot).
+
 # Things to Know
 
 * **Cross-Platform Support** </br>
