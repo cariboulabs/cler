@@ -269,7 +269,10 @@ nginx + basic auth in front if a client insists.
    the Devices list.
 3. **All backends** — Pluto, UHD, CaribouLite, Soapy alternatives in SourceMux with
    their `enumerate()`/`capabilities()`; verified on whatever is on the desk
-   (Pluto available again as of 2026-08-23), others by build + review.
+   (Pluto available again as of 2026-08-23), others by build + review. Then retire
+   `hackrf_spectrum.cpp`, `pluto_spectrum.cpp`, `cariboulite_spectrum.cpp`,
+   `fm_receiver.cpp` (one `sdr_spectrum.cpp` on SourceMux replaces the three) and
+   point spike's `spike_source.hpp` at SourceMux.
 4. **Decoders as tabs** — JSON adapter blocks for RDS, ADS-B, AIS, APRS, modem/FEC
    stats; tables in the browser. Map later.
 5. **WAN profile + polish** — `pcm16@24k`, Opus, deflated spectrum rows, fps/N
