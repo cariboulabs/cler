@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
-#include "desktop_blocks/web/spectrum_frame.hpp"
+#include "desktop_blocks/spectrum/spectrum_frame.hpp"
 
 #include <atomic>
 #include <cstdint>

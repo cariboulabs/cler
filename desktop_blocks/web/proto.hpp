@@ -1,6 +1,6 @@
 #pragma once
 
-#include "desktop_blocks/web/spectrum_frame.hpp"
+#include "desktop_blocks/spectrum/spectrum_frame.hpp"
 
 #include <cmath>
 #include <cstdint>
