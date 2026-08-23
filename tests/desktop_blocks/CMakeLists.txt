@@ -135,3 +135,10 @@ if (CLER_BUILD_BLOCKS_WEB)
     target_link_libraries(web_blocks_test gtest_main cler::desktop_blocks)
     add_test(NAME web_blocks_test COMMAND web_blocks_test)
 endif()
+
+find_program(NODE_EXECUTABLE node)
+if (NODE_EXECUTABLE)
+    add_test(NAME websdr_client_test COMMAND ${NODE_EXECUTABLE} --test
+        ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/proto.test.mjs
+        ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/panel.test.mjs)
+endif()
