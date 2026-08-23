@@ -39,7 +39,9 @@ inline uint16_t crc16_x25(const uint8_t* data, size_t n) {
 // payload to the caller. Frames longer than MAX_BYTES are dropped.
 class Deframer {
 public:
-    static constexpr size_t MAX_BYTES = 128;   // 1008-bit max AIS frame = 126 octets
+    // AX.25 maximum: 10 addresses + control + PID + 256-octet info + FCS.
+    // AIS frames are at most 126 octets.
+    static constexpr size_t MAX_BYTES = 330;
 
     // returns true when a CRC-valid payload is ready in payload()/length()
     bool push_bit(bool bit) {

@@ -353,6 +353,30 @@ TEST(AprsBits, FrameRoundTripThroughFlagPreamble) {
     EXPECT_EQ(d2.frames_bad_crc(), 1u);
 }
 
+// AX.25 allows a 256-octet info field; a long comment must not be dropped
+TEST(AprsBits, MaximumLengthInfoFieldRoundTrip) {
+    char info[257];
+    std::memcpy(info, "!3249.23N/03500.62E>", 20);
+    for (size_t i = 20; i < 256; ++i) info[i] = static_cast<char>('a' + i % 26);
+    info[256] = 0;
+    uint8_t frame[400];
+    const size_t n = aprs::encode_ui("APCLER", "4X1RF-9", "WIDE1-1,WIDE2-1", info, frame, sizeof(frame));
+    ASSERT_EQ(n, 14u + 14u + 2u + 256u);
+    std::array<bool, 4096> tx{};
+    const size_t nb = aprs::encode_frame(frame, n, tx.data(), tx.size(), 8);
+
+    aprs::Deframer d;
+    bool prev = false;
+    int got = 0;
+    for (size_t i = 0; i < nb; ++i) { const bool bit = !(tx[i] ^ prev); prev = tx[i]; if (d.push_bit(bit)) ++got; }
+    ASSERT_EQ(got, 1);
+    ASSERT_EQ(d.length(), n);
+    aprs::Packet p;
+    ASSERT_TRUE(aprs::parse(d.payload(), d.length(), p));
+    EXPECT_EQ(p.info_len, 256u);
+    EXPECT_TRUE(p.has_position);
+}
+
 // clean, +/-5 Hz tone offset, half amplitude
 TEST(AfskDemod, LoopbackAtOffsetsAndAmplitudes) {
     uint8_t frame[64];

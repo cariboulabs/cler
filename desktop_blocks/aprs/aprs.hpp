@@ -13,10 +13,6 @@
 // CRC-16/X-25 FCS, LSB-first octets) is identical to AIS, so ais::Deframer and
 // ais::crc16_x25 are reused as-is. On top of them: AX.25 address decoding, the
 // UI control/PID check, and the APRS info-field parser. No DSP, no allocation.
-//
-// ais::Deframer caps a frame at 126 payload octets, which is well past a
-// typical APRS packet (addresses + <= ~80 info bytes) but short of AX.25's
-// 256-byte maximum info field; longer frames are dropped.
 namespace aprs {
 
 using ais::crc16_x25;
@@ -38,8 +34,8 @@ struct Packet {
     int altitude_ft = 0;
     char symbol_table = 0, symbol_code = 0;
     char comment[64] = {};
-    char info[128] = {};        // raw info field
-    uint8_t info_len = 0;
+    char info[257] = {};        // raw info field, AX.25 max 256
+    uint16_t info_len = 0;
 };
 
 // ---- AX.25 addresses -------------------------------------------------------
@@ -280,7 +276,7 @@ inline bool parse(const uint8_t* b, size_t n, Packet& p) {
 
     const char* info = reinterpret_cast<const char*>(b + at);
     const size_t ilen = n - at;
-    p.info_len = static_cast<uint8_t>(std::min(ilen, sizeof(p.info) - 1));
+    p.info_len = static_cast<uint16_t>(std::min(ilen, sizeof(p.info) - 1));
     std::memcpy(p.info, info, p.info_len);
     if (ilen == 0) return true;
     p.type = info[0];
