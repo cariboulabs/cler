@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cler websdr</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { --bg:#0b0e14; --panel:#121722; --line:#1e2633; --fg:#e6e9ef; --dim:#8a94a6; --acc:#4fd1ff; --warn:#ffc83c; --bad:#ff5c5c; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:14px system-ui, sans-serif; }
+  #app { display:grid; grid-template-rows:auto 1fr auto; grid-template-columns:1fr 300px; height:100%; }
+  header { grid-column:1/3; display:flex; gap:16px; align-items:center; padding:6px 12px; background:var(--panel); border-bottom:1px solid var(--line); }
+  header .title { font-weight:600; color:var(--acc); }
+  header .freq { font-size:20px; font-variant-numeric:tabular-nums; }
+  header .freq input { width:150px; font-size:20px; background:transparent; color:var(--fg); border:none; border-bottom:1px solid var(--line); text-align:right; }
+  header .spacer { flex:1; }
+  .pill { padding:2px 8px; border-radius:10px; background:var(--line); color:var(--dim); font-size:12px; }
+  .pill.ok { color:#9be28a; } .pill.bad { color:var(--bad); } .pill.ctl { color:var(--warn); }
+  button { background:var(--line); color:var(--fg); border:1px solid #2a3444; border-radius:4px; padding:4px 10px; cursor:pointer; }
+  button:hover { border-color:var(--acc); } button.on { background:var(--acc); color:#000; border-color:var(--acc); }
+  button:disabled { opacity:.5; cursor:default; }
+  main { display:grid; grid-template-rows:180px 1fr; min-height:0; position:relative; }
+  canvas { width:100%; height:100%; display:block; }
+  aside { background:var(--panel); border-left:1px solid var(--line); padding:10px; overflow:auto; display:flex; flex-direction:column; gap:10px; }
+  aside h3 { margin:6px 0 2px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); }
+  .modes { display:flex; flex-wrap:wrap; gap:4px; }
+  .ctl { display:grid; grid-template-columns:1fr; gap:2px; padding:4px 0; border-bottom:1px solid var(--line); }
+  .ctl-name { color:var(--dim); font-size:12px; }
+  .ctl input[type=number], .ctl select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:3px; padding:3px 6px; }
+  .ctl input[type=range] { width:100%; }
+  footer { grid-column:1/3; display:flex; gap:18px; padding:4px 12px; background:var(--panel); border-top:1px solid var(--line); color:var(--dim); font-size:12px; font-variant-numeric:tabular-nums; }
+  #devices { position:absolute; inset:0; background:rgba(11,14,20,.92); display:flex; align-items:center; justify-content:center; z-index:5; }
+  #devices.hidden, #listen.hidden, #errors:empty { display:none; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px 20px; min-width:420px; }
+  .card h2 { margin:0 0 10px; font-size:16px; }
+  .dev { display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); }
+  .dev .lbl { flex:1; } .dev .kind { color:var(--dim); font-size:12px; }
+  #listen { position:absolute; left:50%; top:40px; transform:translateX(-50%); z-index:4; background:var(--warn); color:#000; border-radius:20px; padding:8px 16px; cursor:pointer; font-weight:600; }
+  #errors { position:absolute; right:10px; bottom:10px; z-index:4; display:flex; flex-direction:column; gap:4px; }
+  .toast { background:#3a1e1e; border:1px solid var(--bad); color:#ffd0d0; padding:6px 10px; border-radius:4px; font-size:12px; }
+  #text { font-family:ui-monospace, monospace; font-size:12px; white-space:pre-wrap; max-height:160px; overflow:auto; color:var(--dim); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span class="title">cler websdr</span>
+    <span class="freq"><input id="freq" type="text" value="—"> </span>
+    <span id="source" class="pill">no source</span>
+    <span class="spacer"></span>
+    <button id="devbtn">Devices</button>
+    <span id="role" class="pill">—</span>
+    <span id="conn" class="pill bad">offline</span>
+  </header>
+  <main>
+    <canvas id="spec"></canvas>
+    <canvas id="wf"></canvas>
+    <div id="listen" class="hidden">▶ click to listen</div>
+    <div id="devices"><div class="card"><h2>Devices</h2><div id="devlist"></div><div style="margin-top:10px;display:flex;gap:8px"><button id="rescan">Rescan</button><button id="devclose">Close</button></div></div></div>
+    <div id="errors"></div>
+  </main>
+  <aside>
+    <h3>Mode</h3><div id="modes" class="modes"></div>
+    <h3>Controls</h3><div id="controls"></div>
+    <h3>Audio</h3><label class="ctl"><span class="ctl-name">volume</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+    <h3>Decoded</h3><div id="text"></div>
+  </aside>
+  <footer>
+    <span id="s-stats">—</span>
+    <span id="s-audio">audio: off</span>
+    <span id="s-ver"></span>
+  </footer>
+</div>
+<script type="module">
+import { decodeFrame, encodeSet, encodeSource, encodeHello, formatHz, SeqTracker, T_SPECTRUM, T_AUDIO } from '/client/proto.js';
+import { Waterfall } from '/client/waterfall.js';
+import { AudioPlayer } from '/client/audio.js';
+import * as panel from '/client/panel.js';
+
+const $ = (id) => document.getElementById(id);
+const prefs = (() => { try { return JSON.parse(localStorage.getItem('websdr') || '{}'); } catch { return {}; } })();
+const savePrefs = () => { try { localStorage.setItem('websdr', JSON.stringify(prefs)); } catch {} };
+
+const state = { gen: 0, hello: null, st: {}, model: [], sources: [], connected: false, role: 'view' };
+const audio = new AudioPlayer();
+const seqSpec = new SeqTracker(), seqAudio = new SeqTracker();
+let ws = null, backoff = 500, statsTimer = 0;
+
+const wf = new Waterfall($('spec'), $('wf'), {
+  onTune: (hz) => send(encodeSet({ freq: hz })),
+  onPan: (dHz) => { if (state.st.freq !== undefined) send(encodeSet({ freq: state.st.freq + dHz })); },
+  onView: (v) => { prefs.view = v; savePrefs(); }
+});
+if (prefs.view) wf.setView(prefs.view.x0, prefs.view.x1);
+audio.setGain(prefs.volume ?? 0.8);
+$('vol').value = prefs.volume ?? 0.8;
+$('vol').oninput = () => { audio.setGain(Number($('vol').value)); prefs.volume = Number($('vol').value); savePrefs(); };
+
+function send(text) { if (ws && ws.readyState === 1) ws.send(text); }
+function toast(msg) {
+  const d = document.createElement('div'); d.className = 'toast'; d.textContent = msg;
+  $('errors').appendChild(d); setTimeout(() => d.remove(), 5000);
+}
+
+function connect() {
+  const token = new URLSearchParams(location.search).get('token');
+  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => { state.connected = true; backoff = 500; $('conn').textContent = 'online'; $('conn').className = 'pill ok'; send(encodeHello(token)); seqSpec.reset(); seqAudio.reset(); audio.flush(); };
+  ws.onclose = () => { state.connected = false; $('conn').textContent = 'offline'; $('conn').className = 'pill bad'; audio.flush(); setTimeout(connect, backoff); backoff = Math.min(8000, backoff * 2); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (e) => {
+    if (typeof e.data === 'string') { onText(JSON.parse(e.data)); return; }
+    const f = decodeFrame(e.data);
+    if (!f) return;
+    if (f.type === 0) { toast(`protocol version ${f.ver} not supported`); ws.close(); return; }
+    if (state.gen && f.gen !== state.gen) return;
+    if (f.type === T_SPECTRUM) { seqSpec.push(f.seq); wf.push(f); }
+    else if (f.type === T_AUDIO) { if (seqAudio.push(f.seq)) audio.flush(); if (audio.running) audio.push(f.pcm); }
+  };
+}
+
+function onText(m) {
+  if (m.t === 'hello') {
+    if (m.proto !== 1) { toast(`server protocol ${m.proto}, client 1`); return; }
+    state.hello = m; state.sources = m.sources || []; state.role = m.role;
+    $('s-ver').textContent = m.version ? `server ${m.version}` : '';
+    state.model = panel.buildModel(m.controls, m.state);
+    renderControls();
+    applyState({ ...(m.state || {}), role: m.role });
+    renderDevices();
+    $('devices').classList.toggle('hidden', !!(m.state && m.state.source));
+  } else if (m.t === 'state') {
+    applyState(m);
+  } else if (m.t === 'stats') {
+    $('s-stats').textContent = `drops spec ${m.spectrum_dropped ?? 0} audio ${m.audio_dropped ?? 0} · overflows ${m.overflows ?? 0} · clients ${m.clients ?? 1}`;
+  } else if (m.t === 'error') {
+    toast(`${m.code}: ${m.msg}`);
+  } else if (m.t === 'text') {
+    const el = $('text'); el.textContent += `[${m.stream}] ${typeof m.data === 'string' ? m.data : JSON.stringify(m.data)}\n`; el.scrollTop = el.scrollHeight;
+  }
+}
+
+function applyState(s) {
+  const prevSource = state.st.source;
+  Object.assign(state.st, s);
+  if (s.gen !== undefined && s.gen !== state.gen) { state.gen = s.gen; audio.flush(); seqAudio.reset(); }
+  if (s.role) { state.role = s.role; $('role').textContent = s.role === 'ctl' ? 'controller' : 'viewer'; $('role').className = `pill ${s.role}`; }
+  if (state.st.freq !== undefined && document.activeElement !== $('freq')) $('freq').value = formatHz(state.st.freq);
+  $('source').textContent = state.st.source || 'no source';
+  if (s.source !== undefined && s.source !== prevSource) { wf.clear(); renderDevices(); if (s.source) $('devices').classList.add('hidden'); }
+  if (s.switching !== undefined) $('source').textContent += s.switching ? ' (switching…)' : '';
+  panel.applyState(state.model, state.st);
+  panel.update($('controls'), state.model);
+  for (const b of $('modes').children) b.classList.toggle('on', b.dataset.mode === state.st.mode);
+  wf.setMarker(state.st.offset || 0, state.st.passband || 0);
+  const ctl = state.role === 'ctl';
+  for (const el of document.querySelectorAll('aside input, aside select, aside button, #freq')) if (el.id !== 'vol') el.disabled = !ctl || el.dataset.ro === '1';
+}
+
+function renderControls() {
+  const modes = state.model.find((c) => c.id === 'mode');
+  $('modes').textContent = '';
+  if (modes) for (const o of modes.options) {
+    const b = document.createElement('button'); b.textContent = o; b.dataset.mode = o;
+    b.onclick = () => send(encodeSet({ mode: o }));
+    $('modes').appendChild(b);
+  }
+  const rest = state.model.filter((c) => c.id !== 'mode' && c.id !== 'freq');
+  panel.render($('controls'), rest, (id, value) => send(encodeSet({ [id]: value })));
+  for (const c of rest) if (c.ro) for (const el of $('controls').querySelectorAll(`[data-id="${CSS.escape(c.id)}"] input, [data-id="${CSS.escape(c.id)}"] select`)) el.dataset.ro = '1';
+}
+
+function renderDevices() {
+  const list = $('devlist'); list.textContent = '';
+  if (!state.sources.length) { list.textContent = 'no devices reported yet'; }
+  for (const s of state.sources) {
+    const row = document.createElement('div'); row.className = 'dev';
+    const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = s.label || s.id;
+    const kind = document.createElement('span'); kind.className = 'kind'; kind.textContent = s.kind || '';
+    const btn = document.createElement('button');
+    const current = state.st.source === s.id;
+    btn.textContent = current ? 'connected' : 'Connect';
+    btn.disabled = current || s.available === false || state.role !== 'ctl';
+    btn.onclick = () => send(encodeSource(s.id));
+    row.append(lbl, kind, btn); list.appendChild(row);
+  }
+}
+
+$('freq').onchange = () => {
+  const v = $('freq').value.trim().toLowerCase();
+  const m = v.match(/^([\d.]+)\s*(ghz|mhz|khz|hz)?$/);
+  if (!m) { $('freq').value = formatHz(state.st.freq || 0); return; }
+  const mult = { ghz: 1e9, mhz: 1e6, khz: 1e3, hz: 1 }[m[2] || 'mhz'];
+  send(encodeSet({ freq: Number(m[1]) * mult }));
+  $('freq').blur();
+};
+$('devbtn').onclick = () => { renderDevices(); $('devices').classList.remove('hidden'); };
+$('devclose').onclick = () => $('devices').classList.add('hidden');
+$('rescan').onclick = () => send(JSON.stringify({ t: 'rescan' }));
+$('listen').onclick = async () => { await audio.start(); $('listen').classList.add('hidden'); };
+$('listen').classList.remove('hidden');
+setInterval(() => { $('s-audio').textContent = audio.running ? `audio: ${audio.stats.bufferedMs} ms buffered · underruns ${audio.stats.underruns} · dropped ${audio.stats.dropped}` : 'audio: off'; }, 500);
+connect();
+</script>
+</body>
+</html>
