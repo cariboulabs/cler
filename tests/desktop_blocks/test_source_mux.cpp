@@ -71,7 +71,9 @@ TEST(SourceMux, EmptyMuxIsIdle) {
 
 TEST(SourceMux, SelectOfAMissingBackendFailsCleanly) {
     SourceMux mux("mux");
-    EXPECT_FALSE(mux.select(SourceMux::Kind::Cariboulite, "", 100e6, 2e6));
+    EXPECT_FALSE(mux.select(SourceMux::Kind::Cariboulite, "nope", 100e6, 2e6));
+    EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
+    EXPECT_FALSE(mux.select(SourceMux::Kind::Pluto, "", 100e6, 2e6));
     EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
 #ifdef CLER_HAS_HACKRF
     EXPECT_FALSE(mux.select(SourceMux::Kind::HackRF, "no-such-serial", 100e6, 2.4e6));
@@ -144,5 +146,37 @@ TEST(SourceMux, HackRFIfPresent) {
     const size_t n = pump(mux, 0.5);
     EXPECT_GT(n, 500000u);
     mux.close();
+}
+#endif
+
+#ifdef CLER_HAS_CARIBOULITE
+TEST(SourceMux, CaribouliteIfPresent) {
+    SourceMux mux("mux");
+    auto devs = mux.enumerate();
+    const SourceMux::DeviceInfo* s1g = nullptr;
+    for (auto& d : devs) if (d.kind == SourceMux::Kind::Cariboulite && d.id == "s1g") s1g = &d;
+    if (!s1g) GTEST_SKIP() << "no CaribouLite board";
+
+    ASSERT_TRUE(mux.select(SourceMux::Kind::Cariboulite, "s1g", 100e6, 2e6));
+    EXPECT_EQ(mux.kind(), SourceMux::Kind::Cariboulite);
+    EXPECT_GT(mux.rate(), 0.0);
+    EXPECT_NEAR(mux.center(), 100e6, 1e3);
+    EXPECT_FALSE(mux.lost());
+    auto caps = mux.capabilities();
+    ASSERT_EQ(caps.size(), 5u);
+    EXPECT_EQ(caps[0].id, "freq");
+    EXPECT_LT(caps[0].min, 100e6);
+    EXPECT_GT(caps[0].max, 100e6);
+    EXPECT_EQ(caps[1].id, "rate");
+    EXPECT_TRUE(caps[1].ro);
+    EXPECT_EQ(caps[2].id, "gain");
+    EXPECT_GT(caps[2].step, 0.0);
+    EXPECT_EQ(caps[3].type, "bool");
+    mux.set("freq", 101.1e6);
+    EXPECT_NEAR(mux.center(), 101.1e6, 1e3);
+    const size_t n = pump(mux, 0.5);
+    EXPECT_GT(n, 100000u);
+    mux.close();
+    EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
 }
 #endif
