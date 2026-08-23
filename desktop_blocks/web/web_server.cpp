@@ -324,6 +324,7 @@ void WebServer::broadcast(const std::string& text) {
 void WebServer::tick_loop() {
     using namespace std::chrono;
     uint32_t tick = 0;
+    auto next_stats = steady_clock::now() + seconds(1);
     std::vector<std::pair<std::shared_ptr<ix::WebSocket>, std::shared_ptr<Client>>> targets;
     std::vector<std::string> texts;
     std::string stats_extra;
@@ -362,7 +363,8 @@ void WebServer::tick_loop() {
 
         for (auto& text : texts) for (auto& t : targets) t.first->sendText(text);
 
-        if (tick % 50 == 0) {
+        if (steady_clock::now() >= next_stats) {
+            next_stats += seconds(1);
             for (auto& t : targets) {
                 t.first->sendText("{\"t\":\"stats\",\"spectrum_dropped\":" + std::to_string(t.second->spectrum_dropped) +
                                   ",\"audio_dropped\":" + std::to_string(t.second->audio_dropped) +
