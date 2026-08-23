@@ -25,7 +25,8 @@ struct SourceHackRFBlock : public cler::BlockBase {
                       int lna_gain_db = 40,  // 0-40 dB, multiple of 8
                       int vga_gain_db = 16,  // 0-62 dB, multiple of 2
                       bool amp_enable = false, // Enable RX amp (adds ~14dB)
-                      size_t buffer_size = 0)
+                      size_t buffer_size = 0,
+                      const char* serial = nullptr)  // nullptr = first device
         : cler::BlockBase(name),
           _iq(buffer_size == 0 ? DEFAULT_RING_SAMPLES : buffer_size),
           _freq_hz(freq_hz),
@@ -46,7 +47,8 @@ struct SourceHackRFBlock : public cler::BlockBase {
             cler::panic("Failed to initialize HackRF library.");
         }
 
-        if (hackrf_open(&_dev) != HACKRF_SUCCESS) {
+        const int opened = serial && *serial ? hackrf_open_by_serial(serial, &_dev) : hackrf_open(&_dev);
+        if (opened != HACKRF_SUCCESS) {
             cler::panic("Failed to open HackRF device.");
         }
 
@@ -131,6 +133,7 @@ struct SourceHackRFBlock : public cler::BlockBase {
     bool get_amp_enable() const { return _amp_enable; }
     size_t get_overflow_count() const { return _overflow_count.load(); }
     void reset_overflow_count() { _overflow_count.store(0); }
+    bool lost() const { return _dev == nullptr || hackrf_is_streaming(_dev) != HACKRF_TRUE; }
 
     // Setters (be careful - changing these while streaming may cause issues)
     void set_frequency(uint64_t freq_hz) {

@@ -87,6 +87,10 @@ if (CLER_BUILD_BLOCKS_LIQUID)
     )
 endif()
 
+add_executable(source_mux_test test_source_mux.cpp)
+target_link_libraries(source_mux_test gtest_main cler::desktop_blocks)
+add_test(NAME source_mux_test COMMAND source_mux_test)
+
 add_executable(gui_render_test
     test_gui_render.cpp
 )

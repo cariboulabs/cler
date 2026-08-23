@@ -184,6 +184,7 @@ function(cler_register_standard_block_components)
     desktop_blocks/sources/source_chirp.hpp
     desktop_blocks/sources/source_cw.hpp
     desktop_blocks/sources/source_file.hpp
+    desktop_blocks/sources/source_sim.hpp
   )
   cler_register_block_component(TARGET cler::blocks_sinks_core PATHS
     desktop_blocks/sinks/sink_file.hpp
@@ -204,6 +205,7 @@ function(cler_register_standard_block_components)
   if(TARGET cler::blocks_source_pluto)
     cler_register_block_component(TARGET cler::blocks_source_pluto PATHS desktop_blocks/sources/source_pluto.hpp)
   endif()
+  cler_register_block_component(TARGET cler::blocks_source_mux PATHS desktop_blocks/sources/source_mux.hpp)
   if(TARGET cler::blocks_soapysdr)
     cler_register_block_component(TARGET cler::blocks_soapysdr PATHS
       desktop_blocks/sources/source_soapysdr.hpp
