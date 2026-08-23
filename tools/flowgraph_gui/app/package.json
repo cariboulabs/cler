@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "prebuild:web": "../regen-fixtures.sh",
     "build:web": "./build-wasm.sh && VITE_CLER_WASM=1 vite build --base=./ --outDir ../../../docs/cler-fg/try --emptyOutDir",
     "tauri": "tauri",
+    "pretest": "../regen-fixtures.sh",
     "test": "vitest run",
     "test:e2e": "playwright test --config tests-e2e/playwright.config.ts"
   },

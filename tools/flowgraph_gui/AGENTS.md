@@ -80,7 +80,7 @@ in two places under two names, one of them is wrong.
    monospace. Prose renders in the UI font.
 6. **Destructive actions confirm; reversible actions don't ask.**
 7. **Every interactive element has a `data-testid`** and behaviour lands with
-   a test. Fixtures regenerate via `regen-fixtures.sh` — never hand-edit them.
+   a test. Fixtures regenerate on `npm test` and `npm run build:web` (`regen-fixtures.sh`) — never hand-edit them.
 8. **Panels hold values, not loose push-buttons.** A panel section shows
    fields, lists, and read-only values; actions on that section live in a
    small `⋯` menu on the section header (see Block paths). Inline icon

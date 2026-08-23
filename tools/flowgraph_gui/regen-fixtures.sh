@@ -26,10 +26,8 @@ for name in "${!sources[@]}"; do
   src="${sources[$name]}"
   cargo run -q --manifest-path "$manifest" --bin cler-graph -- \
     parse "$src" --pretty --palette desktop_blocks > "$fixtures_dir/$name.json"
-  echo "regenerated $name.json from $src"
 done
 
 cargo run --quiet --manifest-path "$manifest" -- palette \
   "$repo_root/desktop_blocks" "$repo_root/desktop_examples/mass_spring_damper.cpp" \
   > "$gui_dir/app/tests/palette.json"
-echo "regenerated app/tests/palette.json from desktop_blocks"
