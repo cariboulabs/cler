@@ -149,3 +149,10 @@ if (NODE_EXECUTABLE)
         ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/proto.test.mjs
         ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/panel.test.mjs)
 endif()
+
+set(WEBSDR_NODE_MODULES "${PROJECT_SOURCE_DIR}/tools/flowgraph_gui/app/node_modules")
+if (NODE_EXECUTABLE AND TARGET websdr AND EXISTS "${WEBSDR_NODE_MODULES}/playwright")
+    add_test(NAME websdr_e2e_test COMMAND ${CMAKE_COMMAND} -E env
+        WEBSDR_BIN=$<TARGET_FILE:websdr> NODE_PATH=${WEBSDR_NODE_MODULES}
+        ${NODE_EXECUTABLE} ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/e2e.mjs)
+endif()
