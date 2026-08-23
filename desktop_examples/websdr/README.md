@@ -33,3 +33,9 @@ in `plugdev`.
 
 Alternative for a LAN with no browser requirement: run SoapySDRServer on the
 box and point the desktop scanner at `driver=remote` — all DSP on the laptop.
+
+Build for a Raspberry Pi from any machine (qemu, no sysroot):
+
+    docker buildx build --platform linux/arm64 --build-arg BASE=debian:bullseye \
+      -f docker/Dockerfile.build --target out -o out/linux-arm64 .
+    scp out/linux-arm64/websdr pi@box:/usr/local/bin/
