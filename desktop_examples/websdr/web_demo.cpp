@@ -1,4 +1,3 @@
-// Synthetic spectrum + audio into WebServer: exercises the client without any DSP or hardware.
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
 #include "websdr_client_files.hpp"

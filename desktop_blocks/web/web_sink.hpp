@@ -7,8 +7,6 @@
 #include <array>
 #include <cmath>
 
-// Drains spectrum frames and 48 kHz audio into the WebServer rings every call, clients or not;
-// never backpressures the DSP chain. Drops happen at the ring edge and are counted by the server.
 struct WebSinkBlock : public cler::BlockBase {
     cler::Channel<SpectrumFrame> spectrum;
     cler::Channel<float> audio;

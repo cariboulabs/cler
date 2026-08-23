@@ -1,5 +1,3 @@
-# Script mode: cmake -DOUT=<header> -DVAR=<name> -DFILES=<a;b;c> -P EmbedFiles.cmake
-# Function mode (included from a CMakeLists): cler_embed_dir(<target> <dir> <header-basename> <var>)
 if (CMAKE_SCRIPT_MODE_FILE)
   set(body "#pragma once\n#include \"desktop_blocks/web/web_server.hpp\"\nnamespace {\n")
   set(table "")
@@ -20,7 +18,7 @@ endif()
 set(CLER_EMBED_SCRIPT "${CMAKE_CURRENT_LIST_FILE}")
 
 function(cler_embed_dir target dir header var)
-  file(GLOB files CONFIGURE_DEPENDS "${dir}/*")
+  file(GLOB files CONFIGURE_DEPENDS "${dir}/*.html" "${dir}/*.js" "${dir}/*.css")
   set(out "${CMAKE_CURRENT_BINARY_DIR}/${header}")
   add_custom_command(OUTPUT "${out}"
     COMMAND ${CMAKE_COMMAND} -DOUT=${out} -DVAR=${var} "-DFILES=${files}" -P ${CLER_EMBED_SCRIPT}

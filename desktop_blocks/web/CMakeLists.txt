@@ -2,6 +2,7 @@ include(FetchContent)
 set(USE_TLS OFF CACHE BOOL "" FORCE)
 set(USE_ZLIB OFF CACHE BOOL "" FORCE)
 set(IXWEBSOCKET_INSTALL OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF)
 FetchContent_Declare(ixwebsocket
   GIT_REPOSITORY https://github.com/machinezone/IXWebSocket
   GIT_TAG        v11.4.5
