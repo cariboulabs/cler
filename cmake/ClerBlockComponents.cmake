@@ -104,6 +104,12 @@ function(cler_register_standard_block_components)
     desktop_blocks/udp/sink_udp.hpp
   )
 
+  if(TARGET cler::blocks_web)
+    cler_register_block_component(TARGET cler::blocks_web PATHS
+      desktop_blocks/web/web_sink.hpp
+    )
+  endif()
+
   if(CLER_BUILD_BLOCKS_LIQUID)
     cler_register_block_component(TARGET cler::blocks_liquid PATHS
       desktop_blocks/channelizers/polyphase_analyzer.hpp

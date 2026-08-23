@@ -139,7 +139,7 @@ endif()
 
 if (CLER_BUILD_BLOCKS_WEB)
     add_executable(web_blocks_test test_web_blocks.cpp)
-    target_link_libraries(web_blocks_test gtest_main cler::desktop_blocks)
+    target_link_libraries(web_blocks_test gtest_main cler::desktop_blocks cler::blocks_web)
     add_test(NAME web_blocks_test COMMAND web_blocks_test)
 endif()
 
