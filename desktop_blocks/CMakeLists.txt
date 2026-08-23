@@ -20,7 +20,6 @@ if (CLER_BUILD_BLOCKS_LIQUID)
   # Always fetch liquid-dsp from GitHub to ensure we have all source files
   message(STATUS "Fetching liquid-dsp from GitHub...")
 
-  set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/_deps")
   set(BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
   set(BUILD_AUTOTESTS  OFF CACHE BOOL "" FORCE)
   set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
