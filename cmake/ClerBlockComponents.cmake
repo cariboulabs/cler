@@ -115,6 +115,7 @@ function(cler_register_standard_block_components)
       desktop_blocks/fm/rds.hpp
       desktop_blocks/resamplers/multistage_resampler.hpp
       desktop_blocks/resamplers/rational_resampler.hpp
+      desktop_blocks/spectrum/spectrum.hpp
     )
     cler_register_block_component(TARGET cler::blocks_linear_modem PATHS
       desktop_blocks/linear_modem/ber_counter.hpp

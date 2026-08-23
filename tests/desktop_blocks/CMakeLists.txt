@@ -73,6 +73,8 @@ if (CLER_BUILD_BLOCKS_LIQUID)
 
     add_executable(fec_blocks_test test_fec_blocks.cpp)
     target_link_libraries(fec_blocks_test gtest_main cler::desktop_blocks)
+    add_executable(spectrum_block_test test_spectrum_block.cpp)
+    target_link_libraries(spectrum_block_test gtest_main cler::desktop_blocks)
 
     # Channelizer blocks tests
     add_executable(channelizer_blocks_test
@@ -111,6 +113,7 @@ if (CLER_BUILD_BLOCKS_LIQUID)
     add_test(NAME ais_blocks_test COMMAND ais_blocks_test)
     add_test(NAME demod_blocks_test COMMAND demod_blocks_test)
     add_test(NAME aprs_blocks_test COMMAND aprs_blocks_test)
+    add_test(NAME spectrum_block_test COMMAND spectrum_block_test)
 else()
     message(STATUS "Skipping channelizer_blocks_test because CLER_BUILD_BLOCKS_LIQUID is OFF")
     message(STATUS "Skipping resampler_blocks_test because CLER_BUILD_BLOCKS_LIQUID is OFF")
