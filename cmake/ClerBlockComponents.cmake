@@ -8,9 +8,9 @@ function(cler_register_block_component)
 
   foreach(path IN LISTS ARG_PATHS)
     if(IS_ABSOLUTE "${path}")
-      file(REAL_PATH "${path}" absolute)
+      get_filename_component(absolute "${path}" REALPATH)
     else()
-      file(REAL_PATH "${PROJECT_SOURCE_DIR}/${path}" absolute)
+      get_filename_component(absolute "${PROJECT_SOURCE_DIR}/${path}" REALPATH)
     endif()
     set_property(GLOBAL APPEND PROPERTY CLER_BLOCK_COMPONENT_ORIGINS "${absolute}")
     set_property(GLOBAL APPEND PROPERTY CLER_BLOCK_COMPONENT_TARGETS "${ARG_TARGET}")
@@ -51,9 +51,9 @@ function(cler_configure_editor_exact_block_linking)
       continue()
     endif()
     if(IS_ABSOLUTE "${origin}")
-      file(REAL_PATH "${origin}" absolute)
+      get_filename_component(absolute "${origin}" REALPATH)
     else()
-      file(REAL_PATH "${PROJECT_SOURCE_DIR}/${origin}" absolute)
+      get_filename_component(absolute "${PROJECT_SOURCE_DIR}/${origin}" REALPATH)
     endif()
     list(FIND registered_origins "${absolute}" index)
     if(index EQUAL -1)
@@ -104,6 +104,12 @@ function(cler_register_standard_block_components)
     desktop_blocks/udp/sink_udp.hpp
   )
 
+  if(TARGET cler::blocks_web)
+    cler_register_block_component(TARGET cler::blocks_web PATHS
+      desktop_blocks/web/web_sink.hpp
+    )
+  endif()
+
   if(CLER_BUILD_BLOCKS_LIQUID)
     cler_register_block_component(TARGET cler::blocks_liquid PATHS
       desktop_blocks/channelizers/polyphase_analyzer.hpp
@@ -115,6 +121,7 @@ function(cler_register_standard_block_components)
       desktop_blocks/fm/rds.hpp
       desktop_blocks/resamplers/multistage_resampler.hpp
       desktop_blocks/resamplers/rational_resampler.hpp
+      desktop_blocks/spectrum/spectrum.hpp
     )
     cler_register_block_component(TARGET cler::blocks_linear_modem PATHS
       desktop_blocks/linear_modem/ber_counter.hpp
@@ -183,6 +190,7 @@ function(cler_register_standard_block_components)
     desktop_blocks/sources/source_chirp.hpp
     desktop_blocks/sources/source_cw.hpp
     desktop_blocks/sources/source_file.hpp
+    desktop_blocks/sources/source_sim.hpp
   )
   cler_register_block_component(TARGET cler::blocks_sinks_core PATHS
     desktop_blocks/sinks/sink_file.hpp
@@ -203,6 +211,7 @@ function(cler_register_standard_block_components)
   if(TARGET cler::blocks_source_pluto)
     cler_register_block_component(TARGET cler::blocks_source_pluto PATHS desktop_blocks/sources/source_pluto.hpp)
   endif()
+  cler_register_block_component(TARGET cler::blocks_source_mux PATHS desktop_blocks/sources/source_mux.hpp)
   if(TARGET cler::blocks_soapysdr)
     cler_register_block_component(TARGET cler::blocks_soapysdr PATHS
       desktop_blocks/sources/source_soapysdr.hpp

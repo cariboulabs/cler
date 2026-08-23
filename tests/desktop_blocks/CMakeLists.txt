@@ -73,6 +73,8 @@ if (CLER_BUILD_BLOCKS_LIQUID)
 
     add_executable(fec_blocks_test test_fec_blocks.cpp)
     target_link_libraries(fec_blocks_test gtest_main cler::desktop_blocks)
+    add_executable(spectrum_block_test test_spectrum_block.cpp)
+    target_link_libraries(spectrum_block_test gtest_main cler::desktop_blocks)
 
     # Channelizer blocks tests
     add_executable(channelizer_blocks_test
@@ -84,6 +86,10 @@ if (CLER_BUILD_BLOCKS_LIQUID)
         cler::desktop_blocks
     )
 endif()
+
+add_executable(source_mux_test test_source_mux.cpp)
+target_link_libraries(source_mux_test gtest_main cler::desktop_blocks)
+add_test(NAME source_mux_test COMMAND source_mux_test)
 
 add_executable(gui_render_test
     test_gui_render.cpp
@@ -111,6 +117,7 @@ if (CLER_BUILD_BLOCKS_LIQUID)
     add_test(NAME ais_blocks_test COMMAND ais_blocks_test)
     add_test(NAME demod_blocks_test COMMAND demod_blocks_test)
     add_test(NAME aprs_blocks_test COMMAND aprs_blocks_test)
+    add_test(NAME spectrum_block_test COMMAND spectrum_block_test)
 else()
     message(STATUS "Skipping channelizer_blocks_test because CLER_BUILD_BLOCKS_LIQUID is OFF")
     message(STATUS "Skipping resampler_blocks_test because CLER_BUILD_BLOCKS_LIQUID is OFF")
@@ -128,4 +135,28 @@ if(HACKRF_FOUND)
     add_test(NAME hackrf_blocks_test COMMAND hackrf_blocks_test)
 else()
     message(STATUS "Skipping hackrf_blocks_test because HACKRF_FOUND is OFF")
+endif()
+
+if (CLER_BUILD_BLOCKS_WEB)
+    add_executable(web_blocks_test test_web_blocks.cpp)
+    target_link_libraries(web_blocks_test gtest_main cler::desktop_blocks cler::blocks_web)
+    add_test(NAME web_blocks_test COMMAND web_blocks_test)
+endif()
+
+find_program(NODE_EXECUTABLE node)
+if (NODE_EXECUTABLE)
+    add_test(NAME websdr_client_test COMMAND ${NODE_EXECUTABLE} --test
+        ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/proto.test.mjs
+        ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/panel.test.mjs)
+endif()
+
+if (TARGET websdr)
+    if (NODE_EXECUTABLE)
+        add_test(NAME websdr_e2e_test COMMAND ${CMAKE_COMMAND} -E env
+            WEBSDR_BIN=$<TARGET_FILE:websdr> NODE_PATH=${PROJECT_SOURCE_DIR}/tools/flowgraph_gui/app/node_modules
+            ${NODE_EXECUTABLE} ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/e2e.mjs)
+    else()
+        add_test(NAME websdr_e2e_test COMMAND sh -c "echo SKIP: node not found; exit 77")
+    endif()
+    set_tests_properties(websdr_e2e_test PROPERTIES SKIP_RETURN_CODE 77)
 endif()

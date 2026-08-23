@@ -49,3 +49,9 @@ docker-compose.override.yml
 **/node_modules/
 **/target/
 build-e2e-gui/
+
+build-*/
+node_modules/
+.claude/
+docs/cler-fg/
+tools/flowgraph_gui/

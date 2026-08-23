@@ -1,7 +1,9 @@
 # websdr — cler receiver in a browser, over ssh
 
-Status: plan v2 after three independent critiques (architecture, ops/security,
-frontend/protocol). Nothing built. 2026-08-23.
+Status: plan v3 — v2 was three independent critiques (architecture, ops/security,
+frontend/protocol); v3 puts SourceMux back over the compiled-in backends, makes
+the device list the first screen, and switches sources in place. Nothing built.
+2026-08-23.
 
 ## Goal
 
@@ -43,10 +45,10 @@ an installed receiver, demos without installing anything on the viewer's machine
 ```
  remote box (native cler)                                   laptop
  ┌──────────────────────────────────────────────────────┐   ┌─────────────────┐
- │ main thread: owns WebServer + current Receiver<Src>  │   │ index.html      │
+ │ main thread: owns WebServer + Receiver               │   │ index.html      │
  │                                                      │   │ + 4 ES modules  │
- │  Receiver<Src> (one flowgraph, rebuilt on switch)    │   │  waterfall      │
- │   Src ─> Fanout ─┬─> SpectrumBlock ──> WebSink ──┐   │   │  audio worklet  │
+ │  Receiver (one flowgraph, stop/reconfigure/run)      │   │  waterfall      │
+ │   SourceMux ─> Fanout ─┬─> SpectrumBlock ─> WebSink ─┐ │   │  audio worklet  │
  │                  ├─> Shift ─> Resamp ─> Demod ───┤   │   │  control panel  │
  │                  ├─> decoders ─> JSON adapters ──┤   │   │  decoder tabs   │
  │                  └─> SigMFRecorder               │   │   └─────────────────┘
@@ -55,47 +57,55 @@ an installed receiver, demos without installing anything on the viewer's machine
  └──────────────────────────────────────────────────────┘
 ```
 
-### Sources: SoapySDR + SigMF file + Sim. No SourceMux.
+### SourceMux: one source block over every backend compiled in
 
-`SourceSoapySDRBlock` already covers HackRF, Pluto, UHD, CaribouLite (its only
-driver is a Soapy module) and enumerates devices, gains by name, ranges, antennas.
-That *is* the capabilities abstraction; the plan does not reinvent it per vendor.
-Three source kinds: `Soapy`, `SigMF` (playback), `Sim` (tone + noise, ~40 lines,
-for CI, Playwright, client-side UI work and demos with no hardware).
+Users do not type device strings; they pick from a list. `SourceMux` is a
+`std::variant` over the source blocks cler already has — native `SourceHackRFBlock`,
+`SourcePlutoBlock`, `SourceUHDBlock`, `SourceCaribouliteBlock` (CaribouLite's Soapy
+module is not in apt; its native block is the one that works), `SourceSoapySDRBlock`
+(exotic and network devices: `driver=remote`, `driver=uhd,addr=…`,
+`driver=plutosdr,uri=ip:…`), `SourceSigMFBlock` (playback) and `SimSourceBlock`
+(tone + noise, ~40 lines, for CI/Playwright/demos). Each alternative exists only
+if its library was found at configure time, the same `#ifdef`s spike uses.
 
-Needed additions to the Soapy block: `set_gain(name, value)` (only the aggregate
-exists today), getters for current values, and a `lost()` flag when the stream
-errors so the app can report "source lost" and reopen instead of exiting.
+Per kind, two small static/instance additions:
+- `enumerate()` → `[{id, label, serial/address}]`: `hackrf_device_list`,
+  `iio_create_scan_context` (USB + `ip:`), `uhd::device::find("")`, CaribouLite
+  detect, `SoapySDR::Device::enumerate()`, files in `--record-dir`, "Simulator".
+- `capabilities()` → the `controls[]` list the UI renders: HackRF LNA/VGA/AMP,
+  Pluto gain/bandwidth, UHD gain/antenna, CaribouLite its channels, Soapy from its
+  own API, SigMF a read-only RF group + transport, Sim a tone frequency.
 
-Native `SourceHackRFBlock` stays in the repo; websdr uses it only if the RPi
-measurement shows SoapyHackRF costing real CPU.
+`SourceMux` starts empty (`monostate`); `select(kind, id)` closes the old device
+and opens the new one; `lost()` reports a dead stream so the app reopens rather
+than exits. Exactly one real device plugged in → auto-select at start.
 
-### Source switch = rebuild the flowgraph
+### Switching sources in place
 
-Nothing in cler re-derives rates: resampler ratios, `AnalogDemodBlock`'s channel
-rate, the recorder's rate are all constructor-fixed, and `FlowGraph::stop()` leaves
-stale samples in channels. So the receiver is one object:
+Everything downstream is rate-fixed at construction, so a switch is a stop/
+reconfigure/run, the same pause every SDR program has (GQRX, SDR++, OpenWebRX,
+GNU Radio's lock/unlock):
 
 ```cpp
-template <class Src> struct Receiver {
-    Src src; FanoutBlock fan; SpectrumBlock spec; FrequencyShiftBlock shift;
-    MultiStageResamplerBlock resamp;   // runtime ratio: source rate -> 240 kHz
-    AnalogDemodBlock demod;            // fixed 240 kHz = 5 x 48 kHz
-    SigMFRecorderBlock rec; WebSinkBlock sink; cler::FlowGraph fg;
-};
-std::variant<std::monostate, Receiver<SourceSoapySDRBlock>,
-             Receiver<SourceSigMFBlock>, Receiver<SimSourceBlock>> rx;
+fg.stop();
+mux.select(kind, id);                    // the ~1 s: close + open device
+resamp.set_ratio(240e3 / mux.rate());    // MultiStageResampler: recreate msresamp
+spec.set_rate(mux.rate());
+fg.reset();                              // new: every connected channel -> empty
+fg.run();
 ```
 
-Main thread: stop → destroy → construct → run. `WebServer` lives outside and
-keeps sockets, `/health` and `/recordings` alive while no graph runs; the UI sees
-`state.switching=true`. Switching is refused while recording. The internal rate is
-pinned at 240 kHz (scanner's choice), so any source rate works through the
-runtime-ratio resampler; the spectrum runs at the source rate.
+Two small additions to cler: `ChannelBase::reset()` (SPSC read = write, ~5 lines)
+and `FlowGraph::reset()` that walks each `BlockRunner`'s output channels
+(`cler.hpp:191`) and panics if called while running. Blocks with filter state reset
+themselves on reconfigure (the `AnalogDemodBlock::apply_mode` pattern). One
+`Receiver`, graph type fixed, no variant-of-receivers, no destroy/construct. The
+internal rate is pinned at 240 kHz (scanner's choice) so `AnalogDemodBlock` never
+changes; the spectrum runs at the source rate. Switching is refused while recording.
 
-All control (tune, gains, mode, switch, record) is applied on the main thread
-between `procedure()` calls — atomics/mailbox, the `AnalogDemodBlock::set_mode`
-pattern. The server thread never touches DSP state.
+All control (tune, gains, mode, select, record) is applied on the main thread
+between `procedure()` calls — atomics/mailbox, the `set_mode` pattern. The server
+thread never touches DSP state.
 
 ### SpectrumBlock (new, phase 1)
 
@@ -107,14 +117,14 @@ plots can reuse it later.
 
 ### WebSinkBlock + WebServer
 
-`WebSinkBlock` is a normal cler sink inside each Receiver: every call it drains
+`WebSinkBlock` is a normal cler sink inside the Receiver: every call it drains
 **all** its inputs (spectrum frames, 48 kHz audio, JSON text) whether or not a
 client is connected — it never backpressures the DSP chain (else Fanout stalls and
 the SDR ring overflows). It copies into preallocated SPSC rings owned by the
 `WebServer` (producer = cler worker, consumer = server thread), no allocation in
 `procedure()`.
 
-`WebServer` (IXWebSocket, own thread, ticks at 50 Hz): drains the rings, fans out
+`WebServer` (IXWebSocket, own thread, ticks at 50 Hz, outlives stop/run cycles): drains the rings, fans out
 to sockets with per-socket bounded queues. Drops happen only at the socket edge —
 spectrum frames and audio chunks alike, each counted per socket and reported in
 `stats`. A slow tab cannot play real-time audio anyway. Ping every 5 s, close on
@@ -128,10 +138,13 @@ no-store` on the client files.
 ### Security (phase 1, not later)
 
 - Bind `127.0.0.1` by default. `--bind` for a LAN.
-- WebSocket upgrade rejected unless `Origin` is the server's own `host:port`.
-  Any page on the laptop can open `ws://localhost:8080`; the tunnel does not stop that.
-- `--token`: required whenever bind is not loopback; client sends it as
-  `Sec-WebSocket-Protocol` / `?token=`; `/recordings` requires it too.
+- WebSocket upgrade rejected unless `Origin` is the server's own `host:port`, and
+  without a token the `Host` header must name loopback or the bind address (DNS
+  rebinding sends a matching Origin+Host pair for evil.com). Any page on the laptop
+  can open `ws://localhost:8080`; the tunnel does not stop that.
+- `--token`: required whenever bind is not loopback; client sends it as `?token=`
+  (IXWebSocket does not echo `Sec-WebSocket-Protocol`); `/health` and `/recordings`
+  require it too, client files stay open.
 - Record/play accept bare filenames in `--record-dir` only.
 - One controller: first socket (or the one presenting the token) may `set`;
   others are viewers and see `state.role="view"`. Controller leaves → next in line.
@@ -213,12 +226,28 @@ adds `pcm16@24k`/`opus`, smaller/slower spectrum, without a flag day.
 - Source switch while recording: refused with `error`.
 - Two controllers: impossible by construction (role).
 
+## Usage
+
+```bash
+cler-websdr                     # no args: UI opens on the Devices list
+ssh -L 8080:localhost:8080 box  # from any laptop; open http://localhost:8080
+```
+
+Devices list = enumeration of every backend compiled in, plus recordings and
+Simulator; one real device → auto-connected. Rescan button. Unplug → "source lost",
+auto-reopen. Non-CLI users never type a device string. Flags exist for pinning and
+systemd: `--source hackrf[:serial] | pluto[:uri] | uhd[:addr] | cariboulite |
+soapy:<kwargs> | sigmf:<name> | sim`, `--freq --rate --gain NAME=V --mode --port
+--bind --token --record-dir --client-dir --state-file`.
+
+LAN viewers: `--bind 0.0.0.0 --token s3cret`, they open `http://box:8080/?token=…`;
+first token holder controls, the rest view. Internet exposure is out of scope —
+nginx + basic auth in front if a client insists.
+
 ## Ops
 
-- `cler-websdr --source soapy:driver=hackrf|sigmf:<name>|sim --freq --rate --gain
-  NAME=V... --mode --port --bind --token --record-dir --client-dir --state-file`.
-- `--state-file` persists last tuning/gains/mode as JSON; reboot comes up where it
-  was. Config file only if a client asks; systemd `EnvironmentFile` covers it.
+- `--state-file` persists last device/tuning/gains/mode as JSON; reboot comes up
+  where it was. Config file only if a client asks; systemd `EnvironmentFile` covers it.
 - `--version` prints git sha + build date; `/health` returns the same plus live state.
 - `misc/websdr/cler-websdr.service` (Restart=on-failure, dedicated user, udev notes
   for HackRF/Pluto/USRP) ships with phase 1.
@@ -226,18 +255,24 @@ adds `pcm16@24k`/`opus`, smaller/slower spectrum, without a flag day.
 
 ## Phases
 
-1. **Scanner in a tab** — Soapy (HackRF) + Sim sources chosen by argv (no runtime
-   switch yet), SpectrumBlock, WebSinkBlock + WebServer (IXWebSocket), protocol v1
-   incl. `gen`/version/Origin/token/role, client (waterfall, audio worklet,
-   generated panel from Soapy caps, double-click tune), `/health`, `--version`,
-   systemd unit, node + Playwright tests. Done when: FM station audible in the
-   laptop browser through `ssh -L`, Playwright green on the sim source, RPi CPU
-   number recorded.
+1. **Scanner in a tab** — SourceMux over HackRF (native) + Sim, `enumerate()`
+   /`capabilities()` for those two, Devices list as first screen, select +
+   in-place switch (`Channel::reset`, `FlowGraph::reset`, resampler `set_ratio`),
+   SpectrumBlock, WebSinkBlock + WebServer (IXWebSocket), protocol v1 incl.
+   `gen`/version/Origin/token/role, client (devices, waterfall, audio worklet,
+   generated panel, double-click tune), `/health`, `--version`, systemd unit,
+   node + Playwright tests on Sim. Done when: FM station audible in the laptop
+   browser through `ssh -L` after picking the HackRF from the list, Playwright
+   green on Sim, RPi CPU number recorded.
 2. **Record / playback** — recorder start/stop with disk guard, listing, download,
-   SigMF source pacing/seek/pause/loop/ended, transport controls.
-3. **Runtime source switching** — Receiver variant rebuild, enumeration, `rescan`,
-   Pluto/UHD/CaribouLite verified through Soapy on whatever hardware is on the desk,
-   `set_gain(name)` on the Soapy block.
+   SigMF source pacing/seek/pause/loop/ended, transport controls, recordings in
+   the Devices list.
+3. **All backends** — Pluto, UHD, CaribouLite, Soapy alternatives in SourceMux with
+   their `enumerate()`/`capabilities()`; verified on whatever is on the desk
+   (Pluto available again as of 2026-08-23), others by build + review. Then retire
+   `hackrf_spectrum.cpp`, `pluto_spectrum.cpp`, `cariboulite_spectrum.cpp`,
+   `fm_receiver.cpp` (one `sdr_spectrum.cpp` on SourceMux replaces the three) and
+   point spike's `spike_source.hpp` at SourceMux.
 4. **Decoders as tabs** — JSON adapter blocks for RDS, ADS-B, AIS, APRS, modem/FEC
    stats; tables in the browser. Map later.
 5. **WAN profile + polish** — `pcm16@24k`, Opus, deflated spectrum rows, fps/N
@@ -246,9 +281,23 @@ adds `pcm16@24k`/`opus`, smaller/slower spectrum, without a flag day.
 
 Each phase = a branch, a worker, critic review, merge.
 
+Phase 1 measured 2026-08-23: Raspberry Pi 4 (bullseye, cmake 3.18, native build),
+`--source sim --rate 2.4e6`, 20 fps spectrum + 48 kHz audio through `ssh -L` to a
+laptop: 115–140 % of one core total, of which the Sim generator is roughly a third
+(gdb sampling; no perf on that kernel) — DSP chain ≈ 0.8–1.0 core. i7-14700K with
+a HackRF at 2.4–2.5 MS/s: 13–17 % of one core. Cross-compile toolchain:
+`cmake/toolchains/rpi-aarch64.cmake`.
+
+Phase 1 as built: the sample rate is fixed per run (`--rate`, state file); the
+UI shows it read-only. Changing it from the browser is a phase 2/3 item (it is
+a stop/reconfigure/run like a source switch).
+
 ## Decisions
 
-- Phase 3 covers every source cler already has: HackRF, SoapySDR, CaribouLite, UHD,
-  Pluto, plus SigMF file — all through the Soapy block. (Alon, 2026-08-23.)
+- Every source cler already has is in scope: HackRF, Pluto, UHD, CaribouLite, Soapy,
+  plus SigMF file and Sim — through SourceMux, native blocks first, Soapy for the
+  rest. (Alon, 2026-08-23.)
+- Users pick devices from a list; no device strings. (Alon, 2026-08-23.)
+- Switch in place (stop/reconfigure/`fg.reset()`/run), not rebuild. (Alon, 2026-08-23.)
 - Phase 1 on the x86 bench box; RPi measured before phase 1 is called done.
-- Tables before maps. IXWebSocket, not uWebSockets. No SourceMux. Rebuild on switch.
+- Tables before maps. IXWebSocket, not uWebSockets.

@@ -49,6 +49,7 @@ cd desktop_examples
 | [<img src="misc/showcase/fm_radio.jpg" width="420">](desktop_examples/fm_radio) | **FM radio** — stereo, RDS station text with error correction, seek and band scan. `fm_radio --source hackrf\|pluto\|soapy` |
 | [<img src="misc/showcase/scanner.jpg" width="420">](desktop_examples/scanner) | **Band scanner** — wideband spectrum + waterfall, double-click a signal to tune it; WBFM / NBFM / AM / USB / LSB. |
 | [<img src="misc/showcase/ais_receiver.jpg" width="420">](desktop_examples/ais_receiver) | **AIS ship map** — both VHF channels decoded to a live vessel map. Also `aprs_receiver` for APRS stations. Both run hardware-free with `--sim`. |
+| [<img src="misc/showcase/websdr.jpg" width="420">](desktop_examples/websdr) | **websdr** — the receiver in a browser tab, served by the box the SDR is plugged into (a Raspberry Pi will do): `ssh -L 8080:localhost:8080 box`, open `localhost:8080`, pick the device from a list, double-click to tune, listen. HackRF, CaribouLite, simulator; Pluto/USRP/Soapy and recording next. |
 | [<img src="misc/showcase/modem_loopback.jpg" width="420">](desktop_examples/linear_modem_loopback.cpp) | **Digital modem playground** — BPSK…64-QAM over AWGN with live constellation, EVM and BER. [Runs in your browser](https://cariboulabs.github.io/cler/demos/). |
 
 Plus ADS-B with an aircraft map, a polyphase channelizer, GMSK, SigMF recording interop (`sigmf_tools`), and [browser demos](https://cariboulabs.github.io/cler/demos/) that need no install at all.
@@ -110,6 +111,9 @@ FetchContent_MakeAvailable(cler)
 
 target_link_libraries(my_executable PRIVATE cler::desktop_blocks)
 ```
+
+All build options and their help text: `cmake -LH -N build | grep -A1 CLER_` after a configure.
+Cross-compiling for a Raspberry Pi: `cmake -S . -B build-rpi -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/rpi-aarch64.cmake` (see the file header for the sysroot).
 
 # Things to Know
 

@@ -624,7 +624,21 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         PortCount::Fixed(1),
     ),
     (
+        "SourceMux",
+        0,
+        1,
+        PortCount::Fixed(0),
+        PortCount::Fixed(1),
+    ),
+    (
         "SourcePlutoBlock",
+        0,
+        1,
+        PortCount::Fixed(0),
+        PortCount::Fixed(1),
+    ),
+    (
+        "SimSourceBlock",
         0,
         1,
         PortCount::Fixed(0),
@@ -643,6 +657,13 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         1,
         PortCount::Fixed(0),
         PortCount::CtorArg(5),
+    ),
+    (
+        "SpectrumBlock",
+        1,
+        1,
+        PortCount::Fixed(1),
+        PortCount::Fixed(1),
     ),
     (
         "TriggerBlock",
@@ -686,6 +707,13 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         1,
         PortCount::Fixed(1),
         PortCount::Fixed(1),
+    ),
+    (
+        "WebSinkBlock",
+        2,
+        0,
+        PortCount::Fixed(2),
+        PortCount::Fixed(0),
     ),
 ];
 

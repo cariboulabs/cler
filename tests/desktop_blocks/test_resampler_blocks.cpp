@@ -252,6 +252,36 @@ TEST_F(ResamplerBlocksTest, MultiStageResamplerUnitRatio) {
 }
 
 // Test MultiStageResamplerBlock error conditions
+// 0.5 then 0.1 on the same block: the output count follows the new ratio and
+// nothing from the old filter state leaks (finite, non-zero output)
+TEST_F(ResamplerBlocksTest, MultiStageResamplerSetRatio) {
+    const size_t buffer_size = 4096;
+    MultiStageResamplerBlock<std::complex<float>> resampler("r", 0.5f, 60.0f, buffer_size);
+    cler::Channel<std::complex<float>> output(buffer_size);
+    auto input = generate_complex_exponential(2000, 1000.0f, 100000.0f);
+
+    for (auto v : input) resampler.in.push(v);
+    EXPECT_TRUE(resampler.procedure(&output).is_ok());
+    const size_t half = output.size();
+    EXPECT_NEAR(static_cast<double>(half), 1000.0, 30.0);
+    std::complex<float> tmp;
+    while (output.try_pop(tmp)) {}
+
+    resampler.set_ratio(0.1f);
+    EXPECT_FLOAT_EQ(resampler.ratio(), 0.1f);
+    for (auto v : input) resampler.in.push(v);
+    EXPECT_TRUE(resampler.procedure(&output).is_ok());
+    const size_t tenth = output.size();
+    EXPECT_NEAR(static_cast<double>(tenth), 200.0, 20.0);
+    bool finite = true, nonzero = false;
+    while (output.try_pop(tmp)) {
+        if (!std::isfinite(tmp.real())) finite = false;
+        if (std::abs(tmp) > 1e-6f) nonzero = true;
+    }
+    EXPECT_TRUE(finite);
+    EXPECT_TRUE(nonzero);
+}
+
 TEST_F(ResamplerBlocksTest, MultiStageResamplerErrorConditions) {
     const size_t buffer_size = 4096;
     const float attenuation = 60.0f;
