@@ -92,6 +92,24 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             }            
         }
 
+        static bool can_open() {
+            CaribouLite::SysVersion ver;
+            std::string name, guid;
+            return CaribouLite::DetectBoard(&ver, name, guid);
+        }
+
+        void set_frequency(float hz) { _radio->SetFrequency(hz); }
+        void set_rx_gain(float db) { _radio->SetRxGain(db); }
+        void set_agc(bool on) { _radio->SetAgc(on); }
+        void set_bandwidth(float hz) { _radio->SetRxBandwidth(hz); }
+        float get_frequency() { return _radio->GetFrequency(); }
+        float get_sample_rate() { return _radio->GetRxSampleRate(); }
+        float get_rx_gain() { return _radio->GetRxGain(); }
+        bool get_agc() { return _radio->GetAgc(); }
+        float get_bandwidth() { return _radio->GetRxBandwidth(); }
+        CaribouLiteRadio& radio() { return *_radio; }
+        bool lost() const { return _lost; }
+
         cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
             auto [ptr, space] = out->write_dbf();
             if (ptr == nullptr || space == 0) {
@@ -101,6 +119,7 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
             size_t to_read = std::min(space, _max_samples_to_read);
             int ret = _radio->ReadSamples(ptr, to_read);
             if (ret < 0) {
+                _lost = true;
                 return cler::Error::ProcedureError;
             }
             if (ret == 0) {
@@ -113,4 +132,5 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
         private:    
             CaribouLiteRadio* _radio = nullptr;
             size_t _max_samples_to_read;
+            bool _lost = false;
 };

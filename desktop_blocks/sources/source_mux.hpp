@@ -5,6 +5,9 @@
 #ifdef CLER_HAS_HACKRF
 #include "desktop_blocks/sources/source_hackrf.hpp"
 #endif
+#ifdef CLER_HAS_CARIBOULITE
+#include "desktop_blocks/sources/source_cariboulite.hpp"
+#endif
 
 #include <complex>
 #include <string>
@@ -64,6 +67,12 @@ struct SourceMux : public cler::BlockBase {
             hackrf_exit();
         }
 #endif
+#ifdef CLER_HAS_CARIBOULITE
+        if (std::holds_alternative<CBL>(_v) || CBL::can_open()) {
+            out.push_back({Kind::Cariboulite, "s1g", "CaribouLite S1G"});
+            out.push_back({Kind::Cariboulite, "hif", "CaribouLite HiF"});
+        }
+#endif
         out.push_back({Kind::Sim, "", "Simulator"});
         return out;
     }
@@ -80,6 +89,23 @@ struct SourceMux : public cler::BlockBase {
                 _v.emplace<SourceHackRFBlock>("hackrf", static_cast<uint64_t>(freq_hz + 0.5),
                                               static_cast<uint32_t>(rate_hz + 0.5), 40, 16, false, 0,
                                               id.empty() ? nullptr : id.c_str());
+                return true;
+#endif
+#ifdef CLER_HAS_CARIBOULITE
+            case Kind::Cariboulite:
+                if ((id != "s1g" && id != "hif") || !CBL::can_open()) return false;
+                {
+                    const auto type = id == "hif" ? CaribouLiteRadio::HiF : CaribouLiteRadio::S1G;
+                    CaribouLiteRadio* r = CaribouLite::GetInstance(false).GetRadioChannel(type);
+                    if (!r) return false;
+                    const auto ranges = r->GetFrequencyRange();
+                    bool ok = false;
+                    for (const auto& fr : ranges) ok = ok || (freq_hz > fr.fmin() && freq_hz < fr.fmax());
+                    if (!ok && !ranges.empty()) freq_hz = 0.5 * (ranges.front().fmin() + ranges.front().fmax());
+                    rate_hz = std::min<double>(std::max<double>(rate_hz, r->GetRxSampleRateMin()), r->GetRxSampleRateMax());
+                    _v.emplace<CBL>("cariboulite", type, static_cast<float>(freq_hz),
+                                    static_cast<float>(rate_hz), false, 40.0f);
+                }
                 return true;
 #endif
             case Kind::Sim:
@@ -107,6 +133,9 @@ struct SourceMux : public cler::BlockBase {
 #ifdef CLER_HAS_HACKRF
         if (std::holds_alternative<SourceHackRFBlock>(_v)) return Kind::HackRF;
 #endif
+#ifdef CLER_HAS_CARIBOULITE
+        if (std::holds_alternative<CBL>(_v)) return Kind::Cariboulite;
+#endif
         return Kind::None;
     }
     const std::string& id() const { return _id; }
@@ -116,6 +145,9 @@ struct SourceMux : public cler::BlockBase {
 #ifdef CLER_HAS_HACKRF
         if (auto* h = std::get_if<SourceHackRFBlock>(&_v)) return h->get_sample_rate();
 #endif
+#ifdef CLER_HAS_CARIBOULITE
+        if (auto* c = std::get_if<CBL>(&_v)) return const_cast<CBL*>(c)->get_sample_rate();
+#endif
         return 0.0;
     }
 
@@ -124,12 +156,18 @@ struct SourceMux : public cler::BlockBase {
 #ifdef CLER_HAS_HACKRF
         if (auto* h = std::get_if<SourceHackRFBlock>(&_v)) return static_cast<double>(h->get_frequency());
 #endif
+#ifdef CLER_HAS_CARIBOULITE
+        if (auto* c = std::get_if<CBL>(&_v)) return const_cast<CBL*>(c)->get_frequency();
+#endif
         return 0.0;
     }
 
     bool lost() const {
 #ifdef CLER_HAS_HACKRF
         if (auto* h = std::get_if<SourceHackRFBlock>(&_v)) return h->lost();
+#endif
+#ifdef CLER_HAS_CARIBOULITE
+        if (auto* c = std::get_if<CBL>(&_v)) return c->lost();
 #endif
         return false;
     }
@@ -163,6 +201,20 @@ struct SourceMux : public cler::BlockBase {
             c.push_back(amp);
         }
 #endif
+#ifdef CLER_HAS_CARIBOULITE
+        if (auto* cc = std::get_if<CBL>(&_v)) {
+            CaribouLiteRadio& r = const_cast<CBL*>(cc)->radio();
+            double fmin = 1e12, fmax = 0;
+            for (const auto& fr : r.GetFrequencyRange()) { fmin = std::min<double>(fmin, fr.fmin()); fmax = std::max<double>(fmax, fr.fmax()); }
+            c.push_back(range("freq", "Frequency", "Hz", fmin, fmax, 1, r.GetFrequency()));
+            c.push_back(range("rate", "Sample rate", "Hz", r.GetRxSampleRateMin(), r.GetRxSampleRateMax(), 1, r.GetRxSampleRate(), true));
+            c.push_back(range("gain", "RX gain", "dB", r.GetRxGainMin(), r.GetRxGainMax(), r.GetRxGainSteps(), r.GetRxGain()));
+            Control agc = range("agc", "AGC", "", 0, 1, 1, r.GetAgc() ? 1 : 0);
+            agc.type = "bool";
+            c.push_back(agc);
+            c.push_back(range("bw", "RX bandwidth", "Hz", r.GetRxBandwidthMin(), r.GetRxBandwidthMax(), 1, r.GetRxBandwidth()));
+        }
+#endif
         return c;
     }
 
@@ -183,6 +235,15 @@ struct SourceMux : public cler::BlockBase {
             return;
         }
 #endif
+#ifdef CLER_HAS_CARIBOULITE
+        if (auto* c = std::get_if<CBL>(&_v)) {
+            if (id == "freq") c->set_frequency(static_cast<float>(value));
+            else if (id == "gain") c->set_rx_gain(static_cast<float>(value));
+            else if (id == "agc") c->set_agc(value >= 0.5);
+            else if (id == "bw") c->set_bandwidth(static_cast<float>(value));
+            return;
+        }
+#endif
     }
 
 private:
@@ -198,9 +259,15 @@ private:
         return s.size() > 8 ? s.substr(s.size() - 8) : s;
     }
 
+#ifdef CLER_HAS_CARIBOULITE
+    using CBL = SourceCaribouliteBlock<std::complex<float>>;
+#endif
     std::variant<std::monostate,
 #ifdef CLER_HAS_HACKRF
                  SourceHackRFBlock,
+#endif
+#ifdef CLER_HAS_CARIBOULITE
+                 CBL,
 #endif
                  SimSourceBlock> _v;
     std::string _id;
