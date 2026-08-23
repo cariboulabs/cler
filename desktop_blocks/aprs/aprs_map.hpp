@@ -17,6 +17,7 @@
 // position) turns on a distance column.
 struct APRSMapBlock : public cler::BlockBase {
     static constexpr bool is_gui = true;
+    static constexpr size_t MAX_STATIONS = 512;
 
     cler::Channel<aprs::Packet> in;
 
@@ -171,7 +172,18 @@ private:
     }
 
     void update(const aprs::Packet& p, uint32_t now) {
-        Station& st = _stations[p.source];
+        auto it = _stations.find(p.source);
+        if (it == _stations.end()) {
+            if (_stations.size() >= MAX_STATIONS) {
+                auto oldest = _stations.begin();
+                for (auto i = _stations.begin(); i != _stations.end(); ++i)
+                    if (i->second.last_seen < oldest->second.last_seen) oldest = i;
+                if (_selected == oldest->first) _selected.clear();
+                _stations.erase(oldest);
+            }
+            it = _stations.emplace(p.source, Station{}).first;
+        }
+        Station& st = it->second;
         if (_selected.empty()) _selected = p.source;
         std::memcpy(st.callsign, p.source, sizeof(st.callsign));
         std::memcpy(st.path, p.path, sizeof(st.path));
