@@ -1,0 +1,14 @@
+[Unit]
+Description=cler websdr browser receiver
+After=network.target
+
+[Service]
+User=websdr
+Group=plugdev
+ExecStart=/usr/local/bin/websdr --state-file /var/lib/cler-websdr/state.json --record-dir /var/lib/cler-websdr
+StateDirectory=cler-websdr
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
