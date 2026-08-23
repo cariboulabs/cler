@@ -232,6 +232,18 @@ TEST(LifecycleTest, ResetEmptiesChannelsAndRunResumes) {
     }
 }
 
+TEST(LifecycleDeathTest, ResetWhileRunningAborts) {
+    CountingSource source("Source");
+    CountingSink sink("Sink", kCapacity);
+    auto fg = cler::make_desktop_flowgraph(
+        cler::BlockRunner(&source, &sink.in),
+        cler::BlockRunner(&sink)
+    );
+    fg.run();
+    EXPECT_DEATH(fg.reset(), "reset");
+    fg.stop();
+}
+
 TEST(LifecycleTest, OnlyMayBlockBlocksStopCleanly) {
     for (const auto& config : all_schedulers()) {
         BlockingSource source("BlockingSource");

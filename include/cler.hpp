@@ -423,6 +423,7 @@ namespace cler {
 
         void run(const FlowGraphConfig& config = FlowGraphConfig{}) {
             _config = config;
+            _joined = false;
             _stop_flag.store(false, std::memory_order_release);
             
             
@@ -493,14 +494,17 @@ namespace cler {
             for (size_t i = 0; i < _active_task_count; ++i) {
                 TaskPolicy::join_task(_tasks[i]);
             }
+            _joined = true;
         }
 
         bool is_stopped() const {
             return _stop_flag.load(std::memory_order_acquire);
         }
 
+        // Only between stop() and run(): a self-terminated graph still has
+        // workers unwinding until stop() joins them.
         void reset() {
-            assert((is_stopped() || _active_task_count == 0) && "FlowGraph::reset() while running");
+            if (!_joined) TaskPolicy::fatal("FlowGraph::reset()", "called while workers are running; stop() first");
             std::apply([](auto&... runners) {
                 (std::apply([](auto*... outs) { (outs->reset(), ...); }, runners.outputs), ...);
             }, _runners);
@@ -861,6 +865,7 @@ namespace cler {
         std::tuple<BlockRunners...> _runners;
         std::array<typename TaskPolicy::task_type, _N> _tasks;
         std::atomic<bool> _stop_flag{false};
+        bool _joined = true;
         FlowGraphConfig _config;
         std::array<BlockExecutionStats, _N> _stats;
         std::array<sched::detail::SchedulerCostSample, _N> _cost_samples;
