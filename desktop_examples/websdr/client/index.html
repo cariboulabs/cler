@@ -63,7 +63,7 @@
   <aside>
     <h3>Mode</h3><div id="modes" class="modes"></div>
     <h3>Controls</h3><div id="controls"></div>
-    <h3>Audio</h3><label class="ctl"><span class="ctl-name">volume</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+    <h3>Audio</h3><button id="listenbtn">▶ Listen</button><label class="ctl"><span class="ctl-name">volume</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></label>
     <h3>Decoded</h3><div id="text"></div>
   </aside>
   <footer>
@@ -201,7 +201,13 @@ $('freq').onchange = () => {
 $('devbtn').onclick = () => { renderDevices(); $('devices').classList.remove('hidden'); };
 $('devclose').onclick = () => $('devices').classList.add('hidden');
 $('rescan').onclick = () => { if (state.role === 'ctl') send(JSON.stringify({ t: 'rescan' })); };
-$('listen').onclick = async () => { await audio.start(); $('listen').classList.add('hidden'); };
+const toggleAudio = async () => {
+  if (audio.running) { await audio.suspend(); audio.flush(); } else await audio.start();
+  $('listen').classList.toggle('hidden', audio.running);
+  $('listenbtn').textContent = audio.running ? '■ Stop' : '▶ Listen';
+};
+$('listen').onclick = toggleAudio;
+$('listenbtn').onclick = toggleAudio;
 $('listen').classList.remove('hidden');
 setInterval(() => { $('s-audio').textContent = audio.running ? `audio: ${audio.stats.bufferedMs} ms buffered · underruns ${audio.stats.underruns} · dropped ${audio.stats.dropped}${audio.sampleRate && audio.sampleRate !== 48000 ? ` · resampled to ${audio.sampleRate} Hz` : ''}` : 'audio: off'; }, 500);
 connect();

@@ -250,6 +250,7 @@ struct App {
 };
 
 int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);
     web::ServerOptions o;
     o.files = WEBSDR_CLIENT_FILES;
     o.file_count = WEBSDR_CLIENT_FILES_COUNT;
@@ -312,6 +313,16 @@ int main(int argc, char** argv) {
     std::signal(SIGINT, [](int) { g_run = false; });
     std::signal(SIGTERM, [](int) { g_run = false; });
 
+    const bool loopback = o.bind == "127.0.0.1" || o.bind == "localhost" || o.bind == "::1";
+    if (!loopback && o.token.empty()) {
+        unsigned char rnd[12];
+        FILE* ur = std::fopen("/dev/urandom", "rb");
+        if (!ur || std::fread(rnd, 1, sizeof rnd, ur) != sizeof rnd) cler::panic("websdr: /dev/urandom");
+        std::fclose(ur);
+        char hex[sizeof rnd * 2 + 1];
+        for (size_t i = 0; i < sizeof rnd; ++i) std::snprintf(hex + 2 * i, 3, "%02x", rnd[i]);
+        o.token = hex;
+    }
     web::WebServer srv(o);
     App app(srv, rate, freq, mode);
     app.gains = gains;
@@ -330,7 +341,8 @@ int main(int argc, char** argv) {
     app.rescan();
     app.publish(true);
     srv.start();
-    std::printf("websdr %s on http://%s:%d/\n", WEBSDR_VERSION, o.bind.c_str(), o.port);
+    if (o.token.empty()) std::printf("websdr %s on http://%s:%d/\n", WEBSDR_VERSION, o.bind.c_str(), o.port);
+    else std::printf("websdr %s on http://%s:%d/?token=%s\n", WEBSDR_VERSION, o.bind.c_str(), o.port, o.token.c_str());
 
     const bool auto_pick = source.empty();
     auto pick_only_device = [&]() {
