@@ -32,6 +32,10 @@ fails to start — keep tokens to one word. The unit persists the last device/tu
 /var/lib/cler-earshot/state.json. `earshot --version` and `GET /health` tell you
 which build is running.
 
+`EARSHOT_SCHEDULER=thread_per_block` runs the graph one thread per block instead
+of the default cost-partitioned `PinnedIslands` — there to re-measure the choice on
+your own box, not to tune it (see DESIGN.md for the numbers on a Pi 4).
+
 The unit is `Type=notify` with `WatchdogSec=30`: earshot pings systemd only while
 samples keep arriving, so a process that is alive but wedged is restarted rather
 than left serving a frozen waterfall. Outside systemd the pings are a no-op.

@@ -35,6 +35,7 @@
 #include <chrono>
 #include <cmath>
 #include <csignal>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -105,6 +106,11 @@ static cler::FlowGraphConfig graph_config() {
     cler::FlowGraphConfig c;
     c.scheduler = cler::SchedulerType::PinnedIslands;
     c.num_workers = 4;
+    // so the choice above can be re-measured on the deployment box rather than argued about
+    if (const char* s = std::getenv("EARSHOT_SCHEDULER")) {
+        if (std::string(s) == "thread_per_block") c.scheduler = cler::SchedulerType::ThreadPerBlock;
+        else if (std::string(s) != "pinned_islands") cler::panic("EARSHOT_SCHEDULER: pinned_islands or thread_per_block");
+    }
     return c;
 }
 
