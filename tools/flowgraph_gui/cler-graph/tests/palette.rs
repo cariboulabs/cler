@@ -275,7 +275,7 @@ fn multi_channel_inline_blocks_keep_their_port_names() {
 
 #[test]
 fn an_example_without_inline_blocks_yields_no_specs() {
-    assert!(specs_of("desktop_examples/pluto_spectrum.cpp").is_empty());
+    assert!(specs_of("desktop_examples/sdr_spectrum.cpp").is_empty());
 }
 
 fn headers(dir: &Path, out: &mut Vec<PathBuf>) {
