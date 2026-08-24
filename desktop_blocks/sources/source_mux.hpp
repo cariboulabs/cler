@@ -18,6 +18,8 @@
 #ifdef CLER_HAS_SOAPYSDR
 #include "desktop_blocks/sources/source_soapysdr.hpp"
 #endif
+#include <unistd.h>
+
 #include <algorithm>
 
 #include <complex>
@@ -167,59 +169,111 @@ struct SourceMux : public cler::BlockBase {
         return out;
     }
 
-    // Availability check that never touches the open source.
-    bool probe(Kind kind, const std::string& id) const {
+    // The CaribouLite library mmaps these and exits the process when it cannot,
+    // so the reason has to come from an access check of our own.
+    static std::string cariboulite_access_reason(const char* gpiomem = "/dev/gpiomem",
+                                                 const char* spidev = "/dev/spidev1.0") {
+        for (const char* p : {gpiomem, spidev}) {
+            if (::access(p, R_OK | W_OK) != 0) {
+                return "no access to " + std::string(p) + " — add the user running this to the gpio, spi and i2c groups";
+            }
+        }
+        return {};
+    }
+
+    // Why this device cannot be opened right now; empty means it can. Never
+    // touches the open source. Phrased for whoever has to fix it.
+    std::string open_reason(Kind kind, const std::string& id) const {
         switch (kind) {
 #ifdef CLER_HAS_HACKRF
-            case Kind::HackRF:
-                return SourceHackRFBlock::can_open(id.empty() ? nullptr : id.c_str());
+            case Kind::HackRF: {
+                // a device another process holds comes back as ERROR_LIBUSB, whose
+                // name is "Resource busy", so the library's own word is the honest one
+                const int r = SourceHackRFBlock::open_status(id.empty() ? nullptr : id.c_str());
+                if (r == HACKRF_SUCCESS) return {};
+                if (r == HACKRF_ERROR_NOT_FOUND) {
+                    return id.empty() ? "no hackrf found" : "no hackrf with serial " + short_serial(id);
+                }
+                return "hackrf: " + std::string(hackrf_error_name(static_cast<hackrf_error>(r))) +
+                       " — another program may have it open, or the udev rules are missing";
+            }
 #endif
 #ifdef CLER_HAS_CARIBOULITE
-            case Kind::Cariboulite:
-                return (id == "s1g" || id == "hif") && CBL::can_open();
+            case Kind::Cariboulite: {
+                if (id != "s1g" && id != "hif") return "unknown cariboulite channel " + id + " — use s1g or hif";
+                const std::string access = cariboulite_access_reason();
+                if (!access.empty()) return access;
+                return CBL::can_open() ? std::string{} : "no cariboulite board detected — check the hat is seated";
+            }
 #endif
 #ifdef CLER_HAS_LIBIIO
             case Kind::Pluto: {
                 const std::string uri = id.empty() ? first_pluto_uri() : id;
-                return !uri.empty() && SourcePlutoBlock::probe(uri.c_str()).ok;
+                if (uri.empty()) return "no pluto on usb — give an address like pluto:ip:192.168.2.1";
+                const auto pr = SourcePlutoBlock::probe(uri.c_str());
+                if (pr.ok) return {};
+                if (!pr.reached) return "cannot reach pluto at " + uri;
+                return "pluto at " + uri + " has no receiver — its firmware exposes no cf-ad9361-lpc";
             }
 #endif
 #ifdef CLER_HAS_UHD
             case Kind::UHD:
-                return !uhd::device::find(uhd::device_addr_t(id)).empty() && UHD::can_open(id);
+                if (uhd::device::find(uhd::device_addr_t(id)).empty()) {
+                    return id.empty() ? "no usrp found" : "no usrp matching " + id;
+                }
+                return UHD::can_open(id) ? std::string{} : "usrp is busy or failed to open";
 #endif
 #ifdef CLER_HAS_SOAPYSDR
             case Kind::Soapy: {
                 double f = 100e6, r = 2e6, g = 30.0;
-                return soapy_probe_clamp(id, f, r, g);
+                std::string why;
+                return soapy_probe_clamp(id, f, r, g, &why) ? std::string{} : why;
             }
 #endif
             case Kind::SigMF: {
-                if (!bare_name(id)) return false;
+                if (!bare_name(id)) return "bad recording name";
                 const std::string meta_path = sigmf_path(id);
                 std::error_code ec;
+                if (!std::filesystem::is_regular_file(meta_path, ec)) return "no recording named " + id;
+                if (!std::filesystem::is_regular_file(sigmf::data_path(meta_path), ec)) {
+                    return id + " has no .sigmf-data next to its metadata";
+                }
                 sigmf::Meta meta;
-                return std::filesystem::is_regular_file(meta_path, ec) &&
-                       std::filesystem::is_regular_file(sigmf::data_path(meta_path), ec) &&
-                       sigmf::try_read_meta(meta_path, meta) &&
-                       sigmf::datatype_is_complex(meta.datatype) && meta.sample_rate > 0;
+                std::string meta_why;
+                if (!sigmf::try_read_meta(meta_path, meta, &meta_why)) return id + " " + meta_why;
+                if (!sigmf::datatype_is_complex(meta.datatype)) {
+                    return id + " is " + sigmf::datatype_name(meta.datatype) + ", not a complex capture";
+                }
+                if (meta.sample_rate <= 0) return id + " has no sample rate in its metadata";
+                return {};
             }
             case Kind::Sim:
-                return true;
+                return {};
             default:
-                return false;
+                return std::string(kind_name(kind)) + " is not compiled in";
         }
     }
 
+    // Availability check that never touches the open source.
+    bool probe(Kind kind, const std::string& id, std::string* why = nullptr) const {
+        const std::string reason = open_reason(kind, id);
+        if (why) *why = reason;
+        return reason.empty();
+    }
+
     // Graph must be stopped. Closes the current device, opens the new one;
-    // false (and no source) if the device is gone, busy or not compiled in.
-    bool select(Kind kind, const std::string& id, double freq_hz, double rate_hz) {
+    // false (and no source) if the device is gone, busy or not compiled in,
+    // with the reason in *why.
+    bool select(Kind kind, const std::string& id, double freq_hz, double rate_hz, std::string* why = nullptr) {
         _v.emplace<std::monostate>();
         _id = id;
+        // The old device is closed above, so this asks about the new one alone.
+        const std::string reason = open_reason(kind, id);
+        if (why) *why = reason;
+        if (!reason.empty()) return false;
         switch (kind) {
 #ifdef CLER_HAS_HACKRF
             case Kind::HackRF:
-                if (!SourceHackRFBlock::can_open(id.empty() ? nullptr : id.c_str())) return false;
                 rate_hz = std::clamp(rate_hz, 2e6, 20e6);
                 // ~870 ms of slack at 2.4 MS/s: hackrf_start_rx runs here, long before
                 // an app's plots and panels finish initialising and start consuming.
@@ -230,11 +284,13 @@ struct SourceMux : public cler::BlockBase {
 #endif
 #ifdef CLER_HAS_CARIBOULITE
             case Kind::Cariboulite:
-                if ((id != "s1g" && id != "hif") || !CBL::can_open()) return false;
                 {
                     const auto type = id == "hif" ? CaribouLiteRadio::HiF : CaribouLiteRadio::S1G;
                     CaribouLiteRadio* r = CaribouLite::GetInstance(false).GetRadioChannel(type);
-                    if (!r) return false;
+                    if (!r) {
+                        if (why) *why = "cariboulite has no " + id + " radio channel";
+                        return false;
+                    }
                     const auto ranges = r->GetFrequencyRange();
                     bool ok = false;
                     for (const auto& fr : ranges) ok = ok || (freq_hz > fr.fmin() && freq_hz < fr.fmax());
@@ -248,9 +304,7 @@ struct SourceMux : public cler::BlockBase {
 #ifdef CLER_HAS_LIBIIO
             case Kind::Pluto: {
                 const std::string uri = id.empty() ? first_pluto_uri() : id;
-                if (uri.empty()) return false;
                 const auto pr = SourcePlutoBlock::probe(uri.c_str());
-                if (!pr.ok) return false;
                 _id = uri;
                 _pluto_fmin = pr.fmin; _pluto_fmax = pr.fmax;
                 _pluto_rmin = pr.rmin; _pluto_rmax = pr.rmax;
@@ -262,7 +316,6 @@ struct SourceMux : public cler::BlockBase {
 #endif
 #ifdef CLER_HAS_UHD
             case Kind::UHD: {
-                if (uhd::device::find(uhd::device_addr_t(id)).empty() || !UHD::can_open(id)) return false;
                 _v.emplace<UHD>("uhd", freq_hz, rate_hz, id, 30.0, 1, "sc16", true);
                 _uhd_freq = freq_hz;
                 _uhd_gain = 30.0;
@@ -272,23 +325,14 @@ struct SourceMux : public cler::BlockBase {
 #ifdef CLER_HAS_SOAPYSDR
             case Kind::Soapy: {
                 double f = freq_hz, r = rate_hz, g = 30.0;
-                if (!soapy_probe_clamp(id, f, r, g)) return false;
+                if (!soapy_probe_clamp(id, f, r, g, why)) return false;
                 _v.emplace<Soapy>("soapy", id, f, r, g);
                 return true;
             }
 #endif
-            case Kind::SigMF: {
-                if (!bare_name(id)) return false;
-                const std::string meta_path = sigmf_path(id);
-                std::error_code ec;
-                if (!std::filesystem::is_regular_file(meta_path, ec) ||
-                    !std::filesystem::is_regular_file(sigmf::data_path(meta_path), ec)) return false;
-                sigmf::Meta meta;
-                if (!sigmf::try_read_meta(meta_path, meta)) return false;
-                if (!sigmf::datatype_is_complex(meta.datatype) || meta.sample_rate <= 0) return false;
-                _v.emplace<SigMFSrc>("sigmf", meta_path.c_str(), false, size_t(8192), true);
+            case Kind::SigMF:
+                _v.emplace<SigMFSrc>("sigmf", sigmf_path(id).c_str(), false, size_t(8192), true);
                 return true;
-            }
             case Kind::Sim:
                 _v.emplace<SimSourceBlock>("sim", rate_hz, freq_hz, 400e3);
                 return true;
@@ -607,14 +651,19 @@ private:
         return false;
     }
 
-    static bool soapy_probe_clamp(const std::string& args, double& freq, double& rate, double& gain) {
+    static bool soapy_probe_clamp(const std::string& args, double& freq, double& rate, double& gain,
+                                  std::string* why = nullptr) {
         SoapySDR::Device* dev = nullptr;
         try {
             dev = SoapySDR::Device::make(args);
-        } catch (const std::exception&) {
+        } catch (const std::exception& e) {
+            if (why) *why = "soapy could not open " + args + ": " + e.what();
             return false;
         }
-        if (!dev) return false;
+        if (!dev) {
+            if (why) *why = "soapy found no device for " + args;
+            return false;
+        }
         const auto frs = dev->getFrequencyRange(SOAPY_SDR_RX, 0);
         bool ok = frs.empty();
         for (const auto& r : frs) ok = ok || (freq >= r.minimum() && freq <= r.maximum());

@@ -34,7 +34,8 @@ int main(int argc, char** argv) {
     SourceMux src("Source");
     if (source.empty()) {
         const auto devs = src.enumerate();
-        if (!src.select(devs.front().kind, devs.front().id, freq, rate)) cler::panic("sdr_spectrum: cannot open the first device");
+        std::string why;
+        if (!src.select(devs.front().kind, devs.front().id, freq, rate, &why)) cler::panic(("sdr_spectrum: " + why).c_str());
         std::printf("using %s\n", devs.front().label.c_str());
     } else {
         SourceMux::Kind kind = SourceMux::Kind::None;
@@ -46,7 +47,8 @@ int main(int argc, char** argv) {
                         SourceMux::Kind::Cariboulite, SourceMux::Kind::Soapy, SourceMux::Kind::Sim}) {
             if (k == SourceMux::kind_name(kk)) kind = kk;
         }
-        if (kind == SourceMux::Kind::None || !src.select(kind, id, freq, rate)) cler::panic("sdr_spectrum: cannot open --source");
+        std::string why = "unknown --source " + source;
+        if (kind == SourceMux::Kind::None || !src.select(kind, id, freq, rate, &why)) cler::panic(("sdr_spectrum: " + why).c_str());
     }
     rate = src.rate();
 

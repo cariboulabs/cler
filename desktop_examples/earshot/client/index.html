@@ -36,6 +36,9 @@
   .card h2 { margin:0 0 10px; font-size:16px; }
   .dev { display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); }
   .dev .lbl { flex:1; } .dev .kind { color:var(--dim); font-size:12px; }
+  .dev.failed .lbl { color:var(--bad); }
+  .why { color:#ffd0d0; background:#3a1e1e; border-left:2px solid var(--bad); font-size:12px;
+         padding:5px 8px; margin:0 0 6px; border-radius:0 3px 3px 0; }
   #listen { position:absolute; left:50%; top:40px; transform:translateX(-50%); z-index:4; background:var(--warn); color:#000; border-radius:20px; padding:8px 16px; cursor:pointer; font-weight:600; }
   #errors { position:absolute; right:10px; bottom:10px; z-index:4; display:flex; flex-direction:column; gap:4px; }
   .toast { background:#3a1e1e; border:1px solid var(--bad); color:#ffd0d0; padding:6px 10px; border-radius:4px; font-size:12px; }
@@ -100,12 +103,13 @@ import { Waterfall } from '/client/waterfall.js';
 import { AudioPlayer } from '/client/audio.js';
 import * as panel from '/client/panel.js';
 import { DecoderPanel } from '/client/decoders.js';
+import { applyError, deviceRows } from '/client/devices.js';
 
 const $ = (id) => document.getElementById(id);
 const prefs = (() => { try { return JSON.parse(localStorage.getItem('earshot') || '{}'); } catch { return {}; } })();
 const savePrefs = () => { try { localStorage.setItem('earshot', JSON.stringify(prefs)); } catch {} };
 
-const state = { gen: 0, hello: null, st: {}, model: [], sources: [], connected: false, role: 'view' };
+const state = { gen: 0, hello: null, st: {}, model: [], sources: [], connected: false, role: 'view', devErrors: {} };
 const audio = new AudioPlayer();
 const seqSpec = new SeqTracker(), seqAudio = new SeqTracker();
 let ws = null, backoff = 500, statsTimer = 0;
@@ -175,7 +179,10 @@ function onText(m) {
       $('postime').textContent = `${fmtTime(m.pos ?? 0)} / ${fmtTime(m.duration)}${m.ended ? ' · ended' : ''}`;
     }
   } else if (m.t === 'error') {
-    toast(`${m.code}: ${m.msg}`);
+    const r = applyError(state.devErrors, m);
+    state.devErrors = r.errors;
+    if (r.toast) toast(`${m.code}: ${m.msg}`);
+    else { $('devices').classList.remove('hidden'); renderDevices(); }
   } else if (m.t === 'text') {
     decoders.push(m.stream, m.data);
   }
@@ -190,7 +197,11 @@ function applyState(s) {
   if (s.role) { state.role = s.role; $('role').textContent = s.role === 'ctl' ? 'controller' : 'viewer'; $('role').className = `pill ${s.role}`; }
   if (state.st.freq !== undefined && document.activeElement !== $('freq')) $('freq').value = formatHz(state.st.freq);
   $('source').textContent = state.st.source || 'no source';
-  if (s.source !== undefined && s.source !== prevSource) { wf.clear(); renderDevices(); if (s.source) $('devices').classList.add('hidden'); }
+  if (s.source !== undefined && s.source !== prevSource) {
+    delete state.devErrors[s.source];
+    wf.clear(); renderDevices();
+    if (s.source) $('devices').classList.add('hidden');
+  }
   if (s.switching !== undefined) $('source').textContent += s.switching ? ' (switching…)' : '';
   panel.applyState(state.model, state.st);
   panel.update($('controls'), state.model);
@@ -234,16 +245,23 @@ function renderDevices() {
   const rateRow = document.createElement('div'); rateRow.className = 'dev';
   const rateLbl = document.createElement('span'); rateLbl.className = 'lbl'; rateLbl.textContent = 'sample rate on connect';
   rateRow.append(rateLbl, ratePick); list.appendChild(rateRow);
-  for (const s of state.sources) {
-    const row = document.createElement('div'); row.className = 'dev';
-    const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = s.label || s.id;
-    const kind = document.createElement('span'); kind.className = 'kind'; kind.textContent = s.kind || '';
+  for (const r of deviceRows(state.sources, state.devErrors, state.st.source, state.role)) {
+    const row = document.createElement('div'); row.className = r.why ? 'dev failed' : 'dev';
+    const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = r.label;
+    const kind = document.createElement('span'); kind.className = 'kind'; kind.textContent = r.kind;
     const btn = document.createElement('button');
-    const current = state.st.source === s.id;
-    btn.textContent = current ? 'connected' : 'Connect';
-    btn.disabled = current || s.available === false || state.role !== 'ctl';
-    btn.onclick = () => send(encodeSource(s.id, Number($('devrate')?.value || 0)));
+    btn.textContent = r.connected ? 'connected' : r.why ? 'Retry' : 'Connect';
+    btn.disabled = !r.connectable;
+    btn.onclick = () => {
+      delete state.devErrors[r.id];
+      renderDevices();
+      send(encodeSource(r.id, Number($('devrate')?.value || 0)));
+    };
     row.append(lbl, kind, btn); list.appendChild(row);
+    if (r.why) {
+      const why = document.createElement('div'); why.className = 'why'; why.textContent = r.why;
+      list.appendChild(why);
+    }
   }
 }
 

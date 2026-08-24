@@ -78,6 +78,59 @@ TEST(SourceMux, EmptyMuxIsIdle) {
     EXPECT_DOUBLE_EQ(mux.rate(), 0.0);
 }
 
+// The reason is what the operator reads when a Connect fails, so it has to name
+// the thing that is wrong and, where there is one, the fix.
+TEST(SourceMux, EveryFailureExplainsItself) {
+    SourceMux mux("mux");
+    std::string why;
+
+    EXPECT_FALSE(mux.probe(SourceMux::Kind::Cariboulite, "nope", &why));
+#ifdef CLER_HAS_CARIBOULITE
+    EXPECT_NE(why.find("s1g"), std::string::npos) << why;
+#else
+    EXPECT_NE(why.find("not compiled in"), std::string::npos) << why;
+#endif
+
+    EXPECT_TRUE(mux.probe(SourceMux::Kind::Sim, "", &why));
+    EXPECT_TRUE(why.empty());
+
+#ifdef CLER_HAS_HACKRF
+    EXPECT_FALSE(mux.probe(SourceMux::Kind::HackRF, "no-such-serial", &why));
+    EXPECT_NE(why.find("hackrf"), std::string::npos) << why;
+#endif
+#ifdef CLER_HAS_LIBIIO
+    EXPECT_FALSE(mux.probe(SourceMux::Kind::Pluto, "ip:203.0.113.1", &why));
+    EXPECT_NE(why.find("203.0.113.1"), std::string::npos) << why;
+#endif
+#ifdef CLER_HAS_UHD
+    EXPECT_FALSE(mux.probe(SourceMux::Kind::UHD, "serial=no-such-usrp", &why));
+    EXPECT_NE(why.find("usrp"), std::string::npos) << why;
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+    EXPECT_FALSE(mux.probe(SourceMux::Kind::Soapy, "driver=nosuchdriver", &why));
+    EXPECT_NE(why.find("soapy"), std::string::npos) << why;
+#endif
+
+    // select() must give the same reason probe() does, or the two drift apart
+    std::string why2;
+    EXPECT_FALSE(mux.select(SourceMux::Kind::Cariboulite, "nope", 100e6, 2e6, &why2));
+    EXPECT_EQ(why2, mux.open_reason(SourceMux::Kind::Cariboulite, "nope"));
+}
+
+// The library mmaps these and exits the process when it cannot, so the check has
+// to happen before it is handed control; test it without needing the hardware.
+TEST(SourceMux, CaribouliteAccessReasonNamesTheDeviceAndTheFix) {
+    const std::string missing = SourceMux::cariboulite_access_reason("/no/such/gpiomem", "/dev/null");
+    EXPECT_NE(missing.find("/no/such/gpiomem"), std::string::npos) << missing;
+    EXPECT_NE(missing.find("gpio"), std::string::npos) << missing;
+
+    // an unreadable node is reported the same way as a missing one
+    const std::string denied = SourceMux::cariboulite_access_reason("/proc/1/mem", "/dev/null");
+    EXPECT_FALSE(denied.empty());
+
+    EXPECT_TRUE(SourceMux::cariboulite_access_reason("/dev/null", "/dev/null").empty());
+}
+
 TEST(SourceMux, SelectOfAMissingBackendFailsCleanly) {
     SourceMux mux("mux");
     EXPECT_FALSE(mux.select(SourceMux::Kind::Cariboulite, "nope", 100e6, 2e6));
@@ -314,6 +367,23 @@ TEST(SourceMux, SigMFEnumerateSelectAndTransport) {
 
     EXPECT_FALSE(mux.select(SourceMux::Kind::SigMF, "../muxplay", 0, 0));
     EXPECT_FALSE(mux.select(SourceMux::Kind::SigMF, "missing", 0, 0));
+
+    // each recording failure names the recording and what is wrong with it
+    EXPECT_NE(mux.open_reason(SourceMux::Kind::SigMF, "missing").find("no recording named missing"),
+              std::string::npos);
+    EXPECT_NE(mux.open_reason(SourceMux::Kind::SigMF, "bad").find("cf64_le"), std::string::npos)
+        << mux.open_reason(SourceMux::Kind::SigMF, "bad");
+    EXPECT_FALSE(mux.open_reason(SourceMux::Kind::SigMF, "../muxplay").empty());
+    {
+        FILE* lone = std::fopen((dir + "/lonely.sigmf-meta").c_str(), "wb");
+        ASSERT_NE(lone, nullptr);
+        const char* txt = "{\n  \"global\": { \"core:datatype\": \"ci16_le\", \"core:sample_rate\": 1e6 }\n}\n";
+        std::fwrite(txt, 1, std::strlen(txt), lone);
+        std::fclose(lone);
+    }
+    EXPECT_NE(mux.open_reason(SourceMux::Kind::SigMF, "lonely").find(".sigmf-data"), std::string::npos)
+        << mux.open_reason(SourceMux::Kind::SigMF, "lonely");
+    EXPECT_TRUE(mux.open_reason(SourceMux::Kind::SigMF, "muxplay").empty());
     ASSERT_TRUE(mux.select(SourceMux::Kind::SigMF, "muxplay", 0, 0));
     EXPECT_EQ(mux.kind(), SourceMux::Kind::SigMF);
     EXPECT_TRUE(mux.is_file());
