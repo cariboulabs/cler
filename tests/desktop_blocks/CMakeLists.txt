@@ -137,6 +137,10 @@ else()
     message(STATUS "Skipping hackrf_blocks_test because HACKRF_FOUND is OFF")
 endif()
 
+add_executable(connector_test test_connector.cpp)
+target_link_libraries(connector_test gtest_main cler::desktop_blocks)
+add_test(NAME connector_test COMMAND connector_test)
+
 if (CLER_BUILD_BLOCKS_WEB)
     add_executable(web_blocks_test test_web_blocks.cpp)
     target_link_libraries(web_blocks_test gtest_main cler::desktop_blocks cler::blocks_web)
