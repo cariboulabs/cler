@@ -293,9 +293,17 @@ bool WebServer::push_spectrum(const SpectrumFrame& f) {
 }
 
 size_t WebServer::push_audio(const int16_t* pcm, size_t n) {
-    auto [wptr, wsize] = _audio.write_dbf();
-    const size_t w = std::min(n, wsize);
-    if (w) { std::memcpy(wptr, pcm, w * sizeof(int16_t)); _audio.commit_write(w); }
+    // write_dbf reports free space from a cached reader index, so a short write
+    // means "ask again", not "the ring is full"; only a zero is authoritative.
+    size_t w = 0;
+    while (w < n) {
+        auto [wptr, wsize] = _audio.write_dbf();
+        if (wsize == 0) break;
+        const size_t chunk = std::min(n - w, wsize);
+        std::memcpy(wptr, pcm + w, chunk * sizeof(int16_t));
+        _audio.commit_write(chunk);
+        w += chunk;
+    }
     _audio_dropped += n - w;
     return w;
 }
