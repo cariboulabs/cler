@@ -41,7 +41,17 @@ void make_recording(const std::string& dir, const std::string& name, size_t byte
     if (age.count()) {
         const auto when = fs::last_write_time(base + ".sigmf-meta") - age;
         fs::last_write_time(base + ".sigmf-meta", when);
+        fs::last_write_time(base + ".sigmf-data", when);
     }
+}
+
+// A capture another process started `started` ago and is still appending to:
+// the meta is old (written once at the start), the data file was touched now.
+void make_growing_recording(const std::string& dir, const std::string& name, size_t bytes,
+                            std::chrono::seconds started) {
+    make_recording(dir, name, bytes, started);
+    const std::string base = dir + "/" + name;
+    fs::last_write_time(base + ".sigmf-data", fs::file_time_type::clock::now());
 }
 
 bool exists(const std::string& dir, const std::string& name) {
@@ -154,6 +164,22 @@ TEST(WebsdrRecordings, LeavesFreshRecordingsAlone) {
     fs::remove_all(dir);
 }
 
+// The meta is written once when a capture starts and never rewritten, so a
+// long capture by another process looks old by meta mtime while its data file
+// is still growing. Unlinking it would leave that writer filling a dead inode.
+TEST(WebsdrRecordings, LeavesALongRunningCaptureByAnotherWriterAlone) {
+    const std::string dir = temp_dir("concurrent");
+    make_growing_recording(dir, "other_writer", 4 * 1024 * 1024, std::chrono::seconds(600));
+    make_recording(dir, "ours", 400 * 1024, std::chrono::seconds(300));
+
+    const auto p = websdr::prune_recordings(dir, 1024, 0, "");
+
+    EXPECT_TRUE(exists(dir, "other_writer")) << "unlinked a capture that is still being written";
+    EXPECT_EQ(p.recordings, 1u);
+    EXPECT_FALSE(exists(dir, "ours"));
+    fs::remove_all(dir);
+}
+
 // A data file whose meta never landed still occupies the disk.
 TEST(WebsdrRecordings, CountsAndPrunesOrphanedData) {
     const std::string dir = temp_dir("orphan");
@@ -182,7 +208,7 @@ TEST(WebsdrRecordings, ParsesByteCountsTheWayTheOtherFlagsAreSpelled) {
     EXPECT_TRUE(websdr::parse_bytes("0", v));
     EXPECT_EQ(v, 0u);
 
-    for (const char* bad : {"abc", "-1", "20e9x", "", "1e30", "20 e9"}) {
+    for (const char* bad : {"abc", "-1", "20e9x", "", "1e30", "20 e9", "0x10", "0X10"}) {
         uint64_t out = 999;
         EXPECT_FALSE(websdr::parse_bytes(bad, out)) << "accepted '" << bad << "'";
         EXPECT_EQ(out, 999u) << "clobbered the target on '" << bad << "'";

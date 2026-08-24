@@ -1,16 +1,19 @@
 #pragma once
 
-#include "cler.hpp"
 #include "desktop_blocks/ais/ais.hpp"
 #include "desktop_blocks/aprs/aprs.hpp"
 #include "desktop_blocks/fm/rds.hpp"
 #include "desktop_blocks/web/proto.hpp"
-#include "desktop_blocks/web/web_server.hpp"
 
 #include <cmath>
 #include <cstring>
 #include <string>
 
+// JsonTextSinkBlock finds these by ADL on JsonWriter; they live with the app
+// because the field names are this receiver's wire contract, not the library's.
+// Being an ADL customization point, one adapter per type per binary — like a
+// std::hash specialization, a second receiver linked into the same program must
+// not define its own web::to_json for these types.
 namespace web {
 
 // off-air text is not guaranteed to be terminated
@@ -20,9 +23,6 @@ inline std::string field(const char (&s)[N]) { return std::string(s, strnlen(s, 
 // speeds and courses carry 0.1 resolution; a float widened to double prints ten
 // digits of noise otherwise
 inline double one_dp(float v) { return std::round(v * 10.0f) / 10.0; }
-
-inline const char* stream_of(const ais::Message&) { return "ais"; }
-inline const char* stream_of(const aprs::Packet&) { return "aprs"; }
 
 inline void to_json(const ais::Message& m, JsonWriter& w) {
     w.begin_obj().key("mmsi").num(m.mmsi).key("type").num(m.type);
@@ -59,35 +59,5 @@ inline void to_json(const rds::Station& s, JsonWriter& w) {
      .key("bad_pct").num(s.blocks_total ? 100.0 * s.blocks_bad / s.blocks_total : 0.0)
      .end();
 }
-
-// One JSON line per decoded item, straight to every browser.
-// ponytail: push_text copies into a std::string per item — packet rates are a
-// few per second, not per sample, so the writer's reused buffer is the only
-// thing worth preallocating here.
-template <typename T>
-struct JsonTextSinkBlock : public cler::BlockBase {
-    cler::Channel<T> in;
-
-    JsonTextSinkBlock(const char* name, WebServer& server, size_t buffer_size = 256)
-        : cler::BlockBase(name), in(buffer_size), _server(server) { _w.out.reserve(1024); }
-
-    cler::Result<cler::Empty, cler::Error> procedure() {
-        auto [ptr, n] = in.read_dbf();
-        if (n == 0) return cler::Error::NotEnoughSamples;
-        for (size_t i = 0; i < n; ++i) {
-            _w.out.clear();
-            to_json(ptr[i], _w);
-            _server.push_text(stream_of(ptr[i]), _w.out);
-        }
-        in.commit_read(n);
-        return cler::Empty{};
-    }
-
-    size_t buffer_capacity() const { return _w.out.capacity(); }
-
-private:
-    WebServer& _server;
-    JsonWriter _w;
-};
 
 }

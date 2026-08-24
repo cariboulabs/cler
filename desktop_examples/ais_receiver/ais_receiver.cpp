@@ -50,7 +50,8 @@ int main(int argc, char** argv) {
     }
 
     // source -> fanout(band plot, ch A, ch B); each channel: shift -> 1/50 -> decoder -> map
-    AISSourceBlock source("Source", kind, file, CENTER, RF_RATE, lna, vga, amp);
+    AISSourceBlock source("Source", kind, file, CENTER, RF_RATE, lna, vga, amp,
+                          "Sim ships", RF_RATE, size_t{1} << 18);
     FanoutBlock<std::complex<float>> fanout("RF fanout", 3, 1 << 20);
     PlotCSpectrumBlock band("162 MHz band (AIS channels at -25 / +25 kHz)", {"RF"}, static_cast<size_t>(RF_RATE), 4096);
     FrequencyShiftBlock shift_a("A shift", +CH_OFFSET, RF_RATE, 1 << 18);

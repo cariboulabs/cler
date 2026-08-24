@@ -69,6 +69,23 @@ struct SourceMux : public cler::BlockBase {
         }
     }
 
+    // "hackrf", "pluto:ip:1.2.3.4", "sigmf:capture" -> kind + id, and back.
+    static bool parse_id(const std::string& s, Kind& kind, std::string& id) {
+        const size_t colon = s.find(':');
+        const std::string head = s.substr(0, colon);
+        id = colon == std::string::npos ? "" : s.substr(colon + 1);
+        for (auto k : {Kind::HackRF, Kind::Pluto, Kind::UHD, Kind::Cariboulite, Kind::Soapy, Kind::SigMF, Kind::Sim}) {
+            if (head == kind_name(k)) { kind = k; return true; }
+        }
+        return false;
+    }
+
+    static std::string format_id(Kind kind, const std::string& id) {
+        std::string s = kind_name(kind);
+        if (!id.empty()) s += ":" + id;
+        return s;
+    }
+
     std::vector<DeviceInfo> enumerate() const {
         std::vector<DeviceInfo> out;
 #ifdef CLER_HAS_HACKRF
@@ -204,8 +221,10 @@ struct SourceMux : public cler::BlockBase {
             case Kind::HackRF:
                 if (!SourceHackRFBlock::can_open(id.empty() ? nullptr : id.c_str())) return false;
                 rate_hz = std::clamp(rate_hz, 2e6, 20e6);
+                // ~870 ms of slack at 2.4 MS/s: hackrf_start_rx runs here, long before
+                // an app's plots and panels finish initialising and start consuming.
                 _v.emplace<SourceHackRFBlock>("hackrf", static_cast<uint64_t>(freq_hz + 0.5),
-                                              static_cast<uint32_t>(rate_hz + 0.5), 40, 16, false, 0,
+                                              static_cast<uint32_t>(rate_hz + 0.5), 40, 16, false, size_t{1} << 21,
                                               id.empty() ? nullptr : id.c_str());
                 return true;
 #endif
@@ -237,7 +256,7 @@ struct SourceMux : public cler::BlockBase {
                 _pluto_rmin = pr.rmin; _pluto_rmax = pr.rmax;
                 const long long f = std::clamp<long long>(static_cast<long long>(freq_hz + 0.5), pr.fmin, pr.fmax);
                 const long long r = std::clamp<long long>(static_cast<long long>(rate_hz + 0.5), pr.rmin, pr.rmax);
-                _v.emplace<Pluto>("pluto", uri.c_str(), f, r, 50.0);
+                _v.emplace<Pluto>("pluto", uri.c_str(), f, r, 50.0, 0LL, size_t{1} << 16);
                 return true;
             }
 #endif

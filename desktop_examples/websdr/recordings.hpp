@@ -26,6 +26,8 @@ inline uint64_t free_disk(const std::string& dir) {
 // means what --freq 100e6 means. 0 is unlimited; anything else is a hard no.
 inline bool parse_bytes(const char* s, uint64_t& out) {
     if (!s || !*s) return false;
+    // strtod reads 0x10 as 16, and a 16-byte cap would wipe the archive
+    for (const char* p = s; *p; ++p) if (*p == 'x' || *p == 'X') return false;
     char* end = nullptr;
     const double v = std::strtod(s, &end);
     if (end == s || *end != '\0') return false;
@@ -39,8 +41,11 @@ struct Pruned {
     uint64_t bytes = 0;
 };
 
-// A recording younger than this may still be growing under another process, so
-// it is neither counted nor deleted — the same treatment `keep` gets.
+// A recording touched within this window may still be growing under another
+// process, so it is neither counted nor deleted — the same treatment `keep`
+// gets. Freshness is judged on the newest of the pair: a meta is written once at
+// the start and never rewritten, so meta mtime alone would read a capture that
+// began two minutes ago as stale while its data file is still being appended to.
 inline constexpr std::chrono::seconds kFreshWindow{60};
 
 // Deletes whole recordings, oldest meta first, until the archive holds at most
@@ -57,7 +62,10 @@ inline Pruned prune_recordings(const std::string& dir, uint64_t max_bytes, uint6
     if (dir.empty()) return out;
 
     struct Entry {
-        std::filesystem::file_time_type when;
+        std::filesystem::file_time_type when;   // meta mtime: capture start, the sort key
+        // ::min(), not {}: a default-constructed file_time_type is in the far
+        // future on libstdc++, which would make every recording look fresh
+        std::filesystem::file_time_type newest = std::filesystem::file_time_type::min();
         uint64_t bytes = 0;
         bool has_meta = false;
         bool has_data = false;
@@ -76,6 +84,7 @@ inline Pruned prune_recordings(const std::string& dir, uint64_t max_bytes, uint6
         if (fe) continue;
         Entry& en = found[sigmf::base_path(e.path().string())];
         en.bytes += size;
+        en.newest = std::max(en.newest, when);
         if (is_meta) { en.has_meta = true; en.when = when; }
         if (is_data) { en.has_data = true; if (!en.has_meta) en.when = when; }
     }
@@ -85,9 +94,12 @@ inline Pruned prune_recordings(const std::string& dir, uint64_t max_bytes, uint6
     uint64_t total = 0;
     const auto now = std::filesystem::file_time_type::clock::now();
     for (const auto& [base, en] : found) {
-        if (!en.has_data) continue;             // a lone meta is not a recording of ours
+        // A lone meta is not a recording of ours. It is left alone rather than
+        // tidied away: it may be another tool's capture between writing its meta
+        // and creating its data, and it costs a few hundred bytes to be wrong.
+        if (!en.has_data) continue;
         if (base == keep) continue;
-        if (now - en.when < kFreshWindow) continue;
+        if (now - en.newest < kFreshWindow) continue;
         total += en.bytes;
         candidates.push_back({base, en.when, en.bytes});
     }

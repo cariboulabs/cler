@@ -62,6 +62,10 @@ struct SourcePlutoBlock : public cler::BlockBase {
             iio_channel* chn = iio_device_find_channel(phy, "voltage0", false);
             if (chn && iio_channel_attr_read(chn, "sampling_frequency_available", buf, sizeof buf) > 0) {
                 read_range(buf, pr.rmin, pr.rmax);
+                // the driver rejects exactly the advertised minimum (it rounds the
+                // internal divider below the floor) but accepts min+1 and then
+                // reports the minimum back, so a caller clamping to rmin fails
+                ++pr.rmin;
             }
         }
         iio_context_destroy(ctx);

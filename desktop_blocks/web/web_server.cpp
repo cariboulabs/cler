@@ -1,7 +1,6 @@
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/proto.hpp"
 #include "cler_desktop_utils.hpp"
-#include "desktop_blocks/sigmf/sigmf.hpp"
 
 #include <ixwebsocket/IXHttpServer.h>
 #include <ixwebsocket/IXNetSystem.h>
@@ -70,12 +69,6 @@ const char* content_type(const std::string& name) {
     return "application/octet-stream";
 }
 
-std::string object_inner(const std::string& obj) {
-    const size_t a = obj.find('{'), b = obj.rfind('}');
-    if (a == std::string::npos || b == std::string::npos || b <= a) return "";
-    return obj.substr(a + 1, b - a - 1);
-}
-
 }
 
 struct WebServer::Client {
@@ -95,11 +88,45 @@ struct WebServer::Impl {
     std::vector<int16_t> pcm = std::vector<int16_t>(AUDIO_CHUNK);
 };
 
-WebServer::WebServer(ServerOptions opts)
-    : _opts(std::move(opts)), _impl(new Impl), _spec(16), _audio(48000 * 2) {
-    if (!is_loopback(_opts.bind) && _opts.token.empty()) {
-        cler::panic("websdr: --token is required when binding to a non-loopback address");
+std::string WebServer::safe_name(const std::string& name) {
+    if (name.empty() || name[0] == '.' || name.find('/') != std::string::npos || name.find("..") != std::string::npos) return "";
+    return name;
+}
+
+void WebServer::add_http_route(std::string prefix, HttpRoute handler) {
+    // _routes is read from HTTP threads with no lock, so registration has to be
+    // over before the server is listening
+    if (_running.load(std::memory_order_relaxed)) cler::panic("web: add_http_route after start()");
+    if (prefix.size() < 2 || prefix[0] != '/' || prefix.back() == '/') {
+        cler::panic(("web: bad route prefix '" + prefix + "'").c_str());
     }
+    if (prefix == "/client") cler::panic("web: /client is served by the library");
+    for (const auto& r : _routes) if (r.first == prefix) cler::panic(("web: duplicate route '" + prefix + "'").c_str());
+    _routes.emplace_back(std::move(prefix), std::move(handler));
+}
+
+const HttpRoute* WebServer::match_route(const std::string& path) const {
+    const HttpRoute* best = nullptr;
+    size_t best_len = 0;
+    for (const auto& r : _routes) {
+        if (path.rfind(r.first, 0) != 0) continue;
+        if (path.size() != r.first.size() && path[r.first.size()] != '/') continue;
+        if (r.first.size() >= best_len) { best = &r.second; best_len = r.first.size(); }
+    }
+    return best;
+}
+
+uint64_t WebServer::uptime_seconds() const {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - _impl->started).count());
+}
+
+WebServer::WebServer(ServerOptions opts)
+    : _opts(std::move(opts)), _impl(new Impl), _spec(16), _audio(static_cast<size_t>(_opts.audio_rate * 2)) {
+    if (!is_loopback(_opts.bind) && _opts.token.empty()) {
+        cler::panic("web: a token is required when binding to a non-loopback address");
+    }
+    if (!(_opts.audio_rate >= 1000.0) || _opts.audio_rate > 1e7) cler::panic("web: audio_rate out of range");
 }
 
 WebServer::~WebServer() { stop(); }
@@ -112,75 +139,29 @@ void WebServer::start() {
     _impl->srv->setOnConnectionCallback([this](ix::HttpRequestPtr req, std::shared_ptr<ix::ConnectionState>) -> ix::HttpResponsePtr {
         ix::WebSocketHttpHeaders h;
         h["Cache-Control"] = "no-store";
-        std::string path = req->uri.substr(0, req->uri.find('?'));
-        if (path == "/health") {
-            if (!_opts.token.empty() && query_param(req->uri, "token") != _opts.token) {
-                return std::make_shared<ix::HttpResponse>(401, "Unauthorized", ix::HttpErrorCode::Ok, h, "token required");
-            }
-            h["Content-Type"] = "application/json";
-            const auto up = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - _impl->started).count();
-            std::string body;
-            {
-                std::lock_guard<std::mutex> lock(_mutex);
-                body = "{\"version\":\"" + json_escape(_opts.version) + "\",\"uptime_s\":" + std::to_string(up) +
-                       ",\"clients\":" + std::to_string(_impl->clients.size()) +
-                       (_health_extra.empty() ? "" : "," + _health_extra) + "}";
-            }
-            return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, h, body);
-        }
-        if (!_opts.record_dir.empty() && path.rfind("/recordings", 0) == 0 && (path.size() == 11 || path[11] == '/')) {
-            if (!_opts.token.empty() && query_param(req->uri, "token") != _opts.token) {
-                return std::make_shared<ix::HttpResponse>(401, "Unauthorized", ix::HttpErrorCode::Ok, h, "token required");
-            }
-            if (path == "/recordings") {
-                std::string body = "[";
-                std::error_code ec;
-                for (const auto& e : std::filesystem::directory_iterator(_opts.record_dir, ec)) {
-                    if (!e.is_regular_file() || e.path().extension() != ".sigmf-meta") continue;
-                    sigmf::Meta meta;
-                    if (!sigmf::try_read_meta(e.path().string(), meta)) continue;
-                    std::error_code ec2;
-                    const auto bytes = std::filesystem::file_size(sigmf::data_path(e.path().string()), ec2);
-                    if (ec2) continue;
-                    const double secs = meta.sample_rate > 0
-                        ? static_cast<double>(bytes) / (sigmf::datatype_size(meta.datatype) * meta.sample_rate) : 0.0;
-                    if (body.size() > 1) body += ",";
-                    body += "{\"name\":\"" + json_escape(e.path().stem().string()) + "\",\"bytes\":" + std::to_string(bytes) +
-                            ",\"rate\":" + std::to_string(meta.sample_rate) +
-                            ",\"freq\":" + std::to_string(meta.center_frequency()) +
-                            ",\"seconds\":" + std::to_string(secs) + "}";
+        const size_t qpos = req->uri.find('?');
+        std::string path = req->uri.substr(0, qpos);
+        const std::string query = qpos == std::string::npos ? std::string() : req->uri.substr(qpos + 1);
+        if (const HttpRoute* route = match_route(path)) {
+            if (!_opts.token.empty()) {
+                if (query_param(req->uri, "token") != _opts.token) {
+                    return std::make_shared<ix::HttpResponse>(401, "Unauthorized", ix::HttpErrorCode::Ok, h, "token required");
                 }
-                body += "]";
-                h["Content-Type"] = "application/json";
-                return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, h, body);
+            } else {
+                // same rebinding guard as the WebSocket upgrade: without a token a
+                // page on another origin must not read an app route through DNS
+                const auto it = req->headers.find("Host");
+                const std::string hp = host_part(it == req->headers.end() ? std::string() : it->second);
+                if (!is_loopback(hp) && hp != _opts.bind) {
+                    return std::make_shared<ix::HttpResponse>(403, "Forbidden", ix::HttpErrorCode::Ok, h, "bad host");
+                }
             }
-            const std::string fname = path.substr(12);
-            const bool suffix_ok = fname.size() > 11 &&
-                (fname.rfind(".sigmf-data") == fname.size() - 11 || fname.rfind(".sigmf-meta") == fname.size() - 11);
-            if (!suffix_ok || fname.find('/') != std::string::npos || fname.find("..") != std::string::npos || fname[0] == '.') {
-                return std::make_shared<ix::HttpResponse>(404, "Not Found", ix::HttpErrorCode::Ok, h, "not found");
-            }
-            const std::string full = _opts.record_dir + "/" + fname;
-            std::error_code ec;
-            if (!std::filesystem::is_regular_file(full, ec)) {
-                return std::make_shared<ix::HttpResponse>(404, "Not Found", ix::HttpErrorCode::Ok, h, "not found");
-            }
-            // ponytail: IX responses are one std::string, no chunked send; this is a
-            // single exact-size read (no stringstream doubling), ceiling = file size in RAM
-            const auto size = std::filesystem::file_size(full, ec);
-            std::string body;
-            body.resize(size);
-            std::ifstream f(full, std::ios::binary);
-            if (!f.read(body.data(), static_cast<std::streamsize>(size))) {
-                return std::make_shared<ix::HttpResponse>(500, "Read failed", ix::HttpErrorCode::Ok, h, "read failed");
-            }
-            h["Content-Type"] = "application/octet-stream";
-            return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, h, std::move(body));
+            HttpReply rep = (*route)(path, query);
+            h["Content-Type"] = rep.content_type;
+            return std::make_shared<ix::HttpResponse>(rep.status, rep.status == 200 ? "OK" : "Error", ix::HttpErrorCode::Ok, h, std::move(rep.body));
         }
-        std::string name = path == "/" ? "index.html" : path.rfind("/client/", 0) == 0 ? path.substr(8) : "";
-        if (name.empty() || name[0] == '.' || name.find('/') != std::string::npos || name.find("..") != std::string::npos) {
-            return std::make_shared<ix::HttpResponse>(404, "Not Found", ix::HttpErrorCode::Ok, h, "not found");
-        }
+        const std::string name = safe_name(path == "/" ? "index.html" : path.rfind("/client/", 0) == 0 ? path.substr(8) : "");
+        if (name.empty()) return std::make_shared<ix::HttpResponse>(404, "Not Found", ix::HttpErrorCode::Ok, h, "not found");
         std::string body;
         bool found = false;
         if (!_opts.client_dir.empty() && std::filesystem::is_regular_file(_opts.client_dir + "/" + name)) {
@@ -237,7 +218,9 @@ void WebServer::start() {
                     for (auto i = _impl->clients.begin(); i != _impl->clients.end(); ++i) if (i->second->order < best->second->order) best = i;
                     best->second->controller = true;
                     target = best->second->ws.lock();
-                    promote = "{\"t\":\"state\",\"role\":\"ctl\"" + (_state.empty() ? "" : "," + object_inner(_state)) + "}";
+                    JsonWriter pw;
+                    pw.begin_obj().key("t").str("state").key("role").str("ctl").fields_of(_state).end();
+                    promote = std::move(pw.out);
                 }
             }
             if (target) target->sendText(promote);
@@ -310,7 +293,9 @@ size_t WebServer::push_audio(const int16_t* pcm, size_t n) {
 
 void WebServer::push_text(const std::string& stream, const std::string& json) {
     std::lock_guard<std::mutex> lock(_mutex);
-    _text.push_back("{\"t\":\"text\",\"stream\":\"" + json_escape(stream) + "\",\"data\":" + (json.empty() ? "null" : json) + "}");
+    JsonWriter w;
+    w.begin_obj().key("t").str("text").key("stream").str(stream).key("data").raw(json).end();
+    _text.push_back(std::move(w.out));
     if (_text.size() > 256) { _text.pop_front(); ++_text_dropped; }
 }
 
@@ -319,17 +304,19 @@ void WebServer::set_state(const std::string& json_object) {
     {
         std::lock_guard<std::mutex> lock(_mutex);
         _state = json_object;
-        const std::string inner = object_inner(_state);
         for (auto& kv : _impl->clients) {
             if (auto sp = kv.second->ws.lock()) {
-                out.emplace_back(sp, std::string("{\"t\":\"state\",\"role\":\"") + (kv.second->controller ? "ctl" : "view") + "\"" + (inner.empty() ? "" : "," + inner) + "}");
+                JsonWriter w;
+                w.begin_obj().key("t").str("state").key("role").str(kv.second->controller ? "ctl" : "view")
+                 .fields_of(_state).end();
+                out.emplace_back(sp, std::move(w.out));
             }
         }
     }
     for (auto& p : out) p.first->sendText(p.second);
 }
 
-void WebServer::set_hello_extra(const std::string& json_fragment) { std::lock_guard<std::mutex> lock(_mutex); _hello_extra = json_fragment; }
+void WebServer::set_hello_extra(const std::string& json_object) { std::lock_guard<std::mutex> lock(_mutex); _hello_extra = json_object; }
 
 void WebServer::resend_hello() {
     std::vector<std::pair<std::shared_ptr<ix::WebSocket>, std::string>> out;
@@ -340,11 +327,12 @@ void WebServer::resend_hello() {
     }
     for (auto& p : out) p.first->sendText(p.second);
 }
-void WebServer::set_stats_extra(const std::string& json_fragment) { std::lock_guard<std::mutex> lock(_mutex); _stats_extra = json_fragment; }
-void WebServer::set_health_extra(const std::string& json_fragment) { std::lock_guard<std::mutex> lock(_mutex); _health_extra = json_fragment; }
+void WebServer::set_stats_extra(const std::string& json_object) { std::lock_guard<std::mutex> lock(_mutex); _stats_extra = json_object; }
 
 void WebServer::send_error(const std::string& code, const std::string& msg) {
-    broadcast("{\"t\":\"error\",\"code\":\"" + json_escape(code) + "\",\"msg\":\"" + json_escape(msg) + "\"}");
+    JsonWriter w;
+    w.begin_obj().key("t").str("error").key("code").str(code).key("msg").str(msg).end();
+    broadcast(w.out);
 }
 
 bool WebServer::pop_control(std::string& json) {
@@ -365,9 +353,13 @@ ClientStats WebServer::total_dropped() const {
 }
 
 std::string WebServer::hello_for(const Client& c) {
-    return std::string("{\"t\":\"hello\",\"proto\":1,\"version\":\"") + json_escape(_opts.version) +
-           "\",\"role\":\"" + (c.controller ? "ctl" : "view") + "\",\"codecs\":[\"pcm16\"],\"state\":" + (_state.empty() ? "{}" : _state) +
-           (_hello_extra.empty() ? "" : "," + _hello_extra) + "}";
+    JsonWriter w;
+    w.begin_obj().key("t").str("hello").key("proto").num(PROTO_VER).key("version").str(_opts.version)
+     .key("role").str(c.controller ? "ctl" : "view")
+     .key("codecs").begin_arr().str("pcm16").end()
+     .key("state").raw(_state.empty() ? "{}" : _state)
+     .fields_of(_hello_extra).end();
+    return w.out;
 }
 
 void WebServer::broadcast(const std::string& text) {
@@ -406,7 +398,7 @@ void WebServer::tick_loop() {
                 t.first->sendBinary(ix::IXWebSocketSendData(reinterpret_cast<const char*>(_impl->buf.data()), len));
             }
         }
-        if (ssize) _spec.commit_read(ssize);
+        if (ssize) { _spec.commit_read(ssize); _sent.fetch_add(ssize, std::memory_order_relaxed); }
 
         for (;;) {
             auto [aptr, asize] = _audio.read_dbf();
@@ -424,11 +416,14 @@ void WebServer::tick_loop() {
         if (steady_clock::now() >= next_stats) {
             next_stats += seconds(1);
             for (auto& t : targets) {
-                t.first->sendText("{\"t\":\"stats\",\"spectrum_dropped\":" + std::to_string(t.second->spectrum_dropped) +
-                                  ",\"audio_dropped\":" + std::to_string(t.second->audio_dropped) +
-                                  ",\"text_dropped\":" + std::to_string(_text_dropped.load(std::memory_order_relaxed)) +
-                                  ",\"clients\":" + std::to_string(targets.size()) +
-                                  (stats_extra.empty() ? "" : "," + stats_extra) + "}");
+                JsonWriter w;
+                w.begin_obj().key("t").str("stats")
+                 .key("spectrum_dropped").num(t.second->spectrum_dropped)
+                 .key("audio_dropped").num(t.second->audio_dropped)
+                 .key("text_dropped").num(_text_dropped.load(std::memory_order_relaxed))
+                 .key("clients").num(targets.size())
+                 .fields_of(stats_extra).end();
+                t.first->sendText(w.out);
             }
         }
         if (tick % 250 == 0) {

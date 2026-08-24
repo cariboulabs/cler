@@ -5,9 +5,7 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cmath>
-#include <cstdint>
 
 struct WebSinkBlock : public cler::BlockBase {
     cler::Channel<SpectrumFrame> spectrum;
@@ -35,16 +33,10 @@ struct WebSinkBlock : public cler::BlockBase {
         }
         if (asize) { audio.commit_read(asize); moved = true; }
         if (!moved) return cler::Error::NotEnoughSamples;
-        _delivered.fetch_add(ssize + asize, std::memory_order_relaxed);
         return cler::Empty{};
     }
-
-    // Samples handed to the server so far. Atomic because a watchdog on another
-    // thread reads it to decide whether the chain is still moving.
-    uint64_t delivered() const { return _delivered.load(std::memory_order_relaxed); }
 
 private:
     web::WebServer& _server;
     std::array<int16_t, 4096> _pcm{};
-    std::atomic<uint64_t> _delivered{0};
 };

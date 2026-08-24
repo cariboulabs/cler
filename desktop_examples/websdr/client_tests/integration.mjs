@@ -132,6 +132,17 @@ writeFileSync(`${aged}.sigmf-meta`, JSON.stringify({
 }));
 const hourAgo = new Date(Date.now() - 3600e3);
 for (const f of [`${aged}.sigmf-data`, `${aged}.sigmf-meta`]) utimesSync(f, hourAgo, hourAgo);
+
+// ...and one that started an hour ago but is still being appended to, the way a
+// second websdr writing into the same directory would look. Only its data file
+// is recent, which is exactly what the freshness check has to notice.
+const growing = join(dir, 'growing_capture');
+writeFileSync(`${growing}.sigmf-data`, Buffer.alloc(4 * CAP));
+writeFileSync(`${growing}.sigmf-meta`, JSON.stringify({
+  global: { 'core:datatype': 'ci16_le', 'core:sample_rate': 1e6 },
+  captures: [{ 'core:sample_start': 0 }], annotations: [],
+}));
+utimesSync(`${growing}.sigmf-meta`, hourAgo, hourAgo);   // written once, at the start
 const prunedBefore = state.stats?.pruned_bytes ?? 0;
 
 await record('second', 1200);   // prune runs when a recording starts and every second
@@ -139,7 +150,8 @@ await waitFor('the prune to be reported', () => (state.stats?.pruned_bytes ?? 0)
 const after = await recordings();
 if (after.some((r) => r.name === 'aged_capture')) fail('the aged capture was not pruned');
 if (!after.some((r) => r.name === rec.name)) fail(`the fresh recording ${rec.name} was pruned`);
-ok(`prune: aged capture gone, ${rec.name} kept, pruned_bytes ${state.stats.pruned_bytes}`);
+if (!after.some((r) => r.name === 'growing_capture')) fail('a capture another writer is still appending to was pruned');
+ok(`prune: aged capture gone, ${rec.name} and growing_capture kept, pruned_bytes ${state.stats.pruned_bytes}`);
 
 // (a) play the recording back: gen bumps, is_file, and pos advances
 const genBeforePlay = state.gen;

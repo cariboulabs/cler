@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -17,6 +18,8 @@ namespace web {
 constexpr uint8_t PROTO_VER = 1;
 constexpr uint8_t T_SPECTRUM = 0x01;
 constexpr uint8_t T_AUDIO = 0x02;
+// codec 0 fixes both the wire rate and the frame length; a new rate or chunk is a
+// new codec id, not a parameter
 constexpr uint8_t CODEC_PCM16_48K = 0;
 constexpr size_t HEADER_BYTES = 10;
 constexpr size_t SPECTRUM_HEAD_BYTES = HEADER_BYTES + 8 + 8 + 2 + 4 + 4;
@@ -119,8 +122,23 @@ struct JsonWriter {
     JsonWriter& key(const std::string& k) { sep(); out += '"'; out += json_escape(k); out += "\":"; pending_value = true; return *this; }
     JsonWriter& str(const std::string& v) { sep(); out += '"'; out += json_escape(v); out += '"'; return *this; }
     JsonWriter& num(double v) { sep(); out += json_number(v); return *this; }
+    // %.10g would round a byte count or a drop counter past ~10 digits
+    template <typename T, std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, int> = 0>
+    JsonWriter& num(T v) { sep(); out += std::to_string(v); return *this; }
     JsonWriter& boolean(bool v) { sep(); out += v ? "true" : "false"; return *this; }
     JsonWriter& raw(const std::string& v) { sep(); out += v.empty() ? "null" : v; return *this; }
+    // splice another object's members into the one being written; anything that
+    // is not an object with at least one member contributes nothing, so no
+    // separator is emitted and no trailing junk can ride along
+    JsonWriter& fields_of(const std::string& obj) {
+        const size_t a = obj.find('{');
+        const size_t b = obj.find_last_not_of(" \t\n\r");
+        if (a == std::string::npos || b == std::string::npos || obj[b] != '}' || b <= a + 1) return *this;
+        if (obj.find_first_not_of(" \t\n\r", a + 1) >= b) return *this;
+        sep();
+        out.append(obj, a + 1, b - a - 1);
+        return *this;
+    }
 private:
     std::vector<bool> firsts;
     std::vector<char> closers;
