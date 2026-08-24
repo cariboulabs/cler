@@ -151,6 +151,23 @@ TEST(WebServerTest, OriginAndTokenRejected) {
     srv.stop();
 }
 
+// `ssh -L 8080:localhost:8080` resolves to ::1 first on a stock Debian, so an
+// IPv4-only listener makes the obvious tunnel hang.
+TEST(WebServerTest, LoopbackServesBothFamilies) {
+    const int port = free_port();
+    ServerOptions o; o.port = port;
+    WebServer srv(o);
+    srv.add_http_route("/health", [](const std::string&, const std::string&) {
+        return HttpReply{200, "{}", "application/json"};
+    });
+    srv.start();
+    ix::HttpClient http;
+    EXPECT_EQ(http.get("http://127.0.0.1:" + std::to_string(port) + "/health", http.createRequest())->statusCode, 200);
+    // ix::HttpClient cannot parse a bracketed IPv6 URL, so ask ::1 over a raw socket
+    EXPECT_EQ(webtest::http_status_v6(port, "/health"), 200);
+    srv.stop();
+}
+
 TEST(WebServerTest, RebindingHostRejectedWithoutToken) {
     const int port = free_port();
     ServerOptions o; o.port = port;

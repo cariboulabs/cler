@@ -6,6 +6,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <cstdio>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -23,6 +24,22 @@ inline int free_port() {
     ::getsockname(s, reinterpret_cast<sockaddr*>(&a), &len);
     ::close(s);
     return ntohs(a.sin_port);
+}
+
+// ix::HttpClient cannot parse a bracketed IPv6 URL; this asks ::1 directly.
+inline int http_status_v6(int port, const std::string& path) {
+    int fd = ::socket(AF_INET6, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+    sockaddr_in6 a{}; a.sin6_family = AF_INET6; a.sin6_addr = in6addr_loopback; a.sin6_port = htons(static_cast<uint16_t>(port));
+    if (::connect(fd, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0) { ::close(fd); return -1; }
+    const std::string req = "GET " + path + " HTTP/1.1\r\nHost: [::1]:" + std::to_string(port) + "\r\nConnection: close\r\n\r\n";
+    ::send(fd, req.data(), req.size(), 0);
+    char buf[64] = {};
+    const ssize_t n = ::recv(fd, buf, sizeof(buf) - 1, 0);
+    ::close(fd);
+    int status = 0;
+    if (n > 12) std::sscanf(buf, "HTTP/1.%*d %d", &status);
+    return status;
 }
 
 struct TestClient {

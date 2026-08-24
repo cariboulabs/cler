@@ -336,6 +336,26 @@ Phase 1 as built: the sample rate is fixed per run (`--rate`, state file); the
 UI shows it read-only. Changing it from the browser is a phase 2/3 item (it is
 a stop/reconfigure/run like a source switch).
 
+Scheduler measured 2026-08-24, Raspberry Pi 4, cross-built Release, replaying a
+SigMF capture (not the simulator, whose generator dominates and whose pacing
+re-bases when it falls behind) with a websocket client attached, `EARSHOT_SCHEDULER`
+flipping only the scheduler, runs interleaved A/B/A/B, three rounds each. % of one
+core, mean over 45 s, min-max across rounds:
+
+| rate | decoder | PinnedIslands | ThreadPerBlock |
+|---|---|---|---|
+| 2.4 MS/s | none | **79-88 %** | 150-156 % |
+| 2.4 MS/s | rds  | **87-88 %** | 169-171 % |
+| 3 MS/s   | none | **88-89 %** | 157-160 % |
+
+Zero `overflows`, `spectrum_dropped`, `audio_dropped` and `decoder_dropped` in every
+run, so neither scheduler is cheaper by dropping. This supersedes an earlier
+"153 % vs 97 % at 3 MS/s" figure that was taken while two stray benchmark processes
+were saturating two of the Pi's four cores; the direction and rough magnitude of that
+figure survive the re-measurement. These runs still shared the box with an unrelated
+earshot instance holding ~2.1 cores, which is why they are interleaved and quoted as
+ranges. Set `EARSHOT_SCHEDULER=thread_per_block` to re-check on your own box.
+
 ## Decisions
 
 - Every source cler already has is in scope: HackRF, Pluto, UHD, CaribouLite, Soapy,
