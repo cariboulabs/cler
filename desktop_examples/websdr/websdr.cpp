@@ -403,7 +403,8 @@ int main(int argc, char** argv) {
     const bool auto_pick = source.empty();
     auto pick_only_device = [&]() {
         std::vector<SourceMux::DeviceInfo> real;
-        for (const auto& d : app.devices) if (d.kind != SourceMux::Kind::Sim) real.push_back(d);
+        for (const auto& d : app.devices)
+            if (d.kind != SourceMux::Kind::Sim && d.kind != SourceMux::Kind::SigMF) real.push_back(d);
         if (real.size() == 1) app.select(fg, real[0].kind, real[0].id, freq, rate);
     };
     if (k != SourceMux::Kind::None) app.select(fg, k, id, freq, rate);
