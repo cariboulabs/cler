@@ -1,5 +1,5 @@
 // Broadcast FM radio: stereo, RDS, seek/scan, live band and MPX spectra.
-//   ./fm_radio [--source hackrf|pluto|soapy] [--device <args>] [--freq <MHz>] [--gain <dB>]
+//   ./fm_radio [--source hackrf|pluto|soapy|sigmf:<name>|sim] [--device <args>] [--freq <MHz>] [--gain <dB>]
 //              [--rate <MS/s>] [--lna <dB>] [--vga <dB>] [--amp|--no-amp] [--screenshot <png>]
 //   soapy: --device "driver=rtlsdr"; pluto: --device ip:192.168.2.1 (gain < 0 = AGC)
 #include "cler.hpp"
@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
         else if (arg == "--no-amp") amp = false;
         else if (arg == "--screenshot" && i + 1 < argc) screenshot = argv[++i];
         else {
-            std::cout << "Usage: " << argv[0] << " [--source hackrf|pluto|soapy] [--device <args>] [--freq <MHz>] [--gain <dB>]\n"
+            std::cout << "Usage: " << argv[0] << " [--source hackrf|pluto|soapy|sigmf:<name>|sim] [--device <args>] [--freq <MHz>] [--gain <dB>]\n"
                          "          [--rate <MS/s>: " << ChannelResampler::menu() << "] [--lna <dB>] [--vga <dB>] [--amp|--no-amp] [--screenshot <png>]\n";
             return arg == "--help" ? 0 : 1;
         }
@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
     SourceMux::Kind kind;
     std::string dev_id;
     if (!SourceMux::parse_id(source_name, kind, dev_id) || kind == SourceMux::Kind::None) {
-        std::cerr << "fm_radio: --source must be hackrf, pluto or soapy\n";
+        std::cerr << "fm_radio: unknown --source " << source_name << "\n";
         return 1;
     }
     SourceMux source("Source");
