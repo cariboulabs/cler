@@ -190,17 +190,22 @@ JSON text frames:
 - server→client
   - `hello`: `{proto:1, version, sources:[{id,kind,label,available}], source,
     controls:[{id,label,type:"range"|"enum"|"bool",min,max,step|options,unit,ro}],
-    state, codecs:["pcm16"], spectrum:{n,fps}, role}` — re-sent whole on source switch
+    state, codecs:["pcm16"], spectrum:{n,fps}, decoders:[{id,available,reason?}],
+    role}` — re-sent whole on source switch
   - `state`: `{gen, source, freq, rate, mode, <control id>: value..., recording,
-    is_file, paused, loop, switching, role}` — echoed after every accepted change;
-    all tabs converge
-  - `stats` (1 Hz): `{audio_dropped, spectrum_dropped, buffered_ms, overflows,
-    rec_bytes, free_bytes, pos, duration, ended (file sources only)}`
-  - `text`: `{stream:"rds"|"adsb"|..., data}`
+    is_file, paused, loop, switching, decoder, role}` — echoed after every accepted
+    change; all tabs converge
+  - `stats` (1 Hz): `{audio_dropped, spectrum_dropped, text_dropped,
+    decoder_dropped, overflows, rec_bytes, free_bytes, pos, duration,
+    ended (file sources only)}` — the audio buffer depth the footer shows is the
+    client's own worklet measurement, not a server field
+  - `text`: `{stream:"rds"|"ais"|"aprs", data}` — `data` is an object: RDS carries
+    `{synced,pi,pty,tp,ta,ps,rt,groups_ok,corrected_pct,bad_pct}` at 1 Hz, AIS and
+    APRS one object per decoded packet
   - `error`: `{code, msg}`
 - client→server
   - `hello`: `{proto:1, token?, accept:{codecs:[...]}}`
-  - `set`: `{<control id>: value, ...}` incl. `freq`, `mode`, `offset`
+  - `set`: `{<control id>: value, ...}` incl. `freq`, `mode`, `offset`, `decoder`
   - `source`: `{id, rate?}` (rate in Hz, clamped to what the backend accepts); `rescan`: `{}`
   - `record`: `{on, name?}`; `play`: `{name, pos?, pause?, loop?}`
 
@@ -278,6 +283,25 @@ nginx + basic auth in front if a client insists.
    point spike's `spike_source.hpp` at SourceMux.
 4. **Decoders as tabs** — JSON adapter blocks for RDS, ADS-B, AIS, APRS, modem/FEC
    stats; tables in the browser. Map later.
+   As built: one decoder runs at a time (`--decoder`, `set decoder`), each on a
+   `GateBlock` tap off the 240 kHz channel, so no source, rate or listening mode
+   matters — RDS via FM demod + MPX, APRS via its own NBFM demod at 48 kHz then
+   AFSK1200 behind a ±7.5 kHz channel filter, AIS via a 96 kHz resample. Each
+   advertises the band it `expects` and the client warns when the receiver is tuned
+   elsewhere. A closed gate drains its input (the fanout above advances by its
+   slowest output); an open one backpressures normally and only discards once its
+   input nears full, counted in `stats.decoder_dropped` and followed by a reset of
+   the active decoder, since a hole leaves RDS describing signal that never came.
+   The graph runs on `PinnedIslands`, which splits blocks by measured cost over a
+   topological sort and parks the idle ones. `FixedThreadPool` must not be used
+   here: it chunks in declaration order, so one worker inherits the whole front end
+   (source → fanout → spectrum → shift → resampler) and caps it at a single core —
+   measured at 8 MS/s, one worker at 42 % while the other three sat near 1 %.
+   ADS-B is reported `available:false`: it needs a full-rate magnitude tap off the
+   RF fanout and the CPR aggregation that today lives inside the GUI-only
+   `ADSBAggregateBlock`. The MPX block still produces stereo audio into a null sink
+   when RDS runs; its cost is the per-sample pilot PLL that RDS needs anyway, so
+   splitting the audio path out would save little.
 5. **WAN profile + polish** — `pcm16@24k`, Opus, deflated spectrum rows, fps/N
    negotiation driven by send-queue depth; `--state-file`; gallery entry (screenshot,
    it is not a wasm demo); SoapyRemote note in README.

@@ -39,7 +39,14 @@
   #listen { position:absolute; left:50%; top:40px; transform:translateX(-50%); z-index:4; background:var(--warn); color:#000; border-radius:20px; padding:8px 16px; cursor:pointer; font-weight:600; }
   #errors { position:absolute; right:10px; bottom:10px; z-index:4; display:flex; flex-direction:column; gap:4px; }
   .toast { background:#3a1e1e; border:1px solid var(--bad); color:#ffd0d0; padding:6px 10px; border-radius:4px; font-size:12px; }
-  #text { font-family:ui-monospace, monospace; font-size:12px; white-space:pre-wrap; max-height:160px; overflow:auto; color:var(--dim); }
+  #text { font-family:ui-monospace, monospace; font-size:12px; white-space:pre-wrap; max-height:220px; overflow:auto; color:var(--dim); }
+  #text table { border-collapse:collapse; width:100%; }
+  #text th { text-align:left; color:var(--dim); font-weight:500; border-bottom:1px solid var(--line); }
+  #text td { border-bottom:1px solid var(--line); padding-right:6px; color:var(--fg); }
+  #text tr.stale td { color:var(--dim); opacity:.6; }
+  #dectabs { display:flex; flex-wrap:wrap; gap:4px; }
+  #dectabs button { font-size:12px; padding:2px 8px; }
+  .chip-warn { background:#3a3418; border:1px solid var(--warn); color:var(--warn); padding:3px 6px; border-radius:4px; margin-bottom:6px; }
 </style>
 </head>
 <body>
@@ -79,7 +86,7 @@
     </div>
     <span id="recinfo" class="ctl-name"></span>
     <h3>Audio</h3><button id="listenbtn">▶ Listen</button><label class="ctl"><span class="ctl-name">volume</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></label>
-    <h3>Decoded</h3><div id="text"></div>
+    <h3>Decoded</h3><div id="dectabs"></div><div id="text"></div>
   </aside>
   <footer>
     <span id="s-stats">—</span>
@@ -92,6 +99,7 @@ import { decodeFrame, encodeSet, encodeSource, encodeHello, formatHz, SeqTracker
 import { Waterfall } from '/client/waterfall.js';
 import { AudioPlayer } from '/client/audio.js';
 import * as panel from '/client/panel.js';
+import { DecoderPanel } from '/client/decoders.js';
 
 const $ = (id) => document.getElementById(id);
 const prefs = (() => { try { return JSON.parse(localStorage.getItem('websdr') || '{}'); } catch { return {}; } })();
@@ -102,6 +110,9 @@ const audio = new AudioPlayer();
 const seqSpec = new SeqTracker(), seqAudio = new SeqTracker();
 let ws = null, backoff = 500, statsTimer = 0;
 
+const decoders = new DecoderPanel($('dectabs'), $('text'), (id) => {
+  if (state.role === 'ctl') send(encodeSet({ decoder: id }));
+});
 const wf = new Waterfall($('spec'), $('wf'), {
   onTune: (hz) => { if (state.role === 'ctl') send(encodeSet({ freq: hz })); },
   onPan: (dHz) => { if (state.role === 'ctl' && state.st.freq !== undefined) send(encodeSet({ freq: state.st.freq + dHz })); },
@@ -144,6 +155,7 @@ function onText(m) {
     state.hello = m; state.sources = m.sources || []; state.role = m.role;
     $('s-ver').textContent = m.version ? `server ${m.version}` : '';
     state.model = panel.buildModel(m.controls, m.state);
+    decoders.setDecoders(m.decoders, (m.state && m.state.decoder) || 'none');
     renderControls();
     applyState({ ...(m.state || {}), role: m.role });
     renderDevices();
@@ -152,7 +164,9 @@ function onText(m) {
   } else if (m.t === 'state') {
     applyState(m);
   } else if (m.t === 'stats') {
-    const extra = state.st.recording ? ` · rec ${((m.rec_bytes ?? 0) / 1e6).toFixed(1)} MB` : '';
+    const extra = (state.st.recording ? ` · rec ${((m.rec_bytes ?? 0) / 1e6).toFixed(1)} MB` : '')
+      + (m.decoder_dropped ? ` · decoder drops ${m.decoder_dropped}` : '')
+      + (m.text_dropped ? ` · text drops ${m.text_dropped}` : '');
     $('s-stats').textContent = `drops spec ${m.spectrum_dropped ?? 0} audio ${m.audio_dropped ?? 0} · overflows ${m.overflows ?? 0} · clients ${m.clients ?? 1}${extra}`;
     $('recinfo').textContent = state.st.recording ? `recording · ${((m.rec_bytes ?? 0) / 1e6).toFixed(1)} MB · ${((m.free_bytes ?? 0) / 1e9).toFixed(1)} GB free` : '';
     if (m.duration !== undefined) {
@@ -163,7 +177,7 @@ function onText(m) {
   } else if (m.t === 'error') {
     toast(`${m.code}: ${m.msg}`);
   } else if (m.t === 'text') {
-    const el = $('text'); el.textContent += `[${m.stream}] ${typeof m.data === 'string' ? m.data : JSON.stringify(m.data)}\n`; el.scrollTop = el.scrollHeight;
+    decoders.push(m.stream, m.data);
   }
 }
 
@@ -185,6 +199,8 @@ function applyState(s) {
   $('transport').style.display = state.st.is_file ? '' : 'none';
   if (state.st.paused !== undefined) $('playpause').textContent = state.st.paused ? '▶' : '⏸';
   if (state.st.loop !== undefined) $('loop').checked = !!state.st.loop;
+  if (state.st.decoder) decoders.setActive(state.st.decoder);
+  if (state.st.freq !== undefined) decoders.setTuning(state.st.freq);
   $('recbtn').textContent = state.st.recording ? '■ Stop recording' : '● Record';
   $('recbtn').classList.toggle('on', !!state.st.recording);
   const ctl = state.role === 'ctl';

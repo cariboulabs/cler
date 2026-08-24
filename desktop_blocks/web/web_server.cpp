@@ -311,7 +311,7 @@ size_t WebServer::push_audio(const int16_t* pcm, size_t n) {
 void WebServer::push_text(const std::string& stream, const std::string& json) {
     std::lock_guard<std::mutex> lock(_mutex);
     _text.push_back("{\"t\":\"text\",\"stream\":\"" + json_escape(stream) + "\",\"data\":" + (json.empty() ? "null" : json) + "}");
-    if (_text.size() > 256) _text.pop_front();
+    if (_text.size() > 256) { _text.pop_front(); ++_text_dropped; }
 }
 
 void WebServer::set_state(const std::string& json_object) {
@@ -426,6 +426,7 @@ void WebServer::tick_loop() {
             for (auto& t : targets) {
                 t.first->sendText("{\"t\":\"stats\",\"spectrum_dropped\":" + std::to_string(t.second->spectrum_dropped) +
                                   ",\"audio_dropped\":" + std::to_string(t.second->audio_dropped) +
+                                  ",\"text_dropped\":" + std::to_string(_text_dropped.load(std::memory_order_relaxed)) +
                                   ",\"clients\":" + std::to_string(targets.size()) +
                                   (stats_extra.empty() ? "" : "," + stats_extra) + "}");
             }
