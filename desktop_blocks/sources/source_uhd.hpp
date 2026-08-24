@@ -126,12 +126,14 @@ struct SourceUHDBlock : public cler::BlockBase {
                           << " MHz out of range" << std::endl;
             }
             usrp->set_rx_freq(uhd::tune_request_t(config.center_freq_Hz), channel);
+            center_freq = config.center_freq_Hz;
 
             auto gain_range = usrp->get_rx_gain_range(channel);
             if (config.gain < gain_range.start() || config.gain > gain_range.stop()) {
                 std::cerr << "Gain " << config.gain << " dB out of range" << std::endl;
             }
             usrp->set_rx_gain(config.gain, channel);
+            gain_db = config.gain;
 
             // Same no-op skip as the rate above.
             if (config.bandwidth_Hz > 0 &&
@@ -258,6 +260,18 @@ struct SourceUHDBlock : public cler::BlockBase {
 
     }
     size_t get_overflow_count() const { return overflow_count; }
+
+    double get_frequency() const { return center_freq; }
+    double get_gain() const { return gain_db; }
+    uhd::freq_range_t rx_freq_range() const { return usrp->get_rx_freq_range(0); }
+    uhd::gain_range_t rx_gain_range() const { return usrp->get_rx_gain_range(0); }
+    uhd::meta_range_t rx_rate_range() const { return usrp->get_rx_rates(0); }
+    std::vector<std::string> rx_antennas() const { return usrp->get_rx_antennas(0); }
+    std::string rx_antenna() const { return usrp->get_rx_antenna(0); }
+    void set_rx_antenna(const std::string& a) { usrp->set_rx_antenna(a, 0); }
+    UHDConfig current_config() const {
+        return {center_freq, actual_sample_rate(), gain_db, _last_applied_bw > 0 ? _last_applied_bw : 0.0};
+    }
 
 protected:
     uhd::usrp::multi_usrp::sptr usrp;
