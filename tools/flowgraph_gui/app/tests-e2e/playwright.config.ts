@@ -10,6 +10,10 @@ export default defineConfig({
   workers: 1,
   timeout: 90_000,
   expect: { timeout: 15_000 },
+  // h) F7 loses its keypress on a loaded CI runner often enough to train people
+  // to ignore red: the trace shows no check ever reaching the backend. A retry
+  // keeps a real regression blocking while a swallowed key does not.
+  retries: process.env.CI ? 2 : 0,
   reporter: [['list']],
   use: {
     baseURL: FRONTEND,
