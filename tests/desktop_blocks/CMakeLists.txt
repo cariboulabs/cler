@@ -143,6 +143,10 @@ add_test(NAME connector_test COMMAND ${CMAKE_COMMAND} -E env
     OPENWEBRX_CONNECTOR_BIN=$<TARGET_FILE:openwebrx_connector> $<TARGET_FILE:connector_test>)
 add_dependencies(connector_test openwebrx_connector)
 
+add_executable(websdr_ops_test test_websdr_ops.cpp)
+target_link_libraries(websdr_ops_test gtest_main cler::desktop_blocks)
+add_test(NAME websdr_ops_test COMMAND websdr_ops_test)
+
 if (CLER_BUILD_BLOCKS_WEB)
     add_executable(web_blocks_test test_web_blocks.cpp)
     target_link_libraries(web_blocks_test gtest_main cler::desktop_blocks cler::blocks_web)

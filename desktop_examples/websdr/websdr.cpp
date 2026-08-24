@@ -3,7 +3,7 @@
 // 96 kHz resample) publishing JSON text frames.
 //   ./websdr [--source sim|hackrf[:serial]|none] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]
 //            [--gain NAME=V]... [--decoder none|rds|aprs|ais] [--port N] [--bind ADDR] [--token T]
-//            [--client-dir DIR] [--record-dir DIR] [--state-file FILE] [--version]
+//            [--client-dir DIR] [--record-dir DIR] [--record-max-bytes N] [--state-file FILE] [--version]
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
@@ -25,9 +25,10 @@
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/web_sink.hpp"
+#include "desktop_examples/websdr/recordings.hpp"
+#include "desktop_examples/websdr/watchdog.hpp"
 #include "websdr_client_files.hpp"
 
-#include <sys/statvfs.h>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -115,11 +116,10 @@ static cler::FlowGraphConfig graph_config() {
     return c;
 }
 
-static double free_disk(const std::string& dir) {
-    struct statvfs st;
-    if (statvfs(dir.empty() ? "." : dir.c_str(), &st) != 0) return 0.0;
-    return static_cast<double>(st.f_bavail) * static_cast<double>(st.f_frsize);
-}
+static constexpr uint64_t MIN_FREE_BYTES = 200ull << 20;
+static constexpr uint64_t DEFAULT_RECORD_MAX_BYTES = 20ull << 30;
+
+using websdr::free_disk;
 
 struct App {
     SourceMux& src;
@@ -138,6 +138,8 @@ struct App {
 
     std::string decoder = "none";
     std::string record_dir, state_file;
+    uint64_t record_max_bytes = DEFAULT_RECORD_MAX_BYTES;
+    uint64_t pruned_bytes = 0;
     std::vector<std::pair<std::string, double>> gains;
     double rate, center, offset = 0.0;
     AnalogDemodBlock::Mode mode;
@@ -269,7 +271,7 @@ struct App {
         web::JsonWriter h;
         h.begin_obj().key("source").str(source()).key("rate").num(rate)
          .key("overflows").num(static_cast<double>(src.overflows())).key("recording").boolean(rec.recording())
-         .key("free_disk").num(free_disk(record_dir)).end();
+         .key("free_disk").num(static_cast<double>(free_disk(record_dir))).end();
         srv.set_health_extra(h.out.substr(1, h.out.size() - 2));
         if (running) save_state();
     }
@@ -367,12 +369,23 @@ struct App {
         return out.substr(0, 64);
     }
 
+    // Keeps the record dir inside its byte cap and off the free-space floor by
+    // deleting whole recordings, oldest first; the one being written is spared.
+    void prune() {
+        const auto p = websdr::prune_recordings(record_dir, record_max_bytes, MIN_FREE_BYTES, rec.base());
+        if (p.recordings == 0) return;
+        pruned_bytes += p.bytes;
+        srv.send_error("record", "pruned " + std::to_string(p.recordings) + " old recording(s), " +
+                                 std::to_string(p.bytes >> 20) + " MB");
+    }
+
     void record(bool on, const std::string& name) {
         if (!on) { rec.stop(); publish(); return; }
         if (record_dir.empty()) { srv.send_error("record", "no --record-dir"); return; }
         if (!running || switching) { srv.send_error("record", "no running source"); return; }
         if (rec.recording()) return;
-        if (free_disk(record_dir) < 200e6) { srv.send_error("record", "less than 200 MB free"); return; }
+        prune();
+        if (free_disk(record_dir) < MIN_FREE_BYTES) { srv.send_error("record", "less than 200 MB free"); return; }
         char stamp[32];
         const std::time_t now = std::time(nullptr);
         std::strftime(stamp, sizeof(stamp), "%Y%m%dT%H%M%S", std::gmtime(&now));
@@ -402,6 +415,7 @@ int main(int argc, char** argv) {
     o.version = WEBSDR_VERSION;
     std::string source, record_dir, state_file, mode_s, decoder;
     double freq = 0, rate = 0;
+    uint64_t record_max_bytes = DEFAULT_RECORD_MAX_BYTES;
     std::vector<std::pair<std::string, double>> gains;
     for (int i = 1; i < argc; ++i) {
         auto next = [&](const char* flag) -> const char* { return (!std::strcmp(argv[i], flag) && i + 1 < argc) ? argv[++i] : nullptr; };
@@ -421,11 +435,12 @@ int main(int argc, char** argv) {
         else if (const char* v = next("--token")) o.token = v;
         else if (const char* v = next("--client-dir")) o.client_dir = v;
         else if (const char* v = next("--record-dir")) record_dir = v;
+        else if (const char* v = next("--record-max-bytes")) record_max_bytes = std::strtoull(v, nullptr, 10);
         else if (const char* v = next("--state-file")) state_file = v;
         else {
             std::fprintf(stderr, "Usage: %s [--source sim|hackrf[:serial]|none] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]\n"
                                  "          [--gain NAME=V]... [--decoder none|rds|aprs|ais] [--port N] [--bind ADDR] [--token T]\n"
-                                 "          [--client-dir DIR] [--record-dir DIR] [--state-file FILE] [--version]\n", argv[0]);
+                                 "          [--client-dir DIR] [--record-dir DIR] [--record-max-bytes N] [--state-file FILE] [--version]\n", argv[0]);
             return std::strcmp(argv[i], "--help") == 0 ? 0 : 1;
         }
     }
@@ -500,6 +515,7 @@ int main(int argc, char** argv) {
             rate, freq, mode);
     app.gains = gains;
     app.record_dir = record_dir;
+    app.record_max_bytes = record_max_bytes;
     app.state_file = state_file;
     if (!decoder.empty() && !app.set_decoder(decoder)) {
         std::fprintf(stderr, "unknown --decoder %s\n", decoder.c_str());
@@ -548,8 +564,11 @@ int main(int argc, char** argv) {
     else if (auto_pick) pick_only_device();
 
     using clock = std::chrono::steady_clock;
-    auto last_stats = clock::now(), last_retry = clock::now();
+    auto last_stats = clock::now(), last_retry = clock::now(), last_ping = clock::now();
     uint64_t last_decoder_dropped = 0;
+    websdr::SdNotify notify;
+    notify.send("READY=1");
+    size_t last_written = fan.in.producer_thread_cumulative_write_count();
     while (g_run) {
         std::string ctl;
         while (srv.pop_control(ctl)) {
@@ -619,14 +638,19 @@ int main(int argc, char** argv) {
                 srv.send_error("record", "write failed, recording stopped");
                 app.publish();
             }
-            if (app.rec.recording() && free_disk(record_dir) < 200e6) {
-                app.rec.stop();
-                srv.send_error("record", "disk almost full, recording stopped");
-                app.publish();
+            if (app.rec.recording()) {
+                app.prune();
+                if (free_disk(record_dir) < MIN_FREE_BYTES) {
+                    app.rec.stop();
+                    srv.send_error("record", "disk almost full, recording stopped");
+                    app.publish();
+                }
             }
             web::JsonWriter w;
             w.begin_obj().key("overflows").num(static_cast<double>(app.src.overflows())).key("source_lost").boolean(app.lost)
-             .key("rec_bytes").num(static_cast<double>(app.rec.bytes())).key("free_bytes").num(free_disk(record_dir))
+             .key("rec_bytes").num(static_cast<double>(app.rec.bytes()))
+             .key("free_bytes").num(static_cast<double>(free_disk(record_dir)))
+             .key("pruned_bytes").num(static_cast<double>(app.pruned_bytes))
              .key("decoder_dropped").num(static_cast<double>(app.decoder_dropped()));
             if (app.running && app.src.is_file()) {
                 w.key("pos").num(app.src.pos_seconds()).key("duration").num(app.src.duration_seconds())
@@ -634,6 +658,16 @@ int main(int argc, char** argv) {
             }
             w.end();
             srv.set_stats_extra(w.out.substr(1, w.out.size() - 2));
+        }
+        // Only ping while samples are actually moving, so systemd restarts a
+        // process that is alive but wedged. One skipped ping is harmless: the
+        // deadline is twice the interval.
+        if (notify.interval().count() > 0 && now - last_ping >= notify.interval()) {
+            last_ping = now;
+            const size_t written = fan.in.producer_thread_cumulative_write_count();
+            const bool flowing = !app.running || app.src.paused() || written != last_written;
+            last_written = written;
+            if (flowing) notify.send("WATCHDOG=1");
         }
         if (!app.running && now - last_retry >= std::chrono::seconds(2)) {
             last_retry = now;
