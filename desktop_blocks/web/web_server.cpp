@@ -80,7 +80,7 @@ struct WebServer::Client {
 };
 
 struct WebServer::Impl {
-    std::unique_ptr<ix::HttpServer> srv;
+    std::vector<std::unique_ptr<ix::HttpServer>> srvs;
     std::map<ix::WebSocket*, std::shared_ptr<Client>> clients;
     uint64_t next_order = 0;
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
@@ -133,10 +133,21 @@ WebServer::~WebServer() { stop(); }
 
 void WebServer::start() {
     ix::initNetSystem();
-    _impl->srv.reset(new ix::HttpServer(_opts.port, _opts.bind));
-    _impl->srv->disablePerMessageDeflate();
+    // "localhost" resolves to ::1 before 127.0.0.1 on a stock Debian, so an IPv4-only
+    // listener makes the obvious `ssh -L 8080:localhost:8080` hang. Loopback binds get
+    // both families; a named bind gets the family its address is written in.
+    if (is_loopback(_opts.bind)) {
+        _impl->srvs.emplace_back(new ix::HttpServer(_opts.port, "127.0.0.1", ix::SocketServer::kDefaultTcpBacklog,
+                                                    ix::SocketServer::kDefaultMaxConnections, AF_INET));
+        _impl->srvs.emplace_back(new ix::HttpServer(_opts.port, "::1", ix::SocketServer::kDefaultTcpBacklog,
+                                                    ix::SocketServer::kDefaultMaxConnections, AF_INET6));
+    } else {
+        const int family = _opts.bind.find(':') == std::string::npos ? AF_INET : AF_INET6;
+        _impl->srvs.emplace_back(new ix::HttpServer(_opts.port, _opts.bind, ix::SocketServer::kDefaultTcpBacklog,
+                                                    ix::SocketServer::kDefaultMaxConnections, family));
+    }
 
-    _impl->srv->setOnConnectionCallback([this](ix::HttpRequestPtr req, std::shared_ptr<ix::ConnectionState>) -> ix::HttpResponsePtr {
+    const auto on_connection = ([this](ix::HttpRequestPtr req, std::shared_ptr<ix::ConnectionState>) -> ix::HttpResponsePtr {
         ix::WebSocketHttpHeaders h;
         h["Cache-Control"] = "no-store";
         const size_t qpos = req->uri.find('?');
@@ -176,7 +187,7 @@ void WebServer::start() {
         return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, h, body);
     });
 
-    _impl->srv->setOnClientMessageCallback([this](std::shared_ptr<ix::ConnectionState>, ix::WebSocket& ws, const ix::WebSocketMessagePtr& msg) {
+    const auto on_message = ([this](std::shared_ptr<ix::ConnectionState>, ix::WebSocket& ws, const ix::WebSocketMessagePtr& msg) {
         if (msg->type == ix::WebSocketMessageType::Open) {
             const auto& info = msg->openInfo;
             auto hdr = [&](const char* k) { auto it = info.headers.find(k); return it == info.headers.end() ? std::string() : it->second; };
@@ -187,7 +198,7 @@ void WebServer::start() {
                 if (!is_loopback(hp) && hp != _opts.bind) { ws.close(1008, "host"); return; }
             } else if (query_param(info.uri, "token") != _opts.token) { ws.close(1008, "token"); return; }
             std::shared_ptr<ix::WebSocket> sp;
-            for (auto& c : _impl->srv->getClients()) if (c.get() == &ws) sp = c;
+            for (auto& srv : _impl->srvs) for (auto& c : srv->getClients()) if (c.get() == &ws) sp = c;
             std::string hello;
             {
                 std::lock_guard<std::mutex> lock(_mutex);
@@ -255,16 +266,22 @@ void WebServer::start() {
         if (_on_control) _on_control(msg->str);
     });
 
-    auto res = _impl->srv->listen();
-    if (!res.first) cler::panic(("web server: listen failed: " + res.second).c_str());
-    _impl->srv->start();
+    for (auto& srv : _impl->srvs) {
+        srv->disablePerMessageDeflate();
+        srv->setOnConnectionCallback(on_connection);
+        srv->setOnClientMessageCallback(on_message);
+        auto res = srv->listen();
+        if (!res.first) cler::panic(("web server: listen failed: " + res.second).c_str());
+        srv->start();
+    }
     _running.store(true);
     _tick = std::thread([this] { tick_loop(); });
 }
 
 void WebServer::stop() {
     if (_running.exchange(false) && _tick.joinable()) _tick.join();
-    if (_impl->srv) { _impl->srv->stop(); _impl->srv.reset(); }
+    for (auto& srv : _impl->srvs) srv->stop();
+    _impl->srvs.clear();
 }
 
 bool WebServer::push_spectrum(const SpectrumFrame& f) {
