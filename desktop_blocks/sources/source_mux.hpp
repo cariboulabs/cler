@@ -122,6 +122,40 @@ struct SourceMux : public cler::BlockBase {
         return out;
     }
 
+    // Availability check that never touches the open source.
+    bool probe(Kind kind, const std::string& id) const {
+        switch (kind) {
+#ifdef CLER_HAS_HACKRF
+            case Kind::HackRF:
+                return SourceHackRFBlock::can_open(id.empty() ? nullptr : id.c_str());
+#endif
+#ifdef CLER_HAS_CARIBOULITE
+            case Kind::Cariboulite:
+                return (id == "s1g" || id == "hif") && CBL::can_open();
+#endif
+#ifdef CLER_HAS_LIBIIO
+            case Kind::Pluto: {
+                const std::string uri = id.empty() ? first_pluto_uri() : id;
+                return !uri.empty() && SourcePlutoBlock::probe(uri.c_str()).ok;
+            }
+#endif
+#ifdef CLER_HAS_UHD
+            case Kind::UHD:
+                return !uhd::device::find(uhd::device_addr_t(id)).empty() && UHD::can_open(id);
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+            case Kind::Soapy: {
+                double f = 100e6, r = 2e6, g = 30.0;
+                return soapy_probe_clamp(id, f, r, g);
+            }
+#endif
+            case Kind::Sim:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     // Graph must be stopped. Closes the current device, opens the new one;
     // false (and no source) if the device is gone, busy or not compiled in.
     bool select(Kind kind, const std::string& id, double freq_hz, double rate_hz) {
@@ -131,6 +165,7 @@ struct SourceMux : public cler::BlockBase {
 #ifdef CLER_HAS_HACKRF
             case Kind::HackRF:
                 if (!SourceHackRFBlock::can_open(id.empty() ? nullptr : id.c_str())) return false;
+                rate_hz = std::clamp(rate_hz, 2e6, 20e6);
                 _v.emplace<SourceHackRFBlock>("hackrf", static_cast<uint64_t>(freq_hz + 0.5),
                                               static_cast<uint32_t>(rate_hz + 0.5), 40, 16, false, 0,
                                               id.empty() ? nullptr : id.c_str());
@@ -160,7 +195,8 @@ struct SourceMux : public cler::BlockBase {
                 const auto pr = SourcePlutoBlock::probe(uri.c_str());
                 if (!pr.ok) return false;
                 _id = uri;
-                _pluto_probe = pr;
+                _pluto_fmin = pr.fmin; _pluto_fmax = pr.fmax;
+                _pluto_rmin = pr.rmin; _pluto_rmax = pr.rmax;
                 const long long f = std::clamp<long long>(static_cast<long long>(freq_hz + 0.5), pr.fmin, pr.fmax);
                 const long long r = std::clamp<long long>(static_cast<long long>(rate_hz + 0.5), pr.rmin, pr.rmax);
                 _v.emplace<Pluto>("pluto", uri.c_str(), f, r, 50.0);
@@ -169,9 +205,10 @@ struct SourceMux : public cler::BlockBase {
 #endif
 #ifdef CLER_HAS_UHD
             case Kind::UHD: {
-                if (uhd::device::find(uhd::device_addr_t(id)).empty()) return false;
+                if (uhd::device::find(uhd::device_addr_t(id)).empty() || !UHD::can_open(id)) return false;
                 _v.emplace<UHD>("uhd", freq_hz, rate_hz, id, 30.0, 1, "sc16", true);
                 _uhd_freq = freq_hz;
+                _uhd_gain = 30.0;
                 return true;
             }
 #endif
@@ -274,6 +311,9 @@ struct SourceMux : public cler::BlockBase {
 #ifdef CLER_HAS_LIBIIO
         if (auto* pl = std::get_if<Pluto>(&_v)) return pl->lost();
 #endif
+#ifdef CLER_HAS_UHD
+        if (auto* u = std::get_if<UHD>(&_v)) return u->lost();
+#endif
 #ifdef CLER_HAS_SOAPYSDR
         if (auto* so = std::get_if<Soapy>(&_v)) return so->lost();
 #endif
@@ -328,10 +368,9 @@ struct SourceMux : public cler::BlockBase {
 #endif
 #ifdef CLER_HAS_LIBIIO
         if (auto* pl = std::get_if<Pluto>(&_v)) {
-            const auto& pr = _pluto_probe;
-            c.push_back(range("freq", "Frequency", "Hz", static_cast<double>(pr.fmin), static_cast<double>(pr.fmax), 1,
+            c.push_back(range("freq", "Frequency", "Hz", static_cast<double>(_pluto_fmin), static_cast<double>(_pluto_fmax), 1,
                               static_cast<double>(const_cast<Pluto*>(pl)->get_frequency())));
-            c.push_back(range("rate", "Sample rate", "Hz", static_cast<double>(pr.rmin), static_cast<double>(pr.rmax), 1,
+            c.push_back(range("rate", "Sample rate", "Hz", static_cast<double>(_pluto_rmin), static_cast<double>(_pluto_rmax), 1,
                               static_cast<double>(pl->get_sample_rate()), true));
             c.push_back(range("gain", "RX gain", "dB", -3, 71, 1, pl->get_gain()));
             Control agc = range("agc", "AGC", "", 0, 1, 1, pl->get_agc() ? 1 : 0);
@@ -346,7 +385,7 @@ struct SourceMux : public cler::BlockBase {
             const auto rr = u->rx_rate_range();
             c.push_back(range("freq", "Frequency", "Hz", fr.start(), fr.stop(), 1, u->get_frequency()));
             c.push_back(range("rate", "Sample rate", "Hz", rr.start(), rr.stop(), 1, u->actual_sample_rate(), true));
-            c.push_back(range("gain", "RX gain", "dB", gr.start(), gr.stop(), gr.step() > 0 ? gr.step() : 1, u->get_gain()));
+            c.push_back(range("gain", "RX gain", "dB", gr.start(), gr.stop(), gr.step() > 0 ? gr.step() : 1, _uhd_gain));
             const auto ants = u->rx_antennas();
             if (ants.size() > 1) {
                 Control a;
@@ -416,10 +455,9 @@ struct SourceMux : public cler::BlockBase {
 #endif
 #ifdef CLER_HAS_UHD
         if (auto* u = std::get_if<UHD>(&_v)) {
-            UHDConfig cfg = u->current_config();
-            cfg.center_freq_Hz = _uhd_freq;
+            UHDConfig cfg{_uhd_freq, u->actual_sample_rate(), _uhd_gain, 0.0};
             if (id == "freq") { cfg.center_freq_Hz = value; _uhd_freq = value; }
-            else if (id == "gain") cfg.gain = value;
+            else if (id == "gain") { cfg.gain = value; _uhd_gain = value; }
             else if (id == "antenna") {
                 const auto ants = u->rx_antennas();
                 const size_t i = static_cast<size_t>(value + 0.5);
@@ -463,7 +501,7 @@ private:
             if (n >= 0) iio_context_info_list_free(info);
             iio_scan_context_destroy(sc);
         }
-        return uri.empty() ? "ip:192.168.2.1" : uri;
+        return uri;
     }
 #endif
 
@@ -535,10 +573,6 @@ private:
 #endif
                  SimSourceBlock> _v;
     std::string _id;
-#ifdef CLER_HAS_LIBIIO
-    SourcePlutoBlock::Probe _pluto_probe;
-#endif
-#ifdef CLER_HAS_UHD
-    double _uhd_freq = 0.0;
-#endif
+    long long _pluto_fmin = 0, _pluto_fmax = 0, _pluto_rmin = 0, _pluto_rmax = 0;
+    double _uhd_freq = 0.0, _uhd_gain = 30.0;
 };

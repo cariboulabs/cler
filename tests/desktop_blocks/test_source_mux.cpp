@@ -92,6 +92,9 @@ TEST(SourceMux, SelectOfAMissingBackendFailsCleanly) {
     EXPECT_FALSE(mux.select(SourceMux::Kind::HackRF, "no-such-serial", 100e6, 2.4e6));
     EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
 #endif
+    EXPECT_FALSE(mux.probe(SourceMux::Kind::Cariboulite, "nope"));
+    EXPECT_FALSE(mux.probe(SourceMux::Kind::Pluto, "usb:99.99.9"));
+    EXPECT_TRUE(mux.probe(SourceMux::Kind::Sim, ""));
     EXPECT_TRUE(mux.select(SourceMux::Kind::Sim, "", 100e6, 2e6));
     EXPECT_EQ(mux.kind(), SourceMux::Kind::Sim);
 }
