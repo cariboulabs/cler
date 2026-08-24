@@ -1,4 +1,7 @@
 #include <gtest/gtest.h>
+#include <fstream>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <chrono>
 #include <cmath>
 #include <complex>
@@ -124,9 +127,15 @@ TEST(SourceMux, CaribouliteAccessReasonNamesTheDeviceAndTheFix) {
     EXPECT_NE(missing.find("/no/such/gpiomem"), std::string::npos) << missing;
     EXPECT_NE(missing.find("gpio"), std::string::npos) << missing;
 
-    // an unreadable node is reported the same way as a missing one
-    const std::string denied = SourceMux::cariboulite_access_reason("/proc/1/mem", "/dev/null");
-    EXPECT_FALSE(denied.empty());
+    // an unreadable node is reported the same way as a missing one — but root
+    // bypasses the permission bits, and CI runs as root in a container
+    if (::geteuid() != 0) {
+        const std::string path = std::string(testing::TempDir()) + "/cbl_denied";
+        std::ofstream(path).put('x');
+        ASSERT_EQ(::chmod(path.c_str(), 0), 0);
+        EXPECT_FALSE(SourceMux::cariboulite_access_reason(path.c_str(), "/dev/null").empty());
+        ::unlink(path.c_str());
+    }
 
     EXPECT_TRUE(SourceMux::cariboulite_access_reason("/dev/null", "/dev/null").empty());
 }
