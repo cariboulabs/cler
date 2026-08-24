@@ -22,9 +22,36 @@ browser holding the token controls, the rest view):
     websdr --bind 0.0.0.0 --token s3cret      # http://box:8080/?token=s3cret
 
 Service: `sudo cp misc/websdr/cler-websdr.service /etc/systemd/system/`,
+`sudo cp misc/websdr/cler-websdr.default /etc/default/cler-websdr`,
 `sudo useradd -r -G plugdev websdr`, `sudo systemctl enable --now cler-websdr`.
-The unit persists the last device/tuning in /var/lib/cler-websdr/state.json.
-`websdr --version` and `GET /health` tell you which build is running.
+Put `--bind`, `--port`, `--token` and friends in `WEBSDR_ARGS` in
+/etc/default/cler-websdr; the unit itself only sets the state file and the
+record directory. The unit persists the last device/tuning in
+/var/lib/cler-websdr/state.json. `websdr --version` and `GET /health` tell you
+which build is running.
+
+The unit is `Type=notify` with `WatchdogSec=30`: websdr pings systemd only while
+samples keep arriving, so a process that is alive but wedged is restarted rather
+than left serving a frozen waterfall. Outside systemd the pings are a no-op.
+
+Recordings are capped at 20 GB total (`--record-max-bytes`, 0 disables) and
+websdr also keeps 200 MB of the filesystem free, deleting whole recordings
+oldest-first to stay inside both. The recording in progress is never deleted;
+pruning is reported to the browser and counted as `pruned_bytes` in the stats
+frame.
+
+Upgrades: install versioned and swap the symlink, so a rollback is one command
+and never leaves the box without a binary.
+
+    sudo install build/desktop_examples/websdr/websdr /usr/local/bin/websdr-$(git rev-parse --short HEAD)
+    sudo systemctl stop cler-websdr
+    sudo ln -sfn /usr/local/bin/websdr-<new> /usr/local/bin/websdr
+    sudo systemctl start cler-websdr        # rollback: ln -sfn the old one, restart
+
+A browser tab left open across an upgrade keeps the old JavaScript in memory. The
+client files are served `Cache-Control: no-store`, so a reload always fetches the
+new ones — reload after upgrading, and if the protocol changed the tab says so
+rather than misbehaving.
 
 HackRF as a non-root user needs libhackrf's udev rule (Debian/Ubuntu/Raspberry
 Pi OS ship it as `/lib/udev/rules.d/60-libhackrf0.rules` with the `libhackrf0`

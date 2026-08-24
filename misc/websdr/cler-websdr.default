@@ -1,0 +1,16 @@
+# /etc/default/cler-websdr — extra arguments for the cler-websdr service.
+# Everything websdr accepts works here; the unit already sets --state-file and
+# --record-dir.
+
+# Loopback only (the default): reach it with ssh -L 8080:localhost:8080 box
+#WEBSDR_ARGS="--port 8080"
+
+# LAN: a token is mandatory off loopback. Without one websdr generates a random
+# token and prints the URL to the journal (journalctl -u cler-websdr).
+#WEBSDR_ARGS="--bind 0.0.0.0 --port 8080 --token s3cret"
+
+# Pin a device and a starting tuning instead of auto-picking the only one.
+#WEBSDR_ARGS="--source hackrf --freq 100e6 --rate 2.4e6 --mode WBFM"
+
+# Recordings: 20 GB total by default, oldest deleted first; 0 disables the cap.
+#WEBSDR_ARGS="--record-max-bytes 5000000000"
