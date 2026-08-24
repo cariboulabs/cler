@@ -49,10 +49,14 @@ cd desktop_examples
 | [<img src="misc/showcase/fm_radio.jpg" width="420">](desktop_examples/fm_radio) | **FM radio** — stereo, RDS station text with error correction, seek and band scan. `fm_radio --source hackrf\|pluto\|soapy` |
 | [<img src="misc/showcase/scanner.jpg" width="420">](desktop_examples/scanner) | **Band scanner** — wideband spectrum + waterfall, double-click a signal to tune it; WBFM / NBFM / AM / USB / LSB. |
 | [<img src="misc/showcase/ais_receiver.jpg" width="420">](desktop_examples/ais_receiver) | **AIS ship map** — both VHF channels decoded to a live vessel map. Also `aprs_receiver` for APRS stations. Both run hardware-free with `--sim`. |
-| [<img src="misc/showcase/earshot.jpg" width="420">](desktop_examples/earshot) | **earshot** — the receiver in a browser tab, served by the box the SDR is plugged into (a Raspberry Pi will do): `ssh -L 8080:localhost:8080 box`, open `localhost:8080`, pick the device from a list, double-click to tune, listen. HackRF, Pluto, USRP, CaribouLite, SoapySDR or a SigMF capture; records and plays back to SigMF. |
+| [<img src="misc/showcase/earshot.jpg" width="420">](desktop_examples/earshot) | **earshot** — the receiver in a browser tab, served by the box the SDR is plugged into (a Raspberry Pi will do): `ssh -L 8080:127.0.0.1:8080 box`, open `localhost:8080`, pick the device from a list, double-click to tune, listen. HackRF, Pluto, USRP, CaribouLite, SoapySDR or a SigMF capture; records and plays back to SigMF. |
 | [<img src="misc/showcase/modem_loopback.jpg" width="420">](desktop_examples/linear_modem_loopback.cpp) | **Digital modem playground** — BPSK…64-QAM over AWGN with live constellation, EVM and BER. [Runs in your browser](https://cariboulabs.github.io/cler/demos/). |
 
 Plus ADS-B with an aircraft map, a polyphase channelizer, GMSK, SigMF recording interop (`sigmf_tools`), and [browser demos](https://cariboulabs.github.io/cler/demos/) that need no install at all.
+
+Already running OpenWebRX? `openwebrx_connector` hands it any cler-supported radio — including
+ones it has no driver for, like the CaribouLite — without patching OpenWebRX
+([setup](misc/openwebrx/README.md)).
 
 # Okay, but how does it write?
 
