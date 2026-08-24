@@ -8,6 +8,16 @@
 #ifdef CLER_HAS_CARIBOULITE
 #include "desktop_blocks/sources/source_cariboulite.hpp"
 #endif
+#ifdef CLER_HAS_LIBIIO
+#include "desktop_blocks/sources/source_pluto.hpp"
+#endif
+#ifdef CLER_HAS_UHD
+#include "desktop_blocks/sources/source_uhd.hpp"
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+#include "desktop_blocks/sources/source_soapysdr.hpp"
+#endif
+#include <algorithm>
 
 #include <complex>
 #include <string>
@@ -73,6 +83,41 @@ struct SourceMux : public cler::BlockBase {
             out.push_back({Kind::Cariboulite, "hif", "CaribouLite HiF"});
         }
 #endif
+#ifdef CLER_HAS_LIBIIO
+        if (std::holds_alternative<Pluto>(_v)) {
+            out.push_back({Kind::Pluto, _id, "PlutoSDR " + _id});
+        } else if (iio_scan_context* sc = iio_create_scan_context("usb", 0)) {
+            iio_context_info** info = nullptr;
+            const ssize_t n = iio_scan_context_get_info_list(sc, &info);
+            for (ssize_t i = 0; i < n; ++i) {
+                const std::string uri = iio_context_info_get_uri(info[i]);
+                out.push_back({Kind::Pluto, uri, "PlutoSDR " + uri});
+            }
+            if (n >= 0) iio_context_info_list_free(info);
+            iio_scan_context_destroy(sc);
+        }
+#endif
+#ifdef CLER_HAS_UHD
+        if (std::holds_alternative<UHD>(_v)) {
+            out.push_back({Kind::UHD, _id, "USRP " + _id});
+        } else {
+            for (const auto& addr : uhd::device::find(uhd::device_addr_t())) {
+                const std::string id = addr.has_key("serial") ? "serial=" + addr["serial"] : addr.to_string();
+                out.push_back({Kind::UHD, id, "USRP " + (addr.has_key("product") ? addr["product"] + " " : "") + id});
+            }
+        }
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+        if (std::holds_alternative<Soapy>(_v)) {
+            out.push_back({Kind::Soapy, _id, "Soapy " + _id});
+        } else {
+            for (const auto& dev : enumerate_devices()) {
+                if (native_driver(dev.driver)) continue;
+                out.push_back({Kind::Soapy, dev.get_args_string(),
+                               dev.label.empty() ? "Soapy " + dev.driver : dev.label});
+            }
+        }
+#endif
         out.push_back({Kind::Sim, "", "Simulator"});
         return out;
     }
@@ -108,6 +153,36 @@ struct SourceMux : public cler::BlockBase {
                 }
                 return true;
 #endif
+#ifdef CLER_HAS_LIBIIO
+            case Kind::Pluto: {
+                const std::string uri = id.empty() ? first_pluto_uri() : id;
+                if (uri.empty()) return false;
+                const auto pr = SourcePlutoBlock::probe(uri.c_str());
+                if (!pr.ok) return false;
+                _id = uri;
+                _pluto_probe = pr;
+                const long long f = std::clamp<long long>(static_cast<long long>(freq_hz + 0.5), pr.fmin, pr.fmax);
+                const long long r = std::clamp<long long>(static_cast<long long>(rate_hz + 0.5), pr.rmin, pr.rmax);
+                _v.emplace<Pluto>("pluto", uri.c_str(), f, r, 50.0);
+                return true;
+            }
+#endif
+#ifdef CLER_HAS_UHD
+            case Kind::UHD: {
+                if (uhd::device::find(uhd::device_addr_t(id)).empty()) return false;
+                _v.emplace<UHD>("uhd", freq_hz, rate_hz, id, 30.0, 1, "sc16", true);
+                _uhd_freq = freq_hz;
+                return true;
+            }
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+            case Kind::Soapy: {
+                double f = freq_hz, r = rate_hz, g = 30.0;
+                if (!soapy_probe_clamp(id, f, r, g)) return false;
+                _v.emplace<Soapy>("soapy", id, f, r, g);
+                return true;
+            }
+#endif
             case Kind::Sim:
                 _v.emplace<SimSourceBlock>("sim", rate_hz, freq_hz, 400e3);
                 return true;
@@ -136,6 +211,15 @@ struct SourceMux : public cler::BlockBase {
 #ifdef CLER_HAS_CARIBOULITE
         if (std::holds_alternative<CBL>(_v)) return Kind::Cariboulite;
 #endif
+#ifdef CLER_HAS_LIBIIO
+        if (std::holds_alternative<Pluto>(_v)) return Kind::Pluto;
+#endif
+#ifdef CLER_HAS_UHD
+        if (std::holds_alternative<UHD>(_v)) return Kind::UHD;
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+        if (std::holds_alternative<Soapy>(_v)) return Kind::Soapy;
+#endif
         return Kind::None;
     }
     const std::string& id() const { return _id; }
@@ -148,6 +232,15 @@ struct SourceMux : public cler::BlockBase {
 #ifdef CLER_HAS_CARIBOULITE
         if (auto* c = std::get_if<CBL>(&_v)) return const_cast<CBL*>(c)->get_sample_rate();
 #endif
+#ifdef CLER_HAS_LIBIIO
+        if (auto* pl = std::get_if<Pluto>(&_v)) return static_cast<double>(pl->get_sample_rate());
+#endif
+#ifdef CLER_HAS_UHD
+        if (auto* u = std::get_if<UHD>(&_v)) return u->actual_sample_rate();
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+        if (auto* so = std::get_if<Soapy>(&_v)) return so->get_sample_rate();
+#endif
         return 0.0;
     }
 
@@ -159,6 +252,15 @@ struct SourceMux : public cler::BlockBase {
 #ifdef CLER_HAS_CARIBOULITE
         if (auto* c = std::get_if<CBL>(&_v)) return const_cast<CBL*>(c)->get_frequency();
 #endif
+#ifdef CLER_HAS_LIBIIO
+        if (auto* pl = std::get_if<Pluto>(&_v)) return static_cast<double>(pl->get_frequency());
+#endif
+#ifdef CLER_HAS_UHD
+        if (std::holds_alternative<UHD>(_v)) return _uhd_freq;
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+        if (auto* so = std::get_if<Soapy>(&_v)) return so->get_frequency();
+#endif
         return 0.0;
     }
 
@@ -169,12 +271,21 @@ struct SourceMux : public cler::BlockBase {
 #ifdef CLER_HAS_CARIBOULITE
         if (auto* c = std::get_if<CBL>(&_v)) return c->lost();
 #endif
+#ifdef CLER_HAS_LIBIIO
+        if (auto* pl = std::get_if<Pluto>(&_v)) return pl->lost();
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+        if (auto* so = std::get_if<Soapy>(&_v)) return so->lost();
+#endif
         return false;
     }
 
     size_t overflows() const {
 #ifdef CLER_HAS_HACKRF
         if (auto* h = std::get_if<SourceHackRFBlock>(&_v)) return h->get_overflow_count();
+#endif
+#ifdef CLER_HAS_UHD
+        if (auto* u = std::get_if<UHD>(&_v)) return u->get_overflow_count();
 #endif
         return 0;
     }
@@ -215,6 +326,57 @@ struct SourceMux : public cler::BlockBase {
             c.push_back(range("bw", "RX bandwidth", "Hz", r.GetRxBandwidthMin(), r.GetRxBandwidthMax(), 1, r.GetRxBandwidth()));
         }
 #endif
+#ifdef CLER_HAS_LIBIIO
+        if (auto* pl = std::get_if<Pluto>(&_v)) {
+            const auto& pr = _pluto_probe;
+            c.push_back(range("freq", "Frequency", "Hz", static_cast<double>(pr.fmin), static_cast<double>(pr.fmax), 1,
+                              static_cast<double>(const_cast<Pluto*>(pl)->get_frequency())));
+            c.push_back(range("rate", "Sample rate", "Hz", static_cast<double>(pr.rmin), static_cast<double>(pr.rmax), 1,
+                              static_cast<double>(pl->get_sample_rate()), true));
+            c.push_back(range("gain", "RX gain", "dB", -3, 71, 1, pl->get_gain()));
+            Control agc = range("agc", "AGC", "", 0, 1, 1, pl->get_agc() ? 1 : 0);
+            agc.type = "bool";
+            c.push_back(agc);
+        }
+#endif
+#ifdef CLER_HAS_UHD
+        if (auto* u = std::get_if<UHD>(&_v)) {
+            const auto fr = u->rx_freq_range();
+            const auto gr = u->rx_gain_range();
+            const auto rr = u->rx_rate_range();
+            c.push_back(range("freq", "Frequency", "Hz", fr.start(), fr.stop(), 1, u->get_frequency()));
+            c.push_back(range("rate", "Sample rate", "Hz", rr.start(), rr.stop(), 1, u->actual_sample_rate(), true));
+            c.push_back(range("gain", "RX gain", "dB", gr.start(), gr.stop(), gr.step() > 0 ? gr.step() : 1, u->get_gain()));
+            const auto ants = u->rx_antennas();
+            if (ants.size() > 1) {
+                Control a;
+                a.id = "antenna"; a.label = "Antenna"; a.type = "enum";
+                a.options = ants;
+                const auto cur = u->rx_antenna();
+                a.value = static_cast<double>(std::find(ants.begin(), ants.end(), cur) - ants.begin());
+                c.push_back(a);
+            }
+        }
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+        if (auto* so = std::get_if<Soapy>(&_v)) {
+            double fmin = 1e12, fmax = 0;
+            for (const auto& fr : so->get_frequency_range()) { fmin = std::min(fmin, fr.minimum()); fmax = std::max(fmax, fr.maximum()); }
+            double rmin = 1e12, rmax = 0;
+            for (const auto& rr : so->get_sample_rate_range()) { rmin = std::min(rmin, rr.minimum()); rmax = std::max(rmax, rr.maximum()); }
+            const auto gr = so->get_gain_range();
+            c.push_back(range("freq", "Frequency", "Hz", fmin, fmax, 1, so->get_frequency()));
+            c.push_back(range("rate", "Sample rate", "Hz", rmin, rmax, 1, so->get_sample_rate(), true));
+            for (const auto& name : so->list_gains()) {
+                const auto g = so->get_gain_range(name);
+                c.push_back(range(("gain_" + name).c_str(), (name + " gain").c_str(), "dB",
+                                  g.minimum(), g.maximum(), g.step() > 0 ? g.step() : 1, so->get_gain(name)));
+            }
+            if (so->list_gains().empty()) {
+                c.push_back(range("gain", "RX gain", "dB", gr.minimum(), gr.maximum(), gr.step() > 0 ? gr.step() : 1, so->get_gain()));
+            }
+        }
+#endif
         return c;
     }
 
@@ -244,6 +406,38 @@ struct SourceMux : public cler::BlockBase {
             return;
         }
 #endif
+#ifdef CLER_HAS_LIBIIO
+        if (auto* pl = std::get_if<Pluto>(&_v)) {
+            if (id == "freq") pl->set_frequency(static_cast<long long>(value + 0.5));
+            else if (id == "gain") pl->set_gain(value);
+            else if (id == "agc") pl->set_agc(value >= 0.5);
+            return;
+        }
+#endif
+#ifdef CLER_HAS_UHD
+        if (auto* u = std::get_if<UHD>(&_v)) {
+            UHDConfig cfg = u->current_config();
+            cfg.center_freq_Hz = _uhd_freq;
+            if (id == "freq") { cfg.center_freq_Hz = value; _uhd_freq = value; }
+            else if (id == "gain") cfg.gain = value;
+            else if (id == "antenna") {
+                const auto ants = u->rx_antennas();
+                const size_t i = static_cast<size_t>(value + 0.5);
+                if (i < ants.size()) u->set_rx_antenna(ants[i]);
+                return;
+            } else return;
+            u->request_configure(cfg);
+            return;
+        }
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+        if (auto* so = std::get_if<Soapy>(&_v)) {
+            if (id == "freq") so->set_frequency(value);
+            else if (id == "gain") so->set_gain(value);
+            else if (id.rfind("gain_", 0) == 0) so->set_gain(id.substr(5), value);
+            return;
+        }
+#endif
     }
 
 private:
@@ -259,8 +453,69 @@ private:
         return s.size() > 8 ? s.substr(s.size() - 8) : s;
     }
 
+#ifdef CLER_HAS_LIBIIO
+    static std::string first_pluto_uri() {
+        std::string uri;
+        if (iio_scan_context* sc = iio_create_scan_context("usb", 0)) {
+            iio_context_info** info = nullptr;
+            const ssize_t n = iio_scan_context_get_info_list(sc, &info);
+            if (n > 0) uri = iio_context_info_get_uri(info[0]);
+            if (n >= 0) iio_context_info_list_free(info);
+            iio_scan_context_destroy(sc);
+        }
+        return uri.empty() ? "ip:192.168.2.1" : uri;
+    }
+#endif
+
+#ifdef CLER_HAS_SOAPYSDR
+    static bool native_driver(const std::string& d) {
+        (void)d;
+#ifdef CLER_HAS_HACKRF
+        if (d == "hackrf") return true;
+#endif
+#ifdef CLER_HAS_LIBIIO
+        if (d == "plutosdr") return true;
+#endif
+#ifdef CLER_HAS_UHD
+        if (d == "uhd") return true;
+#endif
+        return false;
+    }
+
+    static bool soapy_probe_clamp(const std::string& args, double& freq, double& rate, double& gain) {
+        SoapySDR::Device* dev = nullptr;
+        try {
+            dev = SoapySDR::Device::make(args);
+        } catch (const std::exception&) {
+            return false;
+        }
+        if (!dev) return false;
+        const auto frs = dev->getFrequencyRange(SOAPY_SDR_RX, 0);
+        bool ok = frs.empty();
+        for (const auto& r : frs) ok = ok || (freq >= r.minimum() && freq <= r.maximum());
+        if (!ok) freq = 0.5 * (frs.front().minimum() + frs.front().maximum());
+        const auto rrs = dev->getSampleRateRange(SOAPY_SDR_RX, 0);
+        ok = rrs.empty();
+        for (const auto& r : rrs) ok = ok || (rate >= r.minimum() && rate <= r.maximum());
+        if (!ok) rate = std::clamp(rate, rrs.front().minimum(), rrs.front().maximum());
+        const auto gr = dev->getGainRange(SOAPY_SDR_RX, 0);
+        gain = std::clamp(gain, gr.minimum(), gr.maximum());
+        SoapySDR::Device::unmake(dev);
+        return true;
+    }
+#endif
+
 #ifdef CLER_HAS_CARIBOULITE
     using CBL = SourceCaribouliteBlock<std::complex<float>>;
+#endif
+#ifdef CLER_HAS_LIBIIO
+    using Pluto = SourcePlutoBlock;
+#endif
+#ifdef CLER_HAS_UHD
+    using UHD = SourceUHDBlock<std::complex<float>>;
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+    using Soapy = SourceSoapySDRBlock<std::complex<float>>;
 #endif
     std::variant<std::monostate,
 #ifdef CLER_HAS_HACKRF
@@ -269,6 +524,21 @@ private:
 #ifdef CLER_HAS_CARIBOULITE
                  CBL,
 #endif
+#ifdef CLER_HAS_LIBIIO
+                 Pluto,
+#endif
+#ifdef CLER_HAS_UHD
+                 UHD,
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+                 Soapy,
+#endif
                  SimSourceBlock> _v;
     std::string _id;
+#ifdef CLER_HAS_LIBIIO
+    SourcePlutoBlock::Probe _pluto_probe;
+#endif
+#ifdef CLER_HAS_UHD
+    double _uhd_freq = 0.0;
+#endif
 };
