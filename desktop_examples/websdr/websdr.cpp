@@ -665,7 +665,7 @@ int main(int argc, char** argv) {
         if (notify.interval().count() > 0 && now - last_ping >= notify.interval()) {
             last_ping = now;
             const size_t written = fan.in.producer_thread_cumulative_write_count();
-            const bool flowing = !app.running || app.src.paused() || written != last_written;
+            const bool flowing = !app.running || app.src.paused() || app.src.ended() || written != last_written;
             last_written = written;
             if (flowing) notify.send("WATCHDOG=1");
         }

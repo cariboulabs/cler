@@ -26,7 +26,7 @@ public:
         if (_fd < 0) { _path.clear(); return; }
 
         const char* pid = std::getenv("WATCHDOG_PID");
-        if (pid && std::atoll(pid) != static_cast<long long>(::getpid())) return;
+        if (pid && *pid && std::atoll(pid) != static_cast<long long>(::getpid())) return;
         const char* usec = std::getenv("WATCHDOG_USEC");
         const long long us = usec ? std::atoll(usec) : 0;
         // systemd wants the ping well inside the deadline; half is what sd_watchdog_enabled callers use
