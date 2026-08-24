@@ -55,6 +55,7 @@ struct GateBlock : public cler::BlockBase {
     void set_open(bool open) { _open.store(open, std::memory_order_relaxed); }
     bool open() const { return _open.load(std::memory_order_relaxed); }
     uint64_t dropped() const { return _dropped.load(std::memory_order_relaxed); }
+    void clear_dropped() { _dropped.store(0, std::memory_order_relaxed); }
 
 private:
     std::atomic<bool> _open;

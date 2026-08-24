@@ -195,8 +195,10 @@ JSON text frames:
   - `state`: `{gen, source, freq, rate, mode, <control id>: value..., recording,
     is_file, paused, loop, switching, decoder, role}` — echoed after every accepted
     change; all tabs converge
-  - `stats` (1 Hz): `{audio_dropped, spectrum_dropped, buffered_ms, overflows,
-    rec_bytes, free_bytes, pos, duration, ended (file sources only)}`
+  - `stats` (1 Hz): `{audio_dropped, spectrum_dropped, text_dropped,
+    decoder_dropped, overflows, rec_bytes, free_bytes, pos, duration,
+    ended (file sources only)}` — the audio buffer depth the footer shows is the
+    client's own worklet measurement, not a server field
   - `text`: `{stream:"rds"|"ais"|"aprs", data}` — `data` is an object: RDS carries
     `{synced,pi,pty,tp,ta,ps,rt,groups_ok,corrected_pct,bad_pct}` at 1 Hz, AIS and
     APRS one object per decoded packet
@@ -284,13 +286,17 @@ nginx + basic auth in front if a client insists.
    As built: one decoder runs at a time (`--decoder`, `set decoder`), each on a
    `GateBlock` tap off the 240 kHz channel, so no source, rate or listening mode
    matters — RDS via FM demod + MPX, APRS via its own NBFM demod at 48 kHz then
-   AFSK1200, AIS via a 96 kHz resample. Each advertises the band it `expects` and
-   the client warns when the receiver is tuned elsewhere. A closed gate drains its
-   input (the fanout above advances by its slowest output); an open one
-   backpressures normally and only discards once its input nears full, counted in
-   `stats.decoder_dropped`. The graph runs on a `FixedThreadPool`: a dozen mostly
-   idle tap blocks cost ~3 points of a core each with their own thread and nothing
-   measurable on a pool.
+   AFSK1200 behind a ±7.5 kHz channel filter, AIS via a 96 kHz resample. Each
+   advertises the band it `expects` and the client warns when the receiver is tuned
+   elsewhere. A closed gate drains its input (the fanout above advances by its
+   slowest output); an open one backpressures normally and only discards once its
+   input nears full, counted in `stats.decoder_dropped` and followed by a reset of
+   the active decoder, since a hole leaves RDS describing signal that never came.
+   The graph runs on `PinnedIslands`, which splits blocks by measured cost over a
+   topological sort and parks the idle ones. `FixedThreadPool` must not be used
+   here: it chunks in declaration order, so one worker inherits the whole front end
+   (source → fanout → spectrum → shift → resampler) and caps it at a single core —
+   measured at 8 MS/s, one worker at 42 % while the other three sat near 1 %.
    ADS-B is reported `available:false`: it needs a full-rate magnitude tap off the
    RF fanout and the CPR aggregation that today lives inside the GUI-only
    `ADSBAggregateBlock`. The MPX block still produces stereo audio into a null sink

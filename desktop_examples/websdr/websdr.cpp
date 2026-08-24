@@ -19,6 +19,7 @@
 #include "desktop_blocks/fm/fm_demod.hpp"
 #include "desktop_blocks/fm/fm_mpx_decoder.hpp"
 #include "desktop_blocks/aprs/afsk_demod.hpp"
+#include "desktop_blocks/filters/kaiser_lpf.hpp"
 #include "desktop_blocks/ais/ais_decoder.hpp"
 #include "desktop_blocks/web/json_adapters.hpp"
 #include "desktop_blocks/web/proto.hpp"
@@ -51,6 +52,7 @@ static constexpr double IF_OFFSET = 400e3;     // keeps the SDR's DC spike out o
 static constexpr double AUDIO_HZ = 48e3;       // AnalogDemodBlock output rate
 static constexpr double AIS_HZ = 96e3;         // 10 samples per AIS symbol
 static constexpr double APRS_DEVIATION_HZ = 5e3;
+static constexpr double APRS_CHANNEL_HZ = 15e3;   // 2 m NBFM: +/-7.5 kHz, so a louder neighbour cannot capture the discriminator
 
 // Every decoder hangs off a fixed-rate point in the chain, so none of them care
 // which source or sample rate is selected — only where the receiver is tuned.
@@ -100,12 +102,15 @@ static std::string source_id(SourceMux::Kind kind, const std::string& id) {
     return s;
 }
 
-// The decoder taps add a dozen mostly-starved blocks; a worker pool polls them
-// far more cheaply than a thread each, and the source keeps its own thread
-// because it declares may_block.
+// The decoder taps add a dozen mostly-idle blocks. PinnedIslands parks them
+// instead of polling a thread each, and splits the rest by measured cost over a
+// topological sort, so the live path is never stuck behind one worker.
+// FixedThreadPool must not be used here: it chunks in declaration order, so one
+// worker inherits source->fanout->spectrum->shift->resampler and the front end
+// caps at a single core.
 static cler::FlowGraphConfig graph_config() {
     cler::FlowGraphConfig c;
-    c.scheduler = cler::SchedulerType::FixedThreadPool;
+    c.scheduler = cler::SchedulerType::PinnedIslands;
     c.num_workers = 4;
     return c;
 }
@@ -165,6 +170,20 @@ struct App {
     }
 
     uint64_t decoder_dropped() const { return rds_gate.dropped() + aprs_gate.dropped() + ais_gate.dropped(); }
+
+    // A dropped window leaves the RDS bit sync and station snapshot describing
+    // signal that no longer arrived; AFSK and AIS hunt for their own preambles
+    // and resync on their own.
+    void reset_decoder_state() {
+        if (decoder == "rds") mpx.rds_reset();
+    }
+
+    void reset_taps() {
+        rds_gate.clear_dropped();
+        aprs_gate.clear_dropped();
+        ais_gate.clear_dropped();
+        reset_decoder_state();
+    }
 
     void publish_rds() {
         if (decoder != "rds") return;
@@ -290,6 +309,7 @@ struct App {
         shift.set_sample_rate(rate);
         tune_to(freq_hz);
         fg.reset();
+        reset_taps();
         fg.run(graph_config());
         running = true;
         publish(true);
@@ -471,6 +491,7 @@ int main(int argc, char** argv) {
     web::JsonTextSinkBlock<ais::Message> ais_json("AIS json", srv);
     GateBlock<std::complex<float>> aprs_gate("APRS gate", false, 1 << 18);
     MultiStageResamplerBlock<std::complex<float>> aprs_resamp("APRS channel", static_cast<float>(AUDIO_HZ / CHANNEL_HZ), 60.0f, 1 << 16);
+    KaiserLPFBlock<std::complex<float>> aprs_lpf("APRS channel filter", AUDIO_HZ, APRS_CHANNEL_HZ / 2, 3e3, 60.0, 1 << 16);
     FMDemodBlock aprs_fm("APRS NBFM", AUDIO_HZ, APRS_DEVIATION_HZ, 1 << 16);
     AFSKDemodBlock afsk("AFSK1200", AUDIO_HZ, 1 << 14);
     web::JsonTextSinkBlock<aprs::Packet> aprs_json("APRS json", srv);
@@ -502,7 +523,8 @@ int main(int argc, char** argv) {
         cler::BlockRunner(&ais, &ais_json.in),
         cler::BlockRunner(&ais_json),
         cler::BlockRunner(&aprs_gate, &aprs_resamp.in),
-        cler::BlockRunner(&aprs_resamp, &aprs_fm.in),
+        cler::BlockRunner(&aprs_resamp, &aprs_lpf.in),
+        cler::BlockRunner(&aprs_lpf, &aprs_fm.in),
         cler::BlockRunner(&aprs_fm, &afsk.in),
         cler::BlockRunner(&afsk, &aprs_json.in),
         cler::BlockRunner(&aprs_json),
@@ -527,6 +549,7 @@ int main(int argc, char** argv) {
 
     using clock = std::chrono::steady_clock;
     auto last_stats = clock::now(), last_retry = clock::now();
+    uint64_t last_decoder_dropped = 0;
     while (g_run) {
         std::string ctl;
         while (srv.pop_control(ctl)) {
@@ -579,6 +602,10 @@ int main(int argc, char** argv) {
         if (now - last_stats >= std::chrono::seconds(1)) {
             last_stats = now;
             app.publish_rds();
+            if (const uint64_t dropped = app.decoder_dropped(); dropped != last_decoder_dropped) {
+                last_decoder_dropped = dropped;
+                app.reset_decoder_state();
+            }
             if (app.running && app.src.lost()) {
                 app.lost = true;
                 fg.stop();
