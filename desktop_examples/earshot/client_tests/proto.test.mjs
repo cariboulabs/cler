@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeFrame, encodeSet, encodeHello, formatHz, SeqTracker, T_SPECTRUM, T_AUDIO, SPECTRUM_HEAD_BYTES, AUDIO_HEAD_BYTES } from '../client/proto.js';
+import { decodeFrame, encodeSet, encodeHello, encodeRecord, encodeDeleteRecording, formatHz, parseFreq,
+         fmtBytes, fmtDuration, SeqTracker, T_SPECTRUM, T_AUDIO, SPECTRUM_HEAD_BYTES, AUDIO_HEAD_BYTES } from '../client/proto.js';
 
 function header(type, gen, seq, extra) {
   const buf = new ArrayBuffer(10 + extra);
@@ -40,6 +41,29 @@ test('encodes control messages', () => {
   assert.equal(encodeSet({ freq: 1e6 }), '{"t":"set","freq":1000000}');
   assert.equal(JSON.parse(encodeHello('x')).token, 'x');
   assert.equal(JSON.parse(encodeHello()).proto, 1);
+});
+
+test('a bare number is MHz, and nonsense is refused rather than guessed', () => {
+  assert.equal(parseFreq('100.1'), 100.1e6);
+  assert.equal(parseFreq('100.1M'), 100.1e6);
+  assert.equal(parseFreq(' 433920k '), 433.92e6);
+  assert.equal(parseFreq('1.2GHz'), 1.2e9);
+  assert.equal(parseFreq('7000000hz'), 7e6);
+  for (const bad of ['', 'abc', '100.1 MHz extra', '-5', '0']) assert.equal(parseFreq(bad), null, bad);
+});
+
+test('record and delete messages carry only what they were given', () => {
+  assert.deepEqual(JSON.parse(encodeRecord(true, '1', 'wfm')), { t: 'record', on: true, dir: '1', name: 'wfm' });
+  assert.deepEqual(JSON.parse(encodeRecord(false)), { t: 'record', on: false });
+  assert.deepEqual(JSON.parse(encodeDeleteRecording('cap1')), { t: 'recording', action: 'delete', name: 'cap1' });
+});
+
+test('bytes and durations read the way an operator says them', () => {
+  assert.equal(fmtBytes(24068888), '24.1 MB');
+  assert.equal(fmtBytes(214e9), '214.0 GB');
+  assert.equal(fmtBytes(512), '512 B');
+  assert.equal(fmtDuration(125), '2:05');
+  assert.equal(fmtDuration(-1), '0:00');
 });
 
 test('formats frequencies and tracks sequence gaps', () => {
