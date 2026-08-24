@@ -207,15 +207,31 @@ JSON text frames:
 - server→client
   - `hello`: `{proto:1, version, sources:[{id,kind,label,available}], source,
     controls:[{id,label,type:"range"|"enum"|"bool",min,max,step|options,unit,ro}],
-    state, codecs:["pcm16"], spectrum:{n,fps}, decoders:[{id,available,reason?}],
-    role}` — re-sent whole on source switch
+    state, codecs:["pcm16"], spectrum:{n,fps},
+    record:{dirs:[{id,path,free_bytes,total_bytes,writable}], max_bytes, min_free_bytes},
+    decoders:[{id,available,cost_hint?,reason?,expects?}], role}` — re-sent whole on
+    source switch. The `mode` control carries `options_disabled`, an array parallel
+    to `options` holding `""` where the mode is usable and the reason where it is
+    not (`"needs 200 kHz; this source is 48 kHz wide"`): a mode wider than the
+    source is meaningless, since the chain upsamples a narrow capture into the
+    240 kHz channel rather than inventing bandwidth. The server refuses such a mode
+    too, so a stale tab gets the same answer the button would have given.
+    `cost_hint` is what a decoder costs while running (`"~2% of a core"`), measured,
+    so the client can show the price of leaving three on. `max_bytes` is the cap
+    per directory: each is its own archive on its own filesystem.
   - `state`: `{gen, source, freq, rate, mode, <control id>: value..., recording,
-    is_file, paused, loop, switching, decoder, role}` — echoed after every accepted
-    change; all tabs converge
+    is_file, paused, loop, switching, decoders, decoder, record_dir, next_name,
+    role}` — echoed after every accepted change; all tabs converge. `decoders` is
+    the array of running decoders and is the truth; `decoder` is the first of them
+    (or `"none"`) and exists for one release so a client built before independent
+    decoders keeps working. `record_dir` is the `id` of the directory the next
+    recording lands in, `next_name` the name it would get if started now.
   - `stats` (1 Hz): `{audio_dropped, spectrum_dropped, text_dropped,
-    decoder_dropped, overflows, rec_bytes, free_bytes, pos, duration,
-    ended (file sources only)}` — the audio buffer depth the footer shows is the
-    client's own worklet measurement, not a server field
+    decoder_dropped, overflows, rec_bytes, free_bytes, pruned_bytes, next_name,
+    pos, duration, ended (file sources only)}` — the audio buffer depth the footer
+    shows is the client's own worklet measurement, not a server field. `next_name`
+    repeats here because `state` only moves on a change, and a name preview built
+    from a timestamp goes stale between them.
   - `text`: `{stream:"rds"|"ais"|"aprs", data}` — `data` is an object: RDS carries
     `{synced,pi,pty,tp,ta,ps,rt,groups_ok,corrected_pct,bad_pct}` at 1 Hz, AIS and
     APRS one object per decoded packet
@@ -226,9 +242,20 @@ JSON text frames:
   read; errors without an `id` are transient toasts.
 - client→server
   - `hello`: `{proto:1, token?, accept:{codecs:[...]}}`
-  - `set`: `{<control id>: value, ...}` incl. `freq`, `mode`, `offset`, `decoder`
+  - `set`: `{<control id>: value, ...}` incl. `freq`, `mode`, `offset`, and either
+    `decoders:["rds","ais"]` (the set to run — order is preserved, `"none"` and
+    duplicates fold away, one unknown name refuses the whole list) or the older
+    `decoder:"rds"`, which sets the same thing to a single entry
   - `source`: `{id, rate?}` (rate in Hz, clamped to what the backend accepts); `rescan`: `{}`
-  - `record`: `{on, name?}`; `play`: `{name, pos?, pause?, loop?}`
+  - `record`: `{on, name?, dir?}` — `dir` is a `record.dirs[].id`, remembered for
+    the next recording; `play`: `{name, pos?, pause?, loop?}`
+  - `recording`: `{action:"delete", name}` — removes both files of a capture.
+    Deletion rides the WebSocket rather than an HTTP verb because the
+    controller/viewer role is a property of the connection: HTTP has only the
+    shared token, which every viewer also holds, so `DELETE /recordings/<name>`
+    could not be controller-only. Refused for the capture being written, for a
+    name that is not a bare filename, and for anything resolving outside a
+    configured record directory.
 
 Codec/fps negotiation lives in `hello` from day one so the WAN profile (phase 5)
 adds `pcm16@24k`/`opus`, smaller/slower spectrum, without a flag day.

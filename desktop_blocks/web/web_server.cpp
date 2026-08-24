@@ -254,7 +254,7 @@ void WebServer::start() {
             auto it = _impl->clients.find(&ws);
             ctl = it != _impl->clients.end() && it->second->controller;
         }
-        if (t != "set" && t != "source" && t != "rescan" && t != "record" && t != "play") {
+        if (t != "set" && t != "source" && t != "rescan" && t != "record" && t != "play" && t != "recording") {
             ws.sendText("{\"t\":\"error\",\"code\":\"unknown\",\"msg\":\"unknown message type\"}");
             return;
         }

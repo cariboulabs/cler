@@ -22,6 +22,12 @@ inline uint64_t free_disk(const std::string& dir) {
     return static_cast<uint64_t>(st.f_bavail) * static_cast<uint64_t>(st.f_frsize);
 }
 
+inline uint64_t total_disk(const std::string& dir) {
+    struct statvfs st;
+    if (statvfs(dir.empty() ? "." : dir.c_str(), &st) != 0) return 0;
+    return static_cast<uint64_t>(st.f_blocks) * static_cast<uint64_t>(st.f_frsize);
+}
+
 // Byte counts spelled like the other numeric flags, so --record-max-bytes 20e9
 // means what --freq 100e6 means. 0 is unlimited; anything else is a hard no.
 inline bool parse_bytes(const char* s, uint64_t& out) {
@@ -123,6 +129,53 @@ inline Pruned prune_recordings(const std::string& dir, uint64_t max_bytes, uint6
         std::fprintf(stderr, "earshot: pruned %s (%llu MB)\n", c.base.c_str(),
                      static_cast<unsigned long long>(c.bytes >> 20));
     }
+    return out;
+}
+
+struct Deleted {
+    bool ok = false;
+    std::string why;      // set when ok is false; shown to whoever asked
+    uint64_t bytes = 0;
+};
+
+// Removes one recording's pair from whichever configured directory holds it.
+// Refuses the capture being written and anything that resolves outside its
+// directory — a symlink planted there still points wherever it likes.
+inline Deleted delete_recording(const std::vector<std::string>& dirs, const std::string& name,
+                                const std::string& keep) {
+    Deleted out;
+    if (name.empty() || name[0] == '.' || name.find('/') != std::string::npos ||
+        name.find("..") != std::string::npos) {
+        out.why = "bad recording name";
+        return out;
+    }
+    for (const auto& dir : dirs) {
+        const std::string base = dir + "/" + name;
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(base + ".sigmf-meta", ec) &&
+            !std::filesystem::is_regular_file(base + ".sigmf-data", ec)) continue;
+        const auto root = std::filesystem::weakly_canonical(dir, ec);
+        const auto real = std::filesystem::weakly_canonical(base + ".sigmf-data", ec);
+        if (ec || real.parent_path() != root) { out.why = "bad recording name"; return out; }
+        if (base == keep) { out.why = name + " is being recorded"; return out; }
+        for (const char* ext : {".sigmf-data", ".sigmf-meta"}) {
+            std::error_code fe;
+            const auto size = std::filesystem::file_size(base + ext, fe);
+            if (!fe) out.bytes += size;
+        }
+        bool removed = false;
+        for (const char* ext : {".sigmf-data", ".sigmf-meta"}) {
+            std::error_code rm_ec;
+            if (std::filesystem::remove(base + ext, rm_ec)) removed = true;
+        }
+        if (!removed) { out.bytes = 0; out.why = "cannot delete " + name; return out; }
+        out.ok = true;
+        // a headless box must not lose a client's capture silently, same as prune
+        std::fprintf(stderr, "earshot: deleted %s (%llu MB)\n", base.c_str(),
+                     static_cast<unsigned long long>(out.bytes >> 20));
+        return out;
+    }
+    out.why = "no recording named " + name;
     return out;
 }
 

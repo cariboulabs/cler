@@ -198,6 +198,26 @@ inline std::string json_unescape(const std::string& raw) {
     return out;
 }
 
+// the flat parser hands back a value's raw text, so an array of strings arrives
+// here as `["rds","ais"]`; anything that is not one yields nothing
+inline std::vector<std::string> json_str_array(const std::string& raw) {
+    std::vector<std::string> out;
+    size_t i = 0;
+    detail::skip_ws(raw, i);
+    if (i >= raw.size() || raw[i] != '[') return out;
+    ++i;
+    while (i < raw.size()) {
+        detail::skip_ws(raw, i);
+        if (i < raw.size() && raw[i] == ']') break;
+        std::string v;
+        if (!detail::skip_value(raw, i, v)) break;
+        out.push_back(json_unescape(v));
+        detail::skip_ws(raw, i);
+        if (i < raw.size() && raw[i] == ',') ++i;
+    }
+    return out;
+}
+
 // flat object: keys unescaped, values raw (strings keep their quotes); false on malformed input
 inline bool json_parse_object(const std::string& s, Fields& fields) {
     fields.clear();

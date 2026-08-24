@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "desktop_examples/earshot/policy.hpp"
 #include "desktop_examples/earshot/recordings.hpp"
 #include "desktop_examples/earshot/watchdog.hpp"
 
@@ -304,4 +305,88 @@ TEST(EarshotWatchdog, NoIntervalWhenTheWatchdogBelongsToAnotherPid) {
     ::unsetenv("WATCHDOG_USEC");
     ::unsetenv("NOTIFY_SOCKET");
     fs::remove_all(dir);
+}
+
+TEST(EarshotDelete, RemovesBothFilesOfThePair) {
+    const std::string dir = temp_dir("del");
+    make_recording(dir, "take", 4096);
+    const auto d = earshot::delete_recording({dir}, "take", "");
+    EXPECT_TRUE(d.ok) << d.why;
+    EXPECT_GE(d.bytes, 4096u);
+    EXPECT_FALSE(fs::exists(dir + "/take.sigmf-data"));
+    EXPECT_FALSE(fs::exists(dir + "/take.sigmf-meta"));
+    fs::remove_all(dir);
+}
+
+TEST(EarshotDelete, FindsTheRecordingInAnyConfiguredDirectory) {
+    const std::string a = temp_dir("del_a"), b = temp_dir("del_b");
+    make_recording(a, "in_a", 2048);
+    make_recording(b, "in_b", 2048);
+    EXPECT_TRUE(earshot::delete_recording({a, b}, "in_b", "").ok);
+    EXPECT_FALSE(exists(b, "in_b"));
+    EXPECT_TRUE(exists(a, "in_a"));
+    fs::remove_all(a);
+    fs::remove_all(b);
+}
+
+TEST(EarshotDelete, RefusesTheCaptureBeingWritten) {
+    const std::string dir = temp_dir("del_live");
+    make_recording(dir, "live", 4096);
+    const auto d = earshot::delete_recording({dir}, "live", dir + "/live");
+    EXPECT_FALSE(d.ok);
+    EXPECT_NE(d.why.find("is being recorded"), std::string::npos) << d.why;
+    EXPECT_TRUE(exists(dir, "live"));
+    fs::remove_all(dir);
+}
+
+TEST(EarshotDelete, RefusesTraversalMissingAndEscapingSymlinks) {
+    const std::string dir = temp_dir("del_bad");
+    const std::string outside = temp_dir("del_outside");
+    make_recording(outside, "secret", 1024);
+    make_recording(dir, "real", 1024);
+    std::error_code ec;
+    fs::create_symlink(outside + "/secret.sigmf-data", dir + "/escape.sigmf-data", ec);
+    fs::create_symlink(outside + "/secret.sigmf-meta", dir + "/escape.sigmf-meta", ec);
+
+    for (const char* bad : {"../del_outside/secret", "", ".hidden", "sub/take"}) {
+        EXPECT_FALSE(earshot::delete_recording({dir}, bad, "").ok) << bad;
+    }
+    EXPECT_FALSE(earshot::delete_recording({dir}, "nosuch", "").ok);
+    if (!ec) {
+        EXPECT_FALSE(earshot::delete_recording({dir}, "escape", "").ok);
+        EXPECT_TRUE(exists(outside, "secret"));
+    }
+    EXPECT_TRUE(exists(dir, "real"));
+    fs::remove_all(dir);
+    fs::remove_all(outside);
+}
+
+TEST(EarshotPolicy, WidePassbandsNeedAWideSource) {
+    using Mode = AnalogDemodBlock::Mode;
+    for (auto m : {Mode::WBFM, Mode::NBFM, Mode::AM, Mode::USB, Mode::LSB}) {
+        EXPECT_EQ(earshot::mode_disabled(m, 2.4e6), "") << AnalogDemodBlock::mode_name(m);
+    }
+    EXPECT_EQ(earshot::mode_disabled(Mode::WBFM, 48e3), "needs 200 kHz; this source is 48 kHz wide");
+    EXPECT_EQ(earshot::mode_disabled(Mode::NBFM, 48e3), "");
+    EXPECT_EQ(earshot::mode_disabled(Mode::AM, 48e3), "");
+    EXPECT_EQ(earshot::mode_disabled(Mode::NBFM, 8e3), "needs 12.5 kHz; this source is 8 kHz wide");
+    EXPECT_EQ(earshot::mode_disabled(Mode::AM, 8e3), "needs 10 kHz; this source is 8 kHz wide");
+    EXPECT_EQ(earshot::mode_disabled(Mode::USB, 8e3), "");
+}
+
+TEST(EarshotPolicy, DecoderListsFoldNoneAndDuplicatesAndRejectTypos) {
+    const std::vector<std::string> known{"rds", "aprs", "ais"};
+    std::vector<std::string> out;
+
+    EXPECT_TRUE(earshot::normalise_decoders({"rds", "ais"}, known, out));
+    EXPECT_EQ(out, (std::vector<std::string>{"rds", "ais"}));
+
+    EXPECT_TRUE(earshot::normalise_decoders({"rds", "rds", "none", ""}, known, out));
+    EXPECT_EQ(out, (std::vector<std::string>{"rds"}));
+
+    EXPECT_TRUE(earshot::normalise_decoders({"none"}, known, out));
+    EXPECT_TRUE(out.empty());
+
+    // one bad name fails the list rather than quietly running a shorter one
+    EXPECT_FALSE(earshot::normalise_decoders({"rds", "nope"}, known, out));
 }

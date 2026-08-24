@@ -52,8 +52,18 @@ struct SourceMux : public cler::BlockBase {
 
     explicit SourceMux(const char* name) : cler::BlockBase(name) {}
 
-    void set_sigmf_dir(const std::string& dir) { _sigmf_dir = dir; }
-    std::string sigmf_path(const std::string& name) const { return _sigmf_dir + "/" + name + ".sigmf-meta"; }
+    void set_sigmf_dir(const std::string& dir) { _sigmf_dirs = {dir}; }
+    void set_sigmf_dirs(const std::vector<std::string>& dirs) { _sigmf_dirs = dirs; }
+    // first directory that actually holds the capture, so a recording written to
+    // any of them plays back; falls back to the first so a miss reads sensibly
+    std::string sigmf_path(const std::string& name) const {
+        std::error_code ec;
+        for (const auto& d : _sigmf_dirs) {
+            const std::string p = d + "/" + name + ".sigmf-meta";
+            if (std::filesystem::is_regular_file(p, ec)) return p;
+        }
+        return (_sigmf_dirs.empty() ? std::string() : _sigmf_dirs.front()) + "/" + name + ".sigmf-meta";
+    }
     static bool bare_name(const std::string& n) {
         return !n.empty() && n.find('/') == std::string::npos && n.find("..") == std::string::npos;
     }
@@ -145,11 +155,14 @@ struct SourceMux : public cler::BlockBase {
             }
         }
 #endif
-        if (!_sigmf_dir.empty()) {
+        for (const auto& sigmf_dir : _sigmf_dirs) {
             std::error_code ec;
-            for (const auto& e : std::filesystem::directory_iterator(_sigmf_dir, ec)) {
+            for (const auto& e : std::filesystem::directory_iterator(sigmf_dir, ec)) {
                 if (!e.is_regular_file() || e.path().extension() != ".sigmf-meta") continue;
                 const std::string name = e.path().stem().string();
+                bool listed = false;   // the first directory holding a name wins, as sigmf_path resolves it
+                for (const auto& d : out) listed = listed || (d.kind == Kind::SigMF && d.id == name);
+                if (listed) continue;
                 std::string label = name;
                 std::error_code ec2;
                 sigmf::Meta meta;
@@ -713,7 +726,7 @@ private:
                  SigMFSrc,
                  SimSourceBlock> _v;
     std::string _id;
-    std::string _sigmf_dir;
+    std::vector<std::string> _sigmf_dirs;
     long long _pluto_fmin = 0, _pluto_fmax = 0, _pluto_rmin = 0, _pluto_rmax = 0;
     double _uhd_freq = 0.0, _uhd_gain = 30.0;
 };
