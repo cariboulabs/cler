@@ -192,15 +192,16 @@ JSON text frames:
     controls:[{id,label,type:"range"|"enum"|"bool",min,max,step|options,unit,ro}],
     state, codecs:["pcm16"], spectrum:{n,fps}, role}` — re-sent whole on source switch
   - `state`: `{gen, source, freq, rate, mode, <control id>: value..., recording,
-    switching, role}` — echoed after every accepted change; all tabs converge
+    is_file, paused, loop, switching, role}` — echoed after every accepted change;
+    all tabs converge
   - `stats` (1 Hz): `{audio_dropped, spectrum_dropped, buffered_ms, overflows,
-    rec_bytes, free_bytes, pos (file)}`
+    rec_bytes, free_bytes, pos, duration, ended (file sources only)}`
   - `text`: `{stream:"rds"|"adsb"|..., data}`
   - `error`: `{code, msg}`
 - client→server
   - `hello`: `{proto:1, token?, accept:{codecs:[...]}}`
   - `set`: `{<control id>: value, ...}` incl. `freq`, `mode`, `offset`
-  - `source`: `{id}`; `rescan`: `{}`
+  - `source`: `{id, rate?}` (rate in Hz, clamped to what the backend accepts); `rescan`: `{}`
   - `record`: `{on, name?}`; `play`: `{name, pos?, pause?, loop?}`
 
 Codec/fps negotiation lives in `hello` from day one so the WAN profile (phase 5)
@@ -212,10 +213,12 @@ adds `pcm16@24k`/`opus`, smaller/slower spectrum, without a flag day.
   `statvfs` checked at start and every 64 MB; stops cleanly at a 200 MB floor and
   reports. Filename server-generated (`<utc>_<freq>.sigmf-*`), optional client
   prefix. Listing + download through the same server.
-- Playback: `SourceSigMFBlock` behind a `ThrottleBlock` (the source has no pacing),
-  plus new `seek(pos)`, `pause()`, `loop` and an `ended()` flag (today EOF parks
-  on `NotEnoughSamples` forever). RF controls `ro`; a `transport` control group.
-  Demod/decoders unchanged — same 240 kHz chain.
+- Playback: `SourceSigMFBlock` grew a transport mode (pacing at the file rate,
+  `seek(seconds)`, `pause`, `loop`, `ended()`, position; EOF parks with the file
+  open). SourceMux lists `--record-dir` recordings as `sigmf:<name>` devices and
+  forwards the transport. RF controls `ro`. Demod/decoders unchanged — same
+  240 kHz chain. `GET /recordings` lists, `GET /recordings/<name>.sigmf-data|meta`
+  downloads (token-gated when a token is set).
 
 ## Failure modes the server must handle
 

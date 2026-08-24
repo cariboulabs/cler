@@ -481,7 +481,7 @@ fn delete_block_removes_declaration_and_runner_when_nothing_else_refers_to_it() 
 
 #[test]
 fn set_config_edits_an_assignment_and_appends_a_new_one() {
-    let mut session = session("fm_receiver.cpp");
+    let mut session = session("../tools/flowgraph_gui/cler-graph/tests/data/fm_receiver.cpp");
     let before = session.source().to_string();
     let outcome = session
         .apply(transaction(
@@ -740,7 +740,7 @@ const PROPERTY_FILES: [&str; 8] = [
     "plots.cpp",
     "mass_spring_damper.cpp",
     "polyphase_channelizer.cpp",
-    "fm_receiver.cpp",
+    "../tools/flowgraph_gui/cler-graph/tests/data/fm_receiver.cpp",
     "spike/spike.cpp",
     "uhd_device.cpp",
 ];

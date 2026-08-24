@@ -57,12 +57,27 @@
     <canvas id="spec"></canvas>
     <canvas id="wf"></canvas>
     <div id="listen" class="hidden">▶ click to listen</div>
-    <div id="devices"><div class="card"><h2>Devices</h2><div id="devlist"></div><div style="margin-top:10px;display:flex;gap:8px"><button id="rescan">Rescan</button><button id="devclose">Close</button></div></div></div>
+    <div id="devices"><div class="card"><h2>Devices</h2><div id="devlist"></div><h2 style="margin-top:14px">Recordings</h2><div id="reclist" class="ctl-name">—</div><div style="margin-top:10px;display:flex;gap:8px"><button id="rescan">Rescan</button><button id="devclose">Close</button></div></div></div>
     <div id="errors"></div>
   </main>
   <aside>
     <h3>Mode</h3><div id="modes" class="modes"></div>
     <h3>Controls</h3><div id="controls"></div>
+    <div id="transport" style="display:none">
+      <h3>Playback</h3>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button id="playpause">⏸</button>
+        <input id="pos" type="range" min="0" max="1" step="0.1" value="0" style="flex:1">
+        <span id="postime" class="ctl-name">0:00</span>
+        <label class="ctl-name"><input id="loop" type="checkbox"> loop</label>
+      </div>
+    </div>
+    <h3>Record</h3>
+    <div style="display:flex;gap:6px;align-items:center">
+      <button id="recbtn">● Record</button>
+      <input id="recname" type="text" placeholder="prefix" style="flex:1;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:3px;padding:3px 6px">
+    </div>
+    <span id="recinfo" class="ctl-name"></span>
     <h3>Audio</h3><button id="listenbtn">▶ Listen</button><label class="ctl"><span class="ctl-name">volume</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></label>
     <h3>Decoded</h3><div id="text"></div>
   </aside>
@@ -133,16 +148,26 @@ function onText(m) {
     applyState({ ...(m.state || {}), role: m.role });
     renderDevices();
     if (first) $('devices').classList.toggle('hidden', !!(m.state && m.state.source));
+    renderRecordings();
   } else if (m.t === 'state') {
     applyState(m);
   } else if (m.t === 'stats') {
-    $('s-stats').textContent = `drops spec ${m.spectrum_dropped ?? 0} audio ${m.audio_dropped ?? 0} · overflows ${m.overflows ?? 0} · clients ${m.clients ?? 1}`;
+    const extra = state.st.recording ? ` · rec ${((m.rec_bytes ?? 0) / 1e6).toFixed(1)} MB` : '';
+    $('s-stats').textContent = `drops spec ${m.spectrum_dropped ?? 0} audio ${m.audio_dropped ?? 0} · overflows ${m.overflows ?? 0} · clients ${m.clients ?? 1}${extra}`;
+    $('recinfo').textContent = state.st.recording ? `recording · ${((m.rec_bytes ?? 0) / 1e6).toFixed(1)} MB · ${((m.free_bytes ?? 0) / 1e9).toFixed(1)} GB free` : '';
+    if (m.duration !== undefined) {
+      $('pos').max = m.duration;
+      if (document.activeElement !== $('pos')) $('pos').value = m.pos ?? 0;
+      $('postime').textContent = `${fmtTime(m.pos ?? 0)} / ${fmtTime(m.duration)}${m.ended ? ' · ended' : ''}`;
+    }
   } else if (m.t === 'error') {
     toast(`${m.code}: ${m.msg}`);
   } else if (m.t === 'text') {
     const el = $('text'); el.textContent += `[${m.stream}] ${typeof m.data === 'string' ? m.data : JSON.stringify(m.data)}\n`; el.scrollTop = el.scrollHeight;
   }
 }
+
+function fmtTime(t) { t = Math.max(0, Math.floor(t)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; }
 
 function applyState(s) {
   const prevSource = state.st.source;
@@ -157,6 +182,11 @@ function applyState(s) {
   panel.update($('controls'), state.model);
   for (const b of $('modes').children) b.classList.toggle('on', b.dataset.mode === state.st.mode);
   wf.setMarker(state.st.offset || 0, state.st.passband || 0);
+  $('transport').style.display = state.st.is_file ? '' : 'none';
+  if (state.st.paused !== undefined) $('playpause').textContent = state.st.paused ? '▶' : '⏸';
+  if (state.st.loop !== undefined) $('loop').checked = !!state.st.loop;
+  $('recbtn').textContent = state.st.recording ? '■ Stop recording' : '● Record';
+  $('recbtn').classList.toggle('on', !!state.st.recording);
   const ctl = state.role === 'ctl';
   for (const el of document.querySelectorAll('aside input, aside select, aside button, #freq')) if (el.id !== 'vol') el.disabled = !ctl || el.dataset.ro === '1';
 }
@@ -174,9 +204,20 @@ function renderControls() {
   for (const c of rest) if (c.ro) for (const el of $('controls').querySelectorAll(`[data-id="${CSS.escape(c.id)}"] input, [data-id="${CSS.escape(c.id)}"] select`)) el.dataset.ro = '1';
 }
 
+const RATES = [['keep rate', 0], ['1 MS/s', 1e6], ['2 MS/s', 2e6], ['2.4 MS/s', 2.4e6],
+               ['4 MS/s', 4e6], ['8 MS/s', 8e6], ['10 MS/s', 10e6], ['20 MS/s', 20e6]];
+
 function renderDevices() {
   const list = $('devlist'); list.textContent = '';
   if (!state.sources.length) { list.textContent = 'no devices reported yet'; }
+  const ratePick = document.createElement('select'); ratePick.id = 'devrate';
+  for (const [label, hz] of RATES) {
+    const o = document.createElement('option'); o.textContent = label; o.value = hz;
+    ratePick.appendChild(o);
+  }
+  const rateRow = document.createElement('div'); rateRow.className = 'dev';
+  const rateLbl = document.createElement('span'); rateLbl.className = 'lbl'; rateLbl.textContent = 'sample rate on connect';
+  rateRow.append(rateLbl, ratePick); list.appendChild(rateRow);
   for (const s of state.sources) {
     const row = document.createElement('div'); row.className = 'dev';
     const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = s.label || s.id;
@@ -185,7 +226,7 @@ function renderDevices() {
     const current = state.st.source === s.id;
     btn.textContent = current ? 'connected' : 'Connect';
     btn.disabled = current || s.available === false || state.role !== 'ctl';
-    btn.onclick = () => send(encodeSource(s.id));
+    btn.onclick = () => send(encodeSource(s.id, Number($('devrate')?.value || 0)));
     row.append(lbl, kind, btn); list.appendChild(row);
   }
 }
@@ -198,7 +239,32 @@ $('freq').onchange = () => {
   send(encodeSet({ freq: Number(m[1]) * mult }));
   $('freq').blur();
 };
-$('devbtn').onclick = () => { renderDevices(); $('devices').classList.remove('hidden'); };
+const tokenQs = () => { const t = new URLSearchParams(location.search).get('token'); return t ? `?token=${encodeURIComponent(t)}` : ''; };
+async function renderRecordings() {
+  const el = $('reclist');
+  try {
+    const r = await fetch(`/recordings${tokenQs()}`);
+    if (!r.ok) { el.textContent = '—'; return; }
+    const recs = await r.json();
+    el.textContent = recs.length ? '' : 'none yet';
+    for (const rec of recs) {
+      const row = document.createElement('div'); row.className = 'dev';
+      const lbl = document.createElement('span'); lbl.className = 'lbl';
+      lbl.textContent = `${rec.name} · ${(rec.bytes / 1e6).toFixed(1)} MB · ${fmtTime(rec.seconds)} @ ${(rec.rate / 1e6).toFixed(2)} MS/s`;
+      const dl = document.createElement('a');
+      dl.textContent = 'download'; dl.href = `/recordings/${rec.name}.sigmf-data${tokenQs()}`; dl.style.color = 'var(--acc)';
+      const play = document.createElement('button'); play.textContent = 'Play';
+      play.disabled = state.role !== 'ctl';
+      play.onclick = () => send(JSON.stringify({ t: 'play', name: rec.name }));
+      row.append(lbl, dl, play); el.appendChild(row);
+    }
+  } catch { el.textContent = '—'; }
+}
+$('playpause').onclick = () => send(JSON.stringify({ t: 'play', pause: !state.st.paused }));
+$('pos').onchange = () => send(JSON.stringify({ t: 'play', pos: Number($('pos').value) }));
+$('loop').onchange = () => send(JSON.stringify({ t: 'play', loop: $('loop').checked }));
+$('recbtn').onclick = () => send(JSON.stringify({ t: 'record', on: !state.st.recording, name: $('recname').value }));
+$('devbtn').onclick = () => { renderDevices(); renderRecordings(); $('devices').classList.remove('hidden'); };
 $('devclose').onclick = () => $('devices').classList.add('hidden');
 $('rescan').onclick = () => { if (state.role === 'ctl') send(JSON.stringify({ t: 'rescan' })); };
 const toggleAudio = async () => {

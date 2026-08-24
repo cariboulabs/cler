@@ -31,6 +31,7 @@ struct ServerOptions {
     const EmbeddedFile* files = nullptr;
     size_t file_count = 0;
     std::string version = "dev";
+    std::string record_dir;
 };
 
 struct ClientStats {

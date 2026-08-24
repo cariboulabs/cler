@@ -14,6 +14,10 @@
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/web_sink.hpp"
+#include "desktop_blocks/sigmf/recorder_sigmf.hpp"
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 using namespace web;
 
@@ -284,4 +288,46 @@ TEST(WebSink, DrainsWithoutClientsAndConvertsAudio) {
     EXPECT_LE(d.spectrum_dropped, 9u);
     EXPECT_EQ(d.audio_dropped, 0u);
     EXPECT_TRUE(sink.procedure().is_err());
+}
+
+TEST(WebServerTest, RecordingsListDownloadTraversalAndToken) {
+    const std::string dir = testing::TempDir() + "/webrec";
+    std::filesystem::create_directories(dir);
+    {
+        SigMFRecorderBlock rec("rec", 1e6, 1 << 16);
+        ASSERT_TRUE(rec.start_at(dir + "/take1", 100e6));
+        std::vector<std::complex<float>> tone(500, {0.25f, 0.0f});
+        rec.in.writeN(tone.data(), tone.size());
+        ASSERT_TRUE(rec.procedure().is_ok());
+        rec.stop();
+    }
+    {
+        std::ofstream bad(dir + "/bad.sigmf-meta");
+        bad << "{\n  \"global\": { \"core:datatype\": \"cf64_le\", \"core:sample_rate\": 1e6 }\n}\n";
+    }
+    const int port = free_port();
+    ServerOptions o; o.port = port; o.record_dir = dir; o.token = "s3";
+    WebServer srv(o);
+    srv.start();
+    const std::string root = "http://127.0.0.1:" + std::to_string(port);
+    ix::HttpClient http;
+
+    EXPECT_EQ(http.get(root + "/recordings", http.createRequest())->statusCode, 401);
+    auto list = http.get(root + "/recordings?token=s3", http.createRequest());
+    ASSERT_EQ(list->statusCode, 200);
+    EXPECT_NE(list->body.find("\"name\":\"take1\""), std::string::npos);
+    EXPECT_EQ(list->body.find("bad"), std::string::npos);
+    EXPECT_NE(list->body.find("\"bytes\":2000"), std::string::npos);
+    EXPECT_NE(list->body.find("\"rate\":1000000"), std::string::npos);
+
+    auto data = http.get(root + "/recordings/take1.sigmf-data?token=s3", http.createRequest());
+    ASSERT_EQ(data->statusCode, 200);
+    EXPECT_EQ(data->body.size(), 2000u);
+    EXPECT_EQ(http.get(root + "/recordings/take1.sigmf-meta?token=s3", http.createRequest())->statusCode, 200);
+
+    EXPECT_EQ(http.get(root + "/recordings/../take1.sigmf-data?token=s3", http.createRequest())->statusCode, 404);
+    EXPECT_EQ(http.get(root + "/recordings/take1?token=s3", http.createRequest())->statusCode, 404);
+    EXPECT_EQ(http.get(root + "/recordings/.hidden.sigmf-data?token=s3", http.createRequest())->statusCode, 404);
+    srv.stop();
+    std::filesystem::remove_all(dir);
 }
