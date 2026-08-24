@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>cler earshot</title>
-<link rel="icon" href="data:,">
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M6 9a6.5 6.5 0 0 1 13 0c0 5-5.5 5-5.5 8.5a3.25 3.25 0 0 1-6.5 0" stroke="%23e6edf3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 9a3 3 0 0 1 6 0" stroke="%233987e5" stroke-width="1.8" stroke-linecap="round"/></svg>'>
 <style>
   /* Tokens are the ones cler-fg (app.css) and the ImGui apps (cler_palette.hpp)
      already share; only --trace and --rec are earshot's own, because a spectrum
@@ -35,7 +35,7 @@
   /* top bar: identity, one menu, the tuned frequency, status */
   header { grid-column:1/3; display:flex; gap:12px; align-items:center; padding:6px 12px;
            background:var(--bg-1); border-bottom:1px solid var(--border); }
-  .brand { font-weight:600; color:var(--fg); letter-spacing:.02em; }
+  .brand { font-weight:600; color:var(--fg); letter-spacing:.02em; display:flex; align-items:center; gap:7px; }
   #freq { width:170px; font-size:20px; font-family:var(--mono); font-variant-numeric:tabular-nums;
           background:transparent; color:var(--fg); border:none; border-bottom:1px solid var(--border); text-align:right; padding:2px 4px; }
   #freq:focus { outline:none; border-bottom-color:var(--accent); }
@@ -62,16 +62,31 @@
                     border-radius:4px; background:var(--bg-2); font-size:13px; }
   .menu > summary::-webkit-details-marker { display:none; }
   .menu[open] > summary { border-color:var(--accent); }
-  .menu-items { position:absolute; z-index:20; top:calc(100% + 4px); left:0; min-width:230px;
-                background:var(--bg-2); border:1px solid var(--border); border-radius:6px; padding:6px;
-                display:flex; flex-direction:column; gap:2px; box-shadow:0 8px 30px #0008; }
-  .menu-items button { background:none; border:none; text-align:left; padding:5px 8px; border-radius:3px; }
+  .menu-items { position:absolute; z-index:20; top:calc(100% + 4px); left:0; min-width:260px;
+                background:var(--bg-2); border:1px solid var(--border); border-radius:6px; padding:8px;
+                display:flex; flex-direction:column; gap:4px; box-shadow:0 8px 30px #0008; }
+  .menu-items button { background:none; border:none; text-align:left; padding:8px 12px; border-radius:3px; font-size:14px; }
   .menu-items button:hover:not(:disabled) { background:var(--bg-1); }
   .menu-items label { display:flex; gap:8px; align-items:baseline; padding:4px 8px; border-radius:3px; }
   .menu-items label.off { color:var(--faint); }
   .menu-items .cost { color:var(--muted); font-size:12px; margin-left:auto; }
   .menu-items .band { color:var(--faint); font-size:12px; }
   .menu-items .reason { color:var(--faint); font-size:12px; padding:0 8px 6px 30px; max-width:280px; }
+  /* the decoder list lives in the pane, not behind a menu: options you cannot
+     see are options nobody turns on */
+  .declist { display:flex; flex-direction:column; gap:2px; margin-bottom:6px; }
+  .declist label { display:flex; gap:8px; align-items:baseline; padding:4px 6px; border-radius:3px; }
+  .declist label.off { color:var(--faint); }
+  .declist .cost { color:var(--muted); font-size:12px; margin-left:auto; }
+  .declist .band { color:var(--faint); font-size:12px; }
+  .declist .reason { color:var(--faint); font-size:12px; padding:0 6px 4px 28px; max-width:280px; }
+  /* cler-fg's blocked-tip: a disabled control shows its reason on hover, not
+     only in the native title tooltip */
+  [data-tip] { position:relative; }
+  [data-tip]:hover::after { content:attr(data-tip); position:absolute; bottom:calc(100% + 6px); left:0;
+    z-index:30; width:max-content; max-width:280px; padding:4px 8px; border:1px solid var(--border-hi);
+    border-radius:4px; background:var(--bg-2); color:var(--fg); font-size:11px; line-height:1.35;
+    box-shadow:0 4px 14px #0007; pointer-events:none; }
 
   main { display:grid; grid-template-rows:180px 1fr; min-height:0; min-width:0; position:relative; }
   .plot { position:relative; min-height:0; overflow:hidden; }
@@ -153,9 +168,9 @@
 <body>
 <div id="app">
   <header>
-    <span class="brand">⌁ earshot</span>
+    <span class="brand"><svg viewBox="0 0 24 24" fill="none" width="18" height="18" aria-hidden="true"><path d="M6 9a6.5 6.5 0 0 1 13 0c0 5-5.5 5-5.5 8.5a3.25 3.25 0 0 1-6.5 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 9a3 3 0 0 1 6 0" stroke="#3987e5" stroke-width="1.8" stroke-linecap="round"/></svg> earshot</span>
     <details class="menu" id="menu">
-      <summary data-testid="menu">≡ menu</summary>
+      <summary data-testid="menu" aria-label="menu" title="menu">☰</summary>
       <div class="menu-items">
         <button id="menu-sources" data-testid="menu-sources">sources…</button>
         <button id="menu-recordings" data-testid="menu-recordings">recordings…</button>
@@ -239,15 +254,13 @@
         <div class="sec-head">
           <h3>decoded</h3>
           <span class="spacer"></span>
-          <details class="menu" id="decmenu">
-            <summary data-testid="decoder-menu">⋯</summary>
-            <div class="menu-items" id="decmenu-items"></div>
-          </details>
+          <!-- ponytail: list inline, not behind a ⋯ menu — see .declist note -->
         </div>
+        <div class="declist" id="decmenu-items"></div>
         <span id="deccost" class="note" data-testid="decoder-cost"></span>
         <div id="dectabs"></div>
         <div id="text"></div>
-        <span id="decempty" class="note hidden" data-testid="decoder-empty">no decoder running — pick one from ⋯</span>
+        <span id="decempty" class="note hidden" data-testid="decoder-empty">nothing decoding — tick a decoder above to start it</span>
       </section>
     </div>
   </aside>

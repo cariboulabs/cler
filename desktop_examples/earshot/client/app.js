@@ -24,9 +24,14 @@ let ws = null, backoff = 500;
 function gate(el, ok, reason) {
   if (!el) return;
   el.disabled = !ok;
-  if (!ok && reason) el.title = reason;
-  else if (el.dataset.hint) el.title = el.dataset.hint;
-  else el.removeAttribute('title');
+  if (!ok && reason) {
+    el.title = reason;
+    el.dataset.tip = reason;
+  } else {
+    delete el.dataset.tip;
+    if (el.dataset.hint) el.title = el.dataset.hint;
+    else el.removeAttribute('title');
+  }
 }
 const ctl = () => state.role === 'ctl';
 const NOT_CTL = 'only the controller can change this';
@@ -322,7 +327,7 @@ function renderDecoderMenu() {
     }
   }
   const total = costTotal(state.decoders, running);
-  $('deccost').textContent = total.note || total.text;
+  $('deccost').textContent = running.length ? (total.note || total.text) : '';
   $('deccost').className = total.warn ? 'warnnote' : 'note';
   // nothing running: the chips and the table have nothing to say, but the ⋯ menu
   // is how you start one, so it stays

@@ -1,7 +1,7 @@
 // Headless end-to-end check of the earshot client against the real binary on the
 // simulator source. Exits 77 (ctest SKIP) when playwright is not installed:
 //   EARSHOT_BIN=build/desktop_examples/earshot/earshot \
-//   NODE_PATH=tools/flowgraph_gui/app/node_modules node desktop_examples/earshot/client_tests/e2e.mjs
+//   NODE_PATH=tools/cler-fg/app/node_modules node desktop_examples/earshot/client_tests/e2e.mjs
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -83,9 +83,8 @@ await page.locator('[data-testid=mode-AM]').click();
 await page.waitForFunction(() => document.querySelector('[data-testid=mode-AM]')?.classList.contains('on'), null, { timeout: 5_000 }).catch(() => fail('mode did not become AM'));
 ok('mode button → state mode AM');
 
-// two decoders at once, from the ⋯ menu, with the running cost shown
+// two decoders at once, from the inline list, with the running cost shown
 await page.locator('[data-testid=tab-decoded]').click();
-await page.locator('[data-testid=decoder-menu]').click();
 await page.locator('[data-testid=decoder-rds]').check();
 await sleep(400);
 await page.locator('[data-testid=decoder-aprs]').check();
@@ -102,7 +101,6 @@ const adsbDisabled = await page.locator('[data-testid=decoder-adsb]').isDisabled
 const adsbReason = await page.locator('#decmenu-items .reason').first().textContent();
 if (!adsbDisabled || !/unavailable/.test(adsbReason)) fail(`adsb not explained: disabled=${adsbDisabled} reason="${adsbReason}"`);
 ok('adsb is disabled and says why in text');
-await page.locator('[data-testid=decoder-menu]').click();
 
 // record → the dialog lists it → delete round trip
 await page.locator('[data-testid=tab-receiver]').click();
@@ -159,7 +157,6 @@ for (const id of ['freq', 'record']) {
   if (!title || !/controller/.test(title)) fail(`${id} disabled without a reason (title="${title}")`);
 }
 await viewer.locator('[data-testid=tab-decoded]').click();
-await viewer.locator('[data-testid=decoder-menu]').click();
 const vAis = viewer.locator('[data-testid=decoder-ais]');
 if (!(await vAis.isDisabled())) fail('a viewer can start a decoder');
 if (!/controller/.test((await vAis.getAttribute('title')) || '')) fail('viewer decoder checkbox has no reason');
