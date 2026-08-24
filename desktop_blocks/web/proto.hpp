@@ -17,6 +17,8 @@ namespace web {
 constexpr uint8_t PROTO_VER = 1;
 constexpr uint8_t T_SPECTRUM = 0x01;
 constexpr uint8_t T_AUDIO = 0x02;
+// codec 0 fixes both the wire rate and the frame length; a new rate or chunk is a
+// new codec id, not a parameter
 constexpr uint8_t CODEC_PCM16_48K = 0;
 constexpr size_t HEADER_BYTES = 10;
 constexpr size_t SPECTRUM_HEAD_BYTES = HEADER_BYTES + 8 + 8 + 2 + 4 + 4;

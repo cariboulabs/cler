@@ -16,6 +16,7 @@
 #include "desktop_blocks/fm/fm_demod.hpp"
 #include "desktop_blocks/web/json_sink.hpp"
 #include "desktop_examples/websdr/decoder_json.hpp"
+#include "desktop_examples/websdr/recordings_route.hpp"
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/web_sink.hpp"
@@ -180,6 +181,9 @@ TEST(WebServerTest, OriginAndTokenRejected) {
     const int port = free_port();
     ServerOptions o; o.port = port; o.token = "s3cret";
     WebServer srv(o);
+    srv.add_http_route("/health", [](const std::string&, const std::string&) {
+        return HttpReply{200, "{}", "application/json"};
+    });
     srv.start();
     const std::string base = "ws://127.0.0.1:" + std::to_string(port) + "/";
 
@@ -234,6 +238,11 @@ TEST(WebServerTest, StreamsArriveAndDecode) {
     const int port = free_port();
     ServerOptions o; o.port = port;
     WebServer srv(o);
+    srv.add_http_route("/health", [&srv](const std::string&, const std::string&) {
+        JsonWriter w;
+        w.begin_obj().key("clients").num(static_cast<double>(srv.client_count())).end();
+        return HttpReply{200, w.out, "application/json"};
+    });
     srv.start();
     TestClient c("ws://127.0.0.1:" + std::to_string(port) + "/");
     ASSERT_TRUE(c.wait([&] { return c.open; }));
@@ -285,12 +294,17 @@ TEST(WebServerTest, ComposedFramesAreValidJsonWithAndWithoutExtras) {
             srv.set_hello_extra("{\"sources\":[{\"id\":\"sim\"}],\"decoders\":[]}");
             srv.set_state("{\"gen\":7,\"freq\":100e6}");
             srv.set_stats_extra("{\"overflows\":3}");
-            srv.set_health_extra("{\"source\":\"sim\"}");
         } else {
             srv.set_hello_extra("{}");
             srv.set_stats_extra("");
-            srv.set_health_extra("{}");
         }
+        srv.add_http_route("/health", [&srv, extras](const std::string&, const std::string&) {
+            JsonWriter w;
+            w.begin_obj().key("version").str("compose").key("clients").num(static_cast<double>(srv.client_count()));
+            if (extras) w.key("source").str("sim");
+            w.end();
+            return HttpReply{200, w.out, "application/json"};
+        });
         srv.start();
 
         TestClient c("ws://127.0.0.1:" + std::to_string(port) + "/");
@@ -366,8 +380,11 @@ TEST(WebServerTest, RecordingsListDownloadTraversalAndToken) {
         bad << "{\n  \"global\": { \"core:datatype\": \"cf64_le\", \"core:sample_rate\": 1e6 }\n}\n";
     }
     const int port = free_port();
-    ServerOptions o; o.port = port; o.record_dir = dir; o.token = "s3";
+    ServerOptions o; o.port = port; o.token = "s3";
     WebServer srv(o);
+    srv.add_http_route("/recordings", [&dir](const std::string& path, const std::string&) {
+        return websdr::recordings_route(dir, path);
+    });
     srv.start();
     const std::string root = "http://127.0.0.1:" + std::to_string(port);
     ix::HttpClient http;

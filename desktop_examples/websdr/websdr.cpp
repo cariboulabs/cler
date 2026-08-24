@@ -26,6 +26,7 @@
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/web_sink.hpp"
 #include "decoder_json.hpp"
+#include "recordings_route.hpp"
 #include "websdr_client_files.hpp"
 
 #include <sys/statvfs.h>
@@ -36,6 +37,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -148,6 +150,8 @@ struct App {
     std::string id;
     std::vector<SourceMux::DeviceInfo> devices;
     std::vector<SourceMux::Control> caps;
+    std::mutex health_mutex;
+    std::string health_json = "{}";
 
     App(SourceMux& s, FanoutBlock<std::complex<float>>& f, SpectrumBlock& sp, FrequencyShiftBlock& sh,
         MultiStageResamplerBlock<std::complex<float>>& r, AnalogDemodBlock& d, SigMFRecorderBlock& rc,
@@ -268,11 +272,23 @@ struct App {
         srv.set_state(state_json());
         if (hello) { srv.set_hello_extra(hello_json()); srv.resend_hello(); }
         web::JsonWriter h;
-        h.begin_obj().key("source").str(source()).key("rate").num(rate)
+        h.begin_obj().key("version").str(WEBSDR_VERSION).key("uptime_s").num(static_cast<double>(srv.uptime_seconds()))
+         .key("clients").num(static_cast<double>(srv.client_count()))
+         .key("source").str(source()).key("rate").num(rate)
          .key("overflows").num(static_cast<double>(src.overflows())).key("recording").boolean(rec.recording())
          .key("free_disk").num(free_disk(record_dir)).end();
-        srv.set_health_extra(h.out);
+        {
+            std::lock_guard<std::mutex> lock(health_mutex);
+            health_json = std::move(h.out);
+        }
         if (running) save_state();
+    }
+
+    // the HTTP thread only ever reads this snapshot; App's own fields are the
+    // main thread's
+    std::string health() {
+        std::lock_guard<std::mutex> lock(health_mutex);
+        return health_json;
     }
 
     template <typename FG>
@@ -401,6 +417,7 @@ int main(int argc, char** argv) {
     o.files = WEBSDR_CLIENT_FILES;
     o.file_count = WEBSDR_CLIENT_FILES_COUNT;
     o.version = WEBSDR_VERSION;
+    o.audio_rate = AUDIO_HZ;
     std::string source, record_dir, state_file, mode_s, decoder;
     double freq = 0, rate = 0;
     std::vector<std::pair<std::string, double>> gains;
@@ -471,7 +488,6 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < sizeof rnd; ++i) std::snprintf(hex + 2 * i, 3, "%02x", rnd[i]);
         o.token = hex;
     }
-    o.record_dir = record_dir;
     web::WebServer srv(o);
     SourceMux src("Source");
     FanoutBlock<std::complex<float>> fan("RF fanout", 3, 1 << 20);
@@ -532,6 +548,14 @@ int main(int argc, char** argv) {
         cler::BlockRunner(&demod, &sink.audio),
         cler::BlockRunner(&sink));
 
+    srv.add_http_route("/health", [&app](const std::string&, const std::string&) {
+        return web::HttpReply{200, app.health(), "application/json"};
+    });
+    if (!record_dir.empty()) {
+        srv.add_http_route("/recordings", [record_dir](const std::string& path, const std::string&) {
+            return websdr::recordings_route(record_dir, path);
+        });
+    }
     app.rescan();
     app.publish(true);
     srv.start();

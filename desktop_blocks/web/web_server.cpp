@@ -1,7 +1,6 @@
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/proto.hpp"
 #include "cler_desktop_utils.hpp"
-#include "desktop_blocks/sigmf/sigmf.hpp"
 
 #include <ixwebsocket/IXHttpServer.h>
 #include <ixwebsocket/IXNetSystem.h>
@@ -89,8 +88,33 @@ struct WebServer::Impl {
     std::vector<int16_t> pcm = std::vector<int16_t>(AUDIO_CHUNK);
 };
 
+std::string WebServer::safe_name(const std::string& name) {
+    if (name.empty() || name[0] == '.' || name.find('/') != std::string::npos || name.find("..") != std::string::npos) return "";
+    return name;
+}
+
+void WebServer::add_http_route(std::string prefix, HttpRoute handler) {
+    _routes.emplace_back(std::move(prefix), std::move(handler));
+}
+
+const HttpRoute* WebServer::match_route(const std::string& path) const {
+    const HttpRoute* best = nullptr;
+    size_t best_len = 0;
+    for (const auto& r : _routes) {
+        if (path.rfind(r.first, 0) != 0) continue;
+        if (path.size() != r.first.size() && path[r.first.size()] != '/') continue;
+        if (r.first.size() >= best_len) { best = &r.second; best_len = r.first.size(); }
+    }
+    return best;
+}
+
+uint64_t WebServer::uptime_seconds() const {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - _impl->started).count());
+}
+
 WebServer::WebServer(ServerOptions opts)
-    : _opts(std::move(opts)), _impl(new Impl), _spec(16), _audio(48000 * 2) {
+    : _opts(std::move(opts)), _impl(new Impl), _spec(16), _audio(static_cast<size_t>(_opts.audio_rate * 2)) {
     if (!is_loopback(_opts.bind) && _opts.token.empty()) {
         cler::panic("websdr: --token is required when binding to a non-loopback address");
     }
@@ -106,75 +130,19 @@ void WebServer::start() {
     _impl->srv->setOnConnectionCallback([this](ix::HttpRequestPtr req, std::shared_ptr<ix::ConnectionState>) -> ix::HttpResponsePtr {
         ix::WebSocketHttpHeaders h;
         h["Cache-Control"] = "no-store";
-        std::string path = req->uri.substr(0, req->uri.find('?'));
-        if (path == "/health") {
+        const size_t qpos = req->uri.find('?');
+        std::string path = req->uri.substr(0, qpos);
+        const std::string query = qpos == std::string::npos ? std::string() : req->uri.substr(qpos + 1);
+        if (const HttpRoute* route = match_route(path)) {
             if (!_opts.token.empty() && query_param(req->uri, "token") != _opts.token) {
                 return std::make_shared<ix::HttpResponse>(401, "Unauthorized", ix::HttpErrorCode::Ok, h, "token required");
             }
-            h["Content-Type"] = "application/json";
-            const auto up = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - _impl->started).count();
-            JsonWriter w;
-            {
-                std::lock_guard<std::mutex> lock(_mutex);
-                w.begin_obj().key("version").str(_opts.version).key("uptime_s").num(static_cast<double>(up))
-                 .key("clients").num(static_cast<double>(_impl->clients.size())).fields_of(_health_extra).end();
-            }
-            const std::string& body = w.out;
-            return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, h, body);
+            HttpReply rep = (*route)(path, query);
+            h["Content-Type"] = rep.content_type;
+            return std::make_shared<ix::HttpResponse>(rep.status, rep.status == 200 ? "OK" : "Error", ix::HttpErrorCode::Ok, h, std::move(rep.body));
         }
-        if (!_opts.record_dir.empty() && path.rfind("/recordings", 0) == 0 && (path.size() == 11 || path[11] == '/')) {
-            if (!_opts.token.empty() && query_param(req->uri, "token") != _opts.token) {
-                return std::make_shared<ix::HttpResponse>(401, "Unauthorized", ix::HttpErrorCode::Ok, h, "token required");
-            }
-            if (path == "/recordings") {
-                std::string body = "[";
-                std::error_code ec;
-                for (const auto& e : std::filesystem::directory_iterator(_opts.record_dir, ec)) {
-                    if (!e.is_regular_file() || e.path().extension() != ".sigmf-meta") continue;
-                    sigmf::Meta meta;
-                    if (!sigmf::try_read_meta(e.path().string(), meta)) continue;
-                    std::error_code ec2;
-                    const auto bytes = std::filesystem::file_size(sigmf::data_path(e.path().string()), ec2);
-                    if (ec2) continue;
-                    const double secs = meta.sample_rate > 0
-                        ? static_cast<double>(bytes) / (sigmf::datatype_size(meta.datatype) * meta.sample_rate) : 0.0;
-                    if (body.size() > 1) body += ",";
-                    body += "{\"name\":\"" + json_escape(e.path().stem().string()) + "\",\"bytes\":" + std::to_string(bytes) +
-                            ",\"rate\":" + std::to_string(meta.sample_rate) +
-                            ",\"freq\":" + std::to_string(meta.center_frequency()) +
-                            ",\"seconds\":" + std::to_string(secs) + "}";
-                }
-                body += "]";
-                h["Content-Type"] = "application/json";
-                return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, h, body);
-            }
-            const std::string fname = path.substr(12);
-            const bool suffix_ok = fname.size() > 11 &&
-                (fname.rfind(".sigmf-data") == fname.size() - 11 || fname.rfind(".sigmf-meta") == fname.size() - 11);
-            if (!suffix_ok || fname.find('/') != std::string::npos || fname.find("..") != std::string::npos || fname[0] == '.') {
-                return std::make_shared<ix::HttpResponse>(404, "Not Found", ix::HttpErrorCode::Ok, h, "not found");
-            }
-            const std::string full = _opts.record_dir + "/" + fname;
-            std::error_code ec;
-            if (!std::filesystem::is_regular_file(full, ec)) {
-                return std::make_shared<ix::HttpResponse>(404, "Not Found", ix::HttpErrorCode::Ok, h, "not found");
-            }
-            // ponytail: IX responses are one std::string, no chunked send; this is a
-            // single exact-size read (no stringstream doubling), ceiling = file size in RAM
-            const auto size = std::filesystem::file_size(full, ec);
-            std::string body;
-            body.resize(size);
-            std::ifstream f(full, std::ios::binary);
-            if (!f.read(body.data(), static_cast<std::streamsize>(size))) {
-                return std::make_shared<ix::HttpResponse>(500, "Read failed", ix::HttpErrorCode::Ok, h, "read failed");
-            }
-            h["Content-Type"] = "application/octet-stream";
-            return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, h, std::move(body));
-        }
-        std::string name = path == "/" ? "index.html" : path.rfind("/client/", 0) == 0 ? path.substr(8) : "";
-        if (name.empty() || name[0] == '.' || name.find('/') != std::string::npos || name.find("..") != std::string::npos) {
-            return std::make_shared<ix::HttpResponse>(404, "Not Found", ix::HttpErrorCode::Ok, h, "not found");
-        }
+        const std::string name = safe_name(path == "/" ? "index.html" : path.rfind("/client/", 0) == 0 ? path.substr(8) : "");
+        if (name.empty()) return std::make_shared<ix::HttpResponse>(404, "Not Found", ix::HttpErrorCode::Ok, h, "not found");
         std::string body;
         bool found = false;
         if (!_opts.client_dir.empty() && std::filesystem::is_regular_file(_opts.client_dir + "/" + name)) {
@@ -341,7 +309,6 @@ void WebServer::resend_hello() {
     for (auto& p : out) p.first->sendText(p.second);
 }
 void WebServer::set_stats_extra(const std::string& json_object) { std::lock_guard<std::mutex> lock(_mutex); _stats_extra = json_object; }
-void WebServer::set_health_extra(const std::string& json_object) { std::lock_guard<std::mutex> lock(_mutex); _health_extra = json_object; }
 
 void WebServer::send_error(const std::string& code, const std::string& msg) {
     JsonWriter w;
