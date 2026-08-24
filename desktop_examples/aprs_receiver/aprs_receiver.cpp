@@ -51,7 +51,8 @@ int main(int argc, char** argv) {
     }
 
     // source -> fanout(band plot, channel); channel: shift -> 1/50 -> NBFM -> AFSK -> map
-    APRSSourceBlock source("Source", kind, file, freq + IF_OFFSET, RF_RATE, lna, vga, amp);
+    APRSSourceBlock source("Source", kind, file, freq + IF_OFFSET, RF_RATE, lna, vga, amp,
+                           "Sim stations", RF_RATE, -IF_OFFSET, 3e3, size_t{1} << 18);
     FanoutBlock<std::complex<float>> fanout("RF fanout", 2, 1 << 20);
     PlotCSpectrumBlock band("144.8 MHz band (APRS at -250 kHz)", {"RF"}, static_cast<size_t>(RF_RATE), 4096);
     FrequencyShiftBlock shift("IF shift", +IF_OFFSET, RF_RATE, 1 << 18);

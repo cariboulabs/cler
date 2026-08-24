@@ -85,21 +85,10 @@ static double passband_for(AnalogDemodBlock::Mode m) {
 }
 
 static bool parse_source(const std::string& s, SourceMux::Kind& kind, std::string& id) {
-    const size_t c = s.find(':');
-    const std::string k = s.substr(0, c);
-    id = c == std::string::npos ? "" : s.substr(c + 1);
-    for (auto kk : {SourceMux::Kind::HackRF, SourceMux::Kind::Pluto, SourceMux::Kind::UHD,
-                    SourceMux::Kind::Cariboulite, SourceMux::Kind::Soapy, SourceMux::Kind::SigMF,
-                    SourceMux::Kind::Sim}) {
-        if (k == SourceMux::kind_name(kk)) { kind = kk; return true; }
-    }
-    return false;
+    return SourceMux::parse_id(s, kind, id);
 }
-
 static std::string source_id(SourceMux::Kind kind, const std::string& id) {
-    std::string s = SourceMux::kind_name(kind);
-    if (!id.empty()) s += ":" + id;
-    return s;
+    return SourceMux::format_id(kind, id);
 }
 
 // The decoder taps add a dozen mostly-idle blocks. PinnedIslands parks them

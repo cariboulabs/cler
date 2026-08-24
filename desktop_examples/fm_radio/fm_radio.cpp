@@ -1,5 +1,5 @@
 // Broadcast FM radio: stereo, RDS, seek/scan, live band and MPX spectra.
-//   ./fm_radio [--source hackrf|pluto|soapy] [--device <args>] [--freq <MHz>] [--gain <dB>]
+//   ./fm_radio [--source hackrf|pluto|soapy|sigmf:<name>|sim] [--device <args>] [--capture-dir <dir>] [--freq <MHz>] [--gain <dB>]
 //              [--rate <MS/s>] [--lna <dB>] [--vga <dB>] [--amp|--no-amp] [--screenshot <png>]
 //   soapy: --device "driver=rtlsdr"; pluto: --device ip:192.168.2.1 (gain < 0 = AGC)
 #include "cler.hpp"
@@ -14,7 +14,6 @@
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include "fm_radio_blocks.hpp"
 #include "fm_radio_panel.hpp"
-#include "fm_radio_source.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -25,12 +24,13 @@ int main(int argc, char** argv) {
     double freq_hz = 100.0e6, gain_db = 30.0, rf_rate = 2.4e6;
     int lna = 32, vga = 20;
     bool amp = true;
-    std::string screenshot, source_name = "hackrf", device;
+    std::string screenshot, source_name = "hackrf", device, capture_dir = ".";
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--freq" && i + 1 < argc) freq_hz = std::stod(argv[++i]) * 1e6;
         else if (arg == "--source" && i + 1 < argc) source_name = argv[++i];
         else if (arg == "--device" && i + 1 < argc) device = argv[++i];
+        else if (arg == "--capture-dir" && i + 1 < argc) capture_dir = argv[++i];
         else if (arg == "--gain" && i + 1 < argc) gain_db = std::stod(argv[++i]);
         else if (arg == "--rate" && i + 1 < argc) rf_rate = std::stod(argv[++i]) * 1e6;
         else if (arg == "--lna" && i + 1 < argc) lna = std::atoi(argv[++i]);
@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
         else if (arg == "--no-amp") amp = false;
         else if (arg == "--screenshot" && i + 1 < argc) screenshot = argv[++i];
         else {
-            std::cout << "Usage: " << argv[0] << " [--source hackrf|pluto|soapy] [--device <args>] [--freq <MHz>] [--gain <dB>]\n"
+            std::cout << "Usage: " << argv[0] << " [--source hackrf|pluto|soapy|sigmf:<name>|sim] [--device <args>] [--capture-dir <dir>] [--freq <MHz>] [--gain <dB>]\n"
                          "          [--rate <MS/s>: " << ChannelResampler::menu() << "] [--lna <dB>] [--vga <dB>] [--amp|--no-amp] [--screenshot <png>]\n";
             return arg == "--help" ? 0 : 1;
         }
@@ -57,8 +57,35 @@ int main(int argc, char** argv) {
     // Sink-paced pipeline: every buffer between source and sink sits full, so
     // the first channel after the source is the only slack against a blocking
     // audio write (HackRF also has its own 2M-sample ring).
-    RadioSource source("Source", RadioSource::parse_kind(source_name), device,
-                       freq_hz + IF_OFFSET, RF_RATE, gain_db, lna, vga, amp);
+    SourceMux::Kind kind;
+    std::string dev_id;
+    if (!SourceMux::parse_id(source_name, kind, dev_id) || kind == SourceMux::Kind::None) {
+        std::cerr << "fm_radio: unknown --source " << source_name << "\n";
+        return 1;
+    }
+    if (!dev_id.empty() && !device.empty()) {
+        std::cerr << "fm_radio: --source " << source_name << " already names a device; drop --device\n";
+        return 1;
+    }
+    SourceMux source("Source");
+    source.set_sigmf_dir(capture_dir);
+    std::string want = dev_id.empty() ? device : dev_id;
+    bool opened = source.select(kind, want, freq_hz + IF_OFFSET, RF_RATE);
+    // a bare --source pluto only scans USB; a Pluto on ethernet answers to its
+    // advertised name, which is what this app documented before SourceMux
+    if (!opened && kind == SourceMux::Kind::Pluto && want.empty())
+        opened = source.select(kind, "ip:pluto.local", freq_hz + IF_OFFSET, RF_RATE);
+    if (!opened) {
+        std::cerr << "fm_radio: cannot open " << source_name << "\n";
+        return 1;
+    }
+    // select() opens with the backend's defaults; the CLI gains are applied on
+    // top and each set() is a no-op on a device without that knob.
+    source.set("lna", lna);
+    source.set("vga", vga);
+    source.set("amp", amp ? 1.0 : 0.0);
+    if (gain_db < 0) source.set("agc", 1.0);
+    else { source.set("agc", 0.0); source.set("gain", gain_db); }
     FanoutBlock<std::complex<float>> rf_fanout("RF fanout", 2, 1 << 20);
     PlotCSpectrumBlock band_plot("Band (RF around the tuned station)", {"RF"}, static_cast<size_t>(RF_RATE), 2048);
     FrequencyShiftBlock shift("IF shift", +IF_OFFSET, RF_RATE, 1 << 18);
