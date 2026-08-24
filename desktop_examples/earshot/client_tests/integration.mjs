@@ -172,13 +172,17 @@ const genBeforeSim = state.gen;
 send({ t: 'source', id: 'sim' });
 await waitFor('sim again', () => state.st.is_file === false && state.st.source === 'sim');
 if (!(state.gen > genBeforeSim)) fail(`gen did not bump on switch (${genBeforeSim} → ${state.gen})`);
-const settledAt = Date.now();
 state.frames.length = 0;
 await sleep(1000);
 const ahead = state.frames.filter((f) => f.gen > state.gen);
-const stale = state.frames.filter((f) => f.gen < state.gen && f.at > settledAt + 300);
 if (ahead.length) fail(`${ahead.length} frames carried a gen newer than the state`);
-if (stale.length) fail(`${stale.length} stale frames arrived more than 300 ms after the switch`);
+// Order, not wall clock: whatever was already queued may still arrive, but once
+// a frame of the current gen has been seen, no older one may follow it. A time
+// budget here is a guess about the machine, which is what failed on macOS CI.
+const firstCurrent = state.frames.findIndex((f) => f.gen === state.gen);
+const stale = firstCurrent < 0 ? [] : state.frames.slice(firstCurrent).filter((f) => f.gen < state.gen);
+if (firstCurrent < 0) fail('no frames of the current gen arrived after the switch');
+if (stale.length) fail(`${stale.length} stale frames arrived after the stream had caught up`);
 if (state.frames.length < 10) fail(`stream did not resume after the switch (${state.frames.length} frames)`);
 ok(`switch back to sim: gen ${genBeforeSim} → ${state.gen}, ${state.frames.length} frames, none stale`);
 

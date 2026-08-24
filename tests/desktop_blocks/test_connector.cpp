@@ -241,21 +241,24 @@ TEST(ConnectorSockets, KeepingUpReaderLosesNothing) {
         }
     });
 
-    // Paced off the reader rather than the clock: never let more than half the ring
-    // be outstanding, so free space is always there and any drop means push()
-    // believed a stale bound instead of asking again. A wall-clock pace would be a
-    // coin flip on a loaded runner, where a 1 ms sleep is really 10.
+    // Lockstep with the reader: the next block goes in only once the socket has
+    // handed over everything already pushed, so the ring is always nearly empty
+    // and a drop can only mean push() believed a stale bound instead of asking
+    // again. No wall-clock pacing — a sleep is a coin flip on a loaded runner,
+    // and an "outstanding bytes" window still depends on how fast the socket
+    // drains, which is what broke this test on macOS.
     constexpr size_t SAMPLE = sizeof(std::complex<float>);
-    constexpr size_t OUTSTANDING = 64 * 1024 * SAMPLE;
     size_t pushed_bytes = 0;
-    for (int b = 0; b < BLOCKS; ++b) {
+    bool drained = true;
+    for (int b = 0; b < BLOCKS && drained; ++b) {
         for (size_t i = 0; i < BLOCK; ++i) block[i] = {static_cast<float>(b), static_cast<float>(i)};
         iq.push(block.data(), block.size());
         pushed_bytes += BLOCK * SAMPLE;
-        if (!wait_for([&] { return pushed_bytes - received.load() < OUTSTANDING; }, 8000)) break;
+        drained = wait_for([&] { return received.load() >= pushed_bytes; }, 8000);
     }
+    ASSERT_TRUE(drained) << "the reader never caught up; received " << received.load()
+                         << " of " << pushed_bytes;
     const size_t want = sizeof(std::complex<float>) * BLOCK * BLOCKS;
-    wait_for([&] { return received.load() >= want; }, 8000);
     reading = false;
     ::shutdown(fd, SHUT_RDWR);
     reader.join();

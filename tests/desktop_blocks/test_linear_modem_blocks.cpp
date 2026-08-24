@@ -169,9 +169,12 @@ TEST(ModemBlocks, FrequencyShiftSetterTakesEffect) {
 // number read as Eb/N0 would give ~8e-4. The band separates the two.
 TEST(ModemBlocks, QpskBerMatchesEsN0Theory) {
     Loopback lb(LIQUID_MODEM_QPSK, 7.0f, 0.0, 20000);
-    for (int i = 0; i < 2000; ++i) lb.step();
+    // step until the counter has enough bits rather than a fixed number of
+    // steps: a late slip restarts the count, and how many steps that costs
+    // depends on the machine
+    for (int i = 0; i < 20000 && lb.ber.bits() <= 100000u; ++i) lb.step();
     ASSERT_TRUE(lb.ber.aligned());
-    ASSERT_GT(lb.ber.bits(), 100000u);  // a late slip restarts the count
+    ASSERT_GT(lb.ber.bits(), 100000u);
     EXPECT_GT(lb.ber.ber(), 5.0e-3);
     EXPECT_LT(lb.ber.ber(), 4.0e-2);
 }
