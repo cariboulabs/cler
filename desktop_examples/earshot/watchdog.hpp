@@ -66,6 +66,11 @@ public:
     std::chrono::microseconds interval() const { return _interval; }
 
     bool send(const char* msg) {
+#ifdef __EMSCRIPTEN__
+        // no systemd in a browser, and emscripten has no sendto
+        (void)msg;
+        return false;
+#else
         if (_fd < 0) return false;
         sockaddr_un addr{};
         addr.sun_family = AF_UNIX;
@@ -75,6 +80,7 @@ public:
         const socklen_t len = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + _path.size());
         return ::sendto(_fd, msg, std::strlen(msg), 0,
                         reinterpret_cast<sockaddr*>(&addr), len) >= 0;
+#endif
     }
 
 private:

@@ -189,7 +189,7 @@ ES modules, **no npm dependencies in client/**, no build step. CMake globs
   re-handshake. `localStorage` holds client prefs only (zoom, colormap, volume,
   tab); tuning is server truth from `hello`/`state`.
 - Tests: `proto.js`/`panel.js` are pure → `node --test`, zero deps. One Playwright
-  spec (already a devDependency in tools/flowgraph_gui/app) launches the binary with
+  spec (already a devDependency in tools/cler-fg/app) launches the binary with
   `--source sim`, asserts hello/state and that waterfall rows arrive. Headless.
 
 ## Protocol v1
@@ -351,8 +351,8 @@ nginx + basic auth in front if a client insists.
    when RDS runs; its cost is the per-sample pilot PLL that RDS needs anyway, so
    splitting the audio path out would save little.
 5. **WAN profile + polish** — `pcm16@24k`, Opus, deflated spectrum rows, fps/N
-   negotiation driven by send-queue depth; `--state-file`; gallery entry (screenshot,
-   it is not a wasm demo); SoapyRemote note in README.
+   negotiation driven by send-queue depth; `--state-file`; gallery entry (a real wasm demo since
+   web_server_wasm.cpp: the client bridged to the wasm graph on --source sim); SoapyRemote note in README.
 
 Each phase = a branch, a worker, critic review, merge.
 
