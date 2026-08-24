@@ -42,8 +42,8 @@ export function encodeSet(fields) {
   return JSON.stringify({ t: 'set', ...fields });
 }
 
-export function encodeSource(id) {
-  return JSON.stringify({ t: 'source', id });
+export function encodeSource(id, rate) {
+  return JSON.stringify(rate > 0 ? { t: 'source', id, rate } : { t: 'source', id });
 }
 
 export function encodeHello(token) {

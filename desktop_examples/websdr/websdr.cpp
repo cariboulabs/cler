@@ -382,8 +382,10 @@ int main(int argc, char** argv) {
                 }
                 app.publish();
             } else if (t == "source") {
-                if (parse_source(web::json_str(f, "id"), k, id)) app.select(fg, k, id, app.tuned(), app.rate);
-                else srv.send_error("source", "unknown source");
+                if (parse_source(web::json_str(f, "id"), k, id)) {
+                    const double r = web::json_num(f, "rate");
+                    app.select(fg, k, id, app.tuned(), r > 0 ? r : app.rate);
+                } else srv.send_error("source", "unknown source");
             } else if (t == "rescan") {
                 app.rescan();
                 app.publish(true);
