@@ -190,17 +190,20 @@ JSON text frames:
 - server→client
   - `hello`: `{proto:1, version, sources:[{id,kind,label,available}], source,
     controls:[{id,label,type:"range"|"enum"|"bool",min,max,step|options,unit,ro}],
-    state, codecs:["pcm16"], spectrum:{n,fps}, role}` — re-sent whole on source switch
+    state, codecs:["pcm16"], spectrum:{n,fps}, decoders:[{id,available,reason?}],
+    role}` — re-sent whole on source switch
   - `state`: `{gen, source, freq, rate, mode, <control id>: value..., recording,
-    is_file, paused, loop, switching, role}` — echoed after every accepted change;
-    all tabs converge
+    is_file, paused, loop, switching, decoder, role}` — echoed after every accepted
+    change; all tabs converge
   - `stats` (1 Hz): `{audio_dropped, spectrum_dropped, buffered_ms, overflows,
     rec_bytes, free_bytes, pos, duration, ended (file sources only)}`
-  - `text`: `{stream:"rds"|"adsb"|..., data}`
+  - `text`: `{stream:"rds"|"ais"|"aprs", data}` — `data` is an object: RDS carries
+    `{synced,pi,pty,tp,ta,ps,rt,groups_ok,corrected_pct,bad_pct}` at 1 Hz, AIS and
+    APRS one object per decoded packet
   - `error`: `{code, msg}`
 - client→server
   - `hello`: `{proto:1, token?, accept:{codecs:[...]}}`
-  - `set`: `{<control id>: value, ...}` incl. `freq`, `mode`, `offset`
+  - `set`: `{<control id>: value, ...}` incl. `freq`, `mode`, `offset`, `decoder`
   - `source`: `{id, rate?}` (rate in Hz, clamped to what the backend accepts); `rescan`: `{}`
   - `record`: `{on, name?}`; `play`: `{name, pos?, pause?, loop?}`
 
@@ -278,6 +281,13 @@ nginx + basic auth in front if a client insists.
    point spike's `spike_source.hpp` at SourceMux.
 4. **Decoders as tabs** — JSON adapter blocks for RDS, ADS-B, AIS, APRS, modem/FEC
    stats; tables in the browser. Map later.
+   As built: one decoder runs at a time (`--decoder`, `set decoder`), each on a
+   `GateBlock` tap off a fixed-rate point so no source or rate cares — RDS off the
+   240 kHz channel (FM demod + MPX), APRS off the 48 kHz demodulated audio (AFSK1200),
+   AIS off a 96 kHz resample of the channel. A closed gate still drains its input,
+   because the fanout above it advances by its slowest output. ADS-B is reported
+   `available:false`: it needs a full-rate magnitude tap off the RF fanout and the
+   CPR aggregation that today lives inside the GUI-only `ADSBAggregateBlock`.
 5. **WAN profile + polish** — `pcm16@24k`, Opus, deflated spectrum rows, fps/N
    negotiation driven by send-queue depth; `--state-file`; gallery entry (screenshot,
    it is not a wasm demo); SoapyRemote note in README.

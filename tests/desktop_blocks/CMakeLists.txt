@@ -147,7 +147,8 @@ find_program(NODE_EXECUTABLE node)
 if (NODE_EXECUTABLE)
     add_test(NAME websdr_client_test COMMAND ${NODE_EXECUTABLE} --test
         ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/proto.test.mjs
-        ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/panel.test.mjs)
+        ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/panel.test.mjs
+        ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/decoders.test.mjs)
 endif()
 
 if (TARGET websdr)

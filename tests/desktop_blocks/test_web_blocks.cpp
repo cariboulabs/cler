@@ -11,6 +11,7 @@
 #include <vector>
 #include <ixwebsocket/IXWebSocket.h>
 #include <ixwebsocket/IXHttpClient.h>
+#include "desktop_blocks/web/json_adapters.hpp"
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/web_sink.hpp"
@@ -330,4 +331,76 @@ TEST(WebServerTest, RecordingsListDownloadTraversalAndToken) {
     EXPECT_EQ(http.get(root + "/recordings/.hidden.sigmf-data?token=s3", http.createRequest())->statusCode, 404);
     srv.stop();
     std::filesystem::remove_all(dir);
+}
+
+TEST(JsonAdapters, AisMessageToJson) {
+    ais::Message m{};
+    m.type = 1; m.mmsi = 244660000; m.has_position = true; m.lat = 52.375; m.lon = 4.9;
+    m.sog = 12.5f; m.cog = 271.3f; m.heading = 270; m.nav_status = 0;
+    std::snprintf(m.name, sizeof(m.name), "NEDERLAND");
+    std::snprintf(m.callsign, sizeof(m.callsign), "PA1234");
+    m.ship_type = 70;
+    JsonWriter w;
+    to_json(m, w);
+    EXPECT_EQ(w.out,
+        "{\"mmsi\":244660000,\"type\":1,\"lat\":52.375,\"lon\":4.9,\"sog\":12.5,\"cog\":271.3,"
+        "\"heading\":270,\"nav_status\":0,\"name\":\"NEDERLAND\",\"callsign\":\"PA1234\",\"ship_type\":70}");
+
+    ais::Message bare{};
+    bare.type = 5; bare.mmsi = 1; bare.sog = -1.0f; bare.cog = -1.0f;
+    JsonWriter w2;
+    to_json(bare, w2);
+    EXPECT_EQ(w2.out, "{\"mmsi\":1,\"type\":5}");
+}
+
+TEST(JsonAdapters, AprsPacketToJsonEscapesText) {
+    aprs::Packet p{};
+    std::snprintf(p.source, sizeof(p.source), "4X1RF-9");
+    std::snprintf(p.dest, sizeof(p.dest), "APCLER");
+    std::snprintf(p.path, sizeof(p.path), "WIDE1-1");
+    p.type = '!'; p.has_position = true; p.lat = 32.25; p.lon = 35.0;
+    p.course = 90.0f; p.speed = 5.0f; p.symbol_table = '/'; p.symbol_code = '>';
+    std::snprintf(p.comment, sizeof(p.comment), "say \"hi\"\tnow");
+    JsonWriter w;
+    to_json(p, w);
+    EXPECT_EQ(w.out,
+        "{\"source\":\"4X1RF-9\",\"dest\":\"APCLER\",\"path\":\"WIDE1-1\",\"type\":\"!\","
+        "\"lat\":32.25,\"lon\":35,\"course\":90,\"speed\":5,\"symbol\":\"/>\","
+        "\"comment\":\"say \\\"hi\\\"\\tnow\"}");
+}
+
+TEST(JsonAdapters, RdsStationToJson) {
+    rds::Station s{};
+    s.synced = true; s.pi = 0x4416; s.pty = 11; s.tp = true;
+    std::snprintf(s.ps, sizeof(s.ps), "K-BARAMA");
+    std::snprintf(s.rt, sizeof(s.rt), "now playing");
+    s.groups_ok = 40; s.blocks_total = 200; s.blocks_corrected = 10; s.blocks_bad = 50;
+    JsonWriter w;
+    to_json(s, w);
+    EXPECT_EQ(w.out,
+        "{\"synced\":true,\"pi\":17430,\"pty\":11,\"tp\":true,\"ta\":false,"
+        "\"ps\":\"K-BARAMA\",\"rt\":\"now playing\",\"groups_ok\":40,"
+        "\"corrected_pct\":5,\"bad_pct\":25}");
+}
+
+// the writer's buffer is reused, so a long run must not keep growing it
+TEST(JsonAdapters, TextSinkReusesItsBuffer) {
+    const int port = free_port();
+    ServerOptions o; o.port = port;
+    WebServer srv(o);
+    JsonTextSinkBlock<ais::Message> sink("ais json", srv, 512);
+
+    ais::Message m{};
+    m.type = 1; m.has_position = true; m.lat = 52.0; m.lon = 4.0;
+    std::snprintf(m.name, sizeof(m.name), "SHIP");
+    EXPECT_TRUE(sink.procedure().is_err());
+
+    size_t capacity_after_warmup = 0;
+    for (int round = 0; round < 40; ++round) {
+        for (int i = 0; i < 256; ++i) { m.mmsi = 200000000u + i; sink.in.push(m); }
+        ASSERT_TRUE(sink.procedure().is_ok());
+        EXPECT_EQ(sink.in.size(), 0u);
+        if (round == 0) capacity_after_warmup = sink.buffer_capacity();
+        else EXPECT_EQ(sink.buffer_capacity(), capacity_after_warmup);
+    }
 }

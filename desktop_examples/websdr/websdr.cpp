@@ -1,17 +1,26 @@
-// Browser receiver: SourceMux -> fanout -> {spectrum, shift -> resampler -> demod} -> WebSink.
+// Browser receiver: SourceMux -> fanout -> {spectrum, shift -> resampler -> demod} -> WebSink,
+// with gated decoder taps (RDS off the 240 kHz channel, APRS off the 48 kHz audio, AIS off a
+// 96 kHz resample) publishing JSON text frames.
 //   ./websdr [--source sim|hackrf[:serial]|none] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]
-//            [--gain NAME=V]... [--port N] [--bind ADDR] [--token T] [--client-dir DIR]
-//            [--record-dir DIR] [--state-file FILE] [--version]
+//            [--gain NAME=V]... [--decoder none|rds|aprs|ais] [--port N] [--bind ADDR] [--token T]
+//            [--client-dir DIR] [--record-dir DIR] [--state-file FILE] [--version]
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/sources/source_mux.hpp"
 #include "desktop_blocks/utils/fanout.hpp"
+#include "desktop_blocks/utils/gate.hpp"
 #include "desktop_blocks/spectrum/spectrum.hpp"
 #include "desktop_blocks/math/frequency_shift.hpp"
 #include "desktop_blocks/resamplers/multistage_resampler.hpp"
 #include "desktop_blocks/demod/analog_demod.hpp"
 #include "desktop_blocks/sigmf/recorder_sigmf.hpp"
+#include "desktop_blocks/sinks/sink_null.hpp"
+#include "desktop_blocks/fm/fm_demod.hpp"
+#include "desktop_blocks/fm/fm_mpx_decoder.hpp"
+#include "desktop_blocks/aprs/afsk_demod.hpp"
+#include "desktop_blocks/ais/ais_decoder.hpp"
+#include "desktop_blocks/web/json_adapters.hpp"
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/web_sink.hpp"
@@ -39,6 +48,12 @@ static std::atomic<bool> g_run{true};
 
 static constexpr double CHANNEL_HZ = 240e3;    // demod input rate and channel width
 static constexpr double IF_OFFSET = 400e3;     // keeps the SDR's DC spike out of the channel
+static constexpr double AUDIO_HZ = 48e3;       // AnalogDemodBlock output rate
+static constexpr double AIS_HZ = 96e3;         // 10 samples per AIS symbol
+
+// Every decoder hangs off a fixed-rate point in the chain, so none of them care
+// which source or sample rate is selected.
+static const char* const DECODERS[] = {"none", "rds", "aprs", "ais"};
 
 static bool parse_mode(const std::string& m, AnalogDemodBlock::Mode& out) {
     for (auto mode : {AnalogDemodBlock::Mode::WBFM, AnalogDemodBlock::Mode::NBFM, AnalogDemodBlock::Mode::AM,
@@ -91,7 +106,12 @@ struct App {
     SigMFRecorderBlock& rec;
     web::WebServer& srv;
     WebSinkBlock& sink;
+    GateBlock<std::complex<float>>& rds_gate;
+    GateBlock<std::complex<float>>& ais_gate;
+    GateBlock<float>& aprs_gate;
+    FMMpxDecoderBlock& mpx;
 
+    std::string decoder = "none";
     std::string record_dir, state_file;
     std::vector<std::pair<std::string, double>> gains;
     double rate, center, offset = 0.0;
@@ -105,9 +125,31 @@ struct App {
 
     App(SourceMux& s, FanoutBlock<std::complex<float>>& f, SpectrumBlock& sp, FrequencyShiftBlock& sh,
         MultiStageResamplerBlock<std::complex<float>>& r, AnalogDemodBlock& d, SigMFRecorderBlock& rc,
-        web::WebServer& server, WebSinkBlock& k, double rate_hz, double freq_hz, AnalogDemodBlock::Mode m)
+        web::WebServer& server, WebSinkBlock& k, GateBlock<std::complex<float>>& rg,
+        GateBlock<std::complex<float>>& ag, GateBlock<float>& pg, FMMpxDecoderBlock& mp,
+        double rate_hz, double freq_hz, AnalogDemodBlock::Mode m)
         : src(s), fan(f), spec(sp), shift(sh), resamp(r), demod(d), rec(rc), srv(server), sink(k),
+          rds_gate(rg), ais_gate(ag), aprs_gate(pg), mpx(mp),
           rate(rate_hz), center(freq_hz), mode(m) {}
+
+    bool set_decoder(const std::string& name) {
+        bool known = false;
+        for (const char* d : DECODERS) known = known || name == d;
+        if (!known) return false;
+        decoder = name;
+        rds_gate.set_open(name == "rds");
+        aprs_gate.set_open(name == "aprs");
+        ais_gate.set_open(name == "ais");
+        if (name == "rds") mpx.rds_reset();
+        return true;
+    }
+
+    void publish_rds() {
+        if (decoder != "rds") return;
+        web::JsonWriter w;
+        web::to_json(mpx.rds_station(), w);
+        srv.push_text("rds", w.out);
+    }
 
     double tuned() const { return center + offset; }
     std::string source() const { return running ? source_id(kind, id) : ""; }
@@ -130,7 +172,8 @@ struct App {
          .key("switching").boolean(switching).key("source_lost").boolean(lost)
          .key("recording").boolean(rec.recording())
          .key("is_file").boolean(running && src.is_file())
-         .key("paused").boolean(src.paused()).key("loop").boolean(src.looping());
+         .key("paused").boolean(src.paused()).key("loop").boolean(src.looping())
+         .key("decoder").str(decoder);
         for (const auto& c : caps) {
             if (c.id == "freq" || c.id == "rate") continue;
             w.key(c.id).num(c.value);
@@ -158,7 +201,14 @@ struct App {
             if (c.ro) w.key("ro").boolean(true);
             w.end();
         }
-        w.end().key("spectrum").begin_obj().key("n").num(1024).key("fps").num(20).end().end();
+        w.end().key("spectrum").begin_obj().key("n").num(1024).key("fps").num(20).end();
+        w.key("decoders").begin_arr();
+        for (const char* d : DECODERS) {
+            w.begin_obj().key("id").str(d).key("available").boolean(true).end();
+        }
+        w.begin_obj().key("id").str("adsb").key("available").boolean(false)
+         .key("reason").str("needs a full-rate 1090 MHz magnitude tap and CPR aggregation").end();
+        w.end().end();
         return w.out.substr(1, w.out.size() - 2);
     }
 
@@ -287,7 +337,7 @@ struct App {
         if (state_file.empty()) return;
         web::JsonWriter w;
         w.begin_obj().key("source").str(source_id(kind, id)).key("freq").num(tuned()).key("rate").num(rate)
-         .key("mode").str(AnalogDemodBlock::mode_name(mode));
+         .key("mode").str(AnalogDemodBlock::mode_name(mode)).key("decoder").str(decoder);
         for (const auto& c : caps) if (!c.ro && c.id != "freq") w.key(c.id).num(c.value);
         w.end();
         std::ofstream(state_file) << w.out;
@@ -300,7 +350,7 @@ int main(int argc, char** argv) {
     o.files = WEBSDR_CLIENT_FILES;
     o.file_count = WEBSDR_CLIENT_FILES_COUNT;
     o.version = WEBSDR_VERSION;
-    std::string source, record_dir, state_file, mode_s;
+    std::string source, record_dir, state_file, mode_s, decoder;
     double freq = 0, rate = 0;
     std::vector<std::pair<std::string, double>> gains;
     for (int i = 1; i < argc; ++i) {
@@ -315,6 +365,7 @@ int main(int argc, char** argv) {
             if (!eq) { std::fprintf(stderr, "--gain NAME=V\n"); return 1; }
             gains.emplace_back(std::string(v, eq), std::atof(eq + 1));
         }
+        else if (const char* v = next("--decoder")) decoder = v;
         else if (const char* v = next("--port")) o.port = std::atoi(v);
         else if (const char* v = next("--bind")) o.bind = v;
         else if (const char* v = next("--token")) o.token = v;
@@ -323,8 +374,8 @@ int main(int argc, char** argv) {
         else if (const char* v = next("--state-file")) state_file = v;
         else {
             std::fprintf(stderr, "Usage: %s [--source sim|hackrf[:serial]|none] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]\n"
-                                 "          [--gain NAME=V]... [--port N] [--bind ADDR] [--token T] [--client-dir DIR]\n"
-                                 "          [--record-dir DIR] [--state-file FILE] [--version]\n", argv[0]);
+                                 "          [--gain NAME=V]... [--decoder none|rds|aprs|ais] [--port N] [--bind ADDR] [--token T]\n"
+                                 "          [--client-dir DIR] [--record-dir DIR] [--state-file FILE] [--version]\n", argv[0]);
             return std::strcmp(argv[i], "--help") == 0 ? 0 : 1;
         }
     }
@@ -337,8 +388,9 @@ int main(int argc, char** argv) {
             if (freq == 0) freq = web::json_num(fields, "freq");
             if (rate == 0) rate = web::json_num(fields, "rate");
             if (mode_s.empty()) mode_s = web::json_str(fields, "mode");
+            if (decoder.empty()) decoder = web::json_str(fields, "decoder");
             for (const auto& [k, v] : fields) {
-                if (k == "source" || k == "freq" || k == "rate" || k == "mode") continue;
+                if (k == "source" || k == "freq" || k == "rate" || k == "mode" || k == "decoder") continue;
                 bool given = false;
                 for (const auto& g : gains) given = given || g.first == k;
                 if (!given) gains.emplace_back(k, std::atof(v.c_str()));
@@ -378,11 +430,29 @@ int main(int argc, char** argv) {
     AnalogDemodBlock demod("Demod", CHANNEL_HZ, mode, 1 << 16);
     SigMFRecorderBlock rec("Recorder", rate, 1 << 20);
     WebSinkBlock sink("Web sink", srv);
+    FanoutBlock<std::complex<float>> chanfan("Channel fanout", 3, 1 << 18);
+    GateBlock<std::complex<float>> rds_gate("RDS gate", false, 1 << 18);
+    FMDemodBlock fmdemod("FM demod", CHANNEL_HZ, 75e3, 1 << 16);
+    FMMpxDecoderBlock mpx("MPX decoder", CHANNEL_HZ, 5, 50.0, 1 << 16);
+    SinkNullBlock<float> mpx_drain("MPX audio drain");
+    GateBlock<std::complex<float>> ais_gate("AIS gate", false, 1 << 18);
+    MultiStageResamplerBlock<std::complex<float>> ais_resamp("AIS channel", static_cast<float>(AIS_HZ / CHANNEL_HZ), 60.0f, 1 << 16);
+    AISDecoderBlock ais("AIS", AIS_HZ, 1 << 16);
+    web::JsonTextSinkBlock<ais::Message> ais_json("AIS json", srv);
+    FanoutBlock<float> audiofan("Audio fanout", 2, 1 << 16);
+    GateBlock<float> aprs_gate("APRS gate", false, 1 << 16);
+    AFSKDemodBlock afsk("AFSK1200", AUDIO_HZ, 1 << 14);
+    web::JsonTextSinkBlock<aprs::Packet> aprs_json("APRS json", srv);
     if (!record_dir.empty()) src.set_sigmf_dir(record_dir);
-    App app(src, fan, spec, shift, resamp, demod, rec, srv, sink, rate, freq, mode);
+    App app(src, fan, spec, shift, resamp, demod, rec, srv, sink, rds_gate, ais_gate, aprs_gate, mpx,
+            rate, freq, mode);
     app.gains = gains;
     app.record_dir = record_dir;
     app.state_file = state_file;
+    if (!decoder.empty() && !app.set_decoder(decoder)) {
+        std::fprintf(stderr, "unknown --decoder %s\n", decoder.c_str());
+        return 1;
+    }
 
     auto fg = cler::make_desktop_flowgraph(
         cler::BlockRunner(&src, &fan.in),
@@ -390,8 +460,21 @@ int main(int argc, char** argv) {
         cler::BlockRunner(&rec),
         cler::BlockRunner(&spec, &sink.spectrum),
         cler::BlockRunner(&shift, &resamp.in),
-        cler::BlockRunner(&resamp, &demod.in),
-        cler::BlockRunner(&demod, &sink.audio),
+        cler::BlockRunner(&resamp, &chanfan.in),
+        cler::BlockRunner(&chanfan, &demod.in, &rds_gate.in, &ais_gate.in),
+        cler::BlockRunner(&rds_gate, &fmdemod.in),
+        cler::BlockRunner(&fmdemod, &mpx.in),
+        cler::BlockRunner(&mpx, &mpx_drain.in),
+        cler::BlockRunner(&mpx_drain),
+        cler::BlockRunner(&ais_gate, &ais_resamp.in),
+        cler::BlockRunner(&ais_resamp, &ais.in),
+        cler::BlockRunner(&ais, &ais_json.in),
+        cler::BlockRunner(&ais_json),
+        cler::BlockRunner(&demod, &audiofan.in),
+        cler::BlockRunner(&audiofan, &sink.audio, &aprs_gate.in),
+        cler::BlockRunner(&aprs_gate, &afsk.in),
+        cler::BlockRunner(&afsk, &aprs_json.in),
+        cler::BlockRunner(&aprs_json),
         cler::BlockRunner(&sink));
 
     app.rescan();
@@ -429,6 +512,10 @@ int main(int argc, char** argv) {
                         if (parse_mode(web::json_str(f, "mode"), m)) { app.mode = m; app.demod.set_mode(m); }
                         else srv.send_error("set", "unknown mode");
                     }
+                    else if (key == "decoder") {
+                        if (!app.set_decoder(web::json_str(f, "decoder")))
+                            srv.send_error("set", "unknown or unavailable decoder " + web::json_str(f, "decoder"));
+                    }
                     else if (!app.set_control(key, v)) srv.send_error("set", "unknown or read-only control " + key);
                 }
                 app.publish();
@@ -459,6 +546,7 @@ int main(int argc, char** argv) {
         const auto now = clock::now();
         if (now - last_stats >= std::chrono::seconds(1)) {
             last_stats = now;
+            app.publish_rds();
             if (app.running && app.src.lost()) {
                 app.lost = true;
                 fg.stop();

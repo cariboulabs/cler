@@ -695,6 +695,13 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
     ),
     ("FusedBlock", 1, 1, PortCount::Unknown, PortCount::Unknown),
     (
+        "GateBlock",
+        1,
+        1,
+        PortCount::Fixed(1),
+        PortCount::Fixed(1),
+    ),
+    (
         "ThrottleBlock",
         1,
         1,
@@ -707,6 +714,13 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         1,
         PortCount::Fixed(1),
         PortCount::Fixed(1),
+    ),
+    (
+        "JsonTextSinkBlock",
+        1,
+        0,
+        PortCount::Fixed(1),
+        PortCount::Fixed(0),
     ),
     (
         "WebSinkBlock",

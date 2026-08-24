@@ -6,6 +6,7 @@
 
 #include "cler.hpp"
 #include "desktop_blocks/utils/fanout.hpp"
+#include "desktop_blocks/utils/gate.hpp"
 #include "desktop_blocks/utils/throttle.hpp"
 #include "desktop_blocks/utils/throughput.hpp"
 
@@ -333,4 +334,47 @@ TEST_F(UtilityBlocksTest, ThroughputBlockEmptyInput) {
     // Verify no samples passed
     EXPECT_EQ(throughput_block.samples_passed(), 0);
     EXPECT_EQ(output.size(), 0);
+}
+
+// A closed gate must still consume everything: an upstream fanout advances by
+// its slowest output, so a stalled tap would freeze the live path.
+TEST_F(UtilityBlocksTest, GateBlockForwardsOnlyWhileOpen) {
+    GateBlock<float> gate("test_gate", false, 1024);
+    cler::Channel<float> out(1024);
+    std::vector<float> in(100);
+    for (size_t i = 0; i < in.size(); ++i) in[i] = static_cast<float>(i);
+
+    gate.in.writeN(in.data(), in.size());
+    ASSERT_TRUE(gate.procedure(&out).is_ok());
+    EXPECT_EQ(gate.in.size(), 0u);
+    EXPECT_EQ(out.size(), 0u);
+    EXPECT_EQ(gate.dropped(), 0u);
+
+    gate.set_open(true);
+    EXPECT_TRUE(gate.open());
+    gate.in.writeN(in.data(), in.size());
+    ASSERT_TRUE(gate.procedure(&out).is_ok());
+    EXPECT_EQ(gate.in.size(), 0u);
+    ASSERT_EQ(out.size(), in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        float v = 0.0f;
+        ASSERT_TRUE(out.try_pop(v));
+        EXPECT_FLOAT_EQ(v, in[i]);
+    }
+
+    ASSERT_TRUE(gate.procedure(&out).is_err());
+}
+
+// An open gate never blocks its input either: the excess is dropped and counted.
+TEST_F(UtilityBlocksTest, GateBlockDropsWhatDoesNotFitDownstream) {
+    GateBlock<float> gate("test_gate_full", true, 8192);
+    cler::Channel<float> out(2048);
+    std::vector<float> in(8000, 1.0f);
+
+    const size_t written = gate.in.writeN(in.data(), in.size());
+    ASSERT_TRUE(gate.procedure(&out).is_ok());
+    EXPECT_EQ(gate.in.size(), 0u);
+    EXPECT_GT(out.size(), 0u);
+    EXPECT_LT(out.size(), written);
+    EXPECT_EQ(out.size() + gate.dropped(), written);
 }
