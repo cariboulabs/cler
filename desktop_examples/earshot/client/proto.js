@@ -46,6 +46,17 @@ export function encodeSource(id, rate) {
   return JSON.stringify(rate > 0 ? { t: 'source', id, rate } : { t: 'source', id });
 }
 
+export function encodeRecord(on, dir, name) {
+  const m = { t: 'record', on };
+  if (dir) m.dir = dir;
+  if (name) m.name = name;
+  return JSON.stringify(m);
+}
+
+export function encodeDeleteRecording(name) {
+  return JSON.stringify({ t: 'recording', action: 'delete', name });
+}
+
 export function encodeHello(token) {
   const m = { t: 'hello', proto: PROTO_VER, accept: { codecs: ['pcm16'] } };
   if (token) m.token = token;
@@ -58,6 +69,28 @@ export function formatHz(hz) {
   if (a >= 1e6) return (hz / 1e6).toFixed(4) + ' MHz';
   if (a >= 1e3) return (hz / 1e3).toFixed(2) + ' kHz';
   return hz.toFixed(0) + ' Hz';
+}
+
+// bare number = MHz, which is what a radio operator types
+export function parseFreq(text) {
+  const m = String(text).trim().toLowerCase().match(/^([\d.]+)\s*(g|m|k|ghz|mhz|khz|hz)?$/);
+  if (!m || !Number.isFinite(Number(m[1]))) return null;
+  const mult = { g: 1e9, ghz: 1e9, m: 1e6, mhz: 1e6, k: 1e3, khz: 1e3, hz: 1 }[m[2] || 'mhz'];
+  const hz = Number(m[1]) * mult;
+  return hz > 0 ? hz : null;
+}
+
+export function fmtBytes(b) {
+  b = Number(b) || 0;
+  if (b >= 1e9) return (b / 1e9).toFixed(1) + ' GB';
+  if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
+  if (b >= 1e3) return (b / 1e3).toFixed(0) + ' kB';
+  return `${b} B`;
+}
+
+export function fmtDuration(sec) {
+  const t = Math.max(0, Math.floor(Number(sec) || 0));
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 }
 
 export class SeqTracker {

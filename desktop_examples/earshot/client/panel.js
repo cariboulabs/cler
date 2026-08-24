@@ -5,6 +5,8 @@ export function buildModel(controls, state) {
     type: c.type || 'range',
     min: c.min, max: c.max, step: c.step || 1,
     options: c.options || [],
+    // parallel to options: "" where usable, the server's reason where not
+    options_disabled: c.options_disabled || [],
     unit: c.unit || '',
     ro: !!c.ro,
     value: state && state[c.id] !== undefined ? state[c.id] : c.value
@@ -26,16 +28,43 @@ export function coerce(control, raw) {
   return v;
 }
 
+// A read-only control is a value, not a dead widget: rule 1 wants the reason and
+// rule 5 wants the number in monospace.
+export const RO_REASON = {
+  rate: 'fixed when the source was opened — reconnect to change it',
+  freq: 'read-only for this source'
+};
+export function roReason(id) { return RO_REASON[id] || 'read-only for this source'; }
+
+export function fmtValue(c) {
+  if (c.value === undefined || c.value === null) return '—';
+  if (c.type === 'bool') return c.value ? 'on' : 'off';
+  if (typeof c.value === 'number') return c.value.toLocaleString('en-US');
+  return String(c.value);
+}
+
 export function render(root, model, onSet) {
   root.textContent = '';
   for (const c of model) {
-    const row = document.createElement('label');
+    const row = document.createElement(c.ro ? 'div' : 'label');
     row.className = 'ctl';
     row.dataset.id = c.id;
     const name = document.createElement('span');
     name.className = 'ctl-name';
     name.textContent = c.unit ? `${c.label} (${c.unit})` : c.label;
     row.appendChild(name);
+    if (c.ro) {
+      const v = document.createElement('span');
+      v.className = 'ctl-value mono';
+      v.dataset.testid = `ctl-${c.id}-value`;
+      v.textContent = fmtValue(c);
+      const why = document.createElement('span');
+      why.className = 'ctl-note';
+      why.textContent = roReason(c.id);
+      row.append(v, why);
+      root.appendChild(row);
+      continue;
+    }
     let input;
     if (c.type === 'bool') {
       input = document.createElement('input');
@@ -61,14 +90,16 @@ export function render(root, model, onSet) {
       if (c.min !== undefined && c.max !== undefined) {
         const slider = document.createElement('input');
         slider.type = 'range'; slider.min = c.min; slider.max = c.max; slider.step = c.step; slider.value = c.value ?? c.min;
-        slider.disabled = c.ro;
+        slider.dataset.testid = `ctl-${c.id}-slider`;
+        slider.dataset.ctl = c.id;
         slider.oninput = () => { input.value = slider.value; };
         slider.onchange = () => onSet(c.id, Number(slider.value));
         row.appendChild(slider);
       }
     }
-    input.disabled = c.ro;
     input.className = 'ctl-input';
+    input.dataset.testid = `ctl-${c.id}`;
+    input.dataset.ctl = c.id;
     row.appendChild(input);
     root.appendChild(row);
   }
@@ -78,8 +109,14 @@ export function update(root, model) {
   for (const c of model) {
     const row = root.querySelector(`[data-id="${CSS.escape(c.id)}"]`);
     if (!row) continue;
+    if (c.ro) {
+      const v = row.querySelector('.ctl-value');
+      if (v) v.textContent = fmtValue(c);
+      continue;
+    }
     const input = row.querySelector('.ctl-input');
     const slider = row.querySelector('input[type=range]');
+    if (!input) continue;
     if (document.activeElement === input || document.activeElement === slider) continue;
     if (c.type === 'bool') input.checked = !!c.value;
     else input.value = c.value ?? '';

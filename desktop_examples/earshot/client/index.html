@@ -6,311 +6,276 @@
 <title>cler earshot</title>
 <link rel="icon" href="data:,">
 <style>
-  :root { --bg:#0b0e14; --panel:#121722; --line:#1e2633; --fg:#e6e9ef; --dim:#8a94a6; --acc:#4fd1ff; --warn:#ffc83c; --bad:#ff5c5c; }
+  /* Tokens are the ones cler-fg (app.css) and the ImGui apps (cler_palette.hpp)
+     already share; only --trace and --rec are earshot's own, because a spectrum
+     line is data, not chrome, and must never be the interaction colour. */
+  :root {
+    color-scheme: dark;
+    --bg-0:#0e1116; --bg-1:#161b22; --bg-2:#1e242d;
+    --border:#2a323d; --border-hi:#3a444f;
+    --fg:#e6edf3; --muted:#8b98a9; --faint:#6b7787;
+    /* the ground reads on the accent fill at 5.20:1; white only manages 3.64 */
+    --accent:#3987e5; --accent-fg:#0e1116;
+    --ok:#5ec27a; --warn:#e0b341; --danger:#e66767;
+    --trace:#4aa3ff; --rec:#e66767;
+    --danger-bg:#37181c; --danger-border:#6e2a30;
+    --warn-bg:#332b18; --warn-border:#6b551f;
+    --mono: ui-monospace, 'SF Mono', Consolas, monospace;
+  }
   * { box-sizing:border-box; }
-  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:14px system-ui, sans-serif; }
-  #app { display:grid; grid-template-rows:auto 1fr auto; grid-template-columns:1fr 300px; height:100%; }
-  header { grid-column:1/3; display:flex; gap:16px; align-items:center; padding:6px 12px; background:var(--panel); border-bottom:1px solid var(--line); }
-  header .title { font-weight:600; color:var(--acc); }
-  header .freq { font-size:20px; font-variant-numeric:tabular-nums; }
-  header .freq input { width:150px; font-size:20px; background:transparent; color:var(--fg); border:none; border-bottom:1px solid var(--line); text-align:right; }
-  header .spacer { flex:1; }
-  .pill { padding:2px 8px; border-radius:10px; background:var(--line); color:var(--dim); font-size:12px; }
-  .pill.ok { color:#9be28a; } .pill.bad { color:var(--bad); } .pill.ctl { color:var(--warn); }
-  button { background:var(--line); color:var(--fg); border:1px solid #2a3444; border-radius:4px; padding:4px 10px; cursor:pointer; }
-  button:hover { border-color:var(--acc); } button.on { background:var(--acc); color:#000; border-color:var(--acc); }
-  button:disabled { opacity:.5; cursor:default; }
-  main { display:grid; grid-template-rows:180px 1fr; min-height:0; position:relative; }
-  canvas { width:100%; height:100%; display:block; }
-  aside { background:var(--panel); border-left:1px solid var(--line); padding:10px; overflow:auto; display:flex; flex-direction:column; gap:10px; }
-  aside h3 { margin:6px 0 2px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); }
+  html,body { margin:0; height:100%; background:var(--bg-0); color:var(--fg); font:14px system-ui, sans-serif; }
+  .mono { font-family:var(--mono); }
+  .hidden { display:none !important; }
+  .spacer { flex:1; }
+  .note { color:var(--muted); font-size:12px; }
+  .warnnote { color:var(--warn); font-size:12px; }
+
+  #app { display:grid; grid-template-rows:auto 1fr auto; grid-template-columns:1fr 320px; height:100%; }
+
+  /* top bar: identity, one menu, the tuned frequency, status */
+  header { grid-column:1/3; display:flex; gap:12px; align-items:center; padding:6px 12px;
+           background:var(--bg-1); border-bottom:1px solid var(--border); }
+  .brand { font-weight:600; color:var(--fg); letter-spacing:.02em; }
+  #freq { width:170px; font-size:20px; font-family:var(--mono); font-variant-numeric:tabular-nums;
+          background:transparent; color:var(--fg); border:none; border-bottom:1px solid var(--border); text-align:right; padding:2px 4px; }
+  #freq:focus { outline:none; border-bottom-color:var(--accent); }
+  #freq.bad { border-bottom-color:var(--danger); color:var(--danger); }
+  .pill { padding:2px 8px; border-radius:10px; background:var(--bg-2); color:var(--muted); font-size:12px; white-space:nowrap; }
+  .pill.ok { color:var(--ok); } .pill.ctl { color:var(--accent); }
+  .pill.rec { color:var(--rec); animation:blink 1s steps(2,end) infinite; }
+  @keyframes blink { 50% { opacity:.35; } }
+
+  button { background:var(--bg-2); color:var(--fg); border:1px solid var(--border); border-radius:4px;
+           padding:4px 10px; cursor:pointer; font:inherit; }
+  button:hover:not(:disabled) { border-color:var(--border-hi); }
+  button:focus-visible, [tabindex]:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  button.on { background:var(--accent); color:var(--accent-fg); border-color:var(--accent); }
+  /* dim by token, never by alpha: a disabled control still carries its reason */
+  button:disabled { color:var(--faint); border-color:var(--border); cursor:not-allowed; }
+  input:disabled, select:disabled { color:var(--faint); background:var(--bg-1); cursor:not-allowed; }
+  input[type=text], input[type=number], select { background:var(--bg-0); color:var(--fg);
+           border:1px solid var(--border); border-radius:3px; padding:3px 6px; font:inherit; }
+
+  /* menus are <details>, dialogs are <dialog>: Esc, backdrop and focus trap for free */
+  .menu { position:relative; }
+  .menu > summary { list-style:none; cursor:pointer; padding:4px 10px; border:1px solid var(--border);
+                    border-radius:4px; background:var(--bg-2); font-size:13px; }
+  .menu > summary::-webkit-details-marker { display:none; }
+  .menu[open] > summary { border-color:var(--accent); }
+  .menu-items { position:absolute; z-index:20; top:calc(100% + 4px); left:0; min-width:230px;
+                background:var(--bg-2); border:1px solid var(--border); border-radius:6px; padding:6px;
+                display:flex; flex-direction:column; gap:2px; box-shadow:0 8px 30px #0008; }
+  .menu-items button { background:none; border:none; text-align:left; padding:5px 8px; border-radius:3px; }
+  .menu-items button:hover:not(:disabled) { background:var(--bg-1); }
+  .menu-items label { display:flex; gap:8px; align-items:baseline; padding:4px 8px; border-radius:3px; }
+  .menu-items label.off { color:var(--faint); }
+  .menu-items .cost { color:var(--muted); font-size:12px; margin-left:auto; }
+  .menu-items .band { color:var(--faint); font-size:12px; }
+  .menu-items .reason { color:var(--faint); font-size:12px; padding:0 8px 6px 30px; max-width:280px; }
+
+  main { display:grid; grid-template-rows:180px 1fr; min-height:0; min-width:0; position:relative; }
+  .plot { position:relative; min-height:0; overflow:hidden; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  #cursor { position:absolute; right:8px; top:6px; font-family:var(--mono); font-size:12px;
+            color:var(--muted); background:color-mix(in srgb, var(--bg-0) 70%, transparent); padding:1px 6px; border-radius:3px; }
+  #resetzoom { position:absolute; right:8px; bottom:8px; font-size:12px; padding:2px 8px; }
+  #banner { position:absolute; z-index:8; left:0; right:0; top:0; background:var(--danger-bg);
+            border-bottom:1px solid var(--danger-border); color:var(--danger); padding:8px 12px; font-size:13px; }
+  #errors { position:absolute; right:10px; bottom:36px; z-index:6; display:flex; flex-direction:column; gap:4px; }
+  #errors:empty { display:none; }
+  .toast { background:var(--danger-bg); border:1px solid var(--danger-border); color:var(--danger);
+           padding:6px 10px; border-radius:4px; font-size:12px; max-width:340px; }
+
+  aside { background:var(--bg-1); border-left:1px solid var(--border); overflow:auto; min-width:0;
+          display:flex; flex-direction:column; }
+  .tabs { display:flex; gap:4px; padding:8px 10px 0; }
+  .tab { flex:1; border-bottom-left-radius:0; border-bottom-right-radius:0; }
+  .pane { padding:10px; display:flex; flex-direction:column; gap:12px; }
+  section { display:flex; flex-direction:column; gap:6px; }
+  .sec-head { display:flex; align-items:center; gap:6px; }
+  h3 { margin:0; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600; }
   .modes { display:flex; flex-wrap:wrap; gap:4px; }
-  .ctl { display:grid; grid-template-columns:1fr; gap:2px; padding:4px 0; border-bottom:1px solid var(--line); }
-  .ctl-name { color:var(--dim); font-size:12px; }
-  .ctl input[type=number], .ctl select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:3px; padding:3px 6px; }
-  .ctl input[type=range] { width:100%; }
-  footer { grid-column:1/3; display:flex; gap:18px; padding:4px 12px; background:var(--panel); border-top:1px solid var(--line); color:var(--dim); font-size:12px; font-variant-numeric:tabular-nums; }
-  #devices { position:absolute; inset:0; background:rgba(11,14,20,.92); display:flex; align-items:center; justify-content:center; z-index:5; }
-  #devices.hidden, #listen.hidden, #errors:empty { display:none; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px 20px; min-width:420px; }
-  .card h2 { margin:0 0 10px; font-size:16px; }
-  .dev { display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); }
-  .dev .lbl { flex:1; } .dev .kind { color:var(--dim); font-size:12px; }
-  .dev.failed .lbl { color:var(--bad); }
-  .why { color:#ffd0d0; background:#3a1e1e; border-left:2px solid var(--bad); font-size:12px;
-         padding:5px 8px; margin:0 0 6px; border-radius:0 3px 3px 0; }
-  #listen { position:absolute; left:50%; top:40px; transform:translateX(-50%); z-index:4; background:var(--warn); color:#000; border-radius:20px; padding:8px 16px; cursor:pointer; font-weight:600; }
-  #errors { position:absolute; right:10px; bottom:10px; z-index:4; display:flex; flex-direction:column; gap:4px; }
-  .toast { background:#3a1e1e; border:1px solid var(--bad); color:#ffd0d0; padding:6px 10px; border-radius:4px; font-size:12px; }
-  #text { font-family:ui-monospace, monospace; font-size:12px; white-space:pre-wrap; max-height:220px; overflow:auto; color:var(--dim); }
+  .modes button { font-size:13px; }
+  .ctl { display:grid; grid-template-columns:1fr; gap:3px; padding:4px 0; border-bottom:1px solid var(--border); }
+  .ctl-name { color:var(--muted); font-size:12px; }
+  .ctl-value { font-size:13px; }
+  .ctl-note { color:var(--faint); font-size:11px; }
+  .ctl input[type=range] { width:100%; accent-color:var(--accent); }
+  .field { display:grid; grid-template-columns:44px 1fr; gap:6px; align-items:center; }
+  .field > span { color:var(--muted); font-size:12px; }
+
+  footer { grid-column:1/3; display:flex; gap:12px; align-items:center; padding:5px 12px;
+           background:var(--bg-1); border-top:1px solid var(--border); color:var(--muted);
+           font-size:12px; font-variant-numeric:tabular-nums; }
+  footer button { padding:3px 10px; }
+  #recbtn.on { background:var(--rec); border-color:var(--rec); color:#1a0f10; }
+  #listenbtn.pulse { border-color:var(--warn); color:var(--warn); animation:pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow:0 0 0 3px color-mix(in srgb, var(--warn) 30%, transparent); } }
+
+  dialog { background:var(--bg-1); color:var(--fg); border:1px solid var(--border); border-radius:8px;
+           padding:0; max-width:min(560px, 100vw - 24px); width:100%; }
+  dialog::backdrop { background:color-mix(in srgb, var(--bg-0) 72%, transparent); }
+  .dlg-head { display:flex; align-items:center; gap:8px; padding:12px 16px 8px; }
+  .dlg-head h2 { margin:0; font-size:15px; flex:1; }
+  .dlg-body { padding:0 16px 16px; max-height:60vh; overflow:auto; }
+  .row { display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--border); }
+  .row .lbl { flex:1; min-width:0; overflow-wrap:anywhere; }
+  .row .kind { color:var(--muted); font-size:12px; }
+  .row.failed .lbl { color:var(--danger); }
+  .why { color:var(--danger); background:var(--danger-bg); border-left:2px solid var(--danger-border);
+         font-size:12px; padding:5px 8px; margin:0 0 6px; border-radius:0 3px 3px 0; }
+  .confirm { color:var(--danger); font-size:12px; }
+  a { color:var(--accent); }
+
+  #text { font-family:var(--mono); font-size:12px; white-space:pre-wrap; color:var(--muted); }
   #text table { border-collapse:collapse; width:100%; }
-  #text th { text-align:left; color:var(--dim); font-weight:500; border-bottom:1px solid var(--line); }
-  #text td { border-bottom:1px solid var(--line); padding-right:6px; color:var(--fg); }
-  #text tr.stale td { color:var(--dim); opacity:.6; }
+  #text th { text-align:left; color:var(--muted); font-weight:500; border-bottom:1px solid var(--border); }
+  #text td { border-bottom:1px solid var(--border); padding-right:6px; color:var(--fg); }
+  #text tr.stale td { color:var(--faint); }
   #dectabs { display:flex; flex-wrap:wrap; gap:4px; }
-  #dectabs button { font-size:12px; padding:2px 8px; }
-  .chip-warn { background:#3a3418; border:1px solid var(--warn); color:var(--warn); padding:3px 6px; border-radius:4px; margin-bottom:6px; }
+  .chip { font-size:12px; padding:2px 8px; }
+  .chip.warn { border-color:var(--warn); color:var(--warn); }
+  .chip.warn.on { background:var(--warn); color:#1a1508; }
+  .chip-warn { background:var(--warn-bg); border:1px solid var(--warn-border); color:var(--warn);
+               padding:3px 6px; border-radius:4px; margin-bottom:6px; font-family:system-ui, sans-serif; }
+
+  /* one column below 900px: the plots keep the width, the panel becomes a sheet */
+  @media (max-width:900px) {
+    #app { grid-template-columns:1fr; grid-template-rows:auto 1fr auto auto; }
+    header, footer { grid-column:1; }
+    header { flex-wrap:wrap; row-gap:6px; }
+    aside { border-left:none; border-top:1px solid var(--border); max-height:45vh; }
+    main { grid-template-rows:140px 1fr; min-height:220px; }
+    footer { flex-wrap:wrap; row-gap:4px; }
+  }
 </style>
 </head>
 <body>
 <div id="app">
   <header>
-    <span class="title">cler earshot</span>
-    <span class="freq"><input id="freq" type="text" value="—"> </span>
-    <span id="source" class="pill">no source</span>
+    <span class="brand">⌁ earshot</span>
+    <details class="menu" id="menu">
+      <summary data-testid="menu">≡ menu</summary>
+      <div class="menu-items">
+        <button id="menu-sources" data-testid="menu-sources">sources…</button>
+        <button id="menu-recordings" data-testid="menu-recordings">recordings…</button>
+      </div>
+    </details>
+    <input id="freq" data-testid="freq" type="text" value="—" title="tune: 100.1, 100.1M or 433920k"
+           placeholder="100.1 or 100.1M or 433920k">
+    <span id="source" class="pill" data-testid="source">no source</span>
+    <span id="recchip" class="pill rec hidden" data-testid="rec-chip">● recording</span>
     <span class="spacer"></span>
-    <button id="devbtn">Devices</button>
-    <span id="role" class="pill">—</span>
-    <span id="conn" class="pill bad">offline</span>
+    <span id="role" class="pill" data-testid="role">—</span>
+    <span id="conn" class="pill" data-testid="conn">connecting…</span>
   </header>
+
   <main>
-    <canvas id="spec"></canvas>
-    <canvas id="wf"></canvas>
-    <div id="listen" class="hidden">▶ click to listen</div>
-    <div id="devices"><div class="card"><h2>Devices</h2><div id="devlist"></div><h2 style="margin-top:14px">Recordings</h2><div id="reclist" class="ctl-name">—</div><div style="margin-top:10px;display:flex;gap:8px"><button id="rescan">Rescan</button><button id="devclose">Close</button></div></div></div>
+    <div id="banner" class="hidden" data-testid="banner"></div>
+    <div class="plot">
+      <canvas id="spec" tabindex="0" aria-label="spectrum"></canvas>
+      <span id="cursor" data-testid="cursor"></span>
+    </div>
+    <div class="plot">
+      <canvas id="wf" tabindex="0" aria-label="waterfall: double-click to tune, drag to pan, wheel to zoom"></canvas>
+      <button id="resetzoom" class="hidden" data-testid="reset-zoom" title="show the whole span">⤢ reset zoom</button>
+    </div>
     <div id="errors"></div>
   </main>
+
   <aside>
-    <h3>Mode</h3><div id="modes" class="modes"></div>
-    <h3>Controls</h3><div id="controls"></div>
-    <div id="transport" style="display:none">
-      <h3>Playback</h3>
-      <div style="display:flex;gap:6px;align-items:center">
-        <button id="playpause">⏸</button>
-        <input id="pos" type="range" min="0" max="1" step="0.1" value="0" style="flex:1">
-        <span id="postime" class="ctl-name">0:00</span>
-        <label class="ctl-name"><input id="loop" type="checkbox"> loop</label>
-      </div>
+    <div class="tabs">
+      <button id="tab-rx" class="tab on" data-testid="tab-receiver">Receiver</button>
+      <button id="tab-dec" class="tab" data-testid="tab-decoded">Decoded</button>
     </div>
-    <h3>Record</h3>
-    <div style="display:flex;gap:6px;align-items:center">
-      <button id="recbtn">● Record</button>
-      <input id="recname" type="text" placeholder="prefix" style="flex:1;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:3px;padding:3px 6px">
+
+    <div id="pane-rx" class="pane">
+      <section>
+        <h3>mode</h3>
+        <div id="modes" class="modes"></div>
+        <span id="passband" class="note"></span>
+      </section>
+      <section id="sec-controls">
+        <h3 id="controls-title">source</h3>
+        <div id="controls"></div>
+      </section>
+      <section id="transport" class="hidden">
+        <h3>playback</h3>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button id="playpause" data-testid="playpause">⏸</button>
+          <input id="pos" data-testid="pos" type="range" min="0" max="1" step="0.1" value="0" style="flex:1">
+          <span id="postime" class="note">0:00</span>
+        </div>
+        <label class="note"><input id="loop" data-testid="loop" type="checkbox"> loop</label>
+      </section>
+      <section id="sec-record">
+        <h3>record</h3>
+        <div class="field hidden" id="recdirrow"><span>to</span><select id="recdir" data-testid="recdir"></select></div>
+        <div class="field hidden" id="recdironerow"><span>to</span><span id="recdirone" class="mono note" data-testid="recdir-one"></span></div>
+        <div class="field"><span>name</span><input id="recname" data-testid="recname" type="text"></div>
+        <span id="recprev" class="note mono" data-testid="rec-preview"></span>
+        <span id="recfree" class="note" data-testid="rec-free"></span>
+      </section>
     </div>
-    <span id="recinfo" class="ctl-name"></span>
-    <h3>Audio</h3><button id="listenbtn">▶ Listen</button><label class="ctl"><span class="ctl-name">volume</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></label>
-    <h3>Decoded</h3><div id="dectabs"></div><div id="text"></div>
+
+    <div id="pane-dec" class="pane hidden">
+      <section>
+        <div class="sec-head">
+          <h3>decoded</h3>
+          <span class="spacer"></span>
+          <details class="menu" id="decmenu">
+            <summary data-testid="decoder-menu">⋯</summary>
+            <div class="menu-items" id="decmenu-items"></div>
+          </details>
+        </div>
+        <span id="deccost" class="note" data-testid="decoder-cost"></span>
+        <div id="dectabs"></div>
+        <div id="text"></div>
+        <span id="decempty" class="note hidden" data-testid="decoder-empty">no decoder running — pick one from ⋯</span>
+      </section>
+    </div>
   </aside>
+
   <footer>
-    <span id="s-stats">—</span>
+    <button id="listenbtn" data-testid="listen">▶ listen</button>
+    <input id="vol" data-testid="volume" type="range" min="0" max="1" step="0.01" value="0.8"
+           style="width:90px;accent-color:var(--accent)" title="volume — this browser only">
+    <button id="recbtn" data-testid="record">● record</button>
+    <span id="recstatus" data-testid="rec-status"></span>
+    <span class="spacer"></span>
+    <span id="s-stats" data-testid="stats">—</span>
     <span id="s-audio">audio: off</span>
     <span id="s-ver"></span>
   </footer>
+
+  <dialog id="dlg-sources" data-testid="dlg-sources">
+    <div class="dlg-head">
+      <h2>Sources</h2>
+      <details class="menu" id="srcmenu">
+        <summary data-testid="sources-menu">⋯</summary>
+        <div class="menu-items">
+          <button id="rescan" data-testid="rescan">rescan devices</button>
+          <label>sample rate on connect <select id="devrate" data-testid="devrate"></select></label>
+        </div>
+      </details>
+      <button data-close data-testid="sources-close">Close</button>
+    </div>
+    <div class="dlg-body"><div id="devlist"></div></div>
+  </dialog>
+
+  <dialog id="dlg-recordings" data-testid="dlg-recordings">
+    <div class="dlg-head">
+      <h2>Recordings</h2>
+      <button data-close data-testid="recordings-close">Close</button>
+    </div>
+    <div class="dlg-body">
+      <div id="recdirinfo" class="note"></div>
+      <div id="recscp" class="note mono" style="overflow-wrap:anywhere"></div>
+      <div id="recpruned" class="note"></div>
+      <div id="reclist" style="margin-top:8px">—</div>
+    </div>
+  </dialog>
 </div>
-<script type="module">
-import { decodeFrame, encodeSet, encodeSource, encodeHello, formatHz, SeqTracker, T_SPECTRUM, T_AUDIO } from '/client/proto.js';
-import { Waterfall } from '/client/waterfall.js';
-import { AudioPlayer } from '/client/audio.js';
-import * as panel from '/client/panel.js';
-import { DecoderPanel } from '/client/decoders.js';
-import { applyError, deviceRows } from '/client/devices.js';
-
-const $ = (id) => document.getElementById(id);
-const prefs = (() => { try { return JSON.parse(localStorage.getItem('earshot') || '{}'); } catch { return {}; } })();
-const savePrefs = () => { try { localStorage.setItem('earshot', JSON.stringify(prefs)); } catch {} };
-
-const state = { gen: 0, hello: null, st: {}, model: [], sources: [], connected: false, role: 'view', devErrors: {} };
-const audio = new AudioPlayer();
-const seqSpec = new SeqTracker(), seqAudio = new SeqTracker();
-let ws = null, backoff = 500, statsTimer = 0;
-
-const decoders = new DecoderPanel($('dectabs'), $('text'), (id) => {
-  if (state.role === 'ctl') send(encodeSet({ decoder: id }));
-});
-const wf = new Waterfall($('spec'), $('wf'), {
-  onTune: (hz) => { if (state.role === 'ctl') send(encodeSet({ freq: hz })); },
-  onPan: (dHz) => { if (state.role === 'ctl' && state.st.freq !== undefined) send(encodeSet({ freq: state.st.freq + dHz })); },
-  onView: (v) => { prefs.view = v; savePrefs(); }
-});
-if (prefs.view && Number.isFinite(prefs.view.x0) && Number.isFinite(prefs.view.x1) && prefs.view.x0 >= 0 && prefs.view.x1 <= 1 && prefs.view.x0 < prefs.view.x1) wf.setView(prefs.view.x0, prefs.view.x1);
-audio.setGain(prefs.volume ?? 0.8);
-$('vol').value = prefs.volume ?? 0.8;
-$('vol').oninput = () => { audio.setGain(Number($('vol').value)); prefs.volume = Number($('vol').value); savePrefs(); };
-
-function send(text) { if (ws && ws.readyState === 1) ws.send(text); }
-function toast(msg) {
-  const d = document.createElement('div'); d.className = 'toast'; d.textContent = msg;
-  $('errors').appendChild(d); setTimeout(() => d.remove(), 5000);
-}
-
-function connect() {
-  const token = new URLSearchParams(location.search).get('token');
-  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/${token ? `?token=${encodeURIComponent(token)}` : ''}`;
-  ws = new WebSocket(url);
-  ws.binaryType = 'arraybuffer';
-  ws.onopen = () => { state.connected = true; backoff = 500; $('conn').textContent = 'online'; $('conn').className = 'pill ok'; send(encodeHello(token)); seqSpec.reset(); seqAudio.reset(); audio.flush(); };
-  ws.onclose = () => { state.connected = false; state.hello = null; $('conn').textContent = 'offline'; $('conn').className = 'pill bad'; audio.flush(); setTimeout(connect, backoff); backoff = Math.min(8000, backoff * 2); };
-  ws.onerror = () => ws.close();
-  ws.onmessage = (e) => {
-    if (typeof e.data === 'string') { let m; try { m = JSON.parse(e.data); } catch { return; } onText(m); return; }
-    const f = decodeFrame(e.data);
-    if (!f) return;
-    if (f.type === 0) { toast(`protocol version ${f.ver} not supported`); ws.close(); return; }
-    if (state.gen && f.gen !== state.gen) return;
-    if (f.type === T_SPECTRUM) { seqSpec.push(f.seq); wf.push(f); }
-    else if (f.type === T_AUDIO) { if (seqAudio.push(f.seq)) audio.flush(); if (audio.running) audio.push(f.pcm); }
-  };
-}
-
-function onText(m) {
-  if (m.t === 'hello') {
-    if (m.proto !== 1) { toast(`server protocol ${m.proto}, client 1`); return; }
-    const first = !state.hello;
-    state.hello = m; state.sources = m.sources || []; state.role = m.role;
-    $('s-ver').textContent = m.version ? `server ${m.version}` : '';
-    state.model = panel.buildModel(m.controls, m.state);
-    decoders.setDecoders(m.decoders, (m.state && m.state.decoder) || 'none');
-    renderControls();
-    applyState({ ...(m.state || {}), role: m.role });
-    renderDevices();
-    if (first) $('devices').classList.toggle('hidden', !!(m.state && m.state.source));
-    renderRecordings();
-  } else if (m.t === 'state') {
-    applyState(m);
-  } else if (m.t === 'stats') {
-    const extra = (state.st.recording ? ` · rec ${((m.rec_bytes ?? 0) / 1e6).toFixed(1)} MB` : '')
-      + (m.decoder_dropped ? ` · decoder drops ${m.decoder_dropped}` : '')
-      + (m.text_dropped ? ` · text drops ${m.text_dropped}` : '');
-    $('s-stats').textContent = `drops spec ${m.spectrum_dropped ?? 0} audio ${m.audio_dropped ?? 0} · overflows ${m.overflows ?? 0} · clients ${m.clients ?? 1}${extra}`;
-    $('recinfo').textContent = state.st.recording ? `recording · ${((m.rec_bytes ?? 0) / 1e6).toFixed(1)} MB · ${((m.free_bytes ?? 0) / 1e9).toFixed(1)} GB free` : '';
-    if (m.duration !== undefined) {
-      $('pos').max = m.duration;
-      if (document.activeElement !== $('pos')) $('pos').value = m.pos ?? 0;
-      $('postime').textContent = `${fmtTime(m.pos ?? 0)} / ${fmtTime(m.duration)}${m.ended ? ' · ended' : ''}`;
-    }
-  } else if (m.t === 'error') {
-    const r = applyError(state.devErrors, m);
-    state.devErrors = r.errors;
-    if (r.toast) toast(`${m.code}: ${m.msg}`);
-    else { $('devices').classList.remove('hidden'); renderDevices(); }
-  } else if (m.t === 'text') {
-    decoders.push(m.stream, m.data);
-  }
-}
-
-function fmtTime(t) { t = Math.max(0, Math.floor(t)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; }
-
-function applyState(s) {
-  const prevSource = state.st.source;
-  Object.assign(state.st, s);
-  if (s.gen !== undefined && s.gen !== state.gen) { state.gen = s.gen; audio.flush(); seqAudio.reset(); }
-  if (s.role) { state.role = s.role; $('role').textContent = s.role === 'ctl' ? 'controller' : 'viewer'; $('role').className = `pill ${s.role}`; }
-  if (state.st.freq !== undefined && document.activeElement !== $('freq')) $('freq').value = formatHz(state.st.freq);
-  $('source').textContent = state.st.source || 'no source';
-  if (s.source !== undefined && s.source !== prevSource) {
-    delete state.devErrors[s.source];
-    wf.clear(); renderDevices();
-    if (s.source) $('devices').classList.add('hidden');
-  }
-  if (s.switching !== undefined) $('source').textContent += s.switching ? ' (switching…)' : '';
-  panel.applyState(state.model, state.st);
-  panel.update($('controls'), state.model);
-  for (const b of $('modes').children) b.classList.toggle('on', b.dataset.mode === state.st.mode);
-  wf.setMarker(state.st.offset || 0, state.st.passband || 0);
-  $('transport').style.display = state.st.is_file ? '' : 'none';
-  if (state.st.paused !== undefined) $('playpause').textContent = state.st.paused ? '▶' : '⏸';
-  if (state.st.loop !== undefined) $('loop').checked = !!state.st.loop;
-  if (state.st.decoder) decoders.setActive(state.st.decoder);
-  if (state.st.freq !== undefined) decoders.setTuning(state.st.freq);
-  $('recbtn').textContent = state.st.recording ? '■ Stop recording' : '● Record';
-  $('recbtn').classList.toggle('on', !!state.st.recording);
-  const ctl = state.role === 'ctl';
-  for (const el of document.querySelectorAll('aside input, aside select, aside button, #freq')) if (el.id !== 'vol') el.disabled = !ctl || el.dataset.ro === '1';
-}
-
-function renderControls() {
-  const modes = state.model.find((c) => c.id === 'mode');
-  $('modes').textContent = '';
-  if (modes) for (const o of modes.options) {
-    const b = document.createElement('button'); b.textContent = o; b.dataset.mode = o;
-    b.onclick = () => send(encodeSet({ mode: o }));
-    $('modes').appendChild(b);
-  }
-  const rest = state.model.filter((c) => c.id !== 'mode' && c.id !== 'freq');
-  panel.render($('controls'), rest, (id, value) => send(encodeSet({ [id]: value })));
-  for (const c of rest) if (c.ro) for (const el of $('controls').querySelectorAll(`[data-id="${CSS.escape(c.id)}"] input, [data-id="${CSS.escape(c.id)}"] select`)) el.dataset.ro = '1';
-}
-
-const RATES = [['keep rate', 0], ['1 MS/s', 1e6], ['2 MS/s', 2e6], ['2.4 MS/s', 2.4e6],
-               ['4 MS/s', 4e6], ['8 MS/s', 8e6], ['10 MS/s', 10e6], ['20 MS/s', 20e6]];
-
-function renderDevices() {
-  const list = $('devlist'); list.textContent = '';
-  if (!state.sources.length) { list.textContent = 'no devices reported yet'; }
-  const ratePick = document.createElement('select'); ratePick.id = 'devrate';
-  for (const [label, hz] of RATES) {
-    const o = document.createElement('option'); o.textContent = label; o.value = hz;
-    ratePick.appendChild(o);
-  }
-  const rateRow = document.createElement('div'); rateRow.className = 'dev';
-  const rateLbl = document.createElement('span'); rateLbl.className = 'lbl'; rateLbl.textContent = 'sample rate on connect';
-  rateRow.append(rateLbl, ratePick); list.appendChild(rateRow);
-  for (const r of deviceRows(state.sources, state.devErrors, state.st.source, state.role)) {
-    const row = document.createElement('div'); row.className = r.why ? 'dev failed' : 'dev';
-    const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = r.label;
-    const kind = document.createElement('span'); kind.className = 'kind'; kind.textContent = r.kind;
-    const btn = document.createElement('button');
-    btn.textContent = r.connected ? 'connected' : r.why ? 'Retry' : 'Connect';
-    btn.disabled = !r.connectable;
-    btn.onclick = () => {
-      delete state.devErrors[r.id];
-      renderDevices();
-      send(encodeSource(r.id, Number($('devrate')?.value || 0)));
-    };
-    row.append(lbl, kind, btn); list.appendChild(row);
-    if (r.why) {
-      const why = document.createElement('div'); why.className = 'why'; why.textContent = r.why;
-      list.appendChild(why);
-    }
-  }
-}
-
-$('freq').onchange = () => {
-  const v = $('freq').value.trim().toLowerCase();
-  const m = v.match(/^([\d.]+)\s*(ghz|mhz|khz|hz)?$/);
-  if (!m) { $('freq').value = formatHz(state.st.freq || 0); return; }
-  const mult = { ghz: 1e9, mhz: 1e6, khz: 1e3, hz: 1 }[m[2] || 'mhz'];
-  send(encodeSet({ freq: Number(m[1]) * mult }));
-  $('freq').blur();
-};
-const tokenQs = () => { const t = new URLSearchParams(location.search).get('token'); return t ? `?token=${encodeURIComponent(t)}` : ''; };
-async function renderRecordings() {
-  const el = $('reclist');
-  try {
-    const r = await fetch(`/recordings${tokenQs()}`);
-    if (!r.ok) { el.textContent = '—'; return; }
-    const recs = await r.json();
-    el.textContent = recs.length ? '' : 'none yet';
-    for (const rec of recs) {
-      const row = document.createElement('div'); row.className = 'dev';
-      const lbl = document.createElement('span'); lbl.className = 'lbl';
-      lbl.textContent = `${rec.name} · ${(rec.bytes / 1e6).toFixed(1)} MB · ${fmtTime(rec.seconds)} @ ${(rec.rate / 1e6).toFixed(2)} MS/s`;
-      const dl = document.createElement('a');
-      dl.textContent = 'download'; dl.href = `/recordings/${rec.name}.sigmf-data${tokenQs()}`; dl.style.color = 'var(--acc)';
-      const play = document.createElement('button'); play.textContent = 'Play';
-      play.disabled = state.role !== 'ctl';
-      play.onclick = () => send(JSON.stringify({ t: 'play', name: rec.name }));
-      row.append(lbl, dl, play); el.appendChild(row);
-    }
-  } catch { el.textContent = '—'; }
-}
-$('playpause').onclick = () => send(JSON.stringify({ t: 'play', pause: !state.st.paused }));
-$('pos').onchange = () => send(JSON.stringify({ t: 'play', pos: Number($('pos').value) }));
-$('loop').onchange = () => send(JSON.stringify({ t: 'play', loop: $('loop').checked }));
-$('recbtn').onclick = () => send(JSON.stringify({ t: 'record', on: !state.st.recording, name: $('recname').value }));
-$('devbtn').onclick = () => { renderDevices(); renderRecordings(); $('devices').classList.remove('hidden'); };
-$('devclose').onclick = () => $('devices').classList.add('hidden');
-$('rescan').onclick = () => { if (state.role === 'ctl') send(JSON.stringify({ t: 'rescan' })); };
-const toggleAudio = async () => {
-  if (audio.running) { await audio.suspend(); audio.flush(); } else await audio.start();
-  $('listen').classList.toggle('hidden', audio.running);
-  $('listenbtn').textContent = audio.running ? '■ Stop' : '▶ Listen';
-};
-$('listen').onclick = toggleAudio;
-$('listenbtn').onclick = toggleAudio;
-$('listen').classList.remove('hidden');
-setInterval(() => { $('s-audio').textContent = audio.running ? `audio: ${audio.stats.bufferedMs} ms buffered · underruns ${audio.stats.underruns} · dropped ${audio.stats.dropped}${audio.sampleRate && audio.sampleRate !== 48000 ? ` · resampled to ${audio.sampleRate} Hz` : ''}` : 'audio: off'; }, 500);
-connect();
-</script>
+<script type="module" src="/client/app.js"></script>
 </body>
 </html>

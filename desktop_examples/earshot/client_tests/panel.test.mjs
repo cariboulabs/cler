@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildModel, applyState, coerce } from '../client/panel.js';
+import { buildModel, applyState, coerce, fmtValue, roReason } from '../client/panel.js';
 
 const controls = [
   { id: 'freq', label: 'frequency', type: 'range', min: 1e6, max: 6e9, step: 1e3, unit: 'Hz' },
@@ -18,6 +18,25 @@ test('builds the model from controls and state', () => {
   assert.equal(m[3].ro, true); assert.equal(m[3].value, undefined);
   applyState(m, { freq: 2e6, rate: 2.4e6 });
   assert.equal(m[0].value, 2e6); assert.equal(m[3].value, 2.4e6);
+});
+
+test('carries the per-option disable reasons the server sent', () => {
+  const [mode] = buildModel([{ id: 'mode', type: 'enum', options: ['WBFM', 'AM'],
+                              options_disabled: ['needs 200 kHz; this source is 48 kHz wide', ''] }], {});
+  assert.equal(mode.options_disabled.length, 2);
+  assert.match(mode.options_disabled[0], /needs 200 kHz/);
+  assert.equal(mode.options_disabled[1], '');
+  // a server that never sends them must not break the client
+  assert.deepEqual(buildModel([{ id: 'mode', type: 'enum', options: ['AM'] }], {})[0].options_disabled, []);
+});
+
+test('a read-only control shows a value and why it cannot be changed', () => {
+  const m = buildModel(controls, { rate: 2400000, amp: true });
+  assert.equal(fmtValue(m[3]), '2,400,000');
+  assert.equal(fmtValue(m[2]), 'on');
+  assert.equal(fmtValue({ value: undefined }), '—');
+  assert.match(roReason('rate'), /reconnect/);
+  assert.match(roReason('anything'), /read-only/);
 });
 
 test('coerces input by control type and clamps ranges', () => {

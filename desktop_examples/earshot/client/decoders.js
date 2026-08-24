@@ -1,5 +1,6 @@
 export const MAX_ROWS = 200;
 export const STALE_MS = 120000;
+export const COST_WARN_PCT = 25;
 
 // Columns per stream; RDS is a single live card, the rest are newest-first tables
 // keyed so repeat sightings of one station update in place. adsb is listed for
@@ -47,6 +48,54 @@ export function bandLabel(expects) {
     : `${(b.min / 1e6).toFixed(1)}–${(b.max / 1e6).toFixed(1)} MHz`)).join(' or ');
 }
 
+export function costPct(hint) {
+  const m = /(\d+(?:\.\d+)?)\s*%/.exec(hint || '');
+  return m ? Number(m[1]) : 0;
+}
+
+// running is what the server says is on; availability and price come from hello
+export function menuRows(list, running) {
+  const on = new Set(running || []);
+  return (list || []).map((d) => ({
+    id: d.id,
+    checked: on.has(d.id),
+    available: d.available !== false,
+    reason: d.reason || '',
+    cost: d.cost_hint || '',
+    band: bandLabel(d.expects)
+  }));
+}
+
+export function costTotal(list, running) {
+  const by = new Map((list || []).map((d) => [d.id, d.cost_hint]));
+  const pct = (running || []).reduce((a, id) => a + costPct(by.get(id)), 0);
+  const n = (running || []).length;
+  if (!n) return { pct: 0, text: 'nothing running', warn: false };
+  const text = `${n} decoder${n > 1 ? 's' : ''} running · ~${Math.round(pct)}% of a core`;
+  return {
+    pct,
+    text,
+    warn: pct > COST_WARN_PCT,
+    note: pct > COST_WARN_PCT ? `decoders are using ~${Math.round(pct)}% of a core; on an RPi 4 that is most of one` : ''
+  };
+}
+
+// A chip exists only for a decoder that is actually running; an out-of-band one
+// warns from the chip, so it is visible while you are looking at another table.
+export function chipRows(list, running, active, freq) {
+  const meta = new Map((list || []).map((d) => [d.id, d]));
+  return (running || []).map((id) => {
+    const d = meta.get(id) || {};
+    const off = outOfBand(d.expects, freq);
+    return {
+      id,
+      active: id === active,
+      outOfBand: off,
+      title: off ? `tuned outside ${bandLabel(d.expects)} — ${id} will not decode here` : (d.cost_hint || '')
+    };
+  });
+}
+
 export function rdsLines(d) {
   const out = [];
   out.push(`PS   ${d.ps || '—'}${d.synced ? '' : '   (not synced)'}`);
@@ -56,7 +105,8 @@ export function rdsLines(d) {
   return out;
 }
 
-// One tab per stream the server announced; tables render into a shared <div>.
+// Chips pick which running decoder's table is on screen; nothing running means the
+// caller hides the whole section.
 export class DecoderPanel {
   constructor(tabsEl, bodyEl, onSelect) {
     this.tabs = tabsEl;
@@ -64,39 +114,47 @@ export class DecoderPanel {
     this.onSelect = onSelect;
     this.rows = new Map();
     this.rds = null;
-    this.active = 'none';
-    this.expects = new Map();
+    this.active = '';
+    this.list = [];
+    this.running = [];
     this.freq = NaN;
   }
 
-  setDecoders(list, current) {
-    this.tabs.textContent = '';
-    this.expects = new Map((list || []).map((d) => [d.id, d.expects]));
-    for (const d of list || []) {
-      const b = document.createElement('button');
-      b.textContent = d.id;
-      b.dataset.decoder = d.id;
-      b.disabled = d.available === false;
-      if (d.available === false) b.dataset.ro = '1';   // the role sweep re-enables anything without it
-      if (d.reason) b.title = d.reason;
-      b.classList.toggle('on', d.id === current);
-      b.onclick = () => this.onSelect(d.id);
-      this.tabs.appendChild(b);
-    }
-    this.setActive(current);
+  setDecoders(list) { this.list = list || []; this.renderChips(); }
+
+  setRunning(running) {
+    this.running = running || [];
+    if (!this.running.includes(this.active)) this.active = this.running[0] || '';
+    this.renderChips();
+    this.render();
   }
 
   setActive(id) {
-    if (id === this.active) return;
+    if (id === this.active || !this.running.includes(id)) return;
     this.active = id;
-    for (const b of this.tabs.children) b.classList.toggle('on', b.dataset.decoder === id);
+    this.renderChips();
     this.render();
   }
 
   setTuning(freq) {
-    const was = outOfBand(this.expects.get(this.active), this.freq);
+    if (freq === this.freq) return;
     this.freq = freq;
-    if (outOfBand(this.expects.get(this.active), freq) !== was) this.render();
+    this.renderChips();
+    this.render();
+  }
+
+  renderChips() {
+    this.tabs.textContent = '';
+    for (const c of chipRows(this.list, this.running, this.active, this.freq)) {
+      const b = document.createElement('button');
+      b.textContent = c.outOfBand ? `! ${c.id}` : c.id;
+      b.dataset.decoder = c.id;
+      b.dataset.testid = `chip-${c.id}`;
+      b.className = `chip${c.active ? ' on' : ''}${c.outOfBand ? ' warn' : ''}`;
+      if (c.title) b.title = c.title;
+      b.onclick = () => this.onSelect(c.id);
+      this.tabs.appendChild(b);
+    }
   }
 
   push(stream, data, now = Date.now()) {
@@ -112,10 +170,12 @@ export class DecoderPanel {
   render(now = Date.now()) {
     const el = this.body;
     el.textContent = '';
-    const expects = this.expects.get(this.active);
+    if (!this.active) return;
+    const expects = (this.list.find((d) => d.id === this.active) || {}).expects;
     if (outOfBand(expects, this.freq)) {
       const chip = document.createElement('div');
       chip.className = 'chip-warn';
+      chip.dataset.testid = 'decoder-band-warning';
       chip.textContent = `tuned outside ${bandLabel(expects)} — ${this.active} will not decode here`;
       el.appendChild(chip);
     }
@@ -126,7 +186,7 @@ export class DecoderPanel {
       return;
     }
     const rows = this.rows.get(this.active) || [];
-    if (!isTable(this.active)) { if (this.active === 'none') line('no decoder running'); return; }
+    if (!isTable(this.active)) return;
     if (!rows.length) { line('nothing decoded yet'); return; }
     const table = document.createElement('table');
     const head = document.createElement('tr');

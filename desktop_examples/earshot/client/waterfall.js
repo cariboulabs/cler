@@ -1,8 +1,15 @@
 const ROWS = 1024;
 const MAXN = 4096;
 
+// inferno: perceptually uniform (~10 L* per stop), readable under all three
+// colour-blindness types, and it keeps a true black floor — an operator reads
+// black as "nothing there". It owns no blue, which is why the trace can be blue
+// and never be mistaken for a bin.
+const INFERNO = [[0, 0, 4], [27, 12, 65], [74, 12, 107], [120, 28, 109], [165, 44, 96],
+                 [207, 68, 70], [237, 105, 37], [251, 155, 6], [247, 209, 61], [252, 255, 164]];
+
 function colormap() {
-  const stops = [[0, 0, 0], [0, 0, 120], [0, 120, 200], [0, 220, 160], [230, 230, 40], [255, 255, 255]];
+  const stops = INFERNO;
   const lut = new Uint8ClampedArray(256 * 4);
   for (let i = 0; i < 256; i++) {
     const p = (i / 255) * (stops.length - 1);
@@ -29,11 +36,34 @@ export class Waterfall {
     this.lut = colormap();
     this.rowImage = null;
     this.dirty = true;
+    this.readTokens();
     this.bindEvents(this.spec);
     this.bindEvents(this.wf);
     new ResizeObserver(() => { this.resize(); }).observe(this.wf.parentElement);
     this.resize();
   }
+
+  // Components read token names, never raw colours — the canvas has to fetch them
+  // once because 2d fillStyle takes a string.
+  readTokens() {
+    const s = getComputedStyle(document.documentElement);
+    const tok = (n, fallback) => (s.getPropertyValue(n) || '').trim() || fallback;
+    this.col = {
+      ground: tok('--bg-0', '#0e1116'),
+      grid: tok('--border', '#2a323d'),
+      label: tok('--muted', '#8b98a9'),
+      trace: tok('--trace', '#4aa3ff'),
+      marker: tok('--warn', '#e0b341'),
+      passband: 'rgba(224,179,65,0.14)'
+    };
+  }
+
+  resetView() {
+    this.setView(0, 1);
+    if (this.h.onView) this.h.onView(this.view);
+  }
+
+  zoomed() { return this.view.x0 > 0 || this.view.x1 < 1; }
 
   resize() {
     const dpr = window.devicePixelRatio || 1;
@@ -93,7 +123,7 @@ export class Waterfall {
   repaint() {
     const ctx = this.wf.getContext('2d');
     const W = this.wf.width, H = this.wf.height;
-    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#000004'; ctx.fillRect(0, 0, W, H);
     if (!this.n) { this.dirty = false; return; }
     const rowsToDraw = Math.min(H, this.filled);
     const img = ctx.createImageData(W, Math.max(1, rowsToDraw));
@@ -109,35 +139,39 @@ export class Waterfall {
     const ctx = this.spec.getContext('2d');
     const W = this.spec.width, H = this.spec.height;
     const dpr = window.devicePixelRatio || 1;
-    ctx.fillStyle = '#0b0e14'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = this.col.ground; ctx.fillRect(0, 0, W, H);
     if (!this.n || !this.filled) return;
     const font = `${11 * dpr}px system-ui, sans-serif`;
     ctx.font = font;
     const dbRange = 255 * this.dbStep;
-    ctx.strokeStyle = '#1e2633'; ctx.fillStyle = '#8a94a6'; ctx.lineWidth = 1;
+    ctx.strokeStyle = this.col.grid; ctx.fillStyle = this.col.label; ctx.lineWidth = 1;
     for (let db = Math.ceil(this.dbMin / 20) * 20; db <= this.dbMin + dbRange; db += 20) {
       const y = H - ((db - this.dbMin) / dbRange) * H;
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-      ctx.fillText(`${db} dB`, 4 * dpr, y - 2 * dpr);
+      if (y < H - 18 * dpr) ctx.fillText(`${db} dB`, 4 * dpr, y - 2 * dpr);   // the frequency ticks own the bottom strip
     }
     const f0 = this.freqAt(0, W), f1 = this.freqAt(W, W);
     const ticks = 8;
+    let lastRight = -Infinity;   // clamping a label to the edge used to stack it on its neighbour
     for (let i = 0; i <= ticks; i++) {
       const f = f0 + (f1 - f0) * i / ticks;
       const x = (i / ticks) * W;
       ctx.beginPath(); ctx.moveTo(x, H - 14 * dpr); ctx.lineTo(x, H); ctx.stroke();
       const label = (f / 1e6).toFixed(3);
       const tw = ctx.measureText(label).width;
-      ctx.fillText(label, Math.min(Math.max(x - tw / 2, 2), W - tw - 2), H - 3 * dpr);
+      const lx = Math.min(Math.max(x - tw / 2, 2), W - tw - 2);
+      if (lx < lastRight + 6 * dpr) continue;
+      ctx.fillText(label, lx, H - 3 * dpr);
+      lastRight = lx + tw;
     }
     if (this.passbandHz > 0) {
       const xa = this.pxOf(this.center + this.offsetHz - this.passbandHz / 2, W);
       const xb = this.pxOf(this.center + this.offsetHz + this.passbandHz / 2, W);
-      ctx.fillStyle = 'rgba(255,200,60,0.12)'; ctx.fillRect(xa, 0, xb - xa, H);
+      ctx.fillStyle = this.col.passband; ctx.fillRect(xa, 0, xb - xa, H);
     }
     const xo = this.pxOf(this.center + this.offsetHz, W);
-    ctx.strokeStyle = '#ffc83c'; ctx.beginPath(); ctx.moveTo(xo, 0); ctx.lineTo(xo, H); ctx.stroke();
-    ctx.strokeStyle = '#4fd1ff'; ctx.lineWidth = 1.2 * dpr; ctx.beginPath();
+    ctx.strokeStyle = this.col.marker; ctx.beginPath(); ctx.moveTo(xo, 0); ctx.lineTo(xo, H); ctx.stroke();
+    ctx.strokeStyle = this.col.trace; ctx.lineWidth = 1.2 * dpr; ctx.beginPath();
     const base = this.head * MAXN;
     for (let x = 0; x < W; x++) {
       const b = Math.min(this.n - 1, Math.floor(this.binAt(x, W)));
@@ -147,10 +181,21 @@ export class Waterfall {
     ctx.stroke();
   }
 
+  // dB under the pointer, from the newest row — the same numbers the trace is drawn from
+  dbAt(px, width) {
+    if (!this.n || !this.filled) return null;
+    const b = Math.max(0, Math.min(this.n - 1, Math.floor(this.binAt(px, width))));
+    return this.dbMin + this.rows[this.head * MAXN + b] * this.dbStep;
+  }
+
   bindEvents(canvas) {
     let drag = null;
     canvas.addEventListener('mousedown', (e) => { drag = { x: e.offsetX, moved: false }; });
-    canvas.addEventListener('mousemove', (e) => { if (drag && Math.abs(e.offsetX - drag.x) > 3) drag.moved = true; });
+    canvas.addEventListener('mousemove', (e) => {
+      if (drag && Math.abs(e.offsetX - drag.x) > 3) drag.moved = true;
+      if (this.h.onCursor) this.h.onCursor(this.freqAt(e.offsetX, canvas.clientWidth), this.dbAt(e.offsetX, canvas.clientWidth));
+    });
+    canvas.addEventListener('mouseleave', () => { if (this.h.onCursor) this.h.onCursor(null, null); });
     window.addEventListener('mouseup', (e) => {
       if (!drag) return;
       if (drag.moved && canvas === this.wf && this.h.onPan) {

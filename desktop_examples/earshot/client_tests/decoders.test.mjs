@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addRow, bandLabel, cell, columns, isStale, isTable, outOfBand, rdsLines, MAX_ROWS, STALE_MS } from '../client/decoders.js';
+import { addRow, bandLabel, cell, chipRows, columns, costPct, costTotal, isStale, isTable, menuRows,
+         outOfBand, rdsLines, MAX_ROWS, STALE_MS } from '../client/decoders.js';
+
+const LIST = [
+  { id: 'rds', available: true, cost_hint: '~2% of a core', expects: [{ min: 87.5e6, max: 108e6 }] },
+  { id: 'aprs', available: true, cost_hint: '~2% of a core', expects: [{ min: 144.38e6, max: 144.40e6 }] },
+  { id: 'ais', available: true, cost_hint: '~7% of a core', expects: [{ min: 161.97e6, max: 162.03e6 }] },
+  { id: 'adsb', available: false, reason: 'needs a full-rate 1090 MHz magnitude tap' }
+];
 
 test('knows which streams are tables', () => {
   assert.equal(isTable('ais'), true);
@@ -77,4 +85,43 @@ test('band labels read as ranges or spot frequencies', () => {
   assert.equal(bandLabel([{ min: 144.38e6, max: 144.40e6 }]), '144.390 MHz');
   assert.match(bandLabel([{ min: 161.97e6, max: 161.99e6 }, { min: 162.01e6, max: 162.03e6 }]), / or /);
   assert.equal(bandLabel(undefined), '');
+});
+
+test('the menu lists every decoder with its price, checked when running', () => {
+  const rows = menuRows(LIST, ['rds', 'ais']);
+  assert.deepEqual(rows.map((r) => r.id), ['rds', 'aprs', 'ais', 'adsb']);
+  assert.deepEqual(rows.map((r) => r.checked), [true, false, true, false]);
+  assert.equal(rows[0].cost, '~2% of a core');
+  assert.equal(rows[0].band, '87.5–108.0 MHz');
+});
+
+test('an unavailable decoder carries its reason as text, not a tooltip', () => {
+  const adsb = menuRows(LIST, [])[3];
+  assert.equal(adsb.available, false);
+  assert.match(adsb.reason, /full-rate 1090 MHz/);
+});
+
+test('cost adds up and warns past a quarter of a core', () => {
+  assert.equal(costPct('~7% of a core'), 7);
+  assert.equal(costPct(undefined), 0);
+
+  assert.equal(costTotal(LIST, []).text, 'nothing running');
+  const two = costTotal(LIST, ['rds', 'ais']);
+  assert.equal(two.pct, 9);
+  assert.match(two.text, /2 decoders running · ~9% of a core/);
+  assert.equal(two.warn, false);
+
+  const heavy = costTotal([{ id: 'x', cost_hint: '~30% of a core' }], ['x']);
+  assert.equal(heavy.warn, true);
+  assert.match(heavy.note, /most of one/);
+});
+
+test('chips exist only for running decoders and warn from the chip when off band', () => {
+  const chips = chipRows(LIST, ['rds', 'ais'], 'rds', 105.7e6);
+  assert.deepEqual(chips.map((c) => c.id), ['rds', 'ais']);
+  assert.equal(chips[0].active, true);
+  assert.equal(chips[0].outOfBand, false, 'rds is in band at 105.7 MHz');
+  assert.equal(chips[1].outOfBand, true, 'ais is not');
+  assert.match(chips[1].title, /tuned outside/);
+  assert.deepEqual(chipRows(LIST, [], '', 1e6), [], 'nothing running, no chips');
 });
