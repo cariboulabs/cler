@@ -78,12 +78,23 @@ TEST(SourceMux, SelectOfAMissingBackendFailsCleanly) {
     SourceMux mux("mux");
     EXPECT_FALSE(mux.select(SourceMux::Kind::Cariboulite, "nope", 100e6, 2e6));
     EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
-    EXPECT_FALSE(mux.select(SourceMux::Kind::Pluto, "", 100e6, 2e6));
+    EXPECT_FALSE(mux.select(SourceMux::Kind::Pluto, "usb:99.99.9", 100e6, 2e6));
     EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
+#ifdef CLER_HAS_UHD
+    EXPECT_FALSE(mux.select(SourceMux::Kind::UHD, "serial=no-such-usrp", 100e6, 2e6));
+    EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
+#endif
+#ifdef CLER_HAS_SOAPYSDR
+    EXPECT_FALSE(mux.select(SourceMux::Kind::Soapy, "driver=nosuchdriver", 100e6, 2e6));
+    EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
+#endif
 #ifdef CLER_HAS_HACKRF
     EXPECT_FALSE(mux.select(SourceMux::Kind::HackRF, "no-such-serial", 100e6, 2.4e6));
     EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
 #endif
+    EXPECT_FALSE(mux.probe(SourceMux::Kind::Cariboulite, "nope"));
+    EXPECT_FALSE(mux.probe(SourceMux::Kind::Pluto, "usb:99.99.9"));
+    EXPECT_TRUE(mux.probe(SourceMux::Kind::Sim, ""));
     EXPECT_TRUE(mux.select(SourceMux::Kind::Sim, "", 100e6, 2e6));
     EXPECT_EQ(mux.kind(), SourceMux::Kind::Sim);
 }
@@ -136,8 +147,14 @@ TEST(SourceMux, HackRFIfPresent) {
     EXPECT_DOUBLE_EQ(mux.rate(), 2.4e6);
     EXPECT_FALSE(mux.lost());
     auto again = mux.enumerate();
-    ASSERT_EQ(again.size(), 2u);
-    EXPECT_EQ(again[0].id, hack->id);
+    size_t hacks = 0;
+    bool sim = false;
+    for (auto& d : again) {
+        if (d.kind == SourceMux::Kind::HackRF) { ++hacks; EXPECT_EQ(d.id, hack->id); }
+        if (d.kind == SourceMux::Kind::Sim) sim = true;
+    }
+    EXPECT_EQ(hacks, 1u);
+    EXPECT_TRUE(sim);
     auto caps = mux.capabilities();
     ASSERT_EQ(caps.size(), 5u);
     EXPECT_EQ(caps[1].type, "enum");
@@ -186,5 +203,78 @@ TEST(SourceMux, CaribouliteIfPresent) {
     EXPECT_GT(n, 100000u);
     mux.close();
     EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
+}
+#endif
+
+#ifdef CLER_HAS_LIBIIO
+TEST(SourceMux, PlutoIfPresent) {
+    SourceMux mux("mux");
+    auto devs = mux.enumerate();
+    const SourceMux::DeviceInfo* pluto = nullptr;
+    for (auto& d : devs) if (d.kind == SourceMux::Kind::Pluto) pluto = &d;
+    if (!pluto) GTEST_SKIP() << "no Pluto connected";
+
+    ASSERT_TRUE(mux.select(SourceMux::Kind::Pluto, pluto->id, 100.5e6, 2.4e6));
+    EXPECT_EQ(mux.kind(), SourceMux::Kind::Pluto);
+    EXPECT_NEAR(mux.rate(), 2.4e6, 2.4e4);
+    EXPECT_NEAR(mux.center(), 100.5e6, 1e3);
+    EXPECT_FALSE(mux.lost());
+    auto caps = mux.capabilities();
+    ASSERT_EQ(caps.size(), 4u);
+    EXPECT_EQ(caps[0].id, "freq");
+    EXPECT_LE(caps[0].min, 100.5e6);
+    EXPECT_EQ(caps[1].id, "rate");
+    EXPECT_TRUE(caps[1].ro);
+    EXPECT_EQ(caps[2].id, "gain");
+    EXPECT_EQ(caps[3].id, "agc");
+    EXPECT_EQ(caps[3].type, "bool");
+    mux.set("gain", 40);
+    EXPECT_NEAR(mux.capabilities()[2].value, 40.0, 1.0);
+    mux.set("freq", 101.1e6);
+    EXPECT_NEAR(mux.center(), 101.1e6, 1e3);
+    const size_t n = pump(mux, 0.5);
+    EXPECT_GT(n, 500000u);
+    mux.close();
+}
+#endif
+
+#ifdef CLER_HAS_UHD
+TEST(SourceMux, UHDIfPresent) {
+    SourceMux mux("mux");
+    auto devs = mux.enumerate();
+    const SourceMux::DeviceInfo* usrp = nullptr;
+    for (auto& d : devs) if (d.kind == SourceMux::Kind::UHD) usrp = &d;
+    if (!usrp) GTEST_SKIP() << "no USRP connected";
+
+    ASSERT_TRUE(mux.select(SourceMux::Kind::UHD, usrp->id, 100e6, 2e6));
+    EXPECT_EQ(mux.kind(), SourceMux::Kind::UHD);
+    EXPECT_GT(mux.rate(), 0.0);
+    auto caps = mux.capabilities();
+    ASSERT_GE(caps.size(), 3u);
+    EXPECT_EQ(caps[0].id, "freq");
+    EXPECT_EQ(caps[1].id, "rate");
+    EXPECT_TRUE(caps[1].ro);
+    EXPECT_EQ(caps[2].id, "gain");
+    const size_t n = pump(mux, 0.5);
+    EXPECT_GT(n, 100000u);
+    mux.close();
+}
+#endif
+
+#ifdef CLER_HAS_SOAPYSDR
+TEST(SourceMux, SoapyEnumerateSkipsNativeDrivers) {
+    SourceMux mux("mux");
+    for (const auto& d : mux.enumerate()) {
+        if (d.kind != SourceMux::Kind::Soapy) continue;
+#ifdef CLER_HAS_HACKRF
+        EXPECT_EQ(d.id.find("driver=hackrf"), std::string::npos) << d.id;
+#endif
+#ifdef CLER_HAS_LIBIIO
+        EXPECT_EQ(d.id.find("driver=plutosdr"), std::string::npos) << d.id;
+#endif
+#ifdef CLER_HAS_UHD
+        EXPECT_EQ(d.id.find("driver=uhd"), std::string::npos) << d.id;
+#endif
+    }
 }
 #endif

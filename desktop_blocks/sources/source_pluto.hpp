@@ -38,6 +38,36 @@ inline const char* to_iio_gain_control_mode(PlutoAgcMode mode) {
 struct SourcePlutoBlock : public cler::BlockBase {
     static constexpr bool may_block = true;
 
+    struct Probe {
+        bool ok = false;
+        long long fmin = 70000000, fmax = 6000000000;
+        long long rmin = 2083333, rmax = 61440000;
+    };
+
+    // Non-panicking availability check; also reads what the driver will accept
+    // so callers can clamp before the panicking constructor runs.
+    static Probe probe(const char* uri) {
+        Probe pr;
+        iio_context* ctx = iio_create_context_from_uri(uri);
+        if (!ctx) return pr;
+        iio_device* phy = iio_context_find_device(ctx, "ad9361-phy");
+        iio_device* rx_dev = iio_context_find_device(ctx, "cf-ad9361-lpc");
+        if (phy && rx_dev) {
+            pr.ok = true;
+            char buf[128];
+            iio_channel* lo = iio_device_find_channel(phy, "altvoltage0", true);
+            if (lo && iio_channel_attr_read(lo, "frequency_available", buf, sizeof buf) > 0) {
+                read_range(buf, pr.fmin, pr.fmax);
+            }
+            iio_channel* chn = iio_device_find_channel(phy, "voltage0", false);
+            if (chn && iio_channel_attr_read(chn, "sampling_frequency_available", buf, sizeof buf) > 0) {
+                read_range(buf, pr.rmin, pr.rmax);
+            }
+        }
+        iio_context_destroy(ctx);
+        return pr;
+    }
+
     SourcePlutoBlock(const char* name,
                      const char* uri,          // e.g. "ip:192.168.2.1"
                      long long freq_hz,
@@ -90,6 +120,7 @@ struct SourcePlutoBlock : public cler::BlockBase {
             cler::panic(msg);
         }
         _lo = lo;
+        _chn = chn;
 
         if (gain_db < 0.0) {
             iio_channel_attr_write(chn, "gain_control_mode", to_iio_gain_control_mode(agc_mode));
@@ -137,6 +168,7 @@ struct SourcePlutoBlock : public cler::BlockBase {
         if (_consumed >= _available) {
             ssize_t nbytes = iio_buffer_refill(_buf);
             if (nbytes < 0) {
+                _lost = true;
                 return cler::Error::ProcedureError;
             }
             _available = static_cast<size_t>(nbytes) / (2 * sizeof(int16_t));
@@ -158,6 +190,32 @@ struct SourcePlutoBlock : public cler::BlockBase {
 
     long long get_frequency() const { return _freq_hz; }
     long long get_sample_rate() const { return _samp_rate_hz; }
+    bool lost() const { return _lost; }
+
+    double get_gain() const {
+        double g = 0.0;
+        if (_chn) iio_channel_attr_read_double(_chn, "hardwaregain", &g);
+        return g;
+    }
+
+    bool get_agc() const {
+        char buf[32];
+        if (_chn && iio_channel_attr_read(_chn, "gain_control_mode", buf, sizeof buf) > 0) {
+            return std::string(buf) != "manual";
+        }
+        return false;
+    }
+
+    void set_gain(double gain_db) {
+        if (!_chn) return;
+        iio_channel_attr_write(_chn, "gain_control_mode", "manual");
+        iio_channel_attr_write_double(_chn, "hardwaregain", gain_db);
+    }
+
+    void set_agc(bool on, PlutoAgcMode mode = PlutoAgcMode::FastAttack) {
+        if (!_chn) return;
+        iio_channel_attr_write(_chn, "gain_control_mode", on ? to_iio_gain_control_mode(mode) : "manual");
+    }
 
     // Retune while streaming (phy attrs are safe to write at runtime)
     void set_frequency(long long freq_hz) {
@@ -167,6 +225,11 @@ struct SourcePlutoBlock : public cler::BlockBase {
     }
 
 private:
+    static void read_range(const char* buf, long long& lo_out, long long& hi_out) {
+        long long a = 0, b = 0, c = 0;
+        if (std::sscanf(buf, "[%lld %lld %lld]", &a, &b, &c) == 3) { lo_out = a; hi_out = c; }
+    }
+
     static void convert_i16_to_cf32(const int16_t* src, std::complex<float>* dst, size_t n) {
         constexpr float scale = 1.0f / 2048.0f;
         size_t i = 0;
@@ -204,6 +267,8 @@ private:
     iio_channel* _rx_i = nullptr;
     iio_channel* _rx_q = nullptr;
     iio_channel* _lo = nullptr;
+    iio_channel* _chn = nullptr;
+    bool _lost = false;
 
     long long _freq_hz;
     long long _samp_rate_hz;

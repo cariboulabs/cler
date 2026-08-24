@@ -200,7 +200,7 @@ JSON text frames:
 - client→server
   - `hello`: `{proto:1, token?, accept:{codecs:[...]}}`
   - `set`: `{<control id>: value, ...}` incl. `freq`, `mode`, `offset`
-  - `source`: `{id}`; `rescan`: `{}`
+  - `source`: `{id, rate?}` (rate in Hz, clamped to what the backend accepts); `rescan`: `{}`
   - `record`: `{on, name?}`; `play`: `{name, pos?, pause?, loop?}`
 
 Codec/fps negotiation lives in `hello` from day one so the WAN profile (phase 5)

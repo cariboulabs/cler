@@ -174,9 +174,20 @@ function renderControls() {
   for (const c of rest) if (c.ro) for (const el of $('controls').querySelectorAll(`[data-id="${CSS.escape(c.id)}"] input, [data-id="${CSS.escape(c.id)}"] select`)) el.dataset.ro = '1';
 }
 
+const RATES = [['keep rate', 0], ['1 MS/s', 1e6], ['2 MS/s', 2e6], ['2.4 MS/s', 2.4e6],
+               ['4 MS/s', 4e6], ['8 MS/s', 8e6], ['10 MS/s', 10e6], ['20 MS/s', 20e6]];
+
 function renderDevices() {
   const list = $('devlist'); list.textContent = '';
   if (!state.sources.length) { list.textContent = 'no devices reported yet'; }
+  const ratePick = document.createElement('select'); ratePick.id = 'devrate';
+  for (const [label, hz] of RATES) {
+    const o = document.createElement('option'); o.textContent = label; o.value = hz;
+    ratePick.appendChild(o);
+  }
+  const rateRow = document.createElement('div'); rateRow.className = 'dev';
+  const rateLbl = document.createElement('span'); rateLbl.className = 'lbl'; rateLbl.textContent = 'sample rate on connect';
+  rateRow.append(rateLbl, ratePick); list.appendChild(rateRow);
   for (const s of state.sources) {
     const row = document.createElement('div'); row.className = 'dev';
     const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = s.label || s.id;
@@ -185,7 +196,7 @@ function renderDevices() {
     const current = state.st.source === s.id;
     btn.textContent = current ? 'connected' : 'Connect';
     btn.disabled = current || s.available === false || state.role !== 'ctl';
-    btn.onclick = () => send(encodeSource(s.id));
+    btn.onclick = () => send(encodeSource(s.id, Number($('devrate')?.value || 0)));
     row.append(lbl, kind, btn); list.appendChild(row);
   }
 }

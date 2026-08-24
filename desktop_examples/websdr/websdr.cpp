@@ -173,6 +173,13 @@ struct App {
 
     template <typename FG>
     bool select(FG& fg, SourceMux::Kind k, const std::string& dev, double freq_hz, double rate_hz, bool quiet = false) {
+        const bool same = running && k == kind && (dev == id || dev.empty());
+        if (!same && !src.probe(k, dev)) {
+            if (!quiet) srv.send_error("source", "could not open " + source_id(k, dev));
+            return false;
+        }
+        const SourceMux::Kind prev_kind = kind;
+        const std::string prev_id = id;
         switching = true;
         srv.set_state(state_json());
         if (running) { fg.stop(); running = false; }
@@ -181,6 +188,7 @@ struct App {
         kind = k; id = dev;
         rescan();
         if (!ok) {
+            kind = prev_kind; id = prev_id;
             if (!quiet) { srv.send_error("source", "could not open " + source_id(k, dev)); publish(true); }
             return false;
         }
@@ -382,8 +390,10 @@ int main(int argc, char** argv) {
                 }
                 app.publish();
             } else if (t == "source") {
-                if (parse_source(web::json_str(f, "id"), k, id)) app.select(fg, k, id, app.tuned(), app.rate);
-                else srv.send_error("source", "unknown source");
+                if (parse_source(web::json_str(f, "id"), k, id)) {
+                    const double r = web::json_num(f, "rate");
+                    app.select(fg, k, id, app.tuned(), r > 0 ? r : app.rate);
+                } else srv.send_error("source", "unknown source");
             } else if (t == "rescan") {
                 app.rescan();
                 app.publish(true);

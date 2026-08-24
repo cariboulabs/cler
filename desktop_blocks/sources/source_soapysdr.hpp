@@ -188,6 +188,7 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
             return cler::Error::NotEnoughSamples;
         } else {
             std::cerr << "SourceSoapySDRBlock: readStream error: " << SoapySDR::errToStr(ret) << std::endl;
+            _lost = true;
             return cler::Error::TERM_ProcedureError;
         }
     }
@@ -200,6 +201,20 @@ struct SourceSoapySDRBlock : public cler::BlockBase {
             std::cerr << "SourceSoapySDRBlock: set_frequency failed: " << e.what() << std::endl;
         }
     }
+
+    void set_gain(const std::string& name, double gain) {
+        try {
+            device->setGain(SOAPY_SDR_RX, channel_idx, name, gain);
+        } catch (const std::exception& e) {
+            std::cerr << "SourceSoapySDRBlock: set_gain(" << name << ") failed: " << e.what() << std::endl;
+        }
+    }
+
+    double get_gain(const std::string& name) const {
+        return device->getGain(SOAPY_SDR_RX, channel_idx, name);
+    }
+
+    bool lost() const { return _lost; }
 
     void set_gain(double gain) {
         try {
@@ -304,6 +319,7 @@ private:
 
     size_t mtu;
     size_t overflow_count = 0;
+    bool _lost = false;
 };
 
 using SourceSoapySDRBlockCF32 = SourceSoapySDRBlock<std::complex<float>>;

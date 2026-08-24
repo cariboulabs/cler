@@ -126,12 +126,14 @@ struct SourceUHDBlock : public cler::BlockBase {
                           << " MHz out of range" << std::endl;
             }
             usrp->set_rx_freq(uhd::tune_request_t(config.center_freq_Hz), channel);
+            center_freq = config.center_freq_Hz;
 
             auto gain_range = usrp->get_rx_gain_range(channel);
             if (config.gain < gain_range.start() || config.gain > gain_range.stop()) {
                 std::cerr << "Gain " << config.gain << " dB out of range" << std::endl;
             }
             usrp->set_rx_gain(config.gain, channel);
+            gain_db = config.gain;
 
             // Same no-op skip as the rate above.
             if (config.bandwidth_Hz > 0 &&
@@ -218,6 +220,7 @@ struct SourceUHDBlock : public cler::BlockBase {
                     num_rx = rx_stream->recv(write_ptr, write_size, md, 0.1);
                 } catch (const std::exception& e) {
                     std::cerr << "SourceUHDBlock: recv failed: " << e.what() << std::endl;
+                    _lost.store(true, std::memory_order_relaxed);
                     result_error = cler::Error::TERM_ProcedureError;
                     return;
                 }
@@ -229,6 +232,7 @@ struct SourceUHDBlock : public cler::BlockBase {
                 } else if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE &&
                             md.error_code != uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {
                     std::cerr << "SourceUHDBlock: " << md.strerror() << std::endl;
+                    _lost.store(true, std::memory_order_relaxed);
                     result_error = cler::Error::TERM_ProcedureError;
                     return;
                 }
@@ -259,6 +263,24 @@ struct SourceUHDBlock : public cler::BlockBase {
     }
     size_t get_overflow_count() const { return overflow_count; }
 
+    static bool can_open(const std::string& addr) {
+        try {
+            return uhd::usrp::multi_usrp::make(addr) != nullptr;
+        } catch (const std::exception&) {
+            return false;
+        }
+    }
+
+    bool lost() const { return _lost.load(std::memory_order_relaxed); }
+    double get_frequency() const { return center_freq; }
+    double get_gain() const { return gain_db; }
+    uhd::freq_range_t rx_freq_range() const { return usrp->get_rx_freq_range(0); }
+    uhd::gain_range_t rx_gain_range() const { return usrp->get_rx_gain_range(0); }
+    uhd::meta_range_t rx_rate_range() const { return usrp->get_rx_rates(0); }
+    std::vector<std::string> rx_antennas() const { return usrp->get_rx_antennas(0); }
+    std::string rx_antenna() const { return usrp->get_rx_antenna(0); }
+    void set_rx_antenna(const std::string& a) { usrp->set_rx_antenna(a, 0); }
+
 protected:
     uhd::usrp::multi_usrp::sptr usrp;
     uhd::rx_streamer::sptr rx_stream;
@@ -275,6 +297,7 @@ private:
     std::string wire_format;
     bool _quiet;
     std::atomic<bool> _configuring;
+    std::atomic<bool> _lost{false};
     size_t overflow_count = 0;
 
     // Requested rates/bandwidths closer than this are treated as identical.

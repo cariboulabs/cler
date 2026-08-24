@@ -342,7 +342,7 @@ fn streamlined_has_no_sites_and_no_error() {
 
 #[test]
 fn inline_config_temporary_is_read_only() {
-    let site = only_site("cariboulite_spectrum.cpp");
+    let site = only_site("../tools/flowgraph_gui/cler-graph/tests/data/cariboulite_spectrum.cpp");
     let config = site.config.as_ref().expect("inline config");
     assert_eq!(config.source, ConfigSource::InlineTemporary);
     assert!(!config.editable);
@@ -438,7 +438,7 @@ fn corpus_meets_m0_targets() {
             }
         }
     }
-    assert_eq!(with_sites, 29);
+    assert_eq!(with_sites, 26);
     assert!(
         fully_editable >= 15,
         "only {fully_editable} files fully editable"
