@@ -1,6 +1,6 @@
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
-#include "websdr_client_files.hpp"
+#include "earshot_client_files.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -23,8 +23,8 @@ static std::string state_json(uint32_t gen, double freq, const std::string& mode
 
 int main(int argc, char** argv) {
     web::ServerOptions o;
-    o.files = WEBSDR_CLIENT_FILES;
-    o.file_count = WEBSDR_CLIENT_FILES_COUNT;
+    o.files = EARSHOT_CLIENT_FILES;
+    o.file_count = EARSHOT_CLIENT_FILES_COUNT;
     o.version = "web_demo";
     for (int i = 1; i < argc; ++i) {
         auto next = [&](const char* flag) -> const char* { return (!std::strcmp(argv[i], flag) && i + 1 < argc) ? argv[++i] : nullptr; };

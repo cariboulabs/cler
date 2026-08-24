@@ -1,10 +1,10 @@
 # Build cler targets for any architecture/distro under qemu:
-#   docker buildx build --platform linux/arm64 --build-arg BASE=debian:bullseye --build-arg TARGETS=websdr \
+#   docker buildx build --platform linux/arm64 --build-arg BASE=debian:bullseye --build-arg TARGETS=earshot \
 #     -f docker/Dockerfile.build --target out -o out/linux-arm64 .
 ARG BASE=debian:bullseye
 FROM ${BASE} AS build
 ARG CARIBOULITE=1
-ARG TARGETS=websdr
+ARG TARGETS=earshot
 ARG CMAKE_ARGS="-DCLER_BUILD_BLOCKS_GUI=OFF -DBUILD_SHARED_LIBS=OFF -DBUILD_STATIC_LIBS=ON"
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \

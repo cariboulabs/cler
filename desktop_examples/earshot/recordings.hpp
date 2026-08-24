@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-namespace websdr {
+namespace earshot {
 
 inline uint64_t free_disk(const std::string& dir) {
     struct statvfs st;
@@ -120,10 +120,10 @@ inline Pruned prune_recordings(const std::string& dir, uint64_t max_bytes, uint6
         out.bytes += c.bytes;
         ++out.recordings;
         // a headless box must not delete a client's captures silently
-        std::fprintf(stderr, "websdr: pruned %s (%llu MB)\n", c.base.c_str(),
+        std::fprintf(stderr, "earshot: pruned %s (%llu MB)\n", c.base.c_str(),
                      static_cast<unsigned long long>(c.bytes >> 20));
     }
     return out;
 }
 
-}  // namespace websdr
+}  // namespace earshot

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>cler websdr</title>
+<title>cler earshot</title>
 <link rel="icon" href="data:,">
 <style>
   :root { --bg:#0b0e14; --panel:#121722; --line:#1e2633; --fg:#e6e9ef; --dim:#8a94a6; --acc:#4fd1ff; --warn:#ffc83c; --bad:#ff5c5c; }
@@ -52,7 +52,7 @@
 <body>
 <div id="app">
   <header>
-    <span class="title">cler websdr</span>
+    <span class="title">cler earshot</span>
     <span class="freq"><input id="freq" type="text" value="—"> </span>
     <span id="source" class="pill">no source</span>
     <span class="spacer"></span>
@@ -102,8 +102,8 @@ import * as panel from '/client/panel.js';
 import { DecoderPanel } from '/client/decoders.js';
 
 const $ = (id) => document.getElementById(id);
-const prefs = (() => { try { return JSON.parse(localStorage.getItem('websdr') || '{}'); } catch { return {}; } })();
-const savePrefs = () => { try { localStorage.setItem('websdr', JSON.stringify(prefs)); } catch {} };
+const prefs = (() => { try { return JSON.parse(localStorage.getItem('earshot') || '{}'); } catch { return {}; } })();
+const savePrefs = () => { try { localStorage.setItem('earshot', JSON.stringify(prefs)); } catch {} };
 
 const state = { gen: 0, hello: null, st: {}, model: [], sources: [], connected: false, role: 'view' };
 const audio = new AudioPlayer();

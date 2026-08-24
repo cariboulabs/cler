@@ -1,9 +1,13 @@
-# websdr — cler receiver in a browser, over ssh
+# earshot — cler receiver in a browser, over ssh
 
 Status: plan v3 — v2 was three independent critiques (architecture, ops/security,
 frontend/protocol); v3 puts SourceMux back over the compiled-in backends, makes
-the device list the first screen, and switches sources in place. Nothing built.
-2026-08-23.
+the device list the first screen, and switches sources in place. 2026-08-23;
+phases 1-4 are built and merged, phase 5 is not.
+
+Named `websdr` until 2026-08-24; renamed because "WebSDR" is PA3FWM's existing
+project and collided with `openwebrx_connector`, the plugin that hands cler
+radios to OpenWebRX. Nothing about the protocol or the layout changed with it.
 
 ## Goal
 
@@ -135,12 +139,12 @@ HTTP: the library serves `/` and `/client/*` from the embedded files (or
 (`WebServer::safe_name`). Everything else is an app route:
 `srv.add_http_route(prefix, handler)` — longest prefix wins, the library applies
 the same token gate it applies to the WebSocket, the handler returns
-`{status, body, content_type}`. websdr registers two:
+`{status, body, content_type}`. earshot registers two:
 - `/health` — version, uptime, clients, source, rate, overflows, recording, free
   disk. The handler runs on an HTTP thread and only reads a snapshot the main
   thread refreshes in `publish()`; App's own fields stay single-threaded.
 - `/recordings` (list) and `/recordings/<name>.sigmf-{data,meta}` (GET) —
-  `desktop_examples/websdr/recordings_route.hpp`, bare filenames only, resolved
+  `desktop_examples/earshot/recordings_route.hpp`, bare filenames only, resolved
   inside `--record-dir`.
 
 So the library knows sockets, framing, access control and static files; it never
@@ -250,7 +254,7 @@ adds `pcm16@24k`/`opus`, smaller/slower spectrum, without a flag day.
 ## Usage
 
 ```bash
-cler-websdr                     # no args: UI opens on the Devices list
+earshot                         # no args: UI opens on the Devices list
 ssh -L 8080:localhost:8080 box  # from any laptop; open http://localhost:8080
 ```
 
@@ -270,7 +274,7 @@ nginx + basic auth in front if a client insists.
 - `--state-file` persists last device/tuning/gains/mode as JSON; reboot comes up
   where it was. Config file only if a client asks; systemd `EnvironmentFile` covers it.
 - `--version` prints git sha + build date; `/health` returns the same plus live state.
-- `misc/websdr/cler-websdr.service` (Restart=on-failure, dedicated user, udev notes
+- `misc/earshot/cler-earshot.service` (Restart=on-failure, dedicated user, udev notes
   for HackRF/Pluto/USRP) ships with phase 1.
 - RPi build notes + measured CPU at 2.5 MS/s before phase 1 is called done.
 

@@ -8,7 +8,7 @@
 #include <fstream>
 #include <string>
 
-namespace websdr {
+namespace earshot {
 
 // GET /recordings -> the SigMF captures on disk; /recordings/<name>.sigmf-{data,meta} -> one file.
 // Runs on an HTTP thread: `dir` is fixed at startup and only the filesystem is read.

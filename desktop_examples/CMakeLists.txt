@@ -93,7 +93,7 @@ endif()
 add_subdirectory(fm_radio)
 add_subdirectory(ais_receiver)
 add_subdirectory(scanner)
-add_subdirectory(websdr)
+add_subdirectory(earshot)
 add_subdirectory(openwebrx_connector)
 add_subdirectory(aprs_receiver)
 

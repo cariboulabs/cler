@@ -147,9 +147,9 @@ add_test(NAME connector_test COMMAND ${CMAKE_COMMAND} -E env
     OPENWEBRX_CONNECTOR_BIN=$<TARGET_FILE:openwebrx_connector> $<TARGET_FILE:connector_test>)
 add_dependencies(connector_test openwebrx_connector)
 
-add_executable(websdr_ops_test test_websdr_ops.cpp)
-target_link_libraries(websdr_ops_test gtest_main cler::desktop_blocks)
-add_test(NAME websdr_ops_test COMMAND websdr_ops_test)
+add_executable(earshot_ops_test test_earshot_ops.cpp)
+target_link_libraries(earshot_ops_test gtest_main cler::desktop_blocks)
+add_test(NAME earshot_ops_test COMMAND earshot_ops_test)
 
 if (CLER_BUILD_BLOCKS_WEB)
     add_executable(web_blocks_test test_web_blocks.cpp)
@@ -159,28 +159,28 @@ endif()
 
 find_program(NODE_EXECUTABLE node)
 if (NODE_EXECUTABLE)
-    add_test(NAME websdr_client_test COMMAND ${NODE_EXECUTABLE} --test
-        ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/proto.test.mjs
-        ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/panel.test.mjs
-        ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/decoders.test.mjs)
+    add_test(NAME earshot_client_test COMMAND ${NODE_EXECUTABLE} --test
+        ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/proto.test.mjs
+        ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/panel.test.mjs
+        ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/decoders.test.mjs)
 endif()
 
-if (TARGET websdr)
+if (TARGET earshot)
     if (NODE_EXECUTABLE)
-        add_test(NAME websdr_e2e_test COMMAND ${CMAKE_COMMAND} -E env
-            WEBSDR_BIN=$<TARGET_FILE:websdr> NODE_PATH=${PROJECT_SOURCE_DIR}/tools/flowgraph_gui/app/node_modules
-            ${NODE_EXECUTABLE} ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/e2e.mjs)
+        add_test(NAME earshot_e2e_test COMMAND ${CMAKE_COMMAND} -E env
+            EARSHOT_BIN=$<TARGET_FILE:earshot> NODE_PATH=${PROJECT_SOURCE_DIR}/tools/flowgraph_gui/app/node_modules
+            ${NODE_EXECUTABLE} ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/e2e.mjs)
     else()
-        add_test(NAME websdr_e2e_test COMMAND sh -c "echo SKIP: node not found; exit 77")
+        add_test(NAME earshot_e2e_test COMMAND sh -c "echo SKIP: node not found; exit 77")
     endif()
-    set_tests_properties(websdr_e2e_test PROPERTIES SKIP_RETURN_CODE 77)
+    set_tests_properties(earshot_e2e_test PROPERTIES SKIP_RETURN_CODE 77)
 
     if (NODE_EXECUTABLE)
-        add_test(NAME websdr_integration_test COMMAND ${CMAKE_COMMAND} -E env
-            WEBSDR_BIN=$<TARGET_FILE:websdr>
-            ${NODE_EXECUTABLE} ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/integration.mjs)
+        add_test(NAME earshot_integration_test COMMAND ${CMAKE_COMMAND} -E env
+            EARSHOT_BIN=$<TARGET_FILE:earshot>
+            ${NODE_EXECUTABLE} ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/integration.mjs)
     else()
-        add_test(NAME websdr_integration_test COMMAND sh -c "echo SKIP: node not found; exit 77")
+        add_test(NAME earshot_integration_test COMMAND sh -c "echo SKIP: node not found; exit 77")
     endif()
-    set_tests_properties(websdr_integration_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180)
+    set_tests_properties(earshot_integration_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180)
 endif()

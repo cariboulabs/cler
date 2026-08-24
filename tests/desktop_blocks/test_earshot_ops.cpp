@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "desktop_examples/websdr/recordings.hpp"
-#include "desktop_examples/websdr/watchdog.hpp"
+#include "desktop_examples/earshot/recordings.hpp"
+#include "desktop_examples/earshot/watchdog.hpp"
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -20,7 +20,7 @@ namespace {
 namespace fs = std::filesystem;
 
 std::string temp_dir(const char* tag) {
-    const auto dir = fs::temp_directory_path() / (std::string("websdr_ops_") + tag + "_" + std::to_string(::getpid()));
+    const auto dir = fs::temp_directory_path() / (std::string("earshot_ops_") + tag + "_" + std::to_string(::getpid()));
     fs::remove_all(dir);
     fs::create_directories(dir);
     return dir.string();
@@ -60,13 +60,13 @@ bool exists(const std::string& dir, const std::string& name) {
 
 }  // namespace
 
-TEST(WebsdrRecordings, PrunesOldestPairsUntilUnderTheCap) {
+TEST(EarshotRecordings, PrunesOldestPairsUntilUnderTheCap) {
     const std::string dir = temp_dir("cap");
     make_recording(dir, "old", 400 * 1024, std::chrono::seconds(300));
     make_recording(dir, "mid", 400 * 1024, std::chrono::seconds(200));
     make_recording(dir, "new", 400 * 1024, std::chrono::seconds(100));
 
-    const auto p = websdr::prune_recordings(dir, 900 * 1024, 0, "");
+    const auto p = earshot::prune_recordings(dir, 900 * 1024, 0, "");
 
     EXPECT_EQ(p.recordings, 1u);
     EXPECT_GE(p.bytes, 400u * 1024u);
@@ -78,12 +78,12 @@ TEST(WebsdrRecordings, PrunesOldestPairsUntilUnderTheCap) {
     fs::remove_all(dir);
 }
 
-TEST(WebsdrRecordings, NeverPrunesTheRecordingBeingWritten) {
+TEST(EarshotRecordings, NeverPrunesTheRecordingBeingWritten) {
     const std::string dir = temp_dir("keep");
     make_recording(dir, "inprogress", 800 * 1024, std::chrono::seconds(600));   // oldest on purpose
     make_recording(dir, "done", 400 * 1024, std::chrono::seconds(100));
 
-    const auto p = websdr::prune_recordings(dir, 100 * 1024, 0, dir + "/inprogress");
+    const auto p = earshot::prune_recordings(dir, 100 * 1024, 0, dir + "/inprogress");
 
     EXPECT_EQ(p.recordings, 1u);
     EXPECT_TRUE(exists(dir, "inprogress"));
@@ -91,37 +91,37 @@ TEST(WebsdrRecordings, NeverPrunesTheRecordingBeingWritten) {
     fs::remove_all(dir);
 }
 
-TEST(WebsdrRecordings, StopsAtTheCapAndIsANoOpBelowIt) {
+TEST(EarshotRecordings, StopsAtTheCapAndIsANoOpBelowIt) {
     const std::string dir = temp_dir("stop");
     for (int i = 0; i < 4; ++i) {
         make_recording(dir, "r" + std::to_string(i), 400 * 1024, std::chrono::seconds(400 - 100 * i));
     }
 
     // 4 x ~400 KB, cap 1 MB: the two oldest cover the excess, the rest stay
-    const auto p = websdr::prune_recordings(dir, 1024 * 1024, 0, "");
+    const auto p = earshot::prune_recordings(dir, 1024 * 1024, 0, "");
     EXPECT_EQ(p.recordings, 2u);
     EXPECT_FALSE(exists(dir, "r0"));
     EXPECT_FALSE(exists(dir, "r1"));
     EXPECT_TRUE(exists(dir, "r2"));
     EXPECT_TRUE(exists(dir, "r3"));
 
-    const auto again = websdr::prune_recordings(dir, 10 * 1024 * 1024, 0, "");
+    const auto again = earshot::prune_recordings(dir, 10 * 1024 * 1024, 0, "");
     EXPECT_EQ(again.recordings, 0u);
     EXPECT_EQ(again.bytes, 0u);
 
-    const auto unlimited = websdr::prune_recordings(dir, 0, 0, "");
+    const auto unlimited = earshot::prune_recordings(dir, 0, 0, "");
     EXPECT_EQ(unlimited.recordings, 0u);
     EXPECT_TRUE(exists(dir, "r2"));
     fs::remove_all(dir);
 }
 
-TEST(WebsdrRecordings, IgnoresFilesThatAreNotRecordings) {
+TEST(EarshotRecordings, IgnoresFilesThatAreNotRecordings) {
     const std::string dir = temp_dir("junk");
     std::ofstream(dir + "/notes.txt") << "hello";
     std::ofstream(dir + "/orphan.sigmf-meta") << "{}";
     make_recording(dir, "real", 400 * 1024, std::chrono::seconds(300));
 
-    const auto p = websdr::prune_recordings(dir, 1, 0, "");
+    const auto p = earshot::prune_recordings(dir, 1, 0, "");
 
     EXPECT_EQ(p.recordings, 1u);
     EXPECT_FALSE(exists(dir, "real"));
@@ -132,7 +132,7 @@ TEST(WebsdrRecordings, IgnoresFilesThatAreNotRecordings) {
 
 // The live capture must not be able to make the archive look over budget: it is
 // excluded from the total, not just from deletion.
-TEST(WebsdrRecordings, ALiveRecordingLargerThanTheCapKeepsTheArchive) {
+TEST(EarshotRecordings, ALiveRecordingLargerThanTheCapKeepsTheArchive) {
     const std::string dir = temp_dir("livecap");
     make_recording(dir, "archived_a", 300 * 1024, std::chrono::seconds(400));
     make_recording(dir, "archived_b", 300 * 1024, std::chrono::seconds(300));
@@ -140,7 +140,7 @@ TEST(WebsdrRecordings, ALiveRecordingLargerThanTheCapKeepsTheArchive) {
 
     // cap far below the live file, archive comfortably inside it
     for (int tick = 0; tick < 5; ++tick) {
-        const auto p = websdr::prune_recordings(dir, 1024 * 1024, 0, dir + "/live");
+        const auto p = earshot::prune_recordings(dir, 1024 * 1024, 0, dir + "/live");
         EXPECT_EQ(p.recordings, 0u) << "tick " << tick << " deleted archived recordings";
     }
     EXPECT_TRUE(exists(dir, "archived_a"));
@@ -151,12 +151,12 @@ TEST(WebsdrRecordings, ALiveRecordingLargerThanTheCapKeepsTheArchive) {
 
 // Another process writing into the same directory has no `keep` to protect it,
 // so recent files are left alone whoever wrote them.
-TEST(WebsdrRecordings, LeavesFreshRecordingsAlone) {
+TEST(EarshotRecordings, LeavesFreshRecordingsAlone) {
     const std::string dir = temp_dir("fresh");
     make_recording(dir, "someone_elses", 4 * 1024 * 1024);   // mtime now
     make_recording(dir, "ours", 400 * 1024, std::chrono::seconds(300));
 
-    const auto p = websdr::prune_recordings(dir, 1024, 0, "");
+    const auto p = earshot::prune_recordings(dir, 1024, 0, "");
 
     EXPECT_EQ(p.recordings, 1u);
     EXPECT_TRUE(exists(dir, "someone_elses"));
@@ -167,12 +167,12 @@ TEST(WebsdrRecordings, LeavesFreshRecordingsAlone) {
 // The meta is written once when a capture starts and never rewritten, so a
 // long capture by another process looks old by meta mtime while its data file
 // is still growing. Unlinking it would leave that writer filling a dead inode.
-TEST(WebsdrRecordings, LeavesALongRunningCaptureByAnotherWriterAlone) {
+TEST(EarshotRecordings, LeavesALongRunningCaptureByAnotherWriterAlone) {
     const std::string dir = temp_dir("concurrent");
     make_growing_recording(dir, "other_writer", 4 * 1024 * 1024, std::chrono::seconds(600));
     make_recording(dir, "ours", 400 * 1024, std::chrono::seconds(300));
 
-    const auto p = websdr::prune_recordings(dir, 1024, 0, "");
+    const auto p = earshot::prune_recordings(dir, 1024, 0, "");
 
     EXPECT_TRUE(exists(dir, "other_writer")) << "unlinked a capture that is still being written";
     EXPECT_EQ(p.recordings, 1u);
@@ -181,7 +181,7 @@ TEST(WebsdrRecordings, LeavesALongRunningCaptureByAnotherWriterAlone) {
 }
 
 // A data file whose meta never landed still occupies the disk.
-TEST(WebsdrRecordings, CountsAndPrunesOrphanedData) {
+TEST(EarshotRecordings, CountsAndPrunesOrphanedData) {
     const std::string dir = temp_dir("orphan");
     {
         std::ofstream data(dir + "/aborted.sigmf-data", std::ios::binary);
@@ -191,7 +191,7 @@ TEST(WebsdrRecordings, CountsAndPrunesOrphanedData) {
     const auto old = fs::last_write_time(dir + "/aborted.sigmf-data") - std::chrono::seconds(300);
     fs::last_write_time(dir + "/aborted.sigmf-data", old);
 
-    const auto p = websdr::prune_recordings(dir, 200 * 1024, 0, "");
+    const auto p = earshot::prune_recordings(dir, 200 * 1024, 0, "");
 
     EXPECT_EQ(p.recordings, 1u);
     EXPECT_GE(p.bytes, 5u * 1024u * 1024u);
@@ -199,25 +199,25 @@ TEST(WebsdrRecordings, CountsAndPrunesOrphanedData) {
     fs::remove_all(dir);
 }
 
-TEST(WebsdrRecordings, ParsesByteCountsTheWayTheOtherFlagsAreSpelled) {
+TEST(EarshotRecordings, ParsesByteCountsTheWayTheOtherFlagsAreSpelled) {
     uint64_t v = 12345;
-    EXPECT_TRUE(websdr::parse_bytes("20e9", v));
+    EXPECT_TRUE(earshot::parse_bytes("20e9", v));
     EXPECT_EQ(v, 20000000000ull);
-    EXPECT_TRUE(websdr::parse_bytes("5000000000", v));
+    EXPECT_TRUE(earshot::parse_bytes("5000000000", v));
     EXPECT_EQ(v, 5000000000ull);
-    EXPECT_TRUE(websdr::parse_bytes("0", v));
+    EXPECT_TRUE(earshot::parse_bytes("0", v));
     EXPECT_EQ(v, 0u);
 
     for (const char* bad : {"abc", "-1", "20e9x", "", "1e30", "20 e9", "0x10", "0X10"}) {
         uint64_t out = 999;
-        EXPECT_FALSE(websdr::parse_bytes(bad, out)) << "accepted '" << bad << "'";
+        EXPECT_FALSE(earshot::parse_bytes(bad, out)) << "accepted '" << bad << "'";
         EXPECT_EQ(out, 999u) << "clobbered the target on '" << bad << "'";
     }
 }
 
 // Four booleans decide whether a client's box gets restarted, so spell out every
 // combination rather than trusting the expression to read correctly.
-TEST(WebsdrWatchdog, FlowingCoversEveryCombination) {
+TEST(EarshotWatchdog, FlowingCoversEveryCombination) {
     using namespace std::chrono_literals;
     const auto grace = 30s;
     struct Case { bool running, lost, paused, ended, delivered; std::chrono::seconds lost_for; bool want; const char* why; };
@@ -237,14 +237,14 @@ TEST(WebsdrWatchdog, FlowingCoversEveryCombination) {
         {true,  true,  false, false, true,  31s, false, "same while the graph still runs"},
     };
     for (const auto& c : cases) {
-        websdr::Health h;
+        earshot::Health h;
         h.running = c.running; h.lost = c.lost; h.paused = c.paused;
         h.ended = c.ended; h.delivered = c.delivered; h.lost_for = c.lost_for;
-        EXPECT_EQ(websdr::flowing(h, grace), c.want) << c.why;
+        EXPECT_EQ(earshot::flowing(h, grace), c.want) << c.why;
     }
 }
 
-TEST(WebsdrWatchdog, SendsReadyAndPingsToNotifySocket) {
+TEST(EarshotWatchdog, SendsReadyAndPingsToNotifySocket) {
     const std::string dir = temp_dir("notify");
     const std::string sock_path = dir + "/notify.sock";
 
@@ -261,7 +261,7 @@ TEST(WebsdrWatchdog, SendsReadyAndPingsToNotifySocket) {
     ::setenv("WATCHDOG_USEC", "4000000", 1);
     ::setenv("WATCHDOG_PID", std::to_string(::getpid()).c_str(), 1);
     {
-        websdr::SdNotify notify;
+        earshot::SdNotify notify;
         ASSERT_TRUE(notify.active());
         EXPECT_EQ(notify.interval(), std::chrono::microseconds(2000000));
         ASSERT_TRUE(notify.send("READY=1"));
@@ -282,22 +282,22 @@ TEST(WebsdrWatchdog, SendsReadyAndPingsToNotifySocket) {
     fs::remove_all(dir);
 }
 
-TEST(WebsdrWatchdog, IsInertWithoutSystemd) {
+TEST(EarshotWatchdog, IsInertWithoutSystemd) {
     ::unsetenv("NOTIFY_SOCKET");
-    websdr::SdNotify notify;
+    earshot::SdNotify notify;
     EXPECT_FALSE(notify.active());
     EXPECT_EQ(notify.interval().count(), 0);
     EXPECT_FALSE(notify.send("READY=1"));
 }
 
-TEST(WebsdrWatchdog, NoIntervalWhenTheWatchdogBelongsToAnotherPid) {
+TEST(EarshotWatchdog, NoIntervalWhenTheWatchdogBelongsToAnotherPid) {
     const std::string dir = temp_dir("otherpid");
     const std::string sock_path = dir + "/notify.sock";
     ::setenv("NOTIFY_SOCKET", sock_path.c_str(), 1);
     ::setenv("WATCHDOG_USEC", "4000000", 1);
     ::setenv("WATCHDOG_PID", std::to_string(::getpid() + 1).c_str(), 1);
 
-    websdr::SdNotify notify;
+    earshot::SdNotify notify;
     EXPECT_EQ(notify.interval().count(), 0);
 
     ::unsetenv("WATCHDOG_PID");
