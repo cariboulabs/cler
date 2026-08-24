@@ -47,7 +47,7 @@ const ok = (msg) => console.log('ok', msg);
 
 const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
 ws.binaryType = 'arraybuffer';
-const state = { st: null, stats: null, gen: 0, audio: [], frames: [], errors: [] };
+const state = { st: null, stats: null, gen: 0, audio: [], frames: [], errors: [], runt: [] };
 ws.onmessage = (e) => {
   if (typeof e.data === 'string') {
     const m = JSON.parse(e.data);
@@ -58,6 +58,7 @@ ws.onmessage = (e) => {
     return;
   }
   const b = new Uint8Array(e.data);
+  if (b.byteLength < 11) { state.runt.push(b.byteLength); return; }
   const gen = new DataView(e.data).getUint32(2, true);
   state.frames.push({ type: b[0], gen, at: Date.now() });
   if (b[0] === 2) state.audio.push(new DataView(e.data, 11));
@@ -184,6 +185,7 @@ ok(`switch back to sim: gen ${genBeforeSim} → ${state.gen}, ${state.frames.len
 if (state.errors.some((e) => e.code === 'source' || e.code === 'play')) {
   fail('unexpected errors: ' + JSON.stringify(state.errors));
 }
+if (state.runt.length) fail(`binary frames shorter than a header: ${state.runt.join(',')}`);
 ws.close();
 proc.kill();   // the exit handler is the failure-path net; the child holds the loop open
 console.log('integration passed');

@@ -241,12 +241,18 @@ TEST(ConnectorSockets, KeepingUpReaderLosesNothing) {
         }
     });
 
-    // Paced like a radio rather than a flood, so free space is always there and
-    // any drop means push() believed a stale bound instead of asking again.
+    // Paced off the reader rather than the clock: never let more than half the ring
+    // be outstanding, so free space is always there and any drop means push()
+    // believed a stale bound instead of asking again. A wall-clock pace would be a
+    // coin flip on a loaded runner, where a 1 ms sleep is really 10.
+    constexpr size_t SAMPLE = sizeof(std::complex<float>);
+    constexpr size_t OUTSTANDING = 64 * 1024 * SAMPLE;
+    size_t pushed_bytes = 0;
     for (int b = 0; b < BLOCKS; ++b) {
         for (size_t i = 0; i < BLOCK; ++i) block[i] = {static_cast<float>(b), static_cast<float>(i)};
         iq.push(block.data(), block.size());
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        pushed_bytes += BLOCK * SAMPLE;
+        if (!wait_for([&] { return pushed_bytes - received.load() < OUTSTANDING; }, 8000)) break;
     }
     const size_t want = sizeof(std::complex<float>) * BLOCK * BLOCKS;
     wait_for([&] { return received.load() >= want; }, 8000);
