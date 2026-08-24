@@ -21,10 +21,11 @@
 #include "desktop_blocks/aprs/afsk_demod.hpp"
 #include "desktop_blocks/filters/kaiser_lpf.hpp"
 #include "desktop_blocks/ais/ais_decoder.hpp"
-#include "desktop_blocks/web/json_adapters.hpp"
+#include "desktop_blocks/web/json_sink.hpp"
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/web_sink.hpp"
+#include "decoder_json.hpp"
 #include "websdr_client_files.hpp"
 
 #include <sys/statvfs.h>
@@ -488,13 +489,13 @@ int main(int argc, char** argv) {
     GateBlock<std::complex<float>> ais_gate("AIS gate", false, 1 << 18);
     MultiStageResamplerBlock<std::complex<float>> ais_resamp("AIS channel", static_cast<float>(AIS_HZ / CHANNEL_HZ), 60.0f, 1 << 16);
     AISDecoderBlock ais("AIS", AIS_HZ, 1 << 16);
-    web::JsonTextSinkBlock<ais::Message> ais_json("AIS json", srv);
+    web::JsonTextSinkBlock<ais::Message> ais_json("AIS json", srv, "ais");
     GateBlock<std::complex<float>> aprs_gate("APRS gate", false, 1 << 18);
     MultiStageResamplerBlock<std::complex<float>> aprs_resamp("APRS channel", static_cast<float>(AUDIO_HZ / CHANNEL_HZ), 60.0f, 1 << 16);
     KaiserLPFBlock<std::complex<float>> aprs_lpf("APRS channel filter", AUDIO_HZ, APRS_CHANNEL_HZ / 2, 3e3, 60.0, 1 << 16);
     FMDemodBlock aprs_fm("APRS NBFM", AUDIO_HZ, APRS_DEVIATION_HZ, 1 << 16);
     AFSKDemodBlock afsk("AFSK1200", AUDIO_HZ, 1 << 14);
-    web::JsonTextSinkBlock<aprs::Packet> aprs_json("APRS json", srv);
+    web::JsonTextSinkBlock<aprs::Packet> aprs_json("APRS json", srv, "aprs");
     if (!record_dir.empty()) src.set_sigmf_dir(record_dir);
     App app(src, fan, spec, shift, resamp, demod, rec, srv, sink, rds_gate, ais_gate, aprs_gate, mpx,
             rate, freq, mode);

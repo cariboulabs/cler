@@ -14,7 +14,8 @@
 #include "desktop_blocks/aprs/afsk_demod.hpp"
 #include "desktop_blocks/filters/kaiser_lpf.hpp"
 #include "desktop_blocks/fm/fm_demod.hpp"
-#include "desktop_blocks/web/json_adapters.hpp"
+#include "desktop_blocks/web/json_sink.hpp"
+#include "desktop_examples/websdr/decoder_json.hpp"
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/web_sink.hpp"
@@ -391,7 +392,7 @@ TEST(JsonAdapters, TextSinkReusesItsBuffer) {
     const int port = free_port();
     ServerOptions o; o.port = port;
     WebServer srv(o);
-    JsonTextSinkBlock<ais::Message> sink("ais json", srv, 512);
+    JsonTextSinkBlock<ais::Message> sink("ais json", srv, "ais", 512);
 
     ais::Message m{};
     m.type = 1; m.has_position = true; m.lat = 52.0; m.lon = 4.0;
@@ -456,7 +457,7 @@ void run_aprs_tap(const std::vector<std::complex<float>>& iq, bool with_filter, 
     KaiserLPFBlock<std::complex<float>> lpf("chan", fs, 7.5e3, 3e3, 60.0, 1 << 16);
     FMDemodBlock fm("nbfm", fs, dev, 1 << 16);
     AFSKDemodBlock afsk("afsk", fs, 1 << 14);
-    JsonTextSinkBlock<aprs::Packet> json("aprs json", srv, 256);
+    JsonTextSinkBlock<aprs::Packet> json("aprs json", srv, "aprs", 256);
     cler::Channel<std::complex<float>> filtered(1 << 14);
     cler::Channel<float> demodulated(1 << 14);
 
