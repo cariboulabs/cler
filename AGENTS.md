@@ -106,7 +106,12 @@ surfaces the shortfall next call.
 `Channel<float, 1024>` is stack/compile-time size; `Channel<float> ch(1024)`
 is heap/runtime size. Access methods ranked by measured performance:
 1. **`read_dbf`/`write_dbf`** — zero-copy, **the default**; mandatory for
-   hardware interfaces. Needs a heap channel ≥ `DOUBLY_MAPPED_MIN_SIZE` (4 KB);
+   hardware interfaces. The returned size is a **lower bound** (free space comes
+   from a cached index refreshed only once it reads zero), so a short span means
+   "ask again"; only a returned 0 is authoritative. A block writes what fits,
+   commits what it moved and returns — the scheduler calls back. Code at a
+   boundary holding samples from outside the graph (socket, device callback)
+   must loop instead, or it drops what the ring had room for. Needs a heap channel ≥ `DOUBLY_MAPPED_MIN_SIZE` (4 KB);
    otherwise asserts in debug, returns `{nullptr, 0}` in release. Where the OS
    cannot double-map (wasm; `-DCLER_DISABLE_DOUBLY_MAPPED` to force it) the
    channel falls back to a software mirror: same API, 3× memory, one copy at
@@ -129,8 +134,11 @@ Include `task_policies/cler_desktop_tpolicy.hpp`; wire with
 cler::BlockRunner(&gain, &sink.in), ...)`, then `fg.run(config)`/`fg.stop()`.
 
 - **ThreadPerBlock** (default): one thread per block; small graphs, debugging.
-- **FixedThreadPool**: fixed round-robin workers; needs `config.num_workers`
-  (min 2); suffers on imbalanced work.
+- **FixedThreadPool**: splits the blocks into contiguous chunks of declaration
+  order, one worker each, round-robin within a chunk; needs `config.num_workers`
+  (min 2). No cost balancing and no stealing, so a graph whose heavy blocks are
+  declared together pins them all on one worker — reorder the `BlockRunner`
+  arguments or use PinnedIslands.
 - **PinnedIslands**: contiguous topo-order islands, one pinned worker each;
   cost-calibrated, repartitions on drift, workers park when idle; best on
   core-constrained targets (real pinning only on Linux task policies).

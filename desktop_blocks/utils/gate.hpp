@@ -7,7 +7,11 @@
 #include <cstring>
 
 // A monitoring tap that can be switched off at runtime: forwards while open,
-// discards while closed. A closed gate consumes everything, because an upstream
+// discards while closed. This stays an app-level block on purpose: cler's contract
+// is lossless, so a framework-level "disabled block" would either contradict it by
+// eating input or deadlock the upstream fanout by refusing it. A gate is one branch
+// opting into lossiness so the live path stays lossless.
+// A closed gate consumes everything, because an upstream
 // fanout advances by its slowest output and would otherwise stall the live path
 // whenever this branch is idle.
 // An open gate normally backpressures like any block. Only once its input is

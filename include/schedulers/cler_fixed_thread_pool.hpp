@@ -44,7 +44,12 @@ namespace cler {
                 } else {
                     state.queues.initialize(regular_ids.data(), regular_count, effective_worker_count);
 
-                    for (size_t worker_id = 0; worker_id < effective_worker_count; ++worker_id) {
+                    // The partition hands out contiguous chunks, so the tail workers can end
+                    // up with nothing; spawning them would leave threads backing off forever.
+                    size_t staffed = 0;
+                    while (staffed < effective_worker_count && state.queues.worker_block_count(staffed) > 0) ++staffed;
+
+                    for (size_t worker_id = 0; worker_id < staffed; ++worker_id) {
                         State* state_ptr = &state;
                         host.add_task([host, state_ptr, worker_id, config]() {
                             worker_loop(host, *state_ptr, worker_id, config);

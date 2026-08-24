@@ -81,6 +81,11 @@ namespace cler {
         virtual void commit_read(size_t count) = 0;
         virtual void commit_write(size_t count) = 0;
         virtual void reset() = 0;
+        // Both sizes are lower bounds, refreshed only once they read zero: a short
+        // span means ask again, and only a returned 0 is authoritative. In a block,
+        // commit what you moved and return; loop only at a boundary that holds
+        // samples from outside the graph. write_dbf also arms the mirror fold that
+        // the next commit_write consumes, so do not call it without committing.
         virtual std::pair<const T*, std::size_t> read_dbf() = 0;
         virtual std::pair<T*, std::size_t> write_dbf() = 0;
         virtual std::size_t producer_thread_cumulative_write_count() const = 0;
