@@ -69,6 +69,23 @@ struct SourceMux : public cler::BlockBase {
         }
     }
 
+    // "hackrf", "pluto:ip:1.2.3.4", "sigmf:capture" -> kind + id, and back.
+    static bool parse_id(const std::string& s, Kind& kind, std::string& id) {
+        const size_t colon = s.find(':');
+        const std::string head = s.substr(0, colon);
+        id = colon == std::string::npos ? "" : s.substr(colon + 1);
+        for (auto k : {Kind::HackRF, Kind::Pluto, Kind::UHD, Kind::Cariboulite, Kind::Soapy, Kind::SigMF, Kind::Sim}) {
+            if (head == kind_name(k)) { kind = k; return true; }
+        }
+        return false;
+    }
+
+    static std::string format_id(Kind kind, const std::string& id) {
+        std::string s = kind_name(kind);
+        if (!id.empty()) s += ":" + id;
+        return s;
+    }
+
     std::vector<DeviceInfo> enumerate() const {
         std::vector<DeviceInfo> out;
 #ifdef CLER_HAS_HACKRF

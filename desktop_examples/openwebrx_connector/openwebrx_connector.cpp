@@ -24,23 +24,14 @@ static constexpr const char* CONNECTOR_VERSION = "0.6";
 static std::atomic<bool> g_run{true};
 
 static bool parse_device(const std::string& s, SourceMux::Kind& kind, std::string& id) {
-    const size_t colon = s.find(':');
-    const std::string head = s.substr(0, colon);
-    id = colon == std::string::npos ? "" : s.substr(colon + 1);
-    for (auto k : {SourceMux::Kind::HackRF, SourceMux::Kind::Pluto, SourceMux::Kind::UHD,
-                   SourceMux::Kind::Cariboulite, SourceMux::Kind::Soapy, SourceMux::Kind::SigMF,
-                   SourceMux::Kind::Sim}) {
-        if (head == SourceMux::kind_name(k)) { kind = k; return true; }
-    }
+    if (SourceMux::parse_id(s, kind, id)) return true;
     // A soapy-style "driver=hackrf,serial=.." reaches us verbatim from OWRX's device field.
     if (s.find('=') != std::string::npos) { kind = SourceMux::Kind::Soapy; id = s; return true; }
     return false;
 }
 
 static std::string device_name(SourceMux::Kind kind, const std::string& id) {
-    std::string s = SourceMux::kind_name(kind);
-    if (!id.empty()) s += ":" + id;
-    return s;
+    return SourceMux::format_id(kind, id);
 }
 
 struct App {
