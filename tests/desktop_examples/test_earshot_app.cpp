@@ -42,8 +42,8 @@ TEST(WebServerTest, RecordingsListDownloadTraversalAndToken) {
     const int port = free_port();
     ServerOptions o; o.port = port; o.token = "s3";
     WebServer srv(o);
-    srv.add_http_route("/recordings", [&dir](const std::string& path, const std::string&) {
-        return earshot::recordings_route(dir, path);
+    srv.add_http_route("/recordings", [dirs = std::vector<std::string>{dir}](const std::string& path, const std::string&) {
+        return earshot::recordings_route(dirs, path);
     });
     srv.start();
     const std::string root = "http://127.0.0.1:" + std::to_string(port);
@@ -67,6 +67,42 @@ TEST(WebServerTest, RecordingsListDownloadTraversalAndToken) {
     EXPECT_EQ(http.get(root + "/recordings/.hidden.sigmf-data?token=s3", http.createRequest())->statusCode, 404);
     srv.stop();
     std::filesystem::remove_all(dir);
+}
+
+TEST(WebServerTest, RecordingsListsEveryDirectoryAndTagsWhichOne) {
+    const std::string a = testing::TempDir() + "/webrec_a";
+    const std::string b = testing::TempDir() + "/webrec_b";
+    std::filesystem::remove_all(a);
+    std::filesystem::remove_all(b);
+    std::filesystem::create_directories(a);
+    std::filesystem::create_directories(b);
+    for (const auto& [dir, name] : {std::pair{a, "in_a"}, std::pair{b, "in_b"}}) {
+        SigMFRecorderBlock rec("rec", 1e6, 1 << 16);
+        ASSERT_TRUE(rec.start_at(dir + "/" + name, 100e6));
+        std::vector<std::complex<float>> tone(500, {0.25f, 0.0f});
+        rec.in.writeN(tone.data(), tone.size());
+        ASSERT_TRUE(rec.procedure().is_ok());
+        rec.stop();
+    }
+    const int port = free_port();
+    ServerOptions o; o.port = port;
+    WebServer srv(o);
+    srv.add_http_route("/recordings", [dirs = std::vector<std::string>{a, b}](const std::string& path, const std::string&) {
+        return earshot::recordings_route(dirs, path);
+    });
+    srv.start();
+    const std::string root = "http://127.0.0.1:" + std::to_string(port);
+    ix::HttpClient http;
+
+    auto list = http.get(root + "/recordings", http.createRequest());
+    ASSERT_EQ(list->statusCode, 200);
+    EXPECT_NE(list->body.find("\"name\":\"in_a\",\"dir\":\"0\""), std::string::npos) << list->body;
+    EXPECT_NE(list->body.find("\"name\":\"in_b\",\"dir\":\"1\""), std::string::npos) << list->body;
+    // a capture in the second directory downloads like any other
+    EXPECT_EQ(http.get(root + "/recordings/in_b.sigmf-data", http.createRequest())->statusCode, 200);
+    srv.stop();
+    std::filesystem::remove_all(a);
+    std::filesystem::remove_all(b);
 }
 
 TEST(JsonAdapters, AisMessageToJson) {

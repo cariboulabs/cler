@@ -2,8 +2,8 @@
 // with gated decoder taps (RDS off the 240 kHz channel, APRS off the 48 kHz audio, AIS off a
 // 96 kHz resample) publishing JSON text frames.
 //   ./earshot [--source sim|hackrf[:serial]|none] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]
-//            [--gain NAME=V]... [--decoder none|rds|aprs|ais] [--port N] [--bind ADDR] [--token T]
-//            [--client-dir DIR] [--record-dir DIR] [--record-max-bytes N] [--state-file FILE] [--version]
+//            [--gain NAME=V]... [--decoder none|rds[,aprs,ais]] [--port N] [--bind ADDR] [--token T]
+//            [--client-dir DIR] [--record-dir DIR]... [--record-max-bytes N] [--state-file FILE] [--version]
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
@@ -26,6 +26,7 @@
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/web_sink.hpp"
 #include "decoder_json.hpp"
+#include "policy.hpp"
 #include "recordings.hpp"
 #include "recordings_route.hpp"
 #include "watchdog.hpp"
@@ -61,15 +62,16 @@ static constexpr double APRS_CHANNEL_HZ = 15e3;   // 2 m NBFM: +/-7.5 kHz, so a 
 
 // Every decoder hangs off a fixed-rate point in the chain, so none of them care
 // which source or sample rate is selected — only where the receiver is tuned.
+// They run independently: each has its own gate and they may all be open.
 struct DecoderInfo {
     const char* id;
-    double bands[2][2];   // {lo, hi} pairs, {0,0} unused
+    const char* cost_hint;   // measured on an i7-14700K at 2.4 MS/s, one client
+    double bands[2][2];      // {lo, hi} pairs, {0,0} unused
 };
 static const DecoderInfo DECODERS[] = {
-    {"none", {{0, 0}, {0, 0}}},
-    {"rds",  {{87.5e6, 108e6}, {0, 0}}},
-    {"aprs", {{144.38e6, 144.40e6}, {144.79e6, 144.81e6}}},
-    {"ais",  {{161.97e6, 161.99e6}, {162.01e6, 162.03e6}}},
+    {"rds",  "~2% of a core", {{87.5e6, 108e6}, {0, 0}}},
+    {"aprs", "~2% of a core", {{144.38e6, 144.40e6}, {144.79e6, 144.81e6}}},
+    {"ais",  "~7% of a core", {{161.97e6, 161.99e6}, {162.01e6, 162.03e6}}},
 };
 
 static bool parse_mode(const std::string& m, AnalogDemodBlock::Mode& out) {
@@ -78,15 +80,6 @@ static bool parse_mode(const std::string& m, AnalogDemodBlock::Mode& out) {
         if (m == AnalogDemodBlock::mode_name(mode)) { out = mode; return true; }
     }
     return false;
-}
-
-static double passband_for(AnalogDemodBlock::Mode m) {
-    switch (m) {
-        case AnalogDemodBlock::Mode::WBFM: return 200e3;
-        case AnalogDemodBlock::Mode::NBFM: return 12.5e3;
-        case AnalogDemodBlock::Mode::AM: return 10e3;
-        default: return 3.2e3;
-    }
 }
 
 static bool parse_source(const std::string& s, SourceMux::Kind& kind, std::string& id) {
@@ -120,6 +113,7 @@ static constexpr uint64_t DEFAULT_RECORD_MAX_BYTES = 20ull << 30;
 static constexpr auto LOST_GRACE = std::chrono::seconds(60);
 
 using earshot::free_disk;
+using earshot::passband_for;
 
 struct App {
     SourceMux& src;
@@ -136,8 +130,10 @@ struct App {
     GateBlock<std::complex<float>>& aprs_gate;
     FMMpxDecoderBlock& mpx;
 
-    std::string decoder = "none";
-    std::string record_dir, state_file;
+    std::vector<std::string> decoders;   // empty = nothing running
+    std::vector<std::string> record_dirs;
+    size_t record_dir_index = 0;         // where the next recording goes
+    std::string state_file;
     uint64_t record_max_bytes = DEFAULT_RECORD_MAX_BYTES;
     uint64_t pruned_bytes = 0;
     std::vector<std::pair<std::string, double>> gains;
@@ -161,16 +157,35 @@ struct App {
           rds_gate(rg), ais_gate(ag), aprs_gate(pg), mpx(mp),
           rate(rate_hz), center(freq_hz), mode(m) {}
 
-    bool set_decoder(const std::string& name) {
-        bool known = false;
-        for (const auto& d : DECODERS) known = known || name == d.id;
-        if (!known) return false;
-        decoder = name;
-        rds_gate.set_open(name == "rds");
-        aprs_gate.set_open(name == "aprs");
-        ais_gate.set_open(name == "ais");
-        if (name == "rds") mpx.rds_reset();
+    bool decoder_on(const std::string& id) const {
+        for (const auto& d : decoders) if (d == id) return true;
+        return false;
+    }
+
+    bool set_decoders(const std::vector<std::string>& names) {
+        std::vector<std::string> known, next;
+        for (const auto& d : DECODERS) known.emplace_back(d.id);
+        if (!earshot::normalise_decoders(names, known, next)) return false;
+        const bool rds_was = decoder_on("rds");
+        decoders = std::move(next);
+        rds_gate.set_open(decoder_on("rds"));
+        aprs_gate.set_open(decoder_on("aprs"));
+        ais_gate.set_open(decoder_on("ais"));
+        // a tap that was closed saw none of the signal it is about to be handed
+        if (decoder_on("rds") && !rds_was) mpx.rds_reset();
         return true;
+    }
+
+    std::string mode_disabled(AnalogDemodBlock::Mode m) const { return earshot::mode_disabled(m, rate); }
+
+    std::string record_dir() const { return record_dirs.empty() ? "" : record_dirs[record_dir_index]; }
+
+    // what record() would name a capture started now; the client previews it
+    std::string next_name() const {
+        char stamp[32];
+        const std::time_t now = std::time(nullptr);
+        std::strftime(stamp, sizeof(stamp), "%Y%m%dT%H%M%S", std::gmtime(&now));
+        return std::string(stamp) + "_" + std::to_string(static_cast<long long>(center));
     }
 
     uint64_t decoder_dropped() const { return rds_gate.dropped() + aprs_gate.dropped() + ais_gate.dropped(); }
@@ -179,7 +194,7 @@ struct App {
     // signal that no longer arrived; AFSK and AIS hunt for their own preambles
     // and resync on their own.
     void reset_decoder_state() {
-        if (decoder == "rds") mpx.rds_reset();
+        if (decoder_on("rds")) mpx.rds_reset();
     }
 
     void reset_taps() {
@@ -190,7 +205,7 @@ struct App {
     }
 
     void publish_rds() {
-        if (decoder != "rds") return;
+        if (!decoder_on("rds")) return;
         web::JsonWriter w;
         web::to_json(mpx.rds_station(), w);
         srv.push_text("rds", w.out);
@@ -218,7 +233,14 @@ struct App {
          .key("recording").boolean(rec.recording())
          .key("is_file").boolean(running && src.is_file())
          .key("paused").boolean(src.paused()).key("loop").boolean(src.looping())
-         .key("decoder").str(decoder);
+         // decoder (singular, the first one) is the one-release shim that keeps a
+         // client built before independent decoders working; decoders is the truth
+         .key("decoder").str(decoders.empty() ? "none" : decoders.front())
+         .key("record_dir").str(record_dirs.empty() ? "" : std::to_string(record_dir_index))
+         .key("next_name").str(next_name());
+        w.key("decoders").begin_arr();
+        for (const auto& d : decoders) w.str(d);
+        w.end();
         for (const auto& c : caps) {
             if (c.id == "freq" || c.id == "rate") continue;
             w.key(c.id).num(c.value);
@@ -237,6 +259,13 @@ struct App {
         w.end().key("controls").begin_arr();
         w.begin_obj().key("id").str("mode").key("label").str("mode").key("type").str("enum").key("options").begin_arr();
         for (const char* m : {"WBFM", "NBFM", "AM", "USB", "LSB"}) w.str(m);
+        w.end();
+        // parallel to options: "" where the mode is usable, the reason where it is not
+        w.key("options_disabled").begin_arr();
+        for (auto m : {AnalogDemodBlock::Mode::WBFM, AnalogDemodBlock::Mode::NBFM, AnalogDemodBlock::Mode::AM,
+                       AnalogDemodBlock::Mode::USB, AnalogDemodBlock::Mode::LSB}) {
+            w.str(mode_disabled(m));
+        }
         w.end().end();
         for (const auto& c : caps) {
             w.begin_obj().key("id").str(c.id).key("label").str(c.label).key("type").str(c.type);
@@ -247,9 +276,17 @@ struct App {
             w.end();
         }
         w.end().key("spectrum").begin_obj().key("n").num(1024).key("fps").num(20).end();
+        w.key("record").begin_obj().key("dirs").begin_arr();
+        for (size_t i = 0; i < record_dirs.size(); ++i) {
+            const std::string& d = record_dirs[i];
+            w.begin_obj().key("id").str(std::to_string(i)).key("path").str(d)
+             .key("free_bytes").num(free_disk(d)).key("total_bytes").num(earshot::total_disk(d))
+             .key("writable").boolean(::access(d.c_str(), W_OK) == 0).end();
+        }
+        w.end().key("max_bytes").num(record_max_bytes).key("min_free_bytes").num(MIN_FREE_BYTES).end();
         w.key("decoders").begin_arr();
         for (const auto& d : DECODERS) {
-            w.begin_obj().key("id").str(d.id).key("available").boolean(true);
+            w.begin_obj().key("id").str(d.id).key("available").boolean(true).key("cost_hint").str(d.cost_hint);
             if (d.bands[0][1] > 0.0) {
                 w.key("expects").begin_arr();
                 for (const auto& b : d.bands) {
@@ -275,7 +312,7 @@ struct App {
          .key("clients").num(srv.client_count())
          .key("source").str(source()).key("rate").num(rate)
          .key("overflows").num(src.overflows()).key("recording").boolean(rec.recording())
-         .key("free_disk").num(free_disk(record_dir)).end();
+         .key("free_disk").num(free_disk(record_dir())).end();
         {
             std::lock_guard<std::mutex> lock(health_mutex);
             health_json = std::move(h.out);
@@ -320,6 +357,15 @@ struct App {
         rate = src.rate(); center = src.center(); offset = 0.0; lost = false;
         if (std::fabs(center - freq_hz) > rate) freq_hz = center + IF_OFFSET;
         for (const auto& g : gains) src.set(g.first, g.second);
+        // a narrow source can leave the current mode wider than anything it
+        // carries; selected-and-disabled is a state no UI can render honestly
+        if (!mode_disabled(mode).empty()) {
+            for (auto m : {AnalogDemodBlock::Mode::WBFM, AnalogDemodBlock::Mode::NBFM, AnalogDemodBlock::Mode::AM,
+                           AnalogDemodBlock::Mode::USB}) {
+                if (mode_disabled(m).empty()) { mode = m; break; }
+            }
+            demod.set_mode(mode);
+        }
         resamp.set_ratio(static_cast<float>(CHANNEL_HZ / rate));
         rec.set_rate(rate);
         spec.set_rate(rate);
@@ -384,40 +430,61 @@ struct App {
         return out.substr(0, 64);
     }
 
-    // Keeps the record dir inside its byte cap and off the free-space floor by
+    // Keeps each record dir inside its byte cap and off the free-space floor by
     // deleting whole recordings, oldest first; the one being written is spared.
+    // The cap is per directory: each is its own archive on its own filesystem.
     void prune() {
-        const auto p = earshot::prune_recordings(record_dir, record_max_bytes, MIN_FREE_BYTES, rec.base());
-        if (p.recordings == 0) return;
-        pruned_bytes += p.bytes;
-        srv.send_error("record", "pruned " + std::to_string(p.recordings) + " old recording(s), " +
-                                 std::to_string(p.bytes >> 20) + " MB");
+        size_t recordings = 0;
+        uint64_t bytes = 0;
+        for (const auto& d : record_dirs) {
+            const auto p = earshot::prune_recordings(d, record_max_bytes, MIN_FREE_BYTES, rec.base());
+            recordings += p.recordings;
+            bytes += p.bytes;
+        }
+        if (recordings == 0) return;
+        pruned_bytes += bytes;
+        srv.send_error("record", "pruned " + std::to_string(recordings) + " old recording(s), " +
+                                 std::to_string(bytes >> 20) + " MB");
     }
 
-    void record(bool on, const std::string& name) {
+    void record(bool on, const std::string& name, const std::string& dir_id) {
         if (!on) { rec.stop(); publish(); return; }
-        if (record_dir.empty()) { srv.send_error("record", "no --record-dir"); return; }
+        if (record_dirs.empty()) { srv.send_error("record", "no --record-dir"); return; }
+        if (!dir_id.empty()) {
+            const size_t i = static_cast<size_t>(std::atoi(dir_id.c_str()));
+            if (i >= record_dirs.size()) { srv.send_error("record", "no such record directory"); return; }
+            record_dir_index = i;
+        }
         if (!running || switching) { srv.send_error("record", "no running source"); return; }
         if (rec.recording()) return;
+        const std::string dir = record_dir();
         // floor first: on a full disk, deleting the archive and then failing
         // anyway would cost the client their captures for nothing
-        if (free_disk(record_dir) < MIN_FREE_BYTES) { srv.send_error("record", "less than 200 MB free"); return; }
+        if (free_disk(dir) < MIN_FREE_BYTES) { srv.send_error("record", "less than 200 MB free in " + dir); return; }
         prune();
-        char stamp[32];
-        const std::time_t now = std::time(nullptr);
-        std::strftime(stamp, sizeof(stamp), "%Y%m%dT%H%M%S", std::gmtime(&now));
         const std::string prefix = sanitize(name);
-        std::string base = record_dir + "/" + (prefix.empty() ? "" : prefix + "_") + stamp + "_" +
-                           std::to_string(static_cast<long long>(center));
+        const std::string base = dir + "/" + (prefix.empty() ? "" : prefix + "_") + next_name();
         if (!rec.start_at(base, center)) { srv.send_error("record", "cannot open " + base); return; }
         publish();
+    }
+
+    void delete_recording(const std::string& name) {
+        // base() outlives stop(), which is what keeps the last capture out of the
+        // pruner's reach; here it would refuse to delete the take you just made
+        const auto d = earshot::delete_recording(record_dirs, name, rec.recording() ? rec.base() : std::string{});
+        if (!d.ok) { srv.send_error("record", d.why, name); return; }
+        srv.send_error("record", "deleted " + name + ", " + std::to_string(d.bytes >> 20) + " MB");
+        rescan();          // it may have been in the device list as a playable capture
+        publish(true);
     }
 
     void save_state() {
         if (state_file.empty()) return;
         web::JsonWriter w;
         w.begin_obj().key("source").str(source_id(kind, id)).key("freq").num(tuned()).key("rate").num(rate)
-         .key("mode").str(AnalogDemodBlock::mode_name(mode)).key("decoder").str(decoder);
+         .key("mode").str(AnalogDemodBlock::mode_name(mode)).key("decoders").begin_arr();
+        for (const auto& d : decoders) w.str(d);
+        w.end();
         for (const auto& c : caps) if (!c.ro && c.id != "freq") w.key(c.id).num(c.value);
         w.end();
         std::ofstream(state_file) << w.out;
@@ -431,7 +498,8 @@ int main(int argc, char** argv) {
     o.file_count = EARSHOT_CLIENT_FILES_COUNT;
     o.version = EARSHOT_VERSION;
     o.audio_rate = AUDIO_HZ;
-    std::string source, record_dir, state_file, mode_s, decoder;
+    std::string source, state_file, mode_s, decoder;
+    std::vector<std::string> record_dirs;
     double freq = 0, rate = 0;
     uint64_t record_max_bytes = DEFAULT_RECORD_MAX_BYTES;
     std::vector<std::pair<std::string, double>> gains;
@@ -452,7 +520,7 @@ int main(int argc, char** argv) {
         else if (const char* v = next("--bind")) o.bind = v;
         else if (const char* v = next("--token")) o.token = v;
         else if (const char* v = next("--client-dir")) o.client_dir = v;
-        else if (const char* v = next("--record-dir")) record_dir = v;
+        else if (const char* v = next("--record-dir")) record_dirs.push_back(v);
         else if (const char* v = next("--record-max-bytes")) {
             if (!earshot::parse_bytes(v, record_max_bytes)) {
                 std::fprintf(stderr, "--record-max-bytes wants a byte count (20e9, 5000000000, or 0 for unlimited), got '%s'\n", v);
@@ -462,8 +530,8 @@ int main(int argc, char** argv) {
         else if (const char* v = next("--state-file")) state_file = v;
         else {
             std::fprintf(stderr, "Usage: %s [--source sim|hackrf[:serial]|none] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]\n"
-                                 "          [--gain NAME=V]... [--decoder none|rds|aprs|ais] [--port N] [--bind ADDR] [--token T]\n"
-                                 "          [--client-dir DIR] [--record-dir DIR] [--record-max-bytes N] [--state-file FILE] [--version]\n", argv[0]);
+                                 "          [--gain NAME=V]... [--decoder none|rds[,aprs,ais]] [--port N] [--bind ADDR] [--token T]\n"
+                                 "          [--client-dir DIR] [--record-dir DIR]... [--record-max-bytes N] [--state-file FILE] [--version]\n", argv[0]);
             return std::strcmp(argv[i], "--help") == 0 ? 0 : 1;
         }
     }
@@ -476,9 +544,16 @@ int main(int argc, char** argv) {
             if (freq == 0) freq = web::json_num(fields, "freq");
             if (rate == 0) rate = web::json_num(fields, "rate");
             if (mode_s.empty()) mode_s = web::json_str(fields, "mode");
-            if (decoder.empty()) decoder = web::json_str(fields, "decoder");
+            if (decoder.empty()) {
+                // decoders is what we write; decoder is what older state files hold
+                if (const std::string* raw = web::json_find(fields, "decoders")) {
+                    for (const auto& d : web::json_str_array(*raw)) decoder += (decoder.empty() ? "" : ",") + d;
+                } else {
+                    decoder = web::json_str(fields, "decoder");
+                }
+            }
             for (const auto& [k, v] : fields) {
-                if (k == "source" || k == "freq" || k == "rate" || k == "mode" || k == "decoder") continue;
+                if (k == "source" || k == "freq" || k == "rate" || k == "mode" || k == "decoder" || k == "decoders") continue;
                 bool given = false;
                 for (const auto& g : gains) given = given || g.first == k;
                 if (!given) gains.emplace_back(k, std::atof(v.c_str()));
@@ -532,16 +607,24 @@ int main(int argc, char** argv) {
     FMDemodBlock aprs_fm("APRS NBFM", AUDIO_HZ, APRS_DEVIATION_HZ, 1 << 16);
     AFSKDemodBlock afsk("AFSK1200", AUDIO_HZ, 1 << 14);
     web::JsonTextSinkBlock<aprs::Packet> aprs_json("APRS json", srv, "aprs");
-    if (!record_dir.empty()) src.set_sigmf_dir(record_dir);
+    if (!record_dirs.empty()) src.set_sigmf_dirs(record_dirs);
     App app(src, fan, spec, shift, resamp, demod, rec, srv, sink, rds_gate, ais_gate, aprs_gate, mpx,
             rate, freq, mode);
     app.gains = gains;
-    app.record_dir = record_dir;
+    app.record_dirs = record_dirs;
     app.record_max_bytes = record_max_bytes;
     app.state_file = state_file;
-    if (!decoder.empty() && !app.set_decoder(decoder)) {
-        std::fprintf(stderr, "unknown --decoder %s\n", decoder.c_str());
-        return 1;
+    if (!decoder.empty()) {
+        std::vector<std::string> want;
+        for (size_t a = 0, b; a <= decoder.size(); a = b + 1) {
+            b = decoder.find(',', a);
+            if (b == std::string::npos) b = decoder.size();
+            if (b > a) want.push_back(decoder.substr(a, b - a));
+        }
+        if (!app.set_decoders(want)) {
+            std::fprintf(stderr, "unknown --decoder %s\n", decoder.c_str());
+            return 1;
+        }
     }
 
     auto fg = cler::make_desktop_flowgraph(
@@ -572,9 +655,9 @@ int main(int argc, char** argv) {
     srv.add_http_route("/health", [&app](const std::string&, const std::string&) {
         return web::HttpReply{200, app.health(), "application/json"};
     });
-    if (!record_dir.empty()) {
-        srv.add_http_route("/recordings", [record_dir](const std::string& path, const std::string&) {
-            return earshot::recordings_route(record_dir, path);
+    if (!record_dirs.empty()) {
+        srv.add_http_route("/recordings", [record_dirs](const std::string& path, const std::string&) {
+            return earshot::recordings_route(record_dirs, path);
         });
     }
     app.rescan();
@@ -614,12 +697,23 @@ int main(int argc, char** argv) {
                     else if (key == "offset") app.tune_offset(v);
                     else if (key == "mode") {
                         AnalogDemodBlock::Mode m;
-                        if (parse_mode(web::json_str(f, "mode"), m)) { app.mode = m; app.demod.set_mode(m); }
-                        else srv.send_error("set", "unknown mode");
+                        const std::string want = web::json_str(f, "mode");
+                        if (!parse_mode(want, m)) srv.send_error("set", "unknown mode");
+                        // greying it in the UI is not enough: a stale tab or a script
+                        // must get the same answer the button would have given
+                        else if (const std::string why = app.mode_disabled(m); !why.empty())
+                            srv.send_error("set", want + " " + why);
+                        else { app.mode = m; app.demod.set_mode(m); }
                     }
                     else if (key == "decoder") {
-                        if (!app.set_decoder(web::json_str(f, "decoder")))
-                            srv.send_error("set", "unknown or unavailable decoder " + web::json_str(f, "decoder"));
+                        const std::string want = web::json_str(f, "decoder");
+                        if (!app.set_decoders({want}))
+                            srv.send_error("set", "unknown or unavailable decoder " + want);
+                    }
+                    else if (key == "decoders") {
+                        const std::string* raw = web::json_find(f, "decoders");
+                        if (!raw || !app.set_decoders(web::json_str_array(*raw)))
+                            srv.send_error("set", "unknown or unavailable decoder");
                     }
                     else if (!app.set_control(key, v)) srv.send_error("set", "unknown or read-only control " + key);
                 }
@@ -630,7 +724,10 @@ int main(int argc, char** argv) {
                     app.select(fg, k, id, app.tuned(), r > 0 ? r : app.rate);
                 } else srv.send_error("source", "unknown source", web::json_str(f, "id"));
             } else if (t == "record") {
-                app.record(web::json_str(f, "on") == "true", web::json_str(f, "name"));
+                app.record(web::json_str(f, "on") == "true", web::json_str(f, "name"), web::json_str(f, "dir"));
+            } else if (t == "recording") {
+                if (web::json_str(f, "action") == "delete") app.delete_recording(web::json_str(f, "name"));
+                else srv.send_error("record", "unknown recording action");
             } else if (t == "play") {
                 const std::string name = web::json_str(f, "name");
                 bool handled = false;
@@ -671,7 +768,7 @@ int main(int argc, char** argv) {
             }
             if (app.rec.recording()) {
                 app.prune();
-                if (free_disk(record_dir) < MIN_FREE_BYTES) {
+                if (free_disk(app.record_dir()) < MIN_FREE_BYTES) {
                     app.rec.stop();
                     srv.send_error("record", "disk almost full, recording stopped");
                     app.publish();
@@ -679,9 +776,12 @@ int main(int argc, char** argv) {
             }
             web::JsonWriter w;
             w.begin_obj().key("overflows").num(app.src.overflows()).key("source_lost").boolean(app.lost)
-             .key("rec_bytes").num(app.rec.bytes()).key("free_bytes").num(free_disk(record_dir))
+             .key("rec_bytes").num(app.rec.bytes()).key("free_bytes").num(free_disk(app.record_dir()))
              .key("pruned_bytes").num(app.pruned_bytes)
-             .key("decoder_dropped").num(app.decoder_dropped());
+             .key("decoder_dropped").num(app.decoder_dropped())
+             // state only moves on a change, so the name preview would go stale
+             // between them; here it is never more than a second old
+             .key("next_name").str(app.next_name());
             if (app.running && app.src.is_file()) {
                 w.key("pos").num(app.src.pos_seconds()).key("duration").num(app.src.duration_seconds())
                  .key("ended").boolean(app.src.ended());
