@@ -293,6 +293,13 @@ bool WebServer::push_spectrum(const SpectrumFrame& f) {
 }
 
 size_t WebServer::push_audio(const int16_t* pcm, size_t n) {
+    const uint32_t gen = _gen.load(std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(_audio_gen_mutex);
+        if (_audio_gen_marks.empty() ? gen != _audio_gen : gen != _audio_gen_marks.back().second) {
+            _audio_gen_marks.emplace_back(_audio_written, gen);
+        }
+    }
     // write_dbf reports free space from a cached reader index, so a short write
     // means "ask again", not "the ring is full"; only a zero is authoritative.
     size_t w = 0;
@@ -304,6 +311,7 @@ size_t WebServer::push_audio(const int16_t* pcm, size_t n) {
         _audio.commit_write(chunk);
         w += chunk;
     }
+    _audio_written += w;
     _audio_dropped += n - w;
     return w;
 }
@@ -422,8 +430,16 @@ void WebServer::tick_loop() {
         for (;;) {
             auto [aptr, asize] = _audio.read_dbf();
             if (asize < AUDIO_CHUNK) break;
-            const size_t len = encode_audio(_gen.load(std::memory_order_relaxed), _seq_audio++, aptr, AUDIO_CHUNK, _impl->buf.data(), _impl->buf.size());
+            {
+                std::lock_guard<std::mutex> lock(_audio_gen_mutex);
+                while (!_audio_gen_marks.empty() && _audio_gen_marks.front().first <= _audio_read) {
+                    _audio_gen = _audio_gen_marks.front().second;
+                    _audio_gen_marks.pop_front();
+                }
+            }
+            const size_t len = encode_audio(_audio_gen, _seq_audio++, aptr, AUDIO_CHUNK, _impl->buf.data(), _impl->buf.size());
             _audio.commit_read(AUDIO_CHUNK);
+            _audio_read += AUDIO_CHUNK;
             for (auto& t : targets) {
                 if (t.first->bufferedAmount() > 25 * len) { ++t.second->audio_dropped; continue; }
                 t.first->sendBinary(ix::IXWebSocketSendData(reinterpret_cast<const char*>(_impl->buf.data()), len));

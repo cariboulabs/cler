@@ -98,6 +98,15 @@ private:
     cler::Channel<int16_t> _audio;
     std::atomic<uint32_t> _gen{0};
     std::atomic<uint32_t> _seq_spec{0}, _seq_audio{0};
+    // Audio is stamped when it is sent, so a retune would relabel whatever is
+    // still queued as the new frequency. The producer notes where each gen
+    // starts and the tick thread stamps every chunk with the gen it was made
+    // under, which the client then flushes on its own terms.
+    std::mutex _audio_gen_mutex;
+    std::deque<std::pair<uint64_t, uint32_t>> _audio_gen_marks;
+    uint64_t _audio_written = 0;   // producer thread only
+    uint64_t _audio_read = 0;      // tick thread only
+    uint32_t _audio_gen = 0;       // tick thread only
     std::atomic<uint64_t> _sent{0};
     mutable std::mutex _mutex;
     std::deque<std::string> _text;

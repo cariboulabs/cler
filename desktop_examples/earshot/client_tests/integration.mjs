@@ -177,12 +177,17 @@ await sleep(1000);
 const ahead = state.frames.filter((f) => f.gen > state.gen);
 if (ahead.length) fail(`${ahead.length} frames carried a gen newer than the state`);
 // Order, not wall clock: whatever was already queued may still arrive, but once
-// a frame of the current gen has been seen, no older one may follow it. A time
-// budget here is a guess about the machine, which is what failed on macOS CI.
-const firstCurrent = state.frames.findIndex((f) => f.gen === state.gen);
-const stale = firstCurrent < 0 ? [] : state.frames.slice(firstCurrent).filter((f) => f.gen < state.gen);
-if (firstCurrent < 0) fail('no frames of the current gen arrived after the switch');
-if (stale.length) fail(`${stale.length} stale frames arrived after the stream had caught up`);
+// a stream has delivered a frame of the current gen, no older frame of THAT
+// stream may follow. Per stream, because the two are stamped in different
+// places — spectrum by the DSP block, audio by the server — so a spectrum frame
+// already in flight during a retune can legitimately trail the first new audio.
+for (const [type, name] of [[1, 'spectrum'], [2, 'audio']]) {
+  const frames = state.frames.filter((f) => f.type === type);
+  const firstCurrent = frames.findIndex((f) => f.gen === state.gen);
+  if (firstCurrent < 0) fail(`no ${name} frames of the current gen arrived after the switch`);
+  const stale = frames.slice(firstCurrent).filter((f) => f.gen < state.gen);
+  if (stale.length) fail(`${stale.length} stale ${name} frames arrived after that stream caught up`);
+}
 if (state.frames.length < 10) fail(`stream did not resume after the switch (${state.frames.length} frames)`);
 ok(`switch back to sim: gen ${genBeforeSim} → ${state.gen}, ${state.frames.length} frames, none stale`);
 
