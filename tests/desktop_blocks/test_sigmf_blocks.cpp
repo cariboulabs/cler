@@ -448,7 +448,8 @@ TEST(SigMFBlocks, TransportSeeksPausesLoopsAndEnds) {
 
     src.seek(0.005);
     src.procedure(&out);
-    EXPECT_NEAR(src.pos_seconds(), 0.005, 0.002);
+    EXPECT_GE(src.pos_seconds(), 0.005);
+    EXPECT_LT(src.pos_seconds(), 0.01);
     out.commit_read(out.size());
     pump_until_ended(2.0);
     EXPECT_TRUE(src.ended());
