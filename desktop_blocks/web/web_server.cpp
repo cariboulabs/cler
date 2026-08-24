@@ -70,12 +70,6 @@ const char* content_type(const std::string& name) {
     return "application/octet-stream";
 }
 
-std::string object_inner(const std::string& obj) {
-    const size_t a = obj.find('{'), b = obj.rfind('}');
-    if (a == std::string::npos || b == std::string::npos || b <= a) return "";
-    return obj.substr(a + 1, b - a - 1);
-}
-
 }
 
 struct WebServer::Client {
@@ -119,13 +113,13 @@ void WebServer::start() {
             }
             h["Content-Type"] = "application/json";
             const auto up = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - _impl->started).count();
-            std::string body;
+            JsonWriter w;
             {
                 std::lock_guard<std::mutex> lock(_mutex);
-                body = "{\"version\":\"" + json_escape(_opts.version) + "\",\"uptime_s\":" + std::to_string(up) +
-                       ",\"clients\":" + std::to_string(_impl->clients.size()) +
-                       (_health_extra.empty() ? "" : "," + _health_extra) + "}";
+                w.begin_obj().key("version").str(_opts.version).key("uptime_s").num(static_cast<double>(up))
+                 .key("clients").num(static_cast<double>(_impl->clients.size())).fields_of(_health_extra).end();
             }
+            const std::string& body = w.out;
             return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, h, body);
         }
         if (!_opts.record_dir.empty() && path.rfind("/recordings", 0) == 0 && (path.size() == 11 || path[11] == '/')) {
@@ -237,7 +231,9 @@ void WebServer::start() {
                     for (auto i = _impl->clients.begin(); i != _impl->clients.end(); ++i) if (i->second->order < best->second->order) best = i;
                     best->second->controller = true;
                     target = best->second->ws.lock();
-                    promote = "{\"t\":\"state\",\"role\":\"ctl\"" + (_state.empty() ? "" : "," + object_inner(_state)) + "}";
+                    JsonWriter pw;
+                    pw.begin_obj().key("t").str("state").key("role").str("ctl").fields_of(_state).end();
+                    promote = std::move(pw.out);
                 }
             }
             if (target) target->sendText(promote);
@@ -310,7 +306,9 @@ size_t WebServer::push_audio(const int16_t* pcm, size_t n) {
 
 void WebServer::push_text(const std::string& stream, const std::string& json) {
     std::lock_guard<std::mutex> lock(_mutex);
-    _text.push_back("{\"t\":\"text\",\"stream\":\"" + json_escape(stream) + "\",\"data\":" + (json.empty() ? "null" : json) + "}");
+    JsonWriter w;
+    w.begin_obj().key("t").str("text").key("stream").str(stream).key("data").raw(json).end();
+    _text.push_back(std::move(w.out));
     if (_text.size() > 256) { _text.pop_front(); ++_text_dropped; }
 }
 
@@ -319,17 +317,19 @@ void WebServer::set_state(const std::string& json_object) {
     {
         std::lock_guard<std::mutex> lock(_mutex);
         _state = json_object;
-        const std::string inner = object_inner(_state);
         for (auto& kv : _impl->clients) {
             if (auto sp = kv.second->ws.lock()) {
-                out.emplace_back(sp, std::string("{\"t\":\"state\",\"role\":\"") + (kv.second->controller ? "ctl" : "view") + "\"" + (inner.empty() ? "" : "," + inner) + "}");
+                JsonWriter w;
+                w.begin_obj().key("t").str("state").key("role").str(kv.second->controller ? "ctl" : "view")
+                 .fields_of(_state).end();
+                out.emplace_back(sp, std::move(w.out));
             }
         }
     }
     for (auto& p : out) p.first->sendText(p.second);
 }
 
-void WebServer::set_hello_extra(const std::string& json_fragment) { std::lock_guard<std::mutex> lock(_mutex); _hello_extra = json_fragment; }
+void WebServer::set_hello_extra(const std::string& json_object) { std::lock_guard<std::mutex> lock(_mutex); _hello_extra = json_object; }
 
 void WebServer::resend_hello() {
     std::vector<std::pair<std::shared_ptr<ix::WebSocket>, std::string>> out;
@@ -340,11 +340,13 @@ void WebServer::resend_hello() {
     }
     for (auto& p : out) p.first->sendText(p.second);
 }
-void WebServer::set_stats_extra(const std::string& json_fragment) { std::lock_guard<std::mutex> lock(_mutex); _stats_extra = json_fragment; }
-void WebServer::set_health_extra(const std::string& json_fragment) { std::lock_guard<std::mutex> lock(_mutex); _health_extra = json_fragment; }
+void WebServer::set_stats_extra(const std::string& json_object) { std::lock_guard<std::mutex> lock(_mutex); _stats_extra = json_object; }
+void WebServer::set_health_extra(const std::string& json_object) { std::lock_guard<std::mutex> lock(_mutex); _health_extra = json_object; }
 
 void WebServer::send_error(const std::string& code, const std::string& msg) {
-    broadcast("{\"t\":\"error\",\"code\":\"" + json_escape(code) + "\",\"msg\":\"" + json_escape(msg) + "\"}");
+    JsonWriter w;
+    w.begin_obj().key("t").str("error").key("code").str(code).key("msg").str(msg).end();
+    broadcast(w.out);
 }
 
 bool WebServer::pop_control(std::string& json) {
@@ -365,9 +367,13 @@ ClientStats WebServer::total_dropped() const {
 }
 
 std::string WebServer::hello_for(const Client& c) {
-    return std::string("{\"t\":\"hello\",\"proto\":1,\"version\":\"") + json_escape(_opts.version) +
-           "\",\"role\":\"" + (c.controller ? "ctl" : "view") + "\",\"codecs\":[\"pcm16\"],\"state\":" + (_state.empty() ? "{}" : _state) +
-           (_hello_extra.empty() ? "" : "," + _hello_extra) + "}";
+    JsonWriter w;
+    w.begin_obj().key("t").str("hello").key("proto").num(PROTO_VER).key("version").str(_opts.version)
+     .key("role").str(c.controller ? "ctl" : "view")
+     .key("codecs").begin_arr().str("pcm16").end()
+     .key("state").raw(_state.empty() ? "{}" : _state)
+     .fields_of(_hello_extra).end();
+    return w.out;
 }
 
 void WebServer::broadcast(const std::string& text) {
@@ -424,11 +430,14 @@ void WebServer::tick_loop() {
         if (steady_clock::now() >= next_stats) {
             next_stats += seconds(1);
             for (auto& t : targets) {
-                t.first->sendText("{\"t\":\"stats\",\"spectrum_dropped\":" + std::to_string(t.second->spectrum_dropped) +
-                                  ",\"audio_dropped\":" + std::to_string(t.second->audio_dropped) +
-                                  ",\"text_dropped\":" + std::to_string(_text_dropped.load(std::memory_order_relaxed)) +
-                                  ",\"clients\":" + std::to_string(targets.size()) +
-                                  (stats_extra.empty() ? "" : "," + stats_extra) + "}");
+                JsonWriter w;
+                w.begin_obj().key("t").str("stats")
+                 .key("spectrum_dropped").num(static_cast<double>(t.second->spectrum_dropped))
+                 .key("audio_dropped").num(static_cast<double>(t.second->audio_dropped))
+                 .key("text_dropped").num(static_cast<double>(_text_dropped.load(std::memory_order_relaxed)))
+                 .key("clients").num(static_cast<double>(targets.size()))
+                 .fields_of(stats_extra).end();
+                t.first->sendText(w.out);
             }
         }
         if (tick % 250 == 0) {

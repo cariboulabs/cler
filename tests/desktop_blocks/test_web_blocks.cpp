@@ -135,7 +135,7 @@ TEST(WebServerTest, HelloRolesStateAndControl) {
     const int port = free_port();
     ServerOptions o; o.port = port; o.version = "t1";
     WebServer srv(o);
-    srv.set_hello_extra("\"sources\":[{\"id\":\"sim\"}]");
+    srv.set_hello_extra("{\"sources\":[{\"id\":\"sim\"}]}");
     srv.set_state("{\"gen\":1,\"freq\":100e6}");
     srv.start();
 
@@ -272,6 +272,61 @@ TEST(WebServerTest, StreamsArriveAndDecode) {
     auto nf = http.get("http://127.0.0.1:" + std::to_string(port) + "/client/../x", http.createRequest());
     EXPECT_EQ(nf->statusCode, 404);
     srv.stop();
+}
+
+// Every frame splices app-supplied objects into a server-owned one; a missed
+// empty-guard used to produce `{,"x":1}` and nothing noticed.
+TEST(WebServerTest, ComposedFramesAreValidJsonWithAndWithoutExtras) {
+    for (const bool extras : {false, true}) {
+        const int port = free_port();
+        ServerOptions o; o.port = port; o.version = "compose";
+        WebServer srv(o);
+        if (extras) {
+            srv.set_hello_extra("{\"sources\":[{\"id\":\"sim\"}],\"decoders\":[]}");
+            srv.set_state("{\"gen\":7,\"freq\":100e6}");
+            srv.set_stats_extra("{\"overflows\":3}");
+            srv.set_health_extra("{\"source\":\"sim\"}");
+        } else {
+            srv.set_hello_extra("{}");
+            srv.set_stats_extra("");
+            srv.set_health_extra("{}");
+        }
+        srv.start();
+
+        TestClient c("ws://127.0.0.1:" + std::to_string(port) + "/");
+        ASSERT_TRUE(c.wait([&] { return !c.text_with("hello").empty(); }));
+        srv.push_text("rds", extras ? "{\"ps\":\"K-BA\"}" : "");
+        srv.send_error("set", "quote\" and \\ backslash");
+        srv.set_state(extras ? "{\"gen\":8}" : "{}");
+        ASSERT_TRUE(c.wait([&] { return !c.text_with("stats").empty() && !c.text_with("text").empty() &&
+                                        !c.text_with("error").empty() && !c.text_with("state").empty(); }, 5000));
+
+        for (const char* t : {"hello", "state", "stats", "text", "error"}) {
+            const std::string frame = c.text_with(t);
+            ASSERT_FALSE(frame.empty()) << t << " extras=" << extras;
+            Fields f;
+            EXPECT_TRUE(json_parse_object(frame, f)) << t << " extras=" << extras << " -> " << frame;
+            EXPECT_EQ(json_str(f, "t"), t) << frame;
+        }
+        ix::HttpClient http;
+        auto r = http.get("http://127.0.0.1:" + std::to_string(port) + "/health", http.createRequest());
+        ASSERT_EQ(r->statusCode, 200);
+        Fields hf;
+        EXPECT_TRUE(json_parse_object(r->body, hf)) << r->body;
+        EXPECT_EQ(json_str(hf, "version"), "compose");
+        srv.stop();
+    }
+}
+
+TEST(WebProto, FieldsOfSplicesOnlyNonEmptyObjects) {
+    JsonWriter w;
+    w.begin_obj().key("a").num(1).fields_of("").fields_of("{}").fields_of("{\"b\":2}").fields_of("{\"c\":3}").end();
+    EXPECT_EQ(w.out, "{\"a\":1,\"b\":2,\"c\":3}");
+    JsonWriter lead;
+    lead.begin_obj().fields_of("{\"only\":true}").end();
+    EXPECT_EQ(lead.out, "{\"only\":true}");
+    Fields f;
+    EXPECT_TRUE(json_parse_object(w.out, f));
 }
 
 TEST(WebSink, DrainsWithoutClientsAndConvertsAudio) {

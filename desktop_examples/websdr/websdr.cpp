@@ -259,7 +259,7 @@ struct App {
         w.begin_obj().key("id").str("adsb").key("available").boolean(false)
          .key("reason").str("needs a full-rate 1090 MHz magnitude tap and CPR aggregation").end();
         w.end().end();
-        return w.out.substr(1, w.out.size() - 2);
+        return w.out;
     }
 
     // state to every tab; hello too when the device list or controls changed
@@ -271,7 +271,7 @@ struct App {
         h.begin_obj().key("source").str(source()).key("rate").num(rate)
          .key("overflows").num(static_cast<double>(src.overflows())).key("recording").boolean(rec.recording())
          .key("free_disk").num(free_disk(record_dir)).end();
-        srv.set_health_extra(h.out.substr(1, h.out.size() - 2));
+        srv.set_health_extra(h.out);
         if (running) save_state();
     }
 
@@ -634,7 +634,7 @@ int main(int argc, char** argv) {
                  .key("ended").boolean(app.src.ended());
             }
             w.end();
-            srv.set_stats_extra(w.out.substr(1, w.out.size() - 2));
+            srv.set_stats_extra(w.out);
         }
         if (!app.running && now - last_retry >= std::chrono::seconds(2)) {
             last_retry = now;

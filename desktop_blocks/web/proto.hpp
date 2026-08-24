@@ -121,6 +121,15 @@ struct JsonWriter {
     JsonWriter& num(double v) { sep(); out += json_number(v); return *this; }
     JsonWriter& boolean(bool v) { sep(); out += v ? "true" : "false"; return *this; }
     JsonWriter& raw(const std::string& v) { sep(); out += v.empty() ? "null" : v; return *this; }
+    // splice another object's members into the one being written; an empty or
+    // memberless object contributes nothing, so no separator is emitted
+    JsonWriter& fields_of(const std::string& obj) {
+        const size_t a = obj.find('{'), b = obj.rfind('}');
+        if (a == std::string::npos || b == std::string::npos || b <= a + 1) return *this;
+        sep();
+        out.append(obj, a + 1, b - a - 1);
+        return *this;
+    }
 private:
     std::vector<bool> firsts;
     std::vector<char> closers;
