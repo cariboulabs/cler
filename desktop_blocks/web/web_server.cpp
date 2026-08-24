@@ -398,7 +398,7 @@ void WebServer::tick_loop() {
                 t.first->sendBinary(ix::IXWebSocketSendData(reinterpret_cast<const char*>(_impl->buf.data()), len));
             }
         }
-        if (ssize) _spec.commit_read(ssize);
+        if (ssize) { _spec.commit_read(ssize); _sent.fetch_add(ssize, std::memory_order_relaxed); }
 
         for (;;) {
             auto [aptr, asize] = _audio.read_dbf();

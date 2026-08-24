@@ -82,6 +82,9 @@ public:
     bool pop_control(std::string& json);
     void set_on_control(std::function<void(const std::string&)> fn) { _on_control = std::move(fn); }
 
+    // Spectrum frames the tick thread has broadcast. A watchdog reads this to
+    // tell "the receiver is serving" from "a block is still producing".
+    uint64_t sent() const { return _sent.load(std::memory_order_relaxed); }
     size_t client_count() const;
     ClientStats total_dropped() const;
 
@@ -94,6 +97,7 @@ private:
     cler::Channel<int16_t> _audio;
     std::atomic<uint32_t> _gen{0};
     std::atomic<uint32_t> _seq_spec{0}, _seq_audio{0};
+    std::atomic<uint64_t> _sent{0};
     mutable std::mutex _mutex;
     std::deque<std::string> _text;
     std::deque<std::string> _control;

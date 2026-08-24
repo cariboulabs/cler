@@ -5,8 +5,11 @@ After=network.target
 [Service]
 User=websdr
 Group=plugdev
-ExecStart=/usr/local/bin/websdr --state-file /var/lib/cler-websdr/state.json --record-dir /var/lib/cler-websdr
+EnvironmentFile=-/etc/default/cler-websdr
+ExecStart=/usr/local/bin/websdr --state-file /var/lib/cler-websdr/state.json --record-dir /var/lib/cler-websdr $WEBSDR_ARGS
 StateDirectory=cler-websdr
+Type=notify
+WatchdogSec=30
 Restart=on-failure
 RestartSec=2
 
