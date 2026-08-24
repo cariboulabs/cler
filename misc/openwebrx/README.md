@@ -39,6 +39,7 @@ OpenWebRX and are AGPL-3.0-or-later; they are not compiled into any cler binary.
 
 ## Limits
 
-`-r/--rtltcp` is not implemented (OWRX only uses it when `rtltcp_compat` is on).
-`ppm` and soapy `settings` are accepted and ignored. Sample-rate changes restart
-the flowgraph — the IQ socket stays open, OpenWebRX keeps reading.
+`-r/--rtltcp` is not implemented: the connector refuses to start rather than
+leave OpenWebRX waiting on a dead port, so leave `rtltcp_compat` off. Soapy
+`settings` are accepted and ignored. Sample-rate changes restart the flowgraph —
+the IQ socket stays open, OpenWebRX keeps reading.
