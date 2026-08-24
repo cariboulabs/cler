@@ -3,6 +3,8 @@
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 
+#include <unistd.h>
+
 inline bool detect_cariboulite_board()
 {
     CaribouLite::SysVersion ver;
@@ -93,6 +95,10 @@ struct SourceCaribouliteBlock : public cler::BlockBase {
         }
 
         static bool can_open() {
+            // libcariboulite exits the process when it cannot mmap the GPIO,
+            // which a caller probing for a device cannot survive, so check the
+            // access it needs before handing control over.
+            if (::access("/dev/gpiomem", R_OK | W_OK) != 0) return false;
             CaribouLite::SysVersion ver;
             std::string name, guid;
             return CaribouLite::DetectBoard(&ver, name, guid);
