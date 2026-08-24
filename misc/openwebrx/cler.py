@@ -11,7 +11,7 @@ from typing import List
 
 class ClerSource(ConnectorSource):
     def getCommandMapper(self):
-        return super().getCommandMapper().setBase("cler_connector")
+        return super().getCommandMapper().setBase("openwebrx_connector")
 
 
 class ClerDeviceDescription(ConnectorDeviceDescription):

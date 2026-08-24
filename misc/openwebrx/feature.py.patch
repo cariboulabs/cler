@@ -4,7 +4,7 @@
 +++ b/owrx/feature.py
 @@
      features = {
-+        "cler": ["cler_connector"],
++        "cler": ["openwebrx_connector"],
          "core": ["csdr", "pycsdr"],
 @@
      def has_soapy_connector(self):
@@ -13,9 +13,9 @@
          """
          return self._check_connector("soapy_connector")
 +
-+    def has_cler_connector(self):
++    def has_openwebrx_connector(self):
 +        """
 +        The cler connector exposes any radio supported by the cler DSP framework
 +        (HackRF, PlutoSDR, USRP, CaribouLite, SoapySDR, SigMF files, simulator).
 +        """
-+        return self._check_connector("cler_connector")
++        return self._check_connector("openwebrx_connector")

@@ -1,11 +1,11 @@
 # cler as an OpenWebRX source
 
-`cler_connector` speaks the `owrx_connector` protocol, so OpenWebRX can use any
+`openwebrx_connector` speaks the `owrx_connector` protocol, so OpenWebRX can use any
 radio cler supports — including CaribouLite, which has no OpenWebRX driver.
 OpenWebRX does all the DSP; the connector only delivers full-rate IQ.
 
-    cmake --build build --target cler_connector
-    sudo install build/desktop_examples/cler_connector/cler_connector /usr/local/bin/
+    cmake --build build --target openwebrx_connector
+    sudo install build/desktop_examples/openwebrx_connector/openwebrx_connector /usr/local/bin/
 
 ## With a two-file patch (recommended)
 
@@ -33,7 +33,7 @@ The `device` field still reaches the connector even though the UI hides it.
 
 ## Licensing
 
-`cler_connector` is a clean-room implementation of the wire protocol and ships
+`openwebrx_connector` is a clean-room implementation of the wire protocol and ships
 under cler's own license. The files in this directory are derivatives of
 OpenWebRX and are AGPL-3.0-or-later; they are not compiled into any cler binary.
 

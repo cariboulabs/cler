@@ -2,7 +2,7 @@
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
-#include "desktop_examples/cler_connector/connector_proto.hpp"
+#include "desktop_examples/openwebrx_connector/connector_proto.hpp"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -68,7 +68,7 @@ public:
 
     explicit IqServer(int port) {
         _listen = listen_loopback(port);
-        if (_listen < 0) cler::panic("cler_connector: cannot listen on the IQ port");
+        if (_listen < 0) cler::panic("openwebrx_connector: cannot listen on the IQ port");
         _port = socket_port(_listen);
         for (auto& s : _slots) s = std::make_unique<Slot>();
         _accept = std::thread([this] { accept_loop(); });
@@ -141,7 +141,7 @@ private:
             }
             if (!free_slot) {
                 ::close(fd);
-                std::fprintf(stderr, "cler_connector: too many IQ clients, refusing one\n");
+                std::fprintf(stderr, "openwebrx_connector: too many IQ clients, refusing one\n");
                 continue;
             }
             const int one = 1;
@@ -203,7 +203,7 @@ public:
     explicit ControlServer(int port) {
         if (port < 0) return;
         _listen = listen_loopback(port, 1);
-        if (_listen < 0) cler::panic("cler_connector: cannot listen on the control port");
+        if (_listen < 0) cler::panic("openwebrx_connector: cannot listen on the control port");
         _port = socket_port(_listen);
         _accept = std::thread([this] { accept_loop(); });
     }
@@ -245,7 +245,7 @@ private:
                 reader.feed(chunk, static_cast<size_t>(n), [this](const std::string& line) {
                     std::string k, v;
                     if (!split_kv(line, k, v)) {
-                        std::fprintf(stderr, "cler_connector: bad control line '%s'\n", line.c_str());
+                        std::fprintf(stderr, "openwebrx_connector: bad control line '%s'\n", line.c_str());
                         return;
                     }
                     std::lock_guard<std::mutex> lock(_mutex);

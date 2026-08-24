@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "desktop_examples/cler_connector/connector_net.hpp"
-#include "desktop_examples/cler_connector/connector_proto.hpp"
+#include "desktop_examples/openwebrx_connector/connector_net.hpp"
+#include "desktop_examples/openwebrx_connector/connector_proto.hpp"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -74,7 +74,7 @@ bool wait_for(F&& pred, int ms = 2000) {
 }  // namespace
 
 TEST(ConnectorArgs, DefaultsMatchUpstream) {
-    const auto o = parse({"cler_connector"});
+    const auto o = parse({"openwebrx_connector"});
     EXPECT_TRUE(o.error.empty());
     EXPECT_EQ(o.iq_port, 4950);
     EXPECT_EQ(o.control_port, -1);
@@ -86,7 +86,7 @@ TEST(ConnectorArgs, DefaultsMatchUpstream) {
 }
 
 TEST(ConnectorArgs, EveryFlagInTheOrderOwrxSends) {
-    const auto o = parse({"cler_connector", "-s", "2400000", "-f", "100000000", "-p", "4590", "-c", "4591",
+    const auto o = parse({"openwebrx_connector", "-s", "2400000", "-f", "100000000", "-p", "4590", "-c", "4591",
                           "-d", "hackrf:abc", "-P", "1.5", "-g", "LNA=24,VGA=20", "-a", "RX2",
                           "-t", "bias_tx=true", "-i", "-r", "1234"});
     EXPECT_TRUE(o.error.empty());
@@ -104,7 +104,7 @@ TEST(ConnectorArgs, EveryFlagInTheOrderOwrxSends) {
 }
 
 TEST(ConnectorArgs, LongFormsAndInlineValues) {
-    const auto o = parse({"cler_connector", "--port=4950", "--control", "4951", "--device=sim", "--version"});
+    const auto o = parse({"openwebrx_connector", "--port=4950", "--control", "4951", "--device=sim", "--version"});
     EXPECT_TRUE(o.error.empty());
     EXPECT_EQ(o.iq_port, 4950);
     EXPECT_EQ(o.control_port, 4951);
@@ -113,9 +113,9 @@ TEST(ConnectorArgs, LongFormsAndInlineValues) {
 }
 
 TEST(ConnectorArgs, BadInputIsReportedNotGuessed) {
-    EXPECT_FALSE(parse({"cler_connector", "--nope"}).error.empty());
-    EXPECT_FALSE(parse({"cler_connector", "-p"}).error.empty());
-    EXPECT_FALSE(parse({"cler_connector", "extra"}).error.empty());
+    EXPECT_FALSE(parse({"openwebrx_connector", "--nope"}).error.empty());
+    EXPECT_FALSE(parse({"openwebrx_connector", "-p"}).error.empty());
+    EXPECT_FALSE(parse({"openwebrx_connector", "extra"}).error.empty());
 }
 
 TEST(ConnectorGain, EveryFormOfTheSpec) {
@@ -303,8 +303,8 @@ TEST(ConnectorSockets, ControlLinesReachTheApp) {
 // first stdout line and X.Y >= 0.5, and the name is whatever the binary was
 // installed as — which is what makes the sddc_connector rename work.
 TEST(ConnectorVersion, FirstStdoutLineMatchesOwrxFeatureCheck) {
-    const char* bin = std::getenv("CLER_CONNECTOR_BIN");
-    if (!bin) GTEST_SKIP() << "CLER_CONNECTOR_BIN not set";
+    const char* bin = std::getenv("OPENWEBRX_CONNECTOR_BIN");
+    if (!bin) GTEST_SKIP() << "OPENWEBRX_CONNECTOR_BIN not set";
 
     auto first_line = [](const std::string& command) {
         std::string out;
@@ -318,7 +318,7 @@ TEST(ConnectorVersion, FirstStdoutLineMatchesOwrxFeatureCheck) {
     };
 
     const std::string real = first_line(std::string(bin) + " --version");
-    EXPECT_EQ(real, "cler_connector version 0.6");
+    EXPECT_EQ(real, "openwebrx_connector version 0.6");
     EXPECT_EQ(first_line(std::string(bin) + " -v"), real);
 
     const std::string alias = std::string(::testing::TempDir()) + "/sddc_connector";

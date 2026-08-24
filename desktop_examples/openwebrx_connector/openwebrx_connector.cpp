@@ -1,12 +1,12 @@
 // owrx_connector-compatible IQ source: SourceMux -> loopback TCP, so OpenWebRX
 // can use any radio cler supports.
-//   cler_connector -p 4950 -c 4951 -s 2400000 -f 100000000 -d hackrf [-g LNA=24,VGA=20] [-i]
+//   openwebrx_connector -p 4950 -c 4951 -s 2400000 -f 100000000 -d hackrf [-g LNA=24,VGA=20] [-i]
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include "task_policies/cler_desktop_tpolicy.hpp"
 #include "desktop_blocks/sources/source_mux.hpp"
-#include "desktop_examples/cler_connector/connector_net.hpp"
-#include "desktop_examples/cler_connector/connector_proto.hpp"
+#include "desktop_examples/openwebrx_connector/connector_net.hpp"
+#include "desktop_examples/openwebrx_connector/connector_proto.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -96,7 +96,7 @@ struct App {
                     applied = true;
                 }
             }
-            if (!applied) std::fprintf(stderr, "cler_connector: no gain named '%s'\n", name.c_str());
+            if (!applied) std::fprintf(stderr, "openwebrx_connector: no gain named '%s'\n", name.c_str());
         }
     }
 
@@ -107,7 +107,7 @@ struct App {
             for (size_t i = 0; i < c.options.size(); ++i) {
                 if (c.options[i] == antenna) { src.set("antenna", static_cast<double>(i)); return; }
             }
-            std::fprintf(stderr, "cler_connector: no antenna named '%s'\n", antenna.c_str());
+            std::fprintf(stderr, "openwebrx_connector: no antenna named '%s'\n", antenna.c_str());
         }
     }
 
@@ -119,14 +119,14 @@ struct App {
         src.close();
         if (kind == SourceMux::Kind::None || !src.probe(kind, id)) {
             if (!complained) {
-                std::fprintf(stderr, "cler_connector: cannot open %s, retrying\n", device_name(kind, id).c_str());
+                std::fprintf(stderr, "openwebrx_connector: cannot open %s, retrying\n", device_name(kind, id).c_str());
                 complained = true;
             }
             return false;
         }
         if (!src.select(kind, id, corrected(), rate)) {
             if (!complained) {
-                std::fprintf(stderr, "cler_connector: %s refused the requested settings\n", device_name(kind, id).c_str());
+                std::fprintf(stderr, "openwebrx_connector: %s refused the requested settings\n", device_name(kind, id).c_str());
                 complained = true;
             }
             return false;
@@ -139,7 +139,7 @@ struct App {
         fg.run();
         running = true;
         complained = false;
-        std::fprintf(stderr, "cler_connector: %s at %.6f MHz, %.6f MS/s\n",
+        std::fprintf(stderr, "openwebrx_connector: %s at %.6f MHz, %.6f MS/s\n",
                      device_name(kind, id).c_str(), freq / 1e6, rate / 1e6);
         return true;
     }
@@ -173,7 +173,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "%s: rtltcp compatibility is not implemented; turn rtltcp_compat off\n", self.c_str());
         return 1;
     }
-    if (!o.settings.empty()) std::fprintf(stderr, "cler_connector: ignoring device settings '%s'\n", o.settings.c_str());
+    if (!o.settings.empty()) std::fprintf(stderr, "openwebrx_connector: ignoring device settings '%s'\n", o.settings.c_str());
 
     std::signal(SIGINT, [](int) { g_run = false; });
     std::signal(SIGTERM, [](int) { g_run = false; });
@@ -185,7 +185,7 @@ int main(int argc, char** argv) {
     SourceMux src("Source");
     conn::IqSinkBlock sink("IQ sink", iq);
     sink.iqswap.store(o.iqswap);
-    std::fprintf(stderr, "cler_connector: IQ on 127.0.0.1:%d, control on %s\n",
+    std::fprintf(stderr, "openwebrx_connector: IQ on 127.0.0.1:%d, control on %s\n",
                  iq.port(), o.control_port < 0 ? "(none)" : std::to_string(ctl.port()).c_str());
 
     auto fg = cler::make_desktop_flowgraph(
@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
     app.antenna = o.antenna;
     if (!o.device.empty()) {
         if (!parse_device(o.device, app.kind, app.id)) {
-            std::fprintf(stderr, "cler_connector: unknown device '%s'\n", o.device.c_str());
+            std::fprintf(stderr, "openwebrx_connector: unknown device '%s'\n", o.device.c_str());
             return 1;
         }
     } else {
@@ -210,7 +210,7 @@ int main(int argc, char** argv) {
             break;
         }
         if (app.kind == SourceMux::Kind::None) {
-            std::fprintf(stderr, "cler_connector: no device found, falling back to the simulator\n");
+            std::fprintf(stderr, "openwebrx_connector: no device found, falling back to the simulator\n");
             app.kind = SourceMux::Kind::Sim;
         }
     }
@@ -230,12 +230,12 @@ int main(int argc, char** argv) {
             // means "back to the default", not "bad value".
             if (key == "center_freq") {
                 if (numeric) { app.freq = v; app.tune(); }
-                else if (!none) std::fprintf(stderr, "cler_connector: bad center_freq '%s'\n", value.c_str());
+                else if (!none) std::fprintf(stderr, "openwebrx_connector: bad center_freq '%s'\n", value.c_str());
             } else if (key == "samp_rate") {
                 // Every rate is fixed at construction downstream, so the graph
                 // restarts; the sockets outlive it because OWRX keeps reading.
                 if (numeric) { app.rate = v; app.open(fg); }
-                else if (!none) std::fprintf(stderr, "cler_connector: bad samp_rate '%s'\n", value.c_str());
+                else if (!none) std::fprintf(stderr, "openwebrx_connector: bad samp_rate '%s'\n", value.c_str());
             } else if (key == "rf_gain") {
                 app.gain = conn::parse_gain(none ? "auto" : value);
                 if (app.running) app.apply_gain();
@@ -248,14 +248,14 @@ int main(int argc, char** argv) {
                 app.ppm = none ? 0.0 : (numeric ? v : app.ppm);
                 if (app.running) app.tune();
             } else if (key == "settings") {
-                std::fprintf(stderr, "cler_connector: ignoring device settings '%s'\n", value.c_str());
+                std::fprintf(stderr, "openwebrx_connector: ignoring device settings '%s'\n", value.c_str());
             } else {
-                std::fprintf(stderr, "cler_connector: ignoring control '%s'\n", key.c_str());
+                std::fprintf(stderr, "openwebrx_connector: ignoring control '%s'\n", key.c_str());
             }
         }
         const auto now = clock::now();
         if (app.running && src.lost()) {
-            std::fprintf(stderr, "cler_connector: device lost\n");
+            std::fprintf(stderr, "openwebrx_connector: device lost\n");
             fg.stop();
             app.running = false;
             src.close();
@@ -270,7 +270,7 @@ int main(int argc, char** argv) {
             next_report = now + std::chrono::seconds(10);
             const uint64_t drops = iq.dropped();
             if (drops != reported_drops) {
-                std::fprintf(stderr, "cler_connector: %llu samples dropped to slow readers\n",
+                std::fprintf(stderr, "openwebrx_connector: %llu samples dropped to slow readers\n",
                              static_cast<unsigned long long>(drops));
                 reported_drops = drops;
             }
