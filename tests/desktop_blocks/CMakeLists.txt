@@ -139,7 +139,9 @@ endif()
 
 add_executable(connector_test test_connector.cpp)
 target_link_libraries(connector_test gtest_main cler::desktop_blocks)
-add_test(NAME connector_test COMMAND connector_test)
+add_test(NAME connector_test COMMAND ${CMAKE_COMMAND} -E env
+    CLER_CONNECTOR_BIN=$<TARGET_FILE:cler_connector> $<TARGET_FILE:connector_test>)
+add_dependencies(connector_test cler_connector)
 
 if (CLER_BUILD_BLOCKS_WEB)
     add_executable(web_blocks_test test_web_blocks.cpp)

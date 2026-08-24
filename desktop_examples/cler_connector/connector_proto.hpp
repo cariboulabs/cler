@@ -97,12 +97,22 @@ inline Options parse_args(int argc, char* const* argv) {
         auto value = [&](const char* name) -> const char* {
             return has_inline ? inline_value.c_str() : want(i, name);
         };
-        if (a == "-p" || a == "--port") { if (const char* v = value("--port")) o.iq_port = std::atoi(v); }
-        else if (a == "-c" || a == "--control") { if (const char* v = value("--control")) o.control_port = std::atoi(v); }
-        else if (a == "-r" || a == "--rtltcp") { if (const char* v = value("--rtltcp")) o.rtltcp_port = std::atoi(v); }
-        else if (a == "-s" || a == "--samplerate") { if (const char* v = value("--samplerate")) o.samp_rate = std::atof(v); }
-        else if (a == "-f" || a == "--frequency") { if (const char* v = value("--frequency")) o.frequency = std::atof(v); }
-        else if (a == "-P" || a == "--ppm") { if (const char* v = value("--ppm")) o.ppm = std::atof(v); }
+        // A silently mis-parsed port binds somewhere OWRX will never connect to.
+        auto number = [&](const char* name, double& out) {
+            const char* v = value(name);
+            if (v && !parse_number(v, out)) o.error = std::string(name) + " wants a number, got '" + v + "'";
+        };
+        auto integer = [&](const char* name, int& out) {
+            double v = 0;
+            number(name, v);
+            if (o.error.empty()) out = static_cast<int>(v);
+        };
+        if (a == "-p" || a == "--port") integer("--port", o.iq_port);
+        else if (a == "-c" || a == "--control") integer("--control", o.control_port);
+        else if (a == "-r" || a == "--rtltcp") integer("--rtltcp", o.rtltcp_port);
+        else if (a == "-s" || a == "--samplerate") number("--samplerate", o.samp_rate);
+        else if (a == "-f" || a == "--frequency") number("--frequency", o.frequency);
+        else if (a == "-P" || a == "--ppm") number("--ppm", o.ppm);
         else if (a == "-d" || a == "--device") { if (const char* v = value("--device")) o.device = v; }
         else if (a == "-g" || a == "--gain") { if (const char* v = value("--gain")) o.gain = v; }
         else if (a == "-a" || a == "--antenna") { if (const char* v = value("--antenna")) o.antenna = v; }

@@ -9,7 +9,11 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <future>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -213,17 +217,61 @@ TEST(ConnectorSockets, ProbeConnectIsHarmlessAndIqIsFloat32) {
     ASSERT_TRUE(wait_for([&] { return iq.clients() == 0; }));
 }
 
+// write_dbf() hands back a cached lower bound on the free space and only
+// re-reads the consumer index when that bound reaches zero. A push that writes
+// one span and calls the rest dropped therefore loses samples into a ring that
+// is nearly empty: this fails if push() stops looping.
+TEST(ConnectorSockets, KeepingUpReaderLosesNothing) {
+    conn::IqServer iq(0);
+    const int fd = connect_loopback(iq.port());
+    ASSERT_GE(fd, 0);
+    ASSERT_TRUE(wait_for([&] { return iq.clients() == 1; }));
+
+    constexpr size_t BLOCK = 8192;
+    constexpr int BLOCKS = 400;  // 3.3 M samples cycling a 262 k ring many times
+    std::vector<std::complex<float>> block(BLOCK);
+    std::atomic<size_t> received{0};
+    std::atomic<bool> reading{true};
+    std::thread reader([&] {
+        std::vector<char> buf(1 << 20);
+        while (reading.load()) {
+            const ssize_t n = ::recv(fd, buf.data(), buf.size(), 0);
+            if (n > 0) received.fetch_add(static_cast<size_t>(n));
+            else if (n == 0) break;
+        }
+    });
+
+    // Paced like a radio rather than a flood, so free space is always there and
+    // any drop means push() believed a stale bound instead of asking again.
+    for (int b = 0; b < BLOCKS; ++b) {
+        for (size_t i = 0; i < BLOCK; ++i) block[i] = {static_cast<float>(b), static_cast<float>(i)};
+        iq.push(block.data(), block.size());
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const size_t want = sizeof(std::complex<float>) * BLOCK * BLOCKS;
+    wait_for([&] { return received.load() >= want; }, 8000);
+    reading = false;
+    ::shutdown(fd, SHUT_RDWR);
+    reader.join();
+    ::close(fd);
+
+    EXPECT_EQ(iq.dropped(), 0u) << "push() dropped into a ring the reader was keeping up with";
+    EXPECT_EQ(received.load(), want);
+}
+
 TEST(ConnectorSockets, SlowReaderIsDroppedNotBlocking) {
     conn::IqServer iq(0);
     const int fd = connect_loopback(iq.port());
     ASSERT_GE(fd, 0);
     ASSERT_TRUE(wait_for([&] { return iq.clients() == 1; }));
 
+    // Nothing is ever read from fd, so the ring fills and push() must return
+    // rather than wait for room: the DSP chain cannot be held back by a socket.
     std::vector<std::complex<float>> block(conn::IqServer::RING_SAMPLES);
-    const auto start = std::chrono::steady_clock::now();
-    for (int i = 0; i < 8; ++i) iq.push(block.data(), block.size());
-    const auto elapsed = std::chrono::steady_clock::now() - start;
-    EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(), 2000);
+    auto pushes = std::async(std::launch::async, [&] {
+        for (int i = 0; i < 8; ++i) iq.push(block.data(), block.size());
+    });
+    ASSERT_EQ(pushes.wait_for(std::chrono::seconds(10)), std::future_status::ready) << "push() blocked on a full ring";
     EXPECT_GT(iq.dropped(), 0u);
     ::close(fd);
 }
@@ -249,6 +297,42 @@ TEST(ConnectorSockets, ControlLinesReachTheApp) {
     EXPECT_EQ(got[1].second, "LNA=24");
     EXPECT_EQ(got.size(), 2u);
     ::close(fd);
+}
+
+// OpenWebRX only offers the device if `<binary name> version <X.Y>` is the
+// first stdout line and X.Y >= 0.5, and the name is whatever the binary was
+// installed as — which is what makes the sddc_connector rename work.
+TEST(ConnectorVersion, FirstStdoutLineMatchesOwrxFeatureCheck) {
+    const char* bin = std::getenv("CLER_CONNECTOR_BIN");
+    if (!bin) GTEST_SKIP() << "CLER_CONNECTOR_BIN not set";
+
+    auto first_line = [](const std::string& command) {
+        std::string out;
+        FILE* pipe = ::popen(command.c_str(), "r");
+        if (!pipe) return out;
+        char buf[256];
+        if (std::fgets(buf, sizeof buf, pipe)) out = buf;
+        ::pclose(pipe);
+        if (!out.empty() && out.back() == '\n') out.pop_back();
+        return out;
+    };
+
+    const std::string real = first_line(std::string(bin) + " --version");
+    EXPECT_EQ(real, "cler_connector version 0.6");
+    EXPECT_EQ(first_line(std::string(bin) + " -v"), real);
+
+    const std::string alias = std::string(::testing::TempDir()) + "/sddc_connector";
+    ::unlink(alias.c_str());
+    ASSERT_EQ(::symlink(bin, alias.c_str()), 0);
+    EXPECT_EQ(first_line(alias + " --version"), "sddc_connector version 0.6");
+    ::unlink(alias.c_str());
+
+    std::string name, version;
+    std::istringstream parts(real);
+    std::string keyword;
+    ASSERT_TRUE(parts >> name >> keyword >> version);
+    EXPECT_EQ(keyword, "version");
+    EXPECT_GE(std::stod(version), 0.5);
 }
 
 TEST(ConnectorSink, IqSwapExchangesTheComponents) {

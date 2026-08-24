@@ -50,10 +50,20 @@ struct App {
     std::string id;
     double freq = 100e6;
     double rate = 2.4e6;
+    double ppm = 0;
     conn::GainSpec gain;
     std::string antenna;
     bool running = false;
     bool complained = false;
+
+    // The oscillator error is corrected by asking the hardware for a frequency
+    // off by the same fraction; OWRX applies no correction of its own.
+    double corrected() const { return freq * (1.0 + ppm * 1e-6); }
+
+    void tune() {
+        src.set("freq", corrected());
+        if (ppm == 0) freq = src.center();
+    }
 
     void apply_gain() {
         const auto caps = src.capabilities();
@@ -114,7 +124,7 @@ struct App {
             }
             return false;
         }
-        if (!src.select(kind, id, freq, rate)) {
+        if (!src.select(kind, id, corrected(), rate)) {
             if (!complained) {
                 std::fprintf(stderr, "cler_connector: %s refused the requested settings\n", device_name(kind, id).c_str());
                 complained = true;
@@ -124,7 +134,7 @@ struct App {
         apply_gain();
         apply_antenna();
         rate = src.rate();
-        freq = src.center();
+        if (ppm == 0) freq = src.center();
         fg.reset();
         fg.run();
         running = true;
@@ -153,11 +163,17 @@ int main(int argc, char** argv) {
                      "      cariboulite:s1g|hif | soapy:ARGS | sigmf:NAME, or a bare soapy arg string.\n"
                      "      Empty picks the first device found.\n"
                      "  -g  auto | none | <dB> | NAME=V,NAME=V\n"
-                     "  -r  rtl_tcp compatibility is not implemented and is ignored.\n", self.c_str());
+                     "  -r  rtl_tcp compatibility is not implemented.\n", self.c_str());
         return o.error.empty() ? 0 : 1;
     }
-    if (o.rtltcp_port >= 0) std::fprintf(stderr, "cler_connector: -r is not implemented, ignoring\n");
-    if (o.ppm != 0) std::fprintf(stderr, "cler_connector: ppm correction is not supported, ignoring\n");
+    // Accepting -r silently would leave OWRX pointing a TcpSource at a port
+    // nothing listens on, which looks like a broken radio rather than a
+    // missing feature.
+    if (o.rtltcp_port >= 0) {
+        std::fprintf(stderr, "%s: rtltcp compatibility is not implemented; turn rtltcp_compat off\n", self.c_str());
+        return 1;
+    }
+    if (!o.settings.empty()) std::fprintf(stderr, "cler_connector: ignoring device settings '%s'\n", o.settings.c_str());
 
     std::signal(SIGINT, [](int) { g_run = false; });
     std::signal(SIGTERM, [](int) { g_run = false; });
@@ -176,7 +192,7 @@ int main(int argc, char** argv) {
         cler::BlockRunner(&src, &sink.in),
         cler::BlockRunner(&sink));
 
-    App app{src, sink, SourceMux::Kind::None, "", 100e6, 2.4e6, {}, "", false, false};
+    App app{src, sink, SourceMux::Kind::None, "", 100e6, 2.4e6, o.ppm, {}, "", false, false};
     if (o.frequency > 0) app.freq = o.frequency;
     if (o.samp_rate > 0) app.rate = o.samp_rate;
     app.gain = conn::parse_gain(o.gain);
@@ -210,15 +226,16 @@ int main(int argc, char** argv) {
             const bool none = value == "None";
             double v = 0;
             const bool numeric = conn::parse_number(value, v);
-            if (key == "center_freq" && numeric) {
-                app.freq = v;
-                src.set("freq", v);
-                app.freq = src.center();
-            } else if (key == "samp_rate" && numeric) {
+            // OWRX sends the literal "None" when a property is cleared, which
+            // means "back to the default", not "bad value".
+            if (key == "center_freq") {
+                if (numeric) { app.freq = v; app.tune(); }
+                else if (!none) std::fprintf(stderr, "cler_connector: bad center_freq '%s'\n", value.c_str());
+            } else if (key == "samp_rate") {
                 // Every rate is fixed at construction downstream, so the graph
                 // restarts; the sockets outlive it because OWRX keeps reading.
-                app.rate = v;
-                app.open(fg);
+                if (numeric) { app.rate = v; app.open(fg); }
+                else if (!none) std::fprintf(stderr, "cler_connector: bad samp_rate '%s'\n", value.c_str());
             } else if (key == "rf_gain") {
                 app.gain = conn::parse_gain(none ? "auto" : value);
                 if (app.running) app.apply_gain();
@@ -226,9 +243,12 @@ int main(int argc, char** argv) {
                 app.antenna = none ? "" : value;
                 if (app.running) app.apply_antenna();
             } else if (key == "iqswap") {
-                sink.iqswap.store(conn::truthy(value), std::memory_order_relaxed);
+                sink.iqswap.store(!none && conn::truthy(value), std::memory_order_relaxed);
             } else if (key == "ppm") {
-                if (!none && v != 0) std::fprintf(stderr, "cler_connector: ppm correction is not supported\n");
+                app.ppm = none ? 0.0 : (numeric ? v : app.ppm);
+                if (app.running) app.tune();
+            } else if (key == "settings") {
+                std::fprintf(stderr, "cler_connector: ignoring device settings '%s'\n", value.c_str());
             } else {
                 std::fprintf(stderr, "cler_connector: ignoring control '%s'\n", key.c_str());
             }
