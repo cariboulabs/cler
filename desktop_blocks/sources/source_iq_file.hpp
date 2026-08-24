@@ -10,8 +10,10 @@
 #include <string>
 #include <vector>
 
-// 8-bit interleaved IQ capture (hackrf_transfer -r, rtl_sdr) replayed in a loop.
+// Signed 8-bit interleaved IQ capture (hackrf_transfer -r) replayed in a loop.
 struct SourceIQFileBlock : public cler::BlockBase {
+    static constexpr bool may_block = true;
+
     SourceIQFileBlock(const char* name, const std::string& path, size_t chunk = 1 << 16)
         : cler::BlockBase(name), _raw(2 * chunk) {
         _f = std::fopen(path.c_str(), "rb");

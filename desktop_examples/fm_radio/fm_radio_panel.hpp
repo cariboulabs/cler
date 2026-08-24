@@ -35,13 +35,20 @@ struct FmRadioPanel : public cler::BlockBase {
         if (const auto* c = control("lna")) _lna = static_cast<int>(c->value);
         if (const auto* c = control("vga")) _vga = static_cast<int>(c->value);
         if (const auto* c = control("amp")) _amp = c->value >= 0.5;
-        if (const auto* c = control("gain")) _gain = static_cast<float>(c->value);
+        if (const auto* c = gain_control()) _gain = static_cast<float>(c->value);
         _volume = volume.volume();
         _deemph_us = 50;
     }
 
     const SourceMux::Control* control(const std::string& id) const {
         for (const auto& c : _controls) if (c.id == id) return &c;
+        return nullptr;
+    }
+
+    // Soapy reports its gains by name ("gain_LNA"); everything else has a plain one.
+    const SourceMux::Control* gain_control() const {
+        if (const auto* c = control("gain")) return c;
+        for (const auto& c : _controls) if (c.id.rfind("gain", 0) == 0) return &c;
         return nullptr;
     }
 
@@ -162,9 +169,9 @@ struct FmRadioPanel : public cler::BlockBase {
             ImGui::SameLine(0, 16);
             ImGui::TextDisabled("overflows %zu", _src.overflows());
         }
-        if (const auto* g = control("gain")) {
-            if (ImGui::SliderFloat("gain", &_gain, static_cast<float>(g->min), static_cast<float>(g->max), "%.0f dB"))
-                _src.set("gain", _gain);
+        if (const auto* g = gain_control()) {
+            if (ImGui::SliderFloat(g->label.c_str(), &_gain, static_cast<float>(g->min), static_cast<float>(g->max), "%.0f dB"))
+                _src.set(g->id, _gain);
         }
         ImGui::End();
     }

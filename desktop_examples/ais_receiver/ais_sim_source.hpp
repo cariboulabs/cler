@@ -52,6 +52,12 @@ struct AISSimSourceBlock : public cler::BlockBase {
         _burst.reserve(MAX_TX_BITS * _sps);   // the longest burst encode_frame can produce; no growth in procedure()
     }
 
+    // owns a gmskmod handle: copying or moving would double-destroy it
+    AISSimSourceBlock(const AISSimSourceBlock&) = delete;
+    AISSimSourceBlock& operator=(const AISSimSourceBlock&) = delete;
+    AISSimSourceBlock(AISSimSourceBlock&&) = delete;
+    AISSimSourceBlock& operator=(AISSimSourceBlock&&) = delete;
+
     ~AISSimSourceBlock() {
         if (_mod) gmskmod_destroy(_mod);
     }

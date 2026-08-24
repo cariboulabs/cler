@@ -21,8 +21,8 @@ struct PacedSelectableSource : public cler::BlockBase {
     static constexpr bool may_block = true;
     enum class Kind { HackRF, File, Sim };
 
-    // sim_args are forwarded to SimBlock, which is constructed in place: these
-    // blocks own liquid handles and must never be moved.
+    // sim_args are forwarded to SimBlock, which is constructed in place: a
+    // simulator owning a liquid handle deletes its move constructor.
     template <typename... SimArgs>
     PacedSelectableSource(const char* name, Kind kind, const std::string& file, double center_hz,
                           double rate_hz, int lna, int vga, bool amp, SimArgs&&... sim_args)
