@@ -137,7 +137,8 @@ void WebServer::start() {
                 std::error_code ec;
                 for (const auto& e : std::filesystem::directory_iterator(_opts.record_dir, ec)) {
                     if (!e.is_regular_file() || e.path().extension() != ".sigmf-meta") continue;
-                    const auto meta = sigmf::read_meta(e.path().string());
+                    sigmf::Meta meta;
+                    if (!sigmf::try_read_meta(e.path().string(), meta)) continue;
                     std::error_code ec2;
                     const auto bytes = std::filesystem::file_size(sigmf::data_path(e.path().string()), ec2);
                     if (ec2) continue;
@@ -164,10 +165,17 @@ void WebServer::start() {
             if (!std::filesystem::is_regular_file(full, ec)) {
                 return std::make_shared<ix::HttpResponse>(404, "Not Found", ix::HttpErrorCode::Ok, h, "not found");
             }
+            // ponytail: IX responses are one std::string, no chunked send; this is a
+            // single exact-size read (no stringstream doubling), ceiling = file size in RAM
+            const auto size = std::filesystem::file_size(full, ec);
+            std::string body;
+            body.resize(size);
             std::ifstream f(full, std::ios::binary);
-            std::ostringstream ss; ss << f.rdbuf();
+            if (!f.read(body.data(), static_cast<std::streamsize>(size))) {
+                return std::make_shared<ix::HttpResponse>(500, "Read failed", ix::HttpErrorCode::Ok, h, "read failed");
+            }
             h["Content-Type"] = "application/octet-stream";
-            return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, h, ss.str());
+            return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, h, std::move(body));
         }
         std::string name = path == "/" ? "index.html" : path.rfind("/client/", 0) == 0 ? path.substr(8) : "";
         if (name.empty() || name[0] == '.' || name.find('/') != std::string::npos || name.find("..") != std::string::npos) {

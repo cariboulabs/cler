@@ -65,6 +65,13 @@ struct SourceSigMFBlock : public cler::BlockBase {
                 _ended.store(false, std::memory_order_relaxed);
                 _started = false;
             }
+            if (_ended.load(std::memory_order_relaxed) && _loop.load(std::memory_order_relaxed)) {
+                std::clearerr(_fp);
+                std::fseek(_fp, 0, SEEK_SET);
+                _pos.store(0, std::memory_order_relaxed);
+                _ended.store(false, std::memory_order_relaxed);
+                _started = false;
+            }
             if (_pause.load(std::memory_order_relaxed) || _ended.load(std::memory_order_relaxed)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 _started = false;

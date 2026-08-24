@@ -88,7 +88,8 @@ struct SourceMux : public cler::BlockBase {
                 const std::string name = e.path().stem().string();
                 std::string label = name;
                 std::error_code ec2;
-                const auto meta = sigmf::read_meta(e.path().string());
+                sigmf::Meta meta;
+                if (!sigmf::try_read_meta(e.path().string(), meta)) continue;
                 const auto bytes = std::filesystem::file_size(sigmf::data_path(e.path().string()), ec2);
                 if (!ec2 && meta.sample_rate > 0) {
                     const double secs = static_cast<double>(bytes) /
@@ -141,7 +142,8 @@ struct SourceMux : public cler::BlockBase {
                 std::error_code ec;
                 if (!std::filesystem::is_regular_file(meta_path, ec) ||
                     !std::filesystem::is_regular_file(sigmf::data_path(meta_path), ec)) return false;
-                const auto meta = sigmf::read_meta(meta_path);
+                sigmf::Meta meta;
+                if (!sigmf::try_read_meta(meta_path, meta)) return false;
                 if (!sigmf::datatype_is_complex(meta.datatype) || meta.sample_rate <= 0) return false;
                 _v.emplace<SigMFSrc>("sigmf", meta_path.c_str(), false, size_t(8192), true);
                 return true;

@@ -51,6 +51,7 @@ struct SigMFRecorderBlock : public cler::BlockBase {
                         std::fclose(_fp);
                         _fp = nullptr;
                         _recording.store(false, std::memory_order_release);
+                        _failed.store(true, std::memory_order_release);
                         break;
                     }
                     done += n;
@@ -76,6 +77,8 @@ struct SigMFRecorderBlock : public cler::BlockBase {
         std::lock_guard<std::mutex> lock(_mutex);
         if (_fp) return false;
         _base = base;
+        _fp = std::fopen((base + ".sigmf-data").c_str(), "wb");
+        if (!_fp) return false;
         sigmf::Meta meta;
         meta.datatype = sigmf::Datatype::ci16_le;
         meta.sample_rate = _rate;
@@ -85,10 +88,14 @@ struct SigMFRecorderBlock : public cler::BlockBase {
         cap.has_frequency = true;
         cap.datetime = sigmf::utc_now();
         meta.captures.push_back(cap);
-        sigmf::write_meta(_base + ".sigmf-meta", meta);
-        _fp = std::fopen((_base + ".sigmf-data").c_str(), "wb");
-        if (!_fp) return false;
+        if (!sigmf::write_meta(_base + ".sigmf-meta", meta)) {
+            std::fclose(_fp);
+            _fp = nullptr;
+            std::remove((_base + ".sigmf-data").c_str());
+            return false;
+        }
         _samples.store(0, std::memory_order_relaxed);
+        _failed.store(false, std::memory_order_release);
         _recording.store(true, std::memory_order_release);
         return true;
     }
@@ -103,6 +110,8 @@ struct SigMFRecorderBlock : public cler::BlockBase {
     }
 
     bool recording() const { return _recording.load(std::memory_order_acquire); }
+    // one-shot: true after a write failure stopped the recording, cleared by the next start
+    bool take_failure() { return _failed.exchange(false, std::memory_order_acq_rel); }
     // graph stopped and not recording only; the rate lands in the next start()'s meta
     void set_rate(double rate) {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -121,5 +130,6 @@ private:
     FILE* _fp = nullptr;
     std::string _base;
     std::atomic<bool> _recording{false};
+    std::atomic<bool> _failed{false};
     std::atomic<uint64_t> _samples{0};
 };

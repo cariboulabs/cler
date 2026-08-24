@@ -60,17 +60,25 @@ inline std::string utc_now() {
     return buf;
 }
 
-inline Datatype parse_datatype(const std::string& name) {
+inline bool try_parse_datatype(const std::string& name, Datatype& out) {
     // 8-bit types carry no meaningful byte order; the spec still allows the suffix
-    if (name == "cf32_le") return Datatype::cf32_le;
-    if (name == "ci16_le") return Datatype::ci16_le;
-    if (name == "ci8" || name == "ci8_le") return Datatype::ci8;
-    if (name == "cu8" || name == "cu8_le") return Datatype::cu8;
-    if (name == "rf32_le") return Datatype::rf32_le;
-    if (name == "ri16_le") return Datatype::ri16_le;
-    std::string msg = "SigMF core:datatype not supported (little-endian only): " + name;
-    cler::panic(msg.c_str());
-    return Datatype::cf32_le;
+    if (name == "cf32_le") out = Datatype::cf32_le;
+    else if (name == "ci16_le") out = Datatype::ci16_le;
+    else if (name == "ci8" || name == "ci8_le") out = Datatype::ci8;
+    else if (name == "cu8" || name == "cu8_le") out = Datatype::cu8;
+    else if (name == "rf32_le") out = Datatype::rf32_le;
+    else if (name == "ri16_le") out = Datatype::ri16_le;
+    else return false;
+    return true;
+}
+
+inline Datatype parse_datatype(const std::string& name) {
+    Datatype dt;
+    if (!try_parse_datatype(name, dt)) {
+        std::string msg = "SigMF core:datatype not supported (little-endian only): " + name;
+        cler::panic(msg.c_str());
+    }
+    return dt;
 }
 
 // key -> raw JSON text, used to carry keys this reader does not model
@@ -263,24 +271,22 @@ inline std::string base_path(const std::string& path) {
 inline std::string meta_path(const std::string& path) { return base_path(path) + ".sigmf-meta"; }
 inline std::string data_path(const std::string& path) { return base_path(path) + ".sigmf-data"; }
 
-inline Meta read_meta(const std::string& path) {
+inline bool try_read_meta(const std::string& path, Meta& meta) {
     std::string file = meta_path(path);
     FILE* fp = std::fopen(file.c_str(), "rb");
-    if (!fp) {
-        std::string msg = "Failed to open SigMF metadata: " + file;
-        cler::panic(msg.c_str());
-    }
+    if (!fp) return false;
     std::string text;
     char buf[4096];
     size_t n;
     while ((n = std::fread(buf, 1, sizeof(buf), fp)) > 0) text.append(buf, n);
     std::fclose(fp);
 
-    Meta meta;
     for (const auto& kv : detail::parse_object(text)) {
         if (kv.first == "global") {
             for (const auto& g : detail::parse_object(kv.second)) {
-                if (g.first == "core:datatype") meta.datatype = parse_datatype(detail::unescape(g.second));
+                if (g.first == "core:datatype") {
+                    if (!try_parse_datatype(detail::unescape(g.second), meta.datatype)) return false;
+                }
                 else if (g.first == "core:sample_rate") meta.sample_rate = detail::as_number(g.second);
                 else if (g.first == "core:version") meta.version = detail::unescape(g.second);
                 else if (g.first == "core:author") meta.author = detail::unescape(g.second);
@@ -312,6 +318,15 @@ inline Meta read_meta(const std::string& path) {
         }
     }
     if (meta.captures.empty()) meta.captures.push_back(Capture{});
+    return true;
+}
+
+inline Meta read_meta(const std::string& path) {
+    Meta meta;
+    if (!try_read_meta(path, meta)) {
+        std::string msg = "Failed to read SigMF metadata: " + meta_path(path);
+        cler::panic(msg.c_str());
+    }
     return meta;
 }
 
