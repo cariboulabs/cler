@@ -34,7 +34,15 @@ in `plugdev`.
 Alternative for a LAN with no browser requirement: run SoapySDRServer on the
 box and point the desktop scanner at `driver=remote` — all DSP on the laptop.
 
-Build for a Raspberry Pi from any machine (qemu, no sysroot):
+Cross-compile in ~2 min with a sysroot (see cmake/toolchains/rpi-aarch64.cmake header;
+needs gcc-10-aarch64-linux-gnu on Debian-family hosts to match bullseye):
+
+    cmake -S . -B build-rpi -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/rpi-aarch64.cmake \
+      -DRPI_SYSROOT=$HOME/sysroots/rpi-bullseye -DCLER_BUILD_BLOCKS_GUI=OFF \
+      -DBUILD_SHARED_LIBS=OFF -DBUILD_STATIC_LIBS=ON
+    cmake --build build-rpi -j --target websdr
+
+Or build for a Raspberry Pi from any machine (qemu, slower, no sysroot):
 
     docker buildx build --platform linux/arm64 --build-arg BASE=debian:bullseye \
       -f docker/Dockerfile.build --target out -o out/linux-arm64 .
