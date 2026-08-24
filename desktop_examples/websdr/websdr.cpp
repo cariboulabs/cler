@@ -180,6 +180,7 @@ struct App {
         if (rec.recording()) {
             if (!quiet) { srv.send_error("source", "stop recording before switching"); return false; }
             rec.stop();
+            srv.send_error("record", "recording stopped: source lost");
         }
         switching = true;
         srv.set_state(state_json());
@@ -219,6 +220,12 @@ struct App {
     }
 
     void tune_to(double hz) {
+        if (rec.recording()) {
+            const double off = hz - center;
+            if (fits(off)) tune_offset(off);
+            else srv.send_error("set", "recording: only offset tuning inside the band");
+            return;
+        }
         if (rate < 2 * IF_OFFSET + CHANNEL_HZ) {
             center = std::clamp(hz, 1e6, 6e9);
             offset = 0.0;
@@ -449,6 +456,10 @@ int main(int argc, char** argv) {
                 srv.send_error("source", "source lost, retrying");
                 app.rescan();
                 app.publish(true);
+            }
+            if (app.rec.take_failure()) {
+                srv.send_error("record", "write failed, recording stopped");
+                app.publish();
             }
             if (app.rec.recording() && free_disk(record_dir) < 200e6) {
                 app.rec.stop();
