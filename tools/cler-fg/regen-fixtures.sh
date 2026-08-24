@@ -4,7 +4,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-gui_dir="$repo_root/tools/flowgraph_gui"
+gui_dir="$repo_root/tools/cler-fg"
 manifest="$gui_dir/cler-graph/Cargo.toml"
 fixtures_dir="$gui_dir/app/src/fixtures"
 
@@ -16,7 +16,7 @@ declare -A sources=(
   [polyphase_channelizer]=desktop_examples/polyphase_channelizer.cpp
   [spike]=desktop_examples/spike/spike.cpp
   [uhd_device]=desktop_examples/uhd_device.cpp
-  [type_conflict]=tools/flowgraph_gui/cler-graph/tests/data/type_conflict.cpp
+  [type_conflict]=tools/cler-fg/cler-graph/tests/data/type_conflict.cpp
 )
 
 cd "$repo_root"

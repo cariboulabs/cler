@@ -97,8 +97,8 @@ hand-edits it. Nothing follows this yet; the checked-in generated artifacts are:
 Ripple to fix in the same change: `app/src/fixtures/index.ts` (the only importer
 of the models — it also imports the `.cpp` sources with `?raw`, which are NOT
 generated and stay put), `tests/topology.test.ts:3` and `tests/ui.ts:7` for the
-palette, and `tools/flowgraph_gui/regen-fixtures.sh` which writes both sets.
-Fold the rule into `tools/flowgraph_gui/AGENTS.md` once it holds, next to the
+palette, and `tools/cler-fg/regen-fixtures.sh` which writes both sets.
+Fold the rule into `tools/cler-fg/AGENTS.md` once it holds, next to the
 existing "fixtures regenerate via regen-fixtures.sh — never hand-edit them".
 
 Not done here because it is a rename touching test imports and the session was
@@ -108,7 +108,7 @@ ending; it is mechanical and should be one commit.
 
 - `app/src/fixtures/*.json` are parsed models of real `.cpp` files, checked in so
   frontend tests and browser demo mode run without a backend. Regenerate with
-  `tools/flowgraph_gui/regen-fixtures.sh` (also regenerates
+  `tools/cler-fg/regen-fixtures.sh` (also regenerates
   `app/tests/palette.json`); never hand-edit. Question raised whether they earn
   their keep — they do for browser mode, but the drift risk is real and bit us
   once (stale `spike.json`). The `generated/` + `_gen` rename above is the
@@ -122,7 +122,7 @@ ending; it is mechanical and should be one commit.
 ## How to verify quickly
 
 ```
-cd tools/flowgraph_gui/cler-graph && cargo test -q     # 192
+cd tools/cler-fg/cler-graph && cargo test -q     # 192
 cd ../app/src-tauri && cargo test -q                   # 112
 cd .. && npm test && npx svelte-check                  # 346, 3 pre-existing errors in tests/ui.ts
 ```

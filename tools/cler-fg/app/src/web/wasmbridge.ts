@@ -12,6 +12,10 @@ type Exports = {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+// Prebuilt demos live in docs/demos/run/, two levels above the try/ page; the
+// dev server maps the same path in vite.config.ts.
+const RUN_BASE = '../../demos/run/';
+
 function wasi(getMemory: () => WebAssembly.Memory) {
   const view = () => new DataView(getMemory().buffer);
   const bytes = () => new Uint8Array(getMemory().buffer);
@@ -147,8 +151,8 @@ export async function installWasmShell(
         if (pristine) {
           return {
             available: true, reason: null, name: pristine.name, buildDir: null,
-            binary: `run/${pristine.name}.html`,
-            artifact: { state: 'ready', artifactPath: `run/${pristine.name}.html` }
+            binary: `${RUN_BASE}${pristine.name}.html`,
+            artifact: { state: 'ready', artifactPath: `${RUN_BASE}${pristine.name}.html` }
           };
         }
         const jobId = building.get(path);
@@ -188,7 +192,7 @@ export async function installWasmShell(
         });
       }
       if (cmd === 'run_target') {
-        let target = `run/${pristine?.name}.html`;
+        let target = `${RUN_BASE}${pristine?.name}.html`;
         if (!pristine) {
           const sha = await sha256(currentSource(path));
           if (!(await cached(sha))) throw 'this edit is not built yet — press Build (Ctrl+B) first';

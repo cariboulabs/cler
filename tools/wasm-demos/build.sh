@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Builds cler for the browser: liquid-dsp + GUI/plot blocks into libcler_web.a, then each
-# bundled example into app/public/run/<name>.{html,js,wasm,worker.js} (lands in docs/cler-fg/try/run/ via vite).
+# bundled example into docs/demos/run/<name>.{html,js,wasm,worker.js}, plus the payload
+# the in-browser cler-fg compiler needs (same flags, so the two cannot drift).
 # Needs EMSDK pointing at an emsdk checkout with 3.1.24 activated (matches emception).
 set -euo pipefail
 : "${EMSDK:?set EMSDK to an emsdk checkout (3.1.24 activated)}"
 source "$EMSDK/emsdk_env.sh" >/dev/null 2>&1
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo="$(cd "$here/../../.." && pwd)"
+repo="$(cd "$here/../.." && pwd)"
 deps="${CLER_DEPS:-$repo/build/_deps}"        # imgui-src, implot-src, liquid-src from a native configure
-out="$here/out"; run="$here/../app/public/run"   # vite copies public/ into docs/cler-fg/try/
-payload="$here/../app/public/payload"             # what the in-browser compiler needs (fetched on first Build)
+out="$here/out"; run="$repo/docs/demos/run"      # served straight from GitHub Pages
+payload="$repo/tools/cler-fg/app/public/payload"  # what the in-browser compiler needs (fetched on first Build)
 rm -rf "$out/obj"
 mkdir -p "$out/obj" "$run" "$payload"
 jobs="$(nproc --ignore=1)"
@@ -57,10 +58,34 @@ build_example() { # name source [extra link flags...]
   chmod 644 "$run/$name".*
 }
 cp "$here/coi-sw.js" "$run/coi-sw.js"   # COOP/COEP for pages opened straight from docs/demos/
+
+# earshot: no ImGui shell — the page is earshot's own browser client, its
+# WebSocket bridged straight into the wasm module (web_server_wasm.cpp +
+# earshot_glue.js), running the same graph as the native binary on --source sim.
+build_earshot() {
+  echo "== example earshot"
+  local dir="$run/earshot" gen="$out/earshot_gen" src="$repo/desktop_examples/earshot"
+  mkdir -p "$dir" "$gen"
+  printf '#pragma once\n#define EARSHOT_VERSION "wasm demo"\n' > "$gen/earshot_version.hpp"
+  printf '#pragma once\n#include "desktop_blocks/web/web_server.hpp"\nstatic const web::EmbeddedFile EARSHOT_CLIENT_FILES[] = {{"", "", 0}};\nstatic const size_t EARSHOT_CLIENT_FILES_COUNT = 0;\n' > "$gen/earshot_client_files.hpp"
+  em++ "${CXXFLAGS[@]}" -I"$gen" -I"$src" -c "$src/earshot.cpp" -o "$out/obj/earshot.o"
+  em++ "${CXXFLAGS[@]}" -c "$here/web_server_wasm.cpp" -o "$out/obj/web_server_wasm.o"
+  em++ "$out/obj/earshot.o" "$out/obj/web_server_wasm.o" "$out/liquid/lib/libliquid.a" \
+    -O2 -pthread -sPROXY_TO_PTHREAD -sPTHREAD_POOL_SIZE=16 -sALLOW_MEMORY_GROWTH=1 -sEXIT_RUNTIME=0 \
+    -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_earshot_ws_open,_earshot_ws_send \
+    -sEXPORTED_RUNTIME_METHODS=HEAPU8,lengthBytesUTF8,stringToUTF8 \
+    -o "$dir/earshot_core.js"
+  cp "$src"/client/*.js "$dir/"
+  cp "$here/earshot_glue.js" "$here/coi-sw.js" "$dir/"
+  sed -e 's|/client/audio_worklet.js|./audio_worklet.js|' "$src/client/audio.js" > "$dir/audio.js"
+  sed -e 's|<script type="module" src="/client/app.js"></script>|<script>if (window.crossOriginIsolated) { sessionStorage.removeItem("clerCoiReload"); } else if (navigator.serviceWorker \&\& !sessionStorage.getItem("clerCoiReload")) { sessionStorage.setItem("clerCoiReload","1"); navigator.serviceWorker.register("coi-sw.js").then(function(){return navigator.serviceWorker.ready;}).then(function(){location.reload();}); }</script><script src="./earshot_glue.js"></script><script async src="./earshot_core.js"></script><script type="module" src="./app.js"></script>|' \
+    "$src/client/index.html" > "$dir/index.html"
+  chmod 644 "$dir"/*
+}
 echo "== payload for the in-browser compiler"
 cp "$out/libcler_web.a" "$out/liquid/lib/libliquid.a" "$payload/"
 # The same flags, against the virtual repo the browser compiles in ($VIRTUAL_REPO_ROOT
-# in app/src/web/emception.ts), so the two editions cannot drift apart.
+# in cler-fg/app/src/web/emception.ts), so the two editions cannot drift apart.
 cxxvirtual=()
 for flag in "${CXXFLAGS[@]}"; do
   cxxvirtual+=("$(printf '%s' "$flag" | sed -e "s|^-I$out/liquid/include/liquid\$|-Iliquid|" \
@@ -96,5 +121,6 @@ build_example modem_loopback "$repo/desktop_examples/linear_modem_loopback.cpp" 
 # the map's coastlines are read from a relative path, so they ride along in the wasm bundle
 build_example ais_receiver "$repo/desktop_examples/ais_receiver/ais_receiver.cpp" \
   --embed-file "$repo/desktop_blocks/adsb/coastlines_map/ne_110m_coastline.shp@adsb_coastlines/ne_110m_coastline.shp" &
+build_earshot &
 wait
 ls -la "$run"

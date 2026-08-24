@@ -1,6 +1,6 @@
 # cler flowgraph GUI — design vision and rules
 
-Guidance for anyone (human or agent) changing `tools/flowgraph_gui`. Read this
+Guidance for anyone (human or agent) changing `tools/cler-fg`. Read this
 before touching UI or architecture; the repo-root AGENTS.md covers the DSP
 framework itself.
 
@@ -131,13 +131,13 @@ decision it enables, not information it displays.
   checkout for tree-sitter's C). Regenerate after UI, fixture, or block-header
   changes and commit the output. `tests/wasm_session.test.ts` covers the wasm
   end to end and skips when it is not built.
-  `build:web` empties the outDir, and `public/run/` + `public/payload/` are gitignored:
-  without a fresh `web-build/build.sh`, copy them back from `docs/cler-fg/try/` into
+  `build:web` empties the outDir, and `public/payload/` is gitignored:
+  without a fresh `tools/wasm-demos/build.sh`, copy the payload back from `docs/cler-fg/try/` into
   `app/public/` first or the committed Run examples vanish.
-- Run in the browser — `web-build/build.sh` (needs `EMSDK=` an emsdk checkout with
+- Run in the browser — `tools/wasm-demos/build.sh` (needs `EMSDK=` an emsdk checkout with
   **3.1.24** activated, the version emception ships) builds liquid-dsp + GUI/plot
   blocks into `libcler_web.a`, the examples in `src/web/files.ts::RUNNABLE`
-  into `app/public/run/`, and the *payload* the in-browser compiler needs into
+  into `docs/demos/run/`, and the *payload* the in-browser compiler needs into
   `app/public/payload/`: the two archives plus `headers.json` (`include/**`, the
   imgui/implot headers, `liquid.h`, `shell.html` — `desktop_blocks/**` already
   ships inside the app bundle). Rerun it after touching those headers or flags: it also
@@ -195,8 +195,8 @@ decision it enables, not information it displays.
   25 MB first-build note while the toolchain downloads. A finished job flashes the track green and
   folds away; a failed one keeps a red track with the first error and a jump to Diagnostics, and
   Output keeps the raw em++ log. `tests/progress.test.ts` covers the mapping.
-- `web-build/smoke.mjs` is the end-to-end check: `node ../web-build/smoke.mjs` from
-  `app/` after `npm run build:web` serves `docs/` with a header-less
+- `smoke.mjs` is the end-to-end check: `node smoke.mjs` from
+  `tools/cler-fg/` after `npm run build:web` in `app/` serves `docs/` with a header-less
   `python3 -m http.server` (as Pages does) and drives edit → check → build → run
   → screenshot in headless Chromium. It aborts every request to `TOOLCHAIN_BASE`, so a
   green run proves `/cler-fg/try` needs nothing third-party.
