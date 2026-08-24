@@ -63,7 +63,7 @@ TEST_F(NoiseBlocksTest, AWGNBlockFloatZeroSignal) {
     const size_t chunk_size = buffer_size / 2; // Process in chunks to avoid buffer overflow
     const float signal_level = 1.5f; // Use non-zero signal to better detect issues
     
-    NoiseAWGNBlock<float> noise_block("test_awgn_float", noise_stddev, buffer_size);
+    NoiseAWGNBlock<float> noise_block("test_awgn_float", noise_stddev, buffer_size, 1001);
     cler::Channel<float> output(buffer_size);
     
     // Process samples in chunks to avoid buffer overflow
@@ -125,7 +125,7 @@ TEST_F(NoiseBlocksTest, AWGNBlockFloatNonZeroSignal) {
     const float noise_stddev = 0.5f;
     const float signal_level = 3.0f;
     
-    NoiseAWGNBlock<float> noise_block("test_awgn_float_signal", noise_stddev, buffer_size);
+    NoiseAWGNBlock<float> noise_block("test_awgn_float_signal", noise_stddev, buffer_size, 1002);
     cler::Channel<float> output(buffer_size);
     
     // Fill input with constant signal
@@ -176,7 +176,7 @@ TEST_F(NoiseBlocksTest, AWGNBlockComplexZeroSignal) {
     const size_t chunk_size = buffer_size / 2; // Process in chunks to avoid buffer overflow
     const std::complex<float> signal_level{2.0f, 1.0f}; // Use non-zero signal to better detect issues
     
-    NoiseAWGNBlock<std::complex<float>> noise_block("test_awgn_complex", noise_stddev, buffer_size);
+    NoiseAWGNBlock<std::complex<float>> noise_block("test_awgn_complex", noise_stddev, buffer_size, 1003);
     cler::Channel<std::complex<float>> output(buffer_size);
     
     // Process samples in chunks to avoid buffer overflow
@@ -249,7 +249,7 @@ TEST_F(NoiseBlocksTest, AWGNBlockComplexNonZeroSignal) {
     const size_t buffer_size = 4096; // Large enough for dbf
     const float noise_stddev = 0.2f;
     
-    NoiseAWGNBlock<std::complex<float>> noise_block("test_awgn_complex_signal", noise_stddev, buffer_size);
+    NoiseAWGNBlock<std::complex<float>> noise_block("test_awgn_complex_signal", noise_stddev, buffer_size, 1004);
     cler::Channel<std::complex<float>> output(buffer_size);
     
     // Fill input with complex signal
@@ -288,7 +288,7 @@ TEST_F(NoiseBlocksTest, AWGNBlockDouble) {
     const size_t buffer_size = 4096; // Large enough for dbf
     const double noise_stddev = 0.1;
     
-    NoiseAWGNBlock<double> noise_block("test_awgn_double", noise_stddev, buffer_size);
+    NoiseAWGNBlock<double> noise_block("test_awgn_double", noise_stddev, buffer_size, 1005);
     cler::Channel<double> output(buffer_size);
     
     // Fill input with test data
@@ -321,7 +321,7 @@ TEST_F(NoiseBlocksTest, AWGNBlockZeroNoise) {
     const size_t buffer_size = 4096; // Large enough for dbf
     const float noise_stddev = 0.0f; // Zero noise
     
-    NoiseAWGNBlock<float> noise_block("test_awgn_zero_noise", noise_stddev, buffer_size);
+    NoiseAWGNBlock<float> noise_block("test_awgn_zero_noise", noise_stddev, buffer_size, 1006);
     cler::Channel<float> output(buffer_size);
     
     // Fill input with test data
@@ -352,8 +352,8 @@ TEST_F(NoiseBlocksTest, AWGNBlockRandomness) {
     const float noise_stddev = 1.0f;
     
     // Create two identical blocks
-    NoiseAWGNBlock<float> noise_block1("test_awgn_random1", noise_stddev, buffer_size);
-    NoiseAWGNBlock<float> noise_block2("test_awgn_random2", noise_stddev, buffer_size);
+    NoiseAWGNBlock<float> noise_block1("test_awgn_random1", noise_stddev, buffer_size, 1007);
+    NoiseAWGNBlock<float> noise_block2("test_awgn_random2", noise_stddev, buffer_size, 1008);
     cler::Channel<float> output1(buffer_size);
     cler::Channel<float> output2(buffer_size);
     

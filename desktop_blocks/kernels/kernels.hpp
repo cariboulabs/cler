@@ -16,10 +16,16 @@ struct AWGNKernel {
         std::is_same_v<T, std::complex<float>>, float,
         typename std::conditional<std::is_same_v<T, std::complex<double>>, double, T>::type>::type;
 
-    explicit AWGNKernel(scalar_type noise_stddev)
+    // seed 0 draws one from random_device; anything else is reproducible, which
+    // is what a test asserting on the statistics needs
+    explicit AWGNKernel(scalar_type noise_stddev, uint32_t seed = 0)
         : _normal_dist(0.0, noise_stddev) {
-        std::random_device rd;
-        _rng.seed(rd());
+        if (seed == 0) {
+            std::random_device rd;
+            _rng.seed(rd());
+        } else {
+            _rng.seed(seed);
+        }
     }
 
     void set_stddev(scalar_type stddev) {

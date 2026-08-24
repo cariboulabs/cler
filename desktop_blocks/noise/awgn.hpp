@@ -14,8 +14,8 @@ struct NoiseAWGNBlock : public cler::BlockBase {
 
     using scalar_type = typename AWGNKernel<T>::scalar_type;
 
-    NoiseAWGNBlock(const char* name, scalar_type noise_stddev, const size_t buffer_size = 0)
-        : cler::BlockBase(name), in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size), _kernel(noise_stddev) {
+    NoiseAWGNBlock(const char* name, scalar_type noise_stddev, const size_t buffer_size = 0, uint32_t seed = 0)
+        : cler::BlockBase(name), in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size), _kernel(noise_stddev, seed) {
 
         _buffer_size = buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(T) : buffer_size;
         _buffer = new (std::nothrow) T[_buffer_size];
