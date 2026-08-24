@@ -165,6 +165,7 @@ if (NODE_EXECUTABLE)
         ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/decoders.test.mjs
         ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/devices.test.mjs
         ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/recordings.test.mjs
+        ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/waterfall.test.mjs
         ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/keys.test.mjs)
 endif()
 

@@ -46,6 +46,30 @@ if (prefs.view && Number.isFinite(prefs.view.x0) && Number.isFinite(prefs.view.x
 $('resetzoom').classList.toggle('hidden', !wf.zoomed());
 $('resetzoom').onclick = () => { wf.resetView(); $('resetzoom').classList.add('hidden'); };
 
+// display range: auto tracks the noise floor, manual pins it. The note shows the
+// effective values either way, so "auto" is never an unexplained number.
+function applyDisplayPrefs() {
+  const auto = prefs.dispAuto !== false;
+  wf.setRange({ auto, rangeDb: prefs.dispRange ?? 70, floorDb: auto ? null : (prefs.dispFloor ?? -100) });
+  $('dispauto').checked = auto;
+  $('disprange').value = wf.rangeDb;
+  $('dispfloor').disabled = auto;
+  if (!auto) $('dispfloor').value = Math.round(wf.displayFloor());
+  $('dispfloor').title = auto ? 'auto range is tracking the noise floor' : '';
+}
+const readDisplay = () => {
+  prefs.dispAuto = $('dispauto').checked;
+  prefs.dispRange = Number($('disprange').value) || 70;
+  if (!$('dispauto').checked) prefs.dispFloor = Number($('dispfloor').value);
+  savePrefs(); applyDisplayPrefs();
+};
+for (const id of ['dispauto', 'dispfloor', 'disprange']) $(id).onchange = readDisplay;
+$('dispreset').onclick = () => {
+  delete prefs.dispAuto; delete prefs.dispFloor; delete prefs.dispRange;
+  savePrefs(); applyDisplayPrefs();
+};
+applyDisplayPrefs();
+
 audio.setGain(prefs.volume ?? 0.8);
 $('vol').value = prefs.volume ?? 0.8;
 $('vol').oninput = () => { audio.setGain(Number($('vol').value)); prefs.volume = Number($('vol').value); savePrefs(); };
@@ -449,6 +473,9 @@ document.addEventListener('keydown', (e) => {
 });
 
 setInterval(() => {
+  const f = wf.displayFloor();
+  $('dispnote').textContent = `${Math.round(f)} to ${Math.round(f + wf.rangeDb)} dB`
+    + (wf.auto ? ' · auto' : ' · manual');
   $('s-audio').textContent = audio.running
     ? `audio: ${audio.stats.bufferedMs} ms buffered · underruns ${audio.stats.underruns} · dropped ${audio.stats.dropped}`
       + (audio.sampleRate && audio.sampleRate !== 48000 ? ` · resampled to ${audio.sampleRate} Hz` : '')
