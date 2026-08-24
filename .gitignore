@@ -11,3 +11,4 @@ perf-results/
 imgui.ini
 node_modules/
 .vite/
+.claude/

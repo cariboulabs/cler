@@ -29,6 +29,7 @@
 #include <thread>
 #include <vector>
 
+#include "websdr_version.hpp"
 #ifndef WEBSDR_VERSION
 #define WEBSDR_VERSION "dev"
 #endif

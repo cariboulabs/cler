@@ -7,15 +7,16 @@ if (CLER_BUILD_BLOCKS_WEB)
     cler_embed_link(web_demo websdr_client)
 
     if (CLER_BUILD_BLOCKS_LIQUID)
-        execute_process(COMMAND git rev-parse --short HEAD WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-                        OUTPUT_VARIABLE WEBSDR_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-        if (NOT WEBSDR_GIT_SHA)
-            set(WEBSDR_GIT_SHA unknown)
-        endif()
-        string(TIMESTAMP WEBSDR_BUILD_DATE "%Y-%m-%d" UTC)
+        set(_version_hpp ${CMAKE_CURRENT_BINARY_DIR}/websdr_version.hpp)
+        add_custom_target(websdr_version
+            COMMAND ${CMAKE_COMMAND}
+                -DOUT=${_version_hpp} -DSRC=${PROJECT_SOURCE_DIR}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/version.cmake
+            BYPRODUCTS ${_version_hpp})
         add_executable(websdr websdr.cpp)
+        add_dependencies(websdr websdr_version)
+        target_include_directories(websdr PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
         target_link_libraries(websdr PRIVATE cler::desktop_blocks cler::blocks_web)
-        target_compile_definitions(websdr PRIVATE WEBSDR_VERSION="${WEBSDR_GIT_SHA} ${WEBSDR_BUILD_DATE}")
         cler_embed_link(websdr websdr_client)
     endif()
 else()
