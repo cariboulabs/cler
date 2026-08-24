@@ -602,6 +602,9 @@ public:
         std::memory_order_relaxed);
   }
 
+  // Mirror of write_dbf: the size is a lower bound on what is readable, taken from
+  // a cached writer index that refreshes only when the bound reaches zero. A short
+  // span is not "the producer stopped"; only a returned 0 is authoritative.
   std::pair<const T*, std::size_t> read_dbf() noexcept {
       if constexpr (N == 0) {
           if (base_type::is_doubly_mapped_ || base_type::is_mirrored_) {
@@ -663,6 +666,11 @@ public:
       writer_.cumulativeWriteCount_ += count;
   }
 
+  // The size is a lower bound: free space is computed from a cached reader index
+  // that is refreshed only once the bound reaches zero, so a short span means "ask
+  // again", never "the ring is full". Only a returned 0 is authoritative. A block
+  // returns NotEnoughSpace and the scheduler calls back; a boundary writer holding
+  // samples from outside the graph must loop, or it drops what the ring had room for.
   std::pair<T*, std::size_t> write_dbf() noexcept {
       if constexpr (N == 0) {
           if (base_type::is_doubly_mapped_ || base_type::is_mirrored_) {
