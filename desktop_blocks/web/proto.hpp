@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -121,13 +122,19 @@ struct JsonWriter {
     JsonWriter& key(const std::string& k) { sep(); out += '"'; out += json_escape(k); out += "\":"; pending_value = true; return *this; }
     JsonWriter& str(const std::string& v) { sep(); out += '"'; out += json_escape(v); out += '"'; return *this; }
     JsonWriter& num(double v) { sep(); out += json_number(v); return *this; }
+    // %.10g would round a byte count or a drop counter past ~10 digits
+    template <typename T, std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, int> = 0>
+    JsonWriter& num(T v) { sep(); out += std::to_string(v); return *this; }
     JsonWriter& boolean(bool v) { sep(); out += v ? "true" : "false"; return *this; }
     JsonWriter& raw(const std::string& v) { sep(); out += v.empty() ? "null" : v; return *this; }
-    // splice another object's members into the one being written; an empty or
-    // memberless object contributes nothing, so no separator is emitted
+    // splice another object's members into the one being written; anything that
+    // is not an object with at least one member contributes nothing, so no
+    // separator is emitted and no trailing junk can ride along
     JsonWriter& fields_of(const std::string& obj) {
-        const size_t a = obj.find('{'), b = obj.rfind('}');
-        if (a == std::string::npos || b == std::string::npos || b <= a + 1) return *this;
+        const size_t a = obj.find('{');
+        const size_t b = obj.find_last_not_of(" \t\n\r");
+        if (a == std::string::npos || b == std::string::npos || obj[b] != '}' || b <= a + 1) return *this;
+        if (obj.find_first_not_of(" \t\n\r", a + 1) >= b) return *this;
         sep();
         out.append(obj, a + 1, b - a - 1);
         return *this;

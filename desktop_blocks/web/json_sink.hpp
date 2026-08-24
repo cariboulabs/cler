@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cler.hpp"
+#include "cler_desktop_utils.hpp"
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
 
@@ -19,7 +20,11 @@ struct JsonTextSinkBlock : public cler::BlockBase {
     cler::Channel<T> in;
 
     JsonTextSinkBlock(const char* name, WebServer& server, const char* stream, size_t buffer_size = 256)
-        : cler::BlockBase(name), in(buffer_size), _server(server), _stream(stream) { _w.out.reserve(1024); }
+        : cler::BlockBase(name), in(buffer_size), _server(server), _stream(stream ? stream : "") {
+        // the client routes text frames by stream id; an empty one is dropped silently
+        if (_stream.empty()) cler::panic("JsonTextSinkBlock: empty stream id");
+        _w.out.reserve(1024);
+    }
 
     cler::Result<cler::Empty, cler::Error> procedure() {
         auto [ptr, n] = in.read_dbf();

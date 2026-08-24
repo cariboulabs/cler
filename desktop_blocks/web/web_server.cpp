@@ -94,6 +94,14 @@ std::string WebServer::safe_name(const std::string& name) {
 }
 
 void WebServer::add_http_route(std::string prefix, HttpRoute handler) {
+    // _routes is read from HTTP threads with no lock, so registration has to be
+    // over before the server is listening
+    if (_running.load(std::memory_order_relaxed)) cler::panic("web: add_http_route after start()");
+    if (prefix.size() < 2 || prefix[0] != '/' || prefix.back() == '/') {
+        cler::panic(("web: bad route prefix '" + prefix + "'").c_str());
+    }
+    if (prefix == "/client") cler::panic("web: /client is served by the library");
+    for (const auto& r : _routes) if (r.first == prefix) cler::panic(("web: duplicate route '" + prefix + "'").c_str());
     _routes.emplace_back(std::move(prefix), std::move(handler));
 }
 
@@ -116,8 +124,9 @@ uint64_t WebServer::uptime_seconds() const {
 WebServer::WebServer(ServerOptions opts)
     : _opts(std::move(opts)), _impl(new Impl), _spec(16), _audio(static_cast<size_t>(_opts.audio_rate * 2)) {
     if (!is_loopback(_opts.bind) && _opts.token.empty()) {
-        cler::panic("websdr: --token is required when binding to a non-loopback address");
+        cler::panic("web: a token is required when binding to a non-loopback address");
     }
+    if (!(_opts.audio_rate >= 1000.0) || _opts.audio_rate > 1e7) cler::panic("web: audio_rate out of range");
 }
 
 WebServer::~WebServer() { stop(); }
@@ -134,8 +143,18 @@ void WebServer::start() {
         std::string path = req->uri.substr(0, qpos);
         const std::string query = qpos == std::string::npos ? std::string() : req->uri.substr(qpos + 1);
         if (const HttpRoute* route = match_route(path)) {
-            if (!_opts.token.empty() && query_param(req->uri, "token") != _opts.token) {
-                return std::make_shared<ix::HttpResponse>(401, "Unauthorized", ix::HttpErrorCode::Ok, h, "token required");
+            if (!_opts.token.empty()) {
+                if (query_param(req->uri, "token") != _opts.token) {
+                    return std::make_shared<ix::HttpResponse>(401, "Unauthorized", ix::HttpErrorCode::Ok, h, "token required");
+                }
+            } else {
+                // same rebinding guard as the WebSocket upgrade: without a token a
+                // page on another origin must not read an app route through DNS
+                const auto it = req->headers.find("Host");
+                const std::string hp = host_part(it == req->headers.end() ? std::string() : it->second);
+                if (!is_loopback(hp) && hp != _opts.bind) {
+                    return std::make_shared<ix::HttpResponse>(403, "Forbidden", ix::HttpErrorCode::Ok, h, "bad host");
+                }
             }
             HttpReply rep = (*route)(path, query);
             h["Content-Type"] = rep.content_type;
@@ -399,10 +418,10 @@ void WebServer::tick_loop() {
             for (auto& t : targets) {
                 JsonWriter w;
                 w.begin_obj().key("t").str("stats")
-                 .key("spectrum_dropped").num(static_cast<double>(t.second->spectrum_dropped))
-                 .key("audio_dropped").num(static_cast<double>(t.second->audio_dropped))
-                 .key("text_dropped").num(static_cast<double>(_text_dropped.load(std::memory_order_relaxed)))
-                 .key("clients").num(static_cast<double>(targets.size()))
+                 .key("spectrum_dropped").num(t.second->spectrum_dropped)
+                 .key("audio_dropped").num(t.second->audio_dropped)
+                 .key("text_dropped").num(_text_dropped.load(std::memory_order_relaxed))
+                 .key("clients").num(targets.size())
                  .fields_of(stats_extra).end();
                 t.first->sendText(w.out);
             }

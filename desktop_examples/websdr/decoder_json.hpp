@@ -11,6 +11,9 @@
 
 // JsonTextSinkBlock finds these by ADL on JsonWriter; they live with the app
 // because the field names are this receiver's wire contract, not the library's.
+// Being an ADL customization point, one adapter per type per binary — like a
+// std::hash specialization, a second receiver linked into the same program must
+// not define its own web::to_json for these types.
 namespace web {
 
 // off-air text is not guaranteed to be terminated

@@ -272,10 +272,10 @@ struct App {
         srv.set_state(state_json());
         if (hello) { srv.set_hello_extra(hello_json()); srv.resend_hello(); }
         web::JsonWriter h;
-        h.begin_obj().key("version").str(WEBSDR_VERSION).key("uptime_s").num(static_cast<double>(srv.uptime_seconds()))
-         .key("clients").num(static_cast<double>(srv.client_count()))
+        h.begin_obj().key("version").str(WEBSDR_VERSION).key("uptime_s").num(srv.uptime_seconds())
+         .key("clients").num(srv.client_count())
          .key("source").str(source()).key("rate").num(rate)
-         .key("overflows").num(static_cast<double>(src.overflows())).key("recording").boolean(rec.recording())
+         .key("overflows").num(src.overflows()).key("recording").boolean(rec.recording())
          .key("free_disk").num(free_disk(record_dir)).end();
         {
             std::lock_guard<std::mutex> lock(health_mutex);
@@ -650,9 +650,9 @@ int main(int argc, char** argv) {
                 app.publish();
             }
             web::JsonWriter w;
-            w.begin_obj().key("overflows").num(static_cast<double>(app.src.overflows())).key("source_lost").boolean(app.lost)
-             .key("rec_bytes").num(static_cast<double>(app.rec.bytes())).key("free_bytes").num(free_disk(record_dir))
-             .key("decoder_dropped").num(static_cast<double>(app.decoder_dropped()));
+            w.begin_obj().key("overflows").num(app.src.overflows()).key("source_lost").boolean(app.lost)
+             .key("rec_bytes").num(app.rec.bytes()).key("free_bytes").num(free_disk(record_dir))
+             .key("decoder_dropped").num(app.decoder_dropped());
             if (app.running && app.src.is_file()) {
                 w.key("pos").num(app.src.pos_seconds()).key("duration").num(app.src.duration_seconds())
                  .key("ended").boolean(app.src.ended());

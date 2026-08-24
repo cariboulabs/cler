@@ -53,8 +53,8 @@ int main(int argc, char** argv) {
     srv.set_state(state_json(gen, freq, mode, gain, source));
     srv.add_http_route("/health", [&srv, &o](const std::string&, const std::string&) {
         web::JsonWriter w;
-        w.begin_obj().key("version").str(o.version).key("uptime_s").num(static_cast<double>(srv.uptime_seconds()))
-         .key("clients").num(static_cast<double>(srv.client_count())).key("source").str("sim").end();
+        w.begin_obj().key("version").str(o.version).key("uptime_s").num(srv.uptime_seconds())
+         .key("clients").num(srv.client_count()).key("source").str("sim").end();
         return web::HttpReply{200, w.out, "application/json"};
     });
     srv.start();

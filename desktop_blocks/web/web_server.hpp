@@ -62,8 +62,10 @@ public:
     // control, the app owns what its own paths mean.
     void add_http_route(std::string prefix, HttpRoute handler);
     uint64_t uptime_seconds() const;
-    // "" when the name could escape its directory; use it for any app route that
-    // maps a path segment onto a file
+    // "" unless `name` is a single path component: no separators, no "..", no
+    // leading dot. It says nothing about where the name resolves — a symlink in
+    // the directory still escapes it, so a route serving files must also check
+    // the resolved path (see recordings_route.hpp).
     static std::string safe_name(const std::string& name);
 
     bool push_spectrum(const SpectrumFrame& f);

@@ -26,7 +26,7 @@ inline web::HttpReply recordings_route(const std::string& dir, const std::string
             if (ec2) continue;
             const double secs = meta.sample_rate > 0
                 ? static_cast<double>(bytes) / (sigmf::datatype_size(meta.datatype) * meta.sample_rate) : 0.0;
-            w.begin_obj().key("name").str(e.path().stem().string()).key("bytes").num(static_cast<double>(bytes))
+            w.begin_obj().key("name").str(e.path().stem().string()).key("bytes").num(bytes)
              .key("rate").num(meta.sample_rate).key("freq").num(meta.center_frequency())
              .key("seconds").num(secs).end();
         }
@@ -40,6 +40,11 @@ inline web::HttpReply recordings_route(const std::string& dir, const std::string
     const std::string full = dir + "/" + fname;
     std::error_code ec;
     if (!std::filesystem::is_regular_file(full, ec)) return {};
+    // safe_name only clears the name; a symlink planted in the directory still
+    // resolves wherever it likes, so check where the file actually lands
+    const auto real = std::filesystem::weakly_canonical(full, ec);
+    const auto root = std::filesystem::weakly_canonical(dir, ec);
+    if (ec || real.parent_path() != root) return {};
     // ponytail: IX responses are one std::string, no chunked send; this is a
     // single exact-size read (no stringstream doubling), ceiling = file size in RAM
     const auto size = std::filesystem::file_size(full, ec);
