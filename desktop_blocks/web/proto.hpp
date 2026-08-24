@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "websdr protocol v1 is little-endian on the wire");
+static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "protocol v1 is little-endian on the wire");
 
 namespace web {
 

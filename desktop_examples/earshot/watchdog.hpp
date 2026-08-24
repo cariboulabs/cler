@@ -11,7 +11,7 @@
 #include <cstring>
 #include <string>
 
-namespace websdr {
+namespace earshot {
 
 // What the main loop knows about the receiver when it is deciding whether to
 // tell systemd it is alive. `delivered` is the only positive evidence: it counts
@@ -83,4 +83,4 @@ private:
     std::chrono::microseconds _interval{0};
 };
 
-}  // namespace websdr
+}  // namespace earshot

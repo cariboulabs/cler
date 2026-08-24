@@ -17,8 +17,8 @@
 #include "desktop_blocks/web/json_sink.hpp"
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
-#include "desktop_examples/websdr/decoder_json.hpp"
-#include "desktop_examples/websdr/recordings_route.hpp"
+#include "desktop_examples/earshot/decoder_json.hpp"
+#include "desktop_examples/earshot/recordings_route.hpp"
 
 using namespace web;
 using webtest::free_port;
@@ -43,7 +43,7 @@ TEST(WebServerTest, RecordingsListDownloadTraversalAndToken) {
     ServerOptions o; o.port = port; o.token = "s3";
     WebServer srv(o);
     srv.add_http_route("/recordings", [&dir](const std::string& path, const std::string&) {
-        return websdr::recordings_route(dir, path);
+        return earshot::recordings_route(dir, path);
     });
     srv.start();
     const std::string root = "http://127.0.0.1:" + std::to_string(port);
@@ -184,7 +184,7 @@ std::vector<std::complex<float>> aprs_nbfm_iq(double offset_hz, float noise,
     return iq;
 }
 
-// Runs the real tail of the APRS tap; with_filter mirrors what websdr wires up.
+// Runs the real tail of the APRS tap; with_filter mirrors what earshot wires up.
 void run_aprs_tap(const std::vector<std::complex<float>>& iq, bool with_filter, WebServer& srv) {
     const double fs = 48e3, dev = 5e3;
     KaiserLPFBlock<std::complex<float>> lpf("chan", fs, 7.5e3, 3e3, 60.0, 1 << 16);

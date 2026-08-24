@@ -1,7 +1,7 @@
-// Headless end-to-end check of the websdr client against the real binary on the
+// Headless end-to-end check of the earshot client against the real binary on the
 // simulator source. Exits 77 (ctest SKIP) when playwright is not installed:
-//   WEBSDR_BIN=build/desktop_examples/websdr/websdr \
-//   NODE_PATH=tools/flowgraph_gui/app/node_modules node desktop_examples/websdr/client_tests/e2e.mjs
+//   EARSHOT_BIN=build/desktop_examples/earshot/earshot \
+//   NODE_PATH=tools/flowgraph_gui/app/node_modules node desktop_examples/earshot/client_tests/e2e.mjs
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -10,8 +10,8 @@ const require = createRequire(import.meta.url);
 let chromium;
 try { ({ chromium } = require('playwright')); } catch { console.log('SKIP: playwright not installed'); process.exit(77); }
 
-const bin = process.env.WEBSDR_BIN;
-if (!bin) { console.error('WEBSDR_BIN not set'); process.exit(2); }
+const bin = process.env.EARSHOT_BIN;
+if (!bin) { console.error('EARSHOT_BIN not set'); process.exit(2); }
 const port = 18000 + Math.floor(Math.random() * 1000);
 const proc = spawn(bin, ['--source', 'none', '--port', String(port)], { stdio: ['ignore', 'pipe', 'pipe'] });
 process.on('exit', () => proc.kill());
@@ -19,7 +19,7 @@ let log = '';
 proc.stdout.on('data', (d) => (log += d));
 proc.stderr.on('data', (d) => (log += d));
 
-const fail = (msg) => { console.error('FAIL:', msg, '\n--- websdr log ---\n' + log); proc.kill(); process.exit(1); };
+const fail = (msg) => { console.error('FAIL:', msg, '\n--- earshot log ---\n' + log); proc.kill(); process.exit(1); };
 const ok = (msg) => console.log('ok', msg);
 
 for (let i = 0; i < 50; ++i) {
@@ -33,7 +33,7 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 await page.goto(`http://127.0.0.1:${port}/`);
 
-const state = async () => JSON.parse(await page.evaluate(() => JSON.stringify(window.__websdr?.st ?? {})));
+const state = async () => JSON.parse(await page.evaluate(() => JSON.stringify(window.__earshot?.st ?? {})));
 
 await page.waitForFunction(() => document.getElementById('conn')?.textContent === 'online', null, { timeout: 10_000 }).catch(() => fail('never online'));
 ok('page loads, hello arrived');

@@ -256,7 +256,7 @@ void WebServer::start() {
     });
 
     auto res = _impl->srv->listen();
-    if (!res.first) cler::panic(("websdr: listen failed: " + res.second).c_str());
+    if (!res.first) cler::panic(("web server: listen failed: " + res.second).c_str());
     _impl->srv->start();
     _running.store(true);
     _tick = std::thread([this] { tick_loop(); });

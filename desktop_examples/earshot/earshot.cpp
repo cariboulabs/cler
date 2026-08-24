@@ -1,7 +1,7 @@
 // Browser receiver: SourceMux -> fanout -> {spectrum, shift -> resampler -> demod} -> WebSink,
 // with gated decoder taps (RDS off the 240 kHz channel, APRS off the 48 kHz audio, AIS off a
 // 96 kHz resample) publishing JSON text frames.
-//   ./websdr [--source sim|hackrf[:serial]|none] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]
+//   ./earshot [--source sim|hackrf[:serial]|none] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]
 //            [--gain NAME=V]... [--decoder none|rds|aprs|ais] [--port N] [--bind ADDR] [--token T]
 //            [--client-dir DIR] [--record-dir DIR] [--record-max-bytes N] [--state-file FILE] [--version]
 #include "cler.hpp"
@@ -29,7 +29,7 @@
 #include "recordings.hpp"
 #include "recordings_route.hpp"
 #include "watchdog.hpp"
-#include "websdr_client_files.hpp"
+#include "earshot_client_files.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -44,9 +44,9 @@
 #include <thread>
 #include <vector>
 
-#include "websdr_version.hpp"
-#ifndef WEBSDR_VERSION
-#define WEBSDR_VERSION "dev"
+#include "earshot_version.hpp"
+#ifndef EARSHOT_VERSION
+#define EARSHOT_VERSION "dev"
 #endif
 
 static std::atomic<bool> g_run{true};
@@ -113,7 +113,7 @@ static constexpr uint64_t DEFAULT_RECORD_MAX_BYTES = 20ull << 30;
 // the source retry runs every 2 s, so this is many attempts, not a hair trigger
 static constexpr auto LOST_GRACE = std::chrono::seconds(60);
 
-using websdr::free_disk;
+using earshot::free_disk;
 
 struct App {
     SourceMux& src;
@@ -265,7 +265,7 @@ struct App {
         srv.set_state(state_json());
         if (hello) { srv.set_hello_extra(hello_json()); srv.resend_hello(); }
         web::JsonWriter h;
-        h.begin_obj().key("version").str(WEBSDR_VERSION).key("uptime_s").num(srv.uptime_seconds())
+        h.begin_obj().key("version").str(EARSHOT_VERSION).key("uptime_s").num(srv.uptime_seconds())
          .key("clients").num(srv.client_count())
          .key("source").str(source()).key("rate").num(rate)
          .key("overflows").num(src.overflows()).key("recording").boolean(rec.recording())
@@ -380,7 +380,7 @@ struct App {
     // Keeps the record dir inside its byte cap and off the free-space floor by
     // deleting whole recordings, oldest first; the one being written is spared.
     void prune() {
-        const auto p = websdr::prune_recordings(record_dir, record_max_bytes, MIN_FREE_BYTES, rec.base());
+        const auto p = earshot::prune_recordings(record_dir, record_max_bytes, MIN_FREE_BYTES, rec.base());
         if (p.recordings == 0) return;
         pruned_bytes += p.bytes;
         srv.send_error("record", "pruned " + std::to_string(p.recordings) + " old recording(s), " +
@@ -420,9 +420,9 @@ struct App {
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
     web::ServerOptions o;
-    o.files = WEBSDR_CLIENT_FILES;
-    o.file_count = WEBSDR_CLIENT_FILES_COUNT;
-    o.version = WEBSDR_VERSION;
+    o.files = EARSHOT_CLIENT_FILES;
+    o.file_count = EARSHOT_CLIENT_FILES_COUNT;
+    o.version = EARSHOT_VERSION;
     o.audio_rate = AUDIO_HZ;
     std::string source, record_dir, state_file, mode_s, decoder;
     double freq = 0, rate = 0;
@@ -430,7 +430,7 @@ int main(int argc, char** argv) {
     std::vector<std::pair<std::string, double>> gains;
     for (int i = 1; i < argc; ++i) {
         auto next = [&](const char* flag) -> const char* { return (!std::strcmp(argv[i], flag) && i + 1 < argc) ? argv[++i] : nullptr; };
-        if (!std::strcmp(argv[i], "--version")) { std::printf("websdr %s\n", WEBSDR_VERSION); return 0; }
+        if (!std::strcmp(argv[i], "--version")) { std::printf("earshot %s\n", EARSHOT_VERSION); return 0; }
         else if (const char* v = next("--source")) source = v;
         else if (const char* v = next("--freq")) freq = std::atof(v);
         else if (const char* v = next("--rate")) rate = std::atof(v);
@@ -447,7 +447,7 @@ int main(int argc, char** argv) {
         else if (const char* v = next("--client-dir")) o.client_dir = v;
         else if (const char* v = next("--record-dir")) record_dir = v;
         else if (const char* v = next("--record-max-bytes")) {
-            if (!websdr::parse_bytes(v, record_max_bytes)) {
+            if (!earshot::parse_bytes(v, record_max_bytes)) {
                 std::fprintf(stderr, "--record-max-bytes wants a byte count (20e9, 5000000000, or 0 for unlimited), got '%s'\n", v);
                 return 1;
             }
@@ -495,7 +495,7 @@ int main(int argc, char** argv) {
     if (!loopback && o.token.empty()) {
         unsigned char rnd[12];
         FILE* ur = std::fopen("/dev/urandom", "rb");
-        if (!ur || std::fread(rnd, 1, sizeof rnd, ur) != sizeof rnd) cler::panic("websdr: /dev/urandom");
+        if (!ur || std::fread(rnd, 1, sizeof rnd, ur) != sizeof rnd) cler::panic("earshot: /dev/urandom");
         std::fclose(ur);
         char hex[sizeof rnd * 2 + 1];
         for (size_t i = 0; i < sizeof rnd; ++i) std::snprintf(hex + 2 * i, 3, "%02x", rnd[i]);
@@ -567,14 +567,14 @@ int main(int argc, char** argv) {
     });
     if (!record_dir.empty()) {
         srv.add_http_route("/recordings", [record_dir](const std::string& path, const std::string&) {
-            return websdr::recordings_route(record_dir, path);
+            return earshot::recordings_route(record_dir, path);
         });
     }
     app.rescan();
     app.publish(true);
     srv.start();
-    if (o.token.empty()) std::printf("websdr %s on http://%s:%d/\n", WEBSDR_VERSION, o.bind.c_str(), o.port);
-    else std::printf("websdr %s on http://%s:%d/?token=%s\n", WEBSDR_VERSION, o.bind.c_str(), o.port, o.token.c_str());
+    if (o.token.empty()) std::printf("earshot %s on http://%s:%d/\n", EARSHOT_VERSION, o.bind.c_str(), o.port);
+    else std::printf("earshot %s on http://%s:%d/?token=%s\n", EARSHOT_VERSION, o.bind.c_str(), o.port, o.token.c_str());
 
     const bool auto_pick = source.empty();
     auto pick_only_device = [&]() {
@@ -589,7 +589,7 @@ int main(int argc, char** argv) {
     using clock = std::chrono::steady_clock;
     auto last_stats = clock::now(), last_retry = clock::now(), last_ping = clock::now();
     uint64_t last_decoder_dropped = 0;
-    websdr::SdNotify notify;
+    earshot::SdNotify notify;
     notify.send("READY=1");
     uint64_t last_delivered = srv.sent();
     auto lost_since = clock::now();
@@ -689,7 +689,7 @@ int main(int argc, char** argv) {
         if (notify.interval().count() > 0 && now - last_ping >= notify.interval()) {
             last_ping = now;
             const uint64_t delivered = srv.sent();
-            websdr::Health h;
+            earshot::Health h;
             h.running = app.running;
             h.lost = app.lost;
             h.paused = app.src.paused();
@@ -697,7 +697,7 @@ int main(int argc, char** argv) {
             h.delivered = delivered != last_delivered;
             h.lost_for = now - lost_since;
             last_delivered = delivered;
-            if (websdr::flowing(h, LOST_GRACE)) notify.send("WATCHDOG=1");
+            if (earshot::flowing(h, LOST_GRACE)) notify.send("WATCHDOG=1");
         }
         if (!app.running && now - last_retry >= std::chrono::seconds(2)) {
             last_retry = now;

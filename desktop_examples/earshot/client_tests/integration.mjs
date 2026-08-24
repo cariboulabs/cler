@@ -1,21 +1,21 @@
-// Drives the real websdr binary over its own websocket on the simulator source:
+// Drives the real earshot binary over its own websocket on the simulator source:
 // audio actually decodes, a recording round-trips through /recordings and plays
 // back, the archive is pruned to its cap, and a source switch bumps gen without
 // leaking stale frames.
 // Needs nothing but node >= 22 (global WebSocket/fetch):
-//   WEBSDR_BIN=build/desktop_examples/websdr/websdr node desktop_examples/websdr/client_tests/integration.mjs
+//   EARSHOT_BIN=build/desktop_examples/earshot/earshot node desktop_examples/earshot/client_tests/integration.mjs
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const bin = process.env.WEBSDR_BIN;
-if (!bin) { console.error('WEBSDR_BIN not set'); process.exit(2); }
+const bin = process.env.EARSHOT_BIN;
+if (!bin) { console.error('EARSHOT_BIN not set'); process.exit(2); }
 if (typeof WebSocket === 'undefined') { console.log('SKIP: node has no global WebSocket (needs >= 22)'); process.exit(77); }
 
 const CAP = 1_000_000;
-const dir = mkdtempSync(join(tmpdir(), 'websdr-itest-'));
+const dir = mkdtempSync(join(tmpdir(), 'earshot-itest-'));
 let proc = null;
 process.on('exit', () => { proc?.kill(); rmSync(dir, { recursive: true, force: true }); });
 // a ctest timeout arrives as a signal, which does not run the exit handler on its own
@@ -40,7 +40,7 @@ for (let attempt = 0; attempt < 4 && !proc; ++attempt) {
 if (!proc) { console.error('server never came up'); process.exit(1); }
 
 const fail = (msg) => {
-  console.error('FAIL:', msg, '\n--- websdr log ---\n' + proc.log());
+  console.error('FAIL:', msg, '\n--- earshot log ---\n' + proc.log());
   process.exit(1);
 };
 const ok = (msg) => console.log('ok', msg);
@@ -134,7 +134,7 @@ const hourAgo = new Date(Date.now() - 3600e3);
 for (const f of [`${aged}.sigmf-data`, `${aged}.sigmf-meta`]) utimesSync(f, hourAgo, hourAgo);
 
 // ...and one that started an hour ago but is still being appended to, the way a
-// second websdr writing into the same directory would look. Only its data file
+// second earshot writing into the same directory would look. Only its data file
 // is recent, which is exactly what the freshness check has to notice.
 const growing = join(dir, 'growing_capture');
 writeFileSync(`${growing}.sigmf-data`, Buffer.alloc(4 * CAP));
