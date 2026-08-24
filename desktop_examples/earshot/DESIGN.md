@@ -219,7 +219,11 @@ JSON text frames:
   - `text`: `{stream:"rds"|"ais"|"aprs", data}` — `data` is an object: RDS carries
     `{synced,pi,pty,tp,ta,ps,rt,groups_ok,corrected_pct,bad_pct}` at 1 Hz, AIS and
     APRS one object per decoded packet
-  - `error`: `{code, msg}`
+  - `error`: `{code, msg, id?}` — `msg` is the reason in plain words, naming the fix
+  where there is one ("no access to /dev/gpiomem — add the user running this to the
+  gpio, spi and i2c groups"). `id` names what the error is about, so a `source`
+  error lands under that device's row in the Devices list and stays there to be
+  read; errors without an `id` are transient toasts.
 - client→server
   - `hello`: `{proto:1, token?, accept:{codecs:[...]}}`
   - `set`: `{<control id>: value, ...}` incl. `freq`, `mode`, `offset`, `decoder`

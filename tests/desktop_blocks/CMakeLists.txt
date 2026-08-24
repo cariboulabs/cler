@@ -162,7 +162,8 @@ if (NODE_EXECUTABLE)
     add_test(NAME earshot_client_test COMMAND ${NODE_EXECUTABLE} --test
         ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/proto.test.mjs
         ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/panel.test.mjs
-        ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/decoders.test.mjs)
+        ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/decoders.test.mjs
+        ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/devices.test.mjs)
 endif()
 
 if (TARGET earshot)

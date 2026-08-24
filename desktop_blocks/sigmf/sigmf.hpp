@@ -271,10 +271,15 @@ inline std::string base_path(const std::string& path) {
 inline std::string meta_path(const std::string& path) { return base_path(path) + ".sigmf-meta"; }
 inline std::string data_path(const std::string& path) { return base_path(path) + ".sigmf-data"; }
 
-inline bool try_read_meta(const std::string& path, Meta& meta) {
+// why, when given, says what was wrong with the file — the datatype by name if
+// that is what this reader cannot handle.
+inline bool try_read_meta(const std::string& path, Meta& meta, std::string* why = nullptr) {
     std::string file = meta_path(path);
     FILE* fp = std::fopen(file.c_str(), "rb");
-    if (!fp) return false;
+    if (!fp) {
+        if (why) *why = "cannot read the metadata";
+        return false;
+    }
     std::string text;
     char buf[4096];
     size_t n;
@@ -285,7 +290,11 @@ inline bool try_read_meta(const std::string& path, Meta& meta) {
         if (kv.first == "global") {
             for (const auto& g : detail::parse_object(kv.second)) {
                 if (g.first == "core:datatype") {
-                    if (!try_parse_datatype(detail::unescape(g.second), meta.datatype)) return false;
+                    const std::string dt = detail::unescape(g.second);
+                    if (!try_parse_datatype(dt, meta.datatype)) {
+                        if (why) *why = "is " + dt + ", which this build cannot read";
+                        return false;
+                    }
                 }
                 else if (g.first == "core:sample_rate") meta.sample_rate = detail::as_number(g.second);
                 else if (g.first == "core:version") meta.version = detail::unescape(g.second);

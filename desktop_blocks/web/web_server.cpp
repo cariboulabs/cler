@@ -329,9 +329,11 @@ void WebServer::resend_hello() {
 }
 void WebServer::set_stats_extra(const std::string& json_object) { std::lock_guard<std::mutex> lock(_mutex); _stats_extra = json_object; }
 
-void WebServer::send_error(const std::string& code, const std::string& msg) {
+void WebServer::send_error(const std::string& code, const std::string& msg, const std::string& id) {
     JsonWriter w;
-    w.begin_obj().key("t").str("error").key("code").str(code).key("msg").str(msg).end();
+    w.begin_obj().key("t").str("error").key("code").str(code).key("msg").str(msg);
+    if (!id.empty()) w.key("id").str(id);
+    w.end();
     broadcast(w.out);
 }
 

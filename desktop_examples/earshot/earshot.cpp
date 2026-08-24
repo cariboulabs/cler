@@ -292,8 +292,9 @@ struct App {
             srv.send_error("record", "recording stopped: source lost");
         }
         const bool same = running && k == kind && (dev == id || dev.empty());
-        if (!same && !src.probe(k, dev)) {
-            if (!quiet) srv.send_error("source", "could not open " + source_id(k, dev));
+        std::string why;
+        if (!same && !src.probe(k, dev, &why)) {
+            if (!quiet) srv.send_error("source", why, source_id(k, dev));
             return false;
         }
         const SourceMux::Kind prev_kind = kind;
@@ -301,13 +302,13 @@ struct App {
         switching = true;
         srv.set_state(state_json());
         if (running) { fg.stop(); running = false; }
-        const bool ok = src.select(k, dev, freq_hz, rate_hz);
+        const bool ok = src.select(k, dev, freq_hz, rate_hz, &why);
         switching = false;
         kind = k; id = dev;
         rescan();
         if (!ok) {
             kind = prev_kind; id = prev_id;
-            if (!quiet) { srv.send_error("source", "could not open " + source_id(k, dev)); publish(true); }
+            if (!quiet) { srv.send_error("source", why, source_id(k, dev)); publish(true); }
             return false;
         }
         rate = src.rate(); center = src.center(); offset = 0.0; lost = false;
@@ -621,7 +622,7 @@ int main(int argc, char** argv) {
                 if (parse_source(web::json_str(f, "id"), k, id)) {
                     const double r = web::json_num(f, "rate");
                     app.select(fg, k, id, app.tuned(), r > 0 ? r : app.rate);
-                } else srv.send_error("source", "unknown source");
+                } else srv.send_error("source", "unknown source", web::json_str(f, "id"));
             } else if (t == "record") {
                 app.record(web::json_str(f, "on") == "true", web::json_str(f, "name"));
             } else if (t == "play") {

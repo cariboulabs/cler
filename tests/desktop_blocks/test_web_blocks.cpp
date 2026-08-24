@@ -277,6 +277,36 @@ TEST(WebServerTest, ComposedFramesAreValidJsonWithAndWithoutExtras) {
     }
 }
 
+// A client can only put the reason under the right device row if the frame says
+// which device it is about.
+TEST(WebServerTest, SourceErrorsNameTheDeviceAndTheReason) {
+    const int port = free_port();
+    ServerOptions o; o.port = port;
+    WebServer srv(o);
+    srv.start();
+    TestClient c("ws://127.0.0.1:" + std::to_string(port) + "/");
+    ASSERT_TRUE(c.wait([&] { return !c.text_with("hello").empty(); }));
+
+    srv.send_error("source", "no access to /dev/gpiomem", "cariboulite:s1g");
+    ASSERT_TRUE(c.wait([&] { return !c.text_with("error").empty(); }));
+    Fields f;
+    const std::string frame = c.text_with("error");
+    ASSERT_TRUE(json_parse_object(frame, f)) << frame;
+    EXPECT_EQ(json_str(f, "code"), "source");
+    EXPECT_EQ(json_str(f, "id"), "cariboulite:s1g");
+    EXPECT_FALSE(json_str(f, "msg").empty());
+
+    // an error about nothing in particular carries no id to attach it to
+    srv.send_error("record", "disk almost full");
+    ASSERT_TRUE(c.wait([&] {
+        return c.text_with("error").find("disk almost full") != std::string::npos;
+    }));
+    Fields g;
+    ASSERT_TRUE(json_parse_object(c.text_with("error"), g));
+    EXPECT_TRUE(json_str(g, "id").empty());
+    srv.stop();
+}
+
 TEST(WebProto, FieldsOfSplicesOnlyNonEmptyObjects) {
     JsonWriter w;
     w.begin_obj().key("a").num(1).fields_of("").fields_of("{}").fields_of("{ }").fields_of("{\n\t}")

@@ -40,6 +40,7 @@ struct SourcePlutoBlock : public cler::BlockBase {
 
     struct Probe {
         bool ok = false;
+        bool reached = false;   // the context opened; ok still false means no rx device on it
         long long fmin = 70000000, fmax = 6000000000;
         long long rmin = 2083333, rmax = 61440000;
     };
@@ -50,6 +51,7 @@ struct SourcePlutoBlock : public cler::BlockBase {
         Probe pr;
         iio_context* ctx = iio_create_context_from_uri(uri);
         if (!ctx) return pr;
+        pr.reached = true;
         iio_device* phy = iio_context_find_device(ctx, "ad9361-phy");
         iio_device* rx_dev = iio_context_find_device(ctx, "cf-ad9361-lpc");
         if (phy && rx_dev) {

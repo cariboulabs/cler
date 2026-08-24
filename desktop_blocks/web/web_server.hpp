@@ -77,7 +77,8 @@ public:
     void set_hello_extra(const std::string& json_object);
     void resend_hello();
     void set_stats_extra(const std::string& json_object);
-    void send_error(const std::string& code, const std::string& msg);
+    // id names what the error is about, so a client can attach it to that row.
+    void send_error(const std::string& code, const std::string& msg, const std::string& id = "");
 
     bool pop_control(std::string& json);
     void set_on_control(std::function<void(const std::string&)> fn) { _on_control = std::move(fn); }
