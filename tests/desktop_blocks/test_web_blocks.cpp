@@ -16,6 +16,7 @@
 #include "desktop_blocks/web/web_sink.hpp"
 #include "desktop_blocks/sigmf/recorder_sigmf.hpp"
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 using namespace web;
@@ -300,6 +301,10 @@ TEST(WebServerTest, RecordingsListDownloadTraversalAndToken) {
         ASSERT_TRUE(rec.procedure().is_ok());
         rec.stop();
     }
+    {
+        std::ofstream bad(dir + "/bad.sigmf-meta");
+        bad << "{\n  \"global\": { \"core:datatype\": \"cf64_le\", \"core:sample_rate\": 1e6 }\n}\n";
+    }
     const int port = free_port();
     ServerOptions o; o.port = port; o.record_dir = dir; o.token = "s3";
     WebServer srv(o);
@@ -311,6 +316,7 @@ TEST(WebServerTest, RecordingsListDownloadTraversalAndToken) {
     auto list = http.get(root + "/recordings?token=s3", http.createRequest());
     ASSERT_EQ(list->statusCode, 200);
     EXPECT_NE(list->body.find("\"name\":\"take1\""), std::string::npos);
+    EXPECT_EQ(list->body.find("bad"), std::string::npos);
     EXPECT_NE(list->body.find("\"bytes\":2000"), std::string::npos);
     EXPECT_NE(list->body.find("\"rate\":1000000"), std::string::npos);
 

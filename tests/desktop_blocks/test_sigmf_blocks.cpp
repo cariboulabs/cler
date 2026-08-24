@@ -447,12 +447,13 @@ TEST(SigMFBlocks, TransportSeeksPausesLoopsAndEnds) {
     EXPECT_DOUBLE_EQ(src.pos_seconds(), 0.01);
 
     src.seek(0.005);
-    EXPECT_TRUE(src.procedure(&out).is_err() || true);
+    src.procedure(&out);
+    EXPECT_NEAR(src.pos_seconds(), 0.005, 0.002);
+    out.commit_read(out.size());
     pump_until_ended(2.0);
     EXPECT_TRUE(src.ended());
 
     src.set_loop(true);
-    src.seek(0.0);
     size_t got = 0;
     const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
     while (std::chrono::steady_clock::now() < end) {
@@ -462,5 +463,15 @@ TEST(SigMFBlocks, TransportSeeksPausesLoopsAndEnds) {
     }
     EXPECT_FALSE(src.ended());
     EXPECT_GT(got, 1000u);
+    remove_recording(base);
+}
+
+TEST(SigMFBlocks, TryReadMetaRejectsUnsupportedDatatype) {
+    std::string base = unique_base();
+    write_text(sigmf::meta_path(base),
+               "{\n  \"global\": {\n    \"core:datatype\": \"cf64_le\",\n    \"core:sample_rate\": 1000000\n  }\n}\n");
+    sigmf::Meta meta;
+    EXPECT_FALSE(sigmf::try_read_meta(base, meta));
+    EXPECT_FALSE(sigmf::try_read_meta(base + "_missing", meta));
     remove_recording(base);
 }
