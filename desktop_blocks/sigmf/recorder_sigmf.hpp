@@ -65,12 +65,17 @@ struct SigMFRecorderBlock : public cler::BlockBase {
     // GUI thread. Opens <prefix>_YYYYmmdd_HHMMSS.sigmf-{meta,data}; the meta
     // carries the given centre frequency.
     bool start(const std::string& prefix, double center_frequency_hz) {
-        std::lock_guard<std::mutex> lock(_mutex);
-        if (_fp) return false;
         char stamp[32];
         const std::time_t now = std::time(nullptr);
         std::strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", std::gmtime(&now));
-        _base = prefix + "_" + stamp;
+        return start_at(prefix + "_" + stamp, center_frequency_hz);
+    }
+
+    // exact base path, no stamp appended
+    bool start_at(const std::string& base, double center_frequency_hz) {
+        std::lock_guard<std::mutex> lock(_mutex);
+        if (_fp) return false;
+        _base = base;
         sigmf::Meta meta;
         meta.datatype = sigmf::Datatype::ci16_le;
         meta.sample_rate = _rate;
@@ -98,6 +103,13 @@ struct SigMFRecorderBlock : public cler::BlockBase {
     }
 
     bool recording() const { return _recording.load(std::memory_order_acquire); }
+    // graph stopped and not recording only; the rate lands in the next start()'s meta
+    void set_rate(double rate) {
+        std::lock_guard<std::mutex> lock(_mutex);
+        if (_fp) return;
+        _rate = rate;
+    }
+    uint64_t bytes() const { return _samples.load(std::memory_order_relaxed) * 2 * sizeof(int16_t); }
     uint64_t samples() const { return _samples.load(std::memory_order_relaxed); }
     double sample_rate() const { return _rate; }
     std::string base() const { std::lock_guard<std::mutex> lock(_mutex); return _base; }
