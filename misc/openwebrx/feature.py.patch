@@ -1,0 +1,21 @@
+# Copyright (C) 2026 CaribouLabs. SPDX-License-Identifier: AGPL-3.0-or-later
+# Apply inside an OpenWebRX checkout: patch -p1 < feature.py.patch
+--- a/owrx/feature.py
++++ b/owrx/feature.py
+@@
+     features = {
++        "cler": ["cler_connector"],
+         "core": ["csdr", "pycsdr"],
+@@
+     def has_soapy_connector(self):
+         """
+         The SoapySDR connector allows connectivity to SDR devices supported by SoapySDR.
+         """
+         return self._check_connector("soapy_connector")
++
++    def has_cler_connector(self):
++        """
++        The cler connector exposes any radio supported by the cler DSP framework
++        (HackRF, PlutoSDR, USRP, CaribouLite, SoapySDR, SigMF files, simulator).
++        """
++        return self._check_connector("cler_connector")
