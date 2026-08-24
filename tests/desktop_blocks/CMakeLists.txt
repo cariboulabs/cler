@@ -68,6 +68,9 @@ if (CLER_BUILD_BLOCKS_LIQUID)
     add_executable(aprs_blocks_test test_aprs_blocks.cpp)
     target_link_libraries(aprs_blocks_test gtest_main cler::desktop_blocks)
 
+    add_executable(paced_source_test test_paced_source.cpp)
+    target_link_libraries(paced_source_test gtest_main cler::desktop_blocks)
+
     add_executable(linear_modem_blocks_test test_linear_modem_blocks.cpp)
     target_link_libraries(linear_modem_blocks_test gtest_main cler::desktop_blocks)
 
@@ -117,6 +120,7 @@ if (CLER_BUILD_BLOCKS_LIQUID)
     add_test(NAME ais_blocks_test COMMAND ais_blocks_test)
     add_test(NAME demod_blocks_test COMMAND demod_blocks_test)
     add_test(NAME aprs_blocks_test COMMAND aprs_blocks_test)
+    add_test(NAME paced_source_test COMMAND paced_source_test)
     add_test(NAME spectrum_block_test COMMAND spectrum_block_test)
 else()
     message(STATUS "Skipping channelizer_blocks_test because CLER_BUILD_BLOCKS_LIQUID is OFF")

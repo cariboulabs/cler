@@ -14,7 +14,6 @@
 #include "desktop_blocks/gui/gui_manager.hpp"
 #include "fm_radio_blocks.hpp"
 #include "fm_radio_panel.hpp"
-#include "fm_radio_source.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -57,8 +56,23 @@ int main(int argc, char** argv) {
     // Sink-paced pipeline: every buffer between source and sink sits full, so
     // the first channel after the source is the only slack against a blocking
     // audio write (HackRF also has its own 2M-sample ring).
-    RadioSource source("Source", RadioSource::parse_kind(source_name), device,
-                       freq_hz + IF_OFFSET, RF_RATE, gain_db, lna, vga, amp);
+    SourceMux::Kind kind;
+    std::string dev_id;
+    if (!SourceMux::parse_id(source_name, kind, dev_id) || kind == SourceMux::Kind::None) {
+        std::cerr << "fm_radio: --source must be hackrf, pluto or soapy\n";
+        return 1;
+    }
+    SourceMux source("Source");
+    if (!source.select(kind, device.empty() ? dev_id : device, freq_hz + IF_OFFSET, RF_RATE)) {
+        std::cerr << "fm_radio: cannot open " << source_name << "\n";
+        return 1;
+    }
+    // select() opens with the backend's defaults; the CLI gains are applied on
+    // top and each set() is a no-op on a device without that knob.
+    source.set("lna", lna);
+    source.set("vga", vga);
+    source.set("amp", amp ? 1.0 : 0.0);
+    source.set("gain", gain_db);
     FanoutBlock<std::complex<float>> rf_fanout("RF fanout", 2, 1 << 20);
     PlotCSpectrumBlock band_plot("Band (RF around the tuned station)", {"RF"}, static_cast<size_t>(RF_RATE), 2048);
     FrequencyShiftBlock shift("IF shift", +IF_OFFSET, RF_RATE, 1 << 18);

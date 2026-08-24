@@ -3,7 +3,7 @@
 #include "cler.hpp"
 #include "desktop_blocks/fm/fm_mpx_decoder.hpp"
 #include "fm_radio_blocks.hpp"
-#include "fm_radio_source.hpp"
+#include "desktop_blocks/sources/source_mux.hpp"
 #include "desktop_blocks/gui/cler_palette.hpp"
 #include "imgui.h"
 
@@ -26,19 +26,23 @@ struct FmRadioPanel : public cler::BlockBase {
         char ps[9];
     };
 
-    FmRadioPanel(const char* name, RadioSource& source, FMMpxDecoderBlock& mpx,
+    FmRadioPanel(const char* name, SourceMux& source, FMMpxDecoderBlock& mpx,
                  VolumeBlock& volume, double if_offset_hz, double start_hz, double gain_db)
         : cler::BlockBase(name), _src(source), _mpx(mpx), _vol(volume),
           _if_offset(if_offset_hz), _freq(start_hz), _gain(static_cast<float>(gain_db)) {
-#ifdef FM_RADIO_HAVE_HACKRF
-        if (auto* h = source.hackrf()) {
-            _lna = h->get_lna_gain();
-            _vga = h->get_vga_gain();
-            _amp = h->get_amp_enable();
-        }
-#endif
+        // whichever knobs this device reports; the sliders below follow
+        _controls = source.capabilities();
+        if (const auto* c = control("lna")) _lna = static_cast<int>(c->value);
+        if (const auto* c = control("vga")) _vga = static_cast<int>(c->value);
+        if (const auto* c = control("amp")) _amp = c->value >= 0.5;
+        if (const auto* c = control("gain")) _gain = static_cast<float>(c->value);
         _volume = volume.volume();
         _deemph_us = 50;
+    }
+
+    const SourceMux::Control* control(const std::string& id) const {
+        for (const auto& c : _controls) if (c.id == id) return &c;
+        return nullptr;
     }
 
     cler::Result<cler::Empty, cler::Error> procedure() { return cler::Error::NotEnoughSamples; }
@@ -138,18 +142,29 @@ struct FmRadioPanel : public cler::BlockBase {
         }
 
         // --- RF ---
-        ImGui::SeparatorText(_src.kind_name());
-#ifdef FM_RADIO_HAVE_HACKRF
-        if (auto* h = _src.hackrf()) {
-            if (ImGui::SliderInt("LNA", &_lna, 0, 40, "%d dB")) { _lna = (_lna / 8) * 8; h->set_lna_gain(_lna); }
-            if (ImGui::SliderInt("VGA", &_vga, 0, 62, "%d dB")) { _vga = (_vga / 2) * 2; h->set_vga_gain(_vga); }
-            if (ImGui::Checkbox("RF amp", &_amp)) h->set_amp_enable(_amp);
-            ImGui::SameLine(0, 16);
-            ImGui::TextDisabled("overflows %zu", _src.overflow_count());
+        ImGui::SeparatorText(SourceMux::kind_name(_src.kind()));
+        if (const auto* lna = control("lna")) {
+            const int step = static_cast<int>(lna->step > 0 ? lna->step : 1);
+            if (ImGui::SliderInt("LNA", &_lna, static_cast<int>(lna->min), static_cast<int>(lna->max), "%d dB")) {
+                _lna = (_lna / step) * step;
+                _src.set("lna", _lna);
+            }
         }
-#endif
-        if (_src.has_gain()) {
-            if (ImGui::SliderFloat("gain", &_gain, 0.0f, 70.0f, "%.0f dB")) _src.set_gain(_gain);
+        if (const auto* vga = control("vga")) {
+            const int step = static_cast<int>(vga->step > 0 ? vga->step : 1);
+            if (ImGui::SliderInt("VGA", &_vga, static_cast<int>(vga->min), static_cast<int>(vga->max), "%d dB")) {
+                _vga = (_vga / step) * step;
+                _src.set("vga", _vga);
+            }
+        }
+        if (control("amp")) {
+            if (ImGui::Checkbox("RF amp", &_amp)) _src.set("amp", _amp ? 1.0 : 0.0);
+            ImGui::SameLine(0, 16);
+            ImGui::TextDisabled("overflows %zu", _src.overflows());
+        }
+        if (const auto* g = control("gain")) {
+            if (ImGui::SliderFloat("gain", &_gain, static_cast<float>(g->min), static_cast<float>(g->max), "%.0f dB"))
+                _src.set("gain", _gain);
         }
         ImGui::End();
     }
@@ -171,7 +186,7 @@ private:
         hz = std::clamp(hz, BAND_LO, BAND_HI);
         if (hz == _freq) return;
         _freq = hz;
-        _src.set_frequency(_freq + _if_offset);
+        _src.set("freq", _freq + _if_offset);
         _mpx.rds_reset();
         _tuned_at = std::chrono::steady_clock::now();
     }
@@ -225,7 +240,8 @@ private:
 
     static constexpr float SEEK_SNR_DB = 12.0f;
 
-    RadioSource& _src;
+    SourceMux& _src;
+    std::vector<SourceMux::Control> _controls;
     FMMpxDecoderBlock& _mpx;
     VolumeBlock& _vol;
     double _if_offset;

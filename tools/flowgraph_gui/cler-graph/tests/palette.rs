@@ -624,6 +624,13 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         PortCount::Fixed(1),
     ),
     (
+        "SourceIQFileBlock",
+        0,
+        1,
+        PortCount::Fixed(0),
+        PortCount::Fixed(1),
+    ),
+    (
         "SourceMux",
         0,
         1,
