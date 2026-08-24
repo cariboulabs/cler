@@ -11,6 +11,7 @@
 #include "desktop_blocks/math/frequency_shift.hpp"
 #include "desktop_blocks/resamplers/multistage_resampler.hpp"
 #include "desktop_blocks/demod/analog_demod.hpp"
+#include "desktop_blocks/sigmf/recorder_sigmf.hpp"
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/web_sink.hpp"
@@ -87,6 +88,7 @@ struct App {
     FrequencyShiftBlock& shift;
     MultiStageResamplerBlock<std::complex<float>>& resamp;
     AnalogDemodBlock& demod;
+    SigMFRecorderBlock& rec;
     web::WebServer& srv;
     WebSinkBlock& sink;
 
@@ -102,9 +104,9 @@ struct App {
     std::vector<SourceMux::Control> caps;
 
     App(SourceMux& s, FanoutBlock<std::complex<float>>& f, SpectrumBlock& sp, FrequencyShiftBlock& sh,
-        MultiStageResamplerBlock<std::complex<float>>& r, AnalogDemodBlock& d, web::WebServer& server,
-        WebSinkBlock& k, double rate_hz, double freq_hz, AnalogDemodBlock::Mode m)
-        : src(s), fan(f), spec(sp), shift(sh), resamp(r), demod(d), srv(server), sink(k),
+        MultiStageResamplerBlock<std::complex<float>>& r, AnalogDemodBlock& d, SigMFRecorderBlock& rc,
+        web::WebServer& server, WebSinkBlock& k, double rate_hz, double freq_hz, AnalogDemodBlock::Mode m)
+        : src(s), fan(f), spec(sp), shift(sh), resamp(r), demod(d), rec(rc), srv(server), sink(k),
           rate(rate_hz), center(freq_hz), mode(m) {}
 
     double tuned() const { return center + offset; }
@@ -126,7 +128,9 @@ struct App {
          .key("passband").num(passband_for(mode)).key("rate").num(rate)
          .key("mode").str(AnalogDemodBlock::mode_name(mode))
          .key("switching").boolean(switching).key("source_lost").boolean(lost)
-         .key("recording").boolean(false);
+         .key("recording").boolean(rec.recording())
+         .key("is_file").boolean(running && src.is_file())
+         .key("paused").boolean(src.paused()).key("loop").boolean(src.looping());
         for (const auto& c : caps) {
             if (c.id == "freq" || c.id == "rate") continue;
             w.key(c.id).num(c.value);
@@ -165,7 +169,7 @@ struct App {
         if (hello) { srv.set_hello_extra(hello_json()); srv.resend_hello(); }
         web::JsonWriter h;
         h.begin_obj().key("source").str(source()).key("rate").num(rate)
-         .key("overflows").num(static_cast<double>(src.overflows())).key("recording").boolean(false)
+         .key("overflows").num(static_cast<double>(src.overflows())).key("recording").boolean(rec.recording())
          .key("free_disk").num(free_disk(record_dir)).end();
         srv.set_health_extra(h.out.substr(1, h.out.size() - 2));
         if (running) save_state();
@@ -173,6 +177,10 @@ struct App {
 
     template <typename FG>
     bool select(FG& fg, SourceMux::Kind k, const std::string& dev, double freq_hz, double rate_hz, bool quiet = false) {
+        if (rec.recording()) {
+            if (!quiet) { srv.send_error("source", "stop recording before switching"); return false; }
+            rec.stop();
+        }
         switching = true;
         srv.set_state(state_json());
         if (running) { fg.stop(); running = false; }
@@ -188,6 +196,7 @@ struct App {
         if (std::fabs(center - freq_hz) > rate) freq_hz = center + IF_OFFSET;
         for (const auto& g : gains) src.set(g.first, g.second);
         resamp.set_ratio(static_cast<float>(CHANNEL_HZ / rate));
+        rec.set_rate(rate);
         spec.set_rate(rate);
         shift.set_sample_rate(rate);
         tune_to(freq_hz);
@@ -235,6 +244,28 @@ struct App {
             return true;
         }
         return false;
+    }
+
+    static std::string sanitize(const std::string& in) {
+        std::string out;
+        for (char c : in) if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-') out += c;
+        return out.substr(0, 64);
+    }
+
+    void record(bool on, const std::string& name) {
+        if (!on) { rec.stop(); publish(); return; }
+        if (record_dir.empty()) { srv.send_error("record", "no --record-dir"); return; }
+        if (!running || switching) { srv.send_error("record", "no running source"); return; }
+        if (rec.recording()) return;
+        if (free_disk(record_dir) < 200e6) { srv.send_error("record", "less than 200 MB free"); return; }
+        char stamp[32];
+        const std::time_t now = std::time(nullptr);
+        std::strftime(stamp, sizeof(stamp), "%Y%m%dT%H%M%S", std::gmtime(&now));
+        const std::string prefix = sanitize(name);
+        std::string base = record_dir + "/" + (prefix.empty() ? "" : prefix + "_") + stamp + "_" +
+                           std::to_string(static_cast<long long>(center));
+        if (!rec.start_at(base, center)) { srv.send_error("record", "cannot open " + base); return; }
+        publish();
     }
 
     void save_state() {
@@ -322,22 +353,26 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < sizeof rnd; ++i) std::snprintf(hex + 2 * i, 3, "%02x", rnd[i]);
         o.token = hex;
     }
+    o.record_dir = record_dir;
     web::WebServer srv(o);
     SourceMux src("Source");
-    FanoutBlock<std::complex<float>> fan("RF fanout", 2, 1 << 20);
+    FanoutBlock<std::complex<float>> fan("RF fanout", 3, 1 << 20);
     SpectrumBlock spec("Spectrum", rate, 1024, 20.0f, -120.0f, 0.5f, 4, SpectralWindow::Hann, 1 << 16);
     FrequencyShiftBlock shift("Tune shift", 0.0, rate, 1 << 18);
     MultiStageResamplerBlock<std::complex<float>> resamp("Channel", static_cast<float>(CHANNEL_HZ / rate), 60.0f, 1 << 18);
     AnalogDemodBlock demod("Demod", CHANNEL_HZ, mode, 1 << 16);
+    SigMFRecorderBlock rec("Recorder", rate, 1 << 20);
     WebSinkBlock sink("Web sink", srv);
-    App app(src, fan, spec, shift, resamp, demod, srv, sink, rate, freq, mode);
+    if (!record_dir.empty()) src.set_sigmf_dir(record_dir);
+    App app(src, fan, spec, shift, resamp, demod, rec, srv, sink, rate, freq, mode);
     app.gains = gains;
     app.record_dir = record_dir;
     app.state_file = state_file;
 
     auto fg = cler::make_desktop_flowgraph(
         cler::BlockRunner(&src, &fan.in),
-        cler::BlockRunner(&fan, &spec.in, &shift.in),
+        cler::BlockRunner(&fan, &spec.in, &shift.in, &rec.in),
+        cler::BlockRunner(&rec),
         cler::BlockRunner(&spec, &sink.spectrum),
         cler::BlockRunner(&shift, &resamp.in),
         cler::BlockRunner(&resamp, &demod.in),
@@ -384,6 +419,20 @@ int main(int argc, char** argv) {
             } else if (t == "source") {
                 if (parse_source(web::json_str(f, "id"), k, id)) app.select(fg, k, id, app.tuned(), app.rate);
                 else srv.send_error("source", "unknown source");
+            } else if (t == "record") {
+                app.record(web::json_str(f, "on") == "true", web::json_str(f, "name"));
+            } else if (t == "play") {
+                const std::string name = web::json_str(f, "name");
+                bool handled = false;
+                if (!name.empty()) { app.select(fg, SourceMux::Kind::SigMF, name, app.tuned(), app.rate); handled = true; }
+                if (app.src.is_file()) {
+                    for (const auto& [key, val] : f) {
+                        if (key == "pos") { app.src.seek(std::atof(val.c_str())); handled = true; }
+                        else if (key == "pause") { app.src.pause(val == "true"); handled = true; }
+                        else if (key == "loop") { app.src.set_loop(val == "true"); handled = true; }
+                    }
+                    app.publish();
+                } else if (!handled) srv.send_error("play", "no file source");
             } else if (t == "rescan") {
                 app.rescan();
                 app.publish(true);
@@ -401,8 +450,19 @@ int main(int argc, char** argv) {
                 app.rescan();
                 app.publish(true);
             }
+            if (app.rec.recording() && free_disk(record_dir) < 200e6) {
+                app.rec.stop();
+                srv.send_error("record", "disk almost full, recording stopped");
+                app.publish();
+            }
             web::JsonWriter w;
-            w.begin_obj().key("overflows").num(static_cast<double>(app.src.overflows())).key("source_lost").boolean(app.lost).end();
+            w.begin_obj().key("overflows").num(static_cast<double>(app.src.overflows())).key("source_lost").boolean(app.lost)
+             .key("rec_bytes").num(static_cast<double>(app.rec.bytes())).key("free_bytes").num(free_disk(record_dir));
+            if (app.running && app.src.is_file()) {
+                w.key("pos").num(app.src.pos_seconds()).key("duration").num(app.src.duration_seconds())
+                 .key("ended").boolean(app.src.ended());
+            }
+            w.end();
             srv.set_stats_extra(w.out.substr(1, w.out.size() - 2));
         }
         if (!app.running && now - last_retry >= std::chrono::seconds(2)) {
