@@ -195,6 +195,22 @@
         <div id="modes" class="modes"></div>
         <span id="passband" class="note"></span>
       </section>
+      <section id="sec-display">
+        <div class="sec-head">
+          <h3>display</h3>
+          <span class="spacer"></span>
+          <details class="menu" id="dispmenu">
+            <summary data-testid="display-menu">⋯</summary>
+            <div class="menu-items">
+              <label><input id="dispauto" data-testid="display-auto" type="checkbox" checked> auto range</label>
+              <label>floor (dB) <input id="dispfloor" data-testid="display-floor" type="number" step="5" style="width:70px"></label>
+              <label>range (dB) <input id="disprange" data-testid="display-range" type="number" step="10" min="10" max="160" style="width:70px"></label>
+              <button id="dispreset" data-testid="display-reset">reset display</button>
+            </div>
+          </details>
+        </div>
+        <span id="dispnote" class="note" data-testid="display-note"></span>
+      </section>
       <section id="sec-controls">
         <h3 id="controls-title">source</h3>
         <div id="controls"></div>

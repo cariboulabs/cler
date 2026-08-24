@@ -8,17 +8,40 @@ const MAXN = 4096;
 const INFERNO = [[0, 0, 4], [27, 12, 65], [74, 12, 107], [120, 28, 109], [165, 44, 96],
                  [207, 68, 70], [237, 105, 37], [251, 155, 6], [247, 209, 61], [252, 255, 164]];
 
-function colormap() {
+// A shade table maps a raw bin (dbMin + v*dbStep) onto the ramp between floor
+// and floor+range, so the noise floor sits at inferno's black end instead of
+// its hot middle. Baked into the same 256-entry table the row painter already
+// reads, which keeps the paint loop a single lookup.
+function shadeTable(dbMin, dbStep, floorDb, rangeDb) {
   const stops = INFERNO;
   const lut = new Uint8ClampedArray(256 * 4);
-  for (let i = 0; i < 256; i++) {
-    const p = (i / 255) * (stops.length - 1);
+  for (let v = 0; v < 256; v++) {
+    const db = dbMin + v * dbStep;
+    const t = Math.max(0, Math.min(1, (db - floorDb) / rangeDb));
+    const p = t * (stops.length - 1);
     const k = Math.min(stops.length - 2, Math.floor(p));
     const f = p - k;
-    for (let c = 0; c < 3; c++) lut[i * 4 + c] = stops[k][c] + (stops[k + 1][c] - stops[k][c]) * f;
-    lut[i * 4 + 3] = 255;
+    for (let c = 0; c < 3; c++) lut[v * 4 + c] = stops[k][c] + (stops[k + 1][c] - stops[k][c]) * f;
+    lut[v * 4 + 3] = 255;
   }
   return lut;
+}
+
+// The floor is a low percentile of the frame, smoothed: a carrier occupies few
+// bins so it cannot drag the floor up, and the smoothing stops the image
+// breathing while still catching a gain change in a second or so. prev = null
+// snaps, which is what a source switch wants.
+export function trackFloor(prev, bins, n, dbMin, dbStep, alpha = 0.12, pct = 0.1, marginDb = 10) {
+  if (!n) return prev;
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < n; i++) hist[bins[i]]++;
+  const target = Math.max(1, Math.ceil(n * pct));
+  let seen = 0, v = 0;
+  for (; v < 256; v++) { seen += hist[v]; if (seen >= target) break; }
+  // margin keeps the noise just off the bottom of the plot, where the frequency
+  // labels live, and inside inferno's black end
+  const sample = dbMin + Math.min(v, 255) * dbStep - marginDb;
+  return Number.isFinite(prev) ? prev + (sample - prev) * alpha : sample;
 }
 
 export class Waterfall {
@@ -33,7 +56,8 @@ export class Waterfall {
     this.center = 0; this.rate = 0; this.dbMin = -120; this.dbStep = 0.5;
     this.view = { x0: 0, x1: 1 };
     this.offsetHz = 0; this.passbandHz = 0;
-    this.lut = colormap();
+    this.auto = true; this.floorDb = null; this.rangeDb = 70; this.shadedFloor = -100;
+    this.lut = shadeTable(this.dbMin, this.dbStep, this.shadedFloor, this.rangeDb);
     this.rowImage = null;
     this.dirty = true;
     this.readTokens();
@@ -76,14 +100,41 @@ export class Waterfall {
     this.repaint();
   }
 
-  clear() { this.filled = 0; this.head = 0; this.dirty = true; this.repaint(); }
+  clear() { this.filled = 0; this.head = 0; this.dirty = true; if (this.auto) this.floorDb = null; this.repaint(); }
+
+  // floor/range in dB; auto tracks the noise, manual pins it. null floor = snap
+  // to the next frame rather than sliding there.
+  setRange({ auto, floorDb, rangeDb }) {
+    if (auto !== undefined) this.auto = !!auto;
+    if (Number.isFinite(rangeDb)) this.rangeDb = Math.max(10, Math.min(160, rangeDb));
+    if (Number.isFinite(floorDb)) this.floorDb = floorDb;
+    if (this.auto && floorDb === null) this.floorDb = null;
+    this.reshade();
+  }
+
+  // Rows hold raw bins, so a new table re-shades the whole history for free —
+  // the existing dirty flag makes push() repaint instead of scrolling one line.
+  reshade() {
+    this.shadedFloor = this.floorDb ?? -100;
+    this.lut = shadeTable(this.dbMin, this.dbStep, this.shadedFloor, this.rangeDb);
+    this.dirty = true; this.repaint(); this.drawSpectrum();
+  }
 
   push(frame) {
     if (frame.n !== this.n || frame.center !== this.center || frame.rate !== this.rate) {
       this.n = frame.n; this.center = frame.center; this.rate = frame.rate;
       this.filled = 0; this.head = 0; this.dirty = true;
+      if (this.auto) this.floorDb = null;
     }
     this.dbMin = frame.dbMin; this.dbStep = frame.dbStep;
+    if (this.auto) {
+      this.floorDb = trackFloor(this.floorDb, frame.bins, frame.n, frame.dbMin, frame.dbStep);
+      if (Math.abs(this.floorDb - this.shadedFloor) > 0.5) {
+        this.shadedFloor = this.floorDb;
+        this.lut = shadeTable(this.dbMin, this.dbStep, this.shadedFloor, this.rangeDb);
+        this.dirty = true;
+      }
+    }
     this.head = (this.head + ROWS - 1) % ROWS;
     this.rows.set(frame.bins, this.head * MAXN);
     if (this.filled < ROWS) this.filled++;
@@ -143,10 +194,13 @@ export class Waterfall {
     if (!this.n || !this.filled) return;
     const font = `${11 * dpr}px system-ui, sans-serif`;
     ctx.font = font;
-    const dbRange = 255 * this.dbStep;
+    // the same window the waterfall is shaded with, so the trace and the colours
+    // are reading the same dB. PH keeps the plot out of the strip the frequency
+    // labels own, so a noisy floor cannot scribble over them.
+    const lo = this.displayFloor(), dbRange = this.rangeDb, PH = H - 16 * dpr;
     ctx.strokeStyle = this.col.grid; ctx.fillStyle = this.col.label; ctx.lineWidth = 1;
-    for (let db = Math.ceil(this.dbMin / 20) * 20; db <= this.dbMin + dbRange; db += 20) {
-      const y = H - ((db - this.dbMin) / dbRange) * H;
+    for (let db = Math.ceil(lo / 20) * 20; db <= lo + dbRange; db += 20) {
+      const y = PH - ((db - lo) / dbRange) * PH;
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
       if (y < H - 18 * dpr) ctx.fillText(`${db} dB`, 4 * dpr, y - 2 * dpr);   // the frequency ticks own the bottom strip
     }
@@ -175,11 +229,14 @@ export class Waterfall {
     const base = this.head * MAXN;
     for (let x = 0; x < W; x++) {
       const b = Math.min(this.n - 1, Math.floor(this.binAt(x, W)));
-      const y = H - (this.rows[base + b] / 255) * H;
+      const db = this.dbMin + this.rows[base + b] * this.dbStep;
+      const y = PH - Math.max(0, Math.min(1, (db - lo) / dbRange)) * PH;
       if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.stroke();
   }
+
+  displayFloor() { return this.floorDb ?? this.shadedFloor; }
 
   // dB under the pointer, from the newest row — the same numbers the trace is drawn from
   dbAt(px, width) {
