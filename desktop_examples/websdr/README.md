@@ -26,7 +26,9 @@ Service: `sudo cp misc/websdr/cler-websdr.service /etc/systemd/system/`,
 `sudo useradd -r -G plugdev websdr`, `sudo systemctl enable --now cler-websdr`.
 Put `--bind`, `--port`, `--token` and friends in `WEBSDR_ARGS` in
 /etc/default/cler-websdr; the unit itself only sets the state file and the
-record directory. The unit persists the last device/tuning in
+record directory. systemd splits `$WEBSDR_ARGS` on whitespace and ignores
+quoting, so a token with a space in it becomes two arguments and the service
+fails to start — keep tokens to one word. The unit persists the last device/tuning in
 /var/lib/cler-websdr/state.json. `websdr --version` and `GET /health` tell you
 which build is running.
 
@@ -47,6 +49,10 @@ and never leaves the box without a binary.
     sudo systemctl stop cler-websdr
     sudo ln -sfn /usr/local/bin/websdr-<new> /usr/local/bin/websdr
     sudo systemctl start cler-websdr        # rollback: ln -sfn the old one, restart
+
+Rolling back to a build from before the watchdog landed needs the unit changed
+to `Type=simple` as well: an older binary never sends `READY=1`, so `Type=notify`
+waits out its timeout and the start fails.
 
 A browser tab left open across an upgrade keeps the old JavaScript in memory. The
 client files are served `Cache-Control: no-store`, so a reload always fetches the

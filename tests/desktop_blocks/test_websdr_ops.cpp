@@ -109,7 +109,7 @@ TEST(WebsdrRecordings, IgnoresFilesThatAreNotRecordings) {
     const std::string dir = temp_dir("junk");
     std::ofstream(dir + "/notes.txt") << "hello";
     std::ofstream(dir + "/orphan.sigmf-meta") << "{}";
-    make_recording(dir, "real", 400 * 1024);
+    make_recording(dir, "real", 400 * 1024, std::chrono::seconds(300));
 
     const auto p = websdr::prune_recordings(dir, 1, 0, "");
 
@@ -118,6 +118,104 @@ TEST(WebsdrRecordings, IgnoresFilesThatAreNotRecordings) {
     EXPECT_TRUE(fs::exists(dir + "/notes.txt"));
     EXPECT_TRUE(fs::exists(dir + "/orphan.sigmf-meta"));
     fs::remove_all(dir);
+}
+
+// The live capture must not be able to make the archive look over budget: it is
+// excluded from the total, not just from deletion.
+TEST(WebsdrRecordings, ALiveRecordingLargerThanTheCapKeepsTheArchive) {
+    const std::string dir = temp_dir("livecap");
+    make_recording(dir, "archived_a", 300 * 1024, std::chrono::seconds(400));
+    make_recording(dir, "archived_b", 300 * 1024, std::chrono::seconds(300));
+    make_recording(dir, "live", 8 * 1024 * 1024, std::chrono::seconds(200));
+
+    // cap far below the live file, archive comfortably inside it
+    for (int tick = 0; tick < 5; ++tick) {
+        const auto p = websdr::prune_recordings(dir, 1024 * 1024, 0, dir + "/live");
+        EXPECT_EQ(p.recordings, 0u) << "tick " << tick << " deleted archived recordings";
+    }
+    EXPECT_TRUE(exists(dir, "archived_a"));
+    EXPECT_TRUE(exists(dir, "archived_b"));
+    EXPECT_TRUE(exists(dir, "live"));
+    fs::remove_all(dir);
+}
+
+// Another process writing into the same directory has no `keep` to protect it,
+// so recent files are left alone whoever wrote them.
+TEST(WebsdrRecordings, LeavesFreshRecordingsAlone) {
+    const std::string dir = temp_dir("fresh");
+    make_recording(dir, "someone_elses", 4 * 1024 * 1024);   // mtime now
+    make_recording(dir, "ours", 400 * 1024, std::chrono::seconds(300));
+
+    const auto p = websdr::prune_recordings(dir, 1024, 0, "");
+
+    EXPECT_EQ(p.recordings, 1u);
+    EXPECT_TRUE(exists(dir, "someone_elses"));
+    EXPECT_FALSE(exists(dir, "ours"));
+    fs::remove_all(dir);
+}
+
+// A data file whose meta never landed still occupies the disk.
+TEST(WebsdrRecordings, CountsAndPrunesOrphanedData) {
+    const std::string dir = temp_dir("orphan");
+    {
+        std::ofstream data(dir + "/aborted.sigmf-data", std::ios::binary);
+        std::vector<char> zeros(5 * 1024 * 1024, 0);
+        data.write(zeros.data(), static_cast<std::streamsize>(zeros.size()));
+    }
+    const auto old = fs::last_write_time(dir + "/aborted.sigmf-data") - std::chrono::seconds(300);
+    fs::last_write_time(dir + "/aborted.sigmf-data", old);
+
+    const auto p = websdr::prune_recordings(dir, 200 * 1024, 0, "");
+
+    EXPECT_EQ(p.recordings, 1u);
+    EXPECT_GE(p.bytes, 5u * 1024u * 1024u);
+    EXPECT_FALSE(fs::exists(dir + "/aborted.sigmf-data"));
+    fs::remove_all(dir);
+}
+
+TEST(WebsdrRecordings, ParsesByteCountsTheWayTheOtherFlagsAreSpelled) {
+    uint64_t v = 12345;
+    EXPECT_TRUE(websdr::parse_bytes("20e9", v));
+    EXPECT_EQ(v, 20000000000ull);
+    EXPECT_TRUE(websdr::parse_bytes("5000000000", v));
+    EXPECT_EQ(v, 5000000000ull);
+    EXPECT_TRUE(websdr::parse_bytes("0", v));
+    EXPECT_EQ(v, 0u);
+
+    for (const char* bad : {"abc", "-1", "20e9x", "", "1e30", "20 e9"}) {
+        uint64_t out = 999;
+        EXPECT_FALSE(websdr::parse_bytes(bad, out)) << "accepted '" << bad << "'";
+        EXPECT_EQ(out, 999u) << "clobbered the target on '" << bad << "'";
+    }
+}
+
+// Four booleans decide whether a client's box gets restarted, so spell out every
+// combination rather than trusting the expression to read correctly.
+TEST(WebsdrWatchdog, FlowingCoversEveryCombination) {
+    using namespace std::chrono_literals;
+    const auto grace = 30s;
+    struct Case { bool running, lost, paused, ended, delivered; std::chrono::seconds lost_for; bool want; const char* why; };
+    const Case cases[] = {
+        {false, false, false, false, false, 0s,  true,  "no source selected is idle, not wedged"},
+        {false, false, false, false, true,  0s,  true,  "idle and delivering is still idle"},
+        {true,  false, false, false, true,  0s,  true,  "running and delivering"},
+        {true,  false, false, false, false, 0s,  false, "running but nothing reached the server"},
+        {true,  false, true,  false, false, 0s,  true,  "paused playback delivers nothing on purpose"},
+        {true,  false, false, true,  false, 0s,  true,  "a finished file delivers nothing on purpose"},
+        {true,  false, true,  true,  false, 0s,  true,  "paused at the end of a file"},
+        // a lost source sets running=false, which is exactly why lost is checked first
+        {false, true,  false, false, false, 0s,  true,  "just lost, inside the grace period"},
+        {false, true,  false, false, false, 29s, true,  "still retrying, inside the grace period"},
+        {false, true,  false, false, false, 31s, false, "lost for longer than the retries can explain"},
+        {false, true,  false, false, true,  31s, false, "delivering cannot excuse a source lost this long"},
+        {true,  true,  false, false, true,  31s, false, "same while the graph still runs"},
+    };
+    for (const auto& c : cases) {
+        websdr::Health h;
+        h.running = c.running; h.lost = c.lost; h.paused = c.paused;
+        h.ended = c.ended; h.delivered = c.delivered; h.lost_for = c.lost_for;
+        EXPECT_EQ(websdr::flowing(h, grace), c.want) << c.why;
+    }
 }
 
 TEST(WebsdrWatchdog, SendsReadyAndPingsToNotifySocket) {

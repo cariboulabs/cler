@@ -118,6 +118,8 @@ static cler::FlowGraphConfig graph_config() {
 
 static constexpr uint64_t MIN_FREE_BYTES = 200ull << 20;
 static constexpr uint64_t DEFAULT_RECORD_MAX_BYTES = 20ull << 30;
+// the source retry runs every 2 s, so this is many attempts, not a hair trigger
+static constexpr auto LOST_GRACE = std::chrono::seconds(60);
 
 using websdr::free_disk;
 
@@ -384,8 +386,10 @@ struct App {
         if (record_dir.empty()) { srv.send_error("record", "no --record-dir"); return; }
         if (!running || switching) { srv.send_error("record", "no running source"); return; }
         if (rec.recording()) return;
-        prune();
+        // floor first: on a full disk, deleting the archive and then failing
+        // anyway would cost the client their captures for nothing
         if (free_disk(record_dir) < MIN_FREE_BYTES) { srv.send_error("record", "less than 200 MB free"); return; }
+        prune();
         char stamp[32];
         const std::time_t now = std::time(nullptr);
         std::strftime(stamp, sizeof(stamp), "%Y%m%dT%H%M%S", std::gmtime(&now));
@@ -435,7 +439,12 @@ int main(int argc, char** argv) {
         else if (const char* v = next("--token")) o.token = v;
         else if (const char* v = next("--client-dir")) o.client_dir = v;
         else if (const char* v = next("--record-dir")) record_dir = v;
-        else if (const char* v = next("--record-max-bytes")) record_max_bytes = std::strtoull(v, nullptr, 10);
+        else if (const char* v = next("--record-max-bytes")) {
+            if (!websdr::parse_bytes(v, record_max_bytes)) {
+                std::fprintf(stderr, "--record-max-bytes wants a byte count (20e9, 5000000000, or 0 for unlimited), got '%s'\n", v);
+                return 1;
+            }
+        }
         else if (const char* v = next("--state-file")) state_file = v;
         else {
             std::fprintf(stderr, "Usage: %s [--source sim|hackrf[:serial]|none] [--freq Hz] [--rate Hz] [--mode WBFM|NBFM|AM|USB|LSB]\n"
@@ -568,7 +577,8 @@ int main(int argc, char** argv) {
     uint64_t last_decoder_dropped = 0;
     websdr::SdNotify notify;
     notify.send("READY=1");
-    size_t last_written = fan.in.producer_thread_cumulative_write_count();
+    uint64_t last_delivered = sink.delivered();
+    auto lost_since = clock::now();
     while (g_run) {
         std::string ctl;
         while (srv.pop_control(ctl)) {
@@ -659,15 +669,22 @@ int main(int argc, char** argv) {
             w.end();
             srv.set_stats_extra(w.out.substr(1, w.out.size() - 2));
         }
-        // Only ping while samples are actually moving, so systemd restarts a
+        if (!app.lost) lost_since = now;
+        // Only ping while the chain is actually delivering, so systemd restarts a
         // process that is alive but wedged. One skipped ping is harmless: the
         // deadline is twice the interval.
         if (notify.interval().count() > 0 && now - last_ping >= notify.interval()) {
             last_ping = now;
-            const size_t written = fan.in.producer_thread_cumulative_write_count();
-            const bool flowing = !app.running || app.src.paused() || app.src.ended() || written != last_written;
-            last_written = written;
-            if (flowing) notify.send("WATCHDOG=1");
+            const uint64_t delivered = sink.delivered();
+            websdr::Health h;
+            h.running = app.running;
+            h.lost = app.lost;
+            h.paused = app.src.paused();
+            h.ended = app.src.ended();
+            h.delivered = delivered != last_delivered;
+            h.lost_for = now - lost_since;
+            last_delivered = delivered;
+            if (websdr::flowing(h, LOST_GRACE)) notify.send("WATCHDOG=1");
         }
         if (!app.running && now - last_retry >= std::chrono::seconds(2)) {
             last_retry = now;
