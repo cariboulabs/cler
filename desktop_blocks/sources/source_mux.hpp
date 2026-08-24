@@ -2,6 +2,7 @@
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
 #include "desktop_blocks/sources/source_sim.hpp"
+#include "desktop_blocks/sigmf/source_sigmf.hpp"
 #ifdef CLER_HAS_HACKRF
 #include "desktop_blocks/sources/source_hackrf.hpp"
 #endif
@@ -10,6 +11,7 @@
 #endif
 
 #include <complex>
+#include <filesystem>
 #include <string>
 #include <variant>
 #include <vector>
@@ -37,6 +39,12 @@ struct SourceMux : public cler::BlockBase {
     };
 
     explicit SourceMux(const char* name) : cler::BlockBase(name) {}
+
+    void set_sigmf_dir(const std::string& dir) { _sigmf_dir = dir; }
+    std::string sigmf_path(const std::string& name) const { return _sigmf_dir + "/" + name + ".sigmf-meta"; }
+    static bool bare_name(const std::string& n) {
+        return !n.empty() && n.find('/') == std::string::npos && n.find("..") == std::string::npos;
+    }
 
     static const char* kind_name(Kind k) {
         switch (k) {
@@ -73,6 +81,25 @@ struct SourceMux : public cler::BlockBase {
             out.push_back({Kind::Cariboulite, "hif", "CaribouLite HiF"});
         }
 #endif
+        if (!_sigmf_dir.empty()) {
+            std::error_code ec;
+            for (const auto& e : std::filesystem::directory_iterator(_sigmf_dir, ec)) {
+                if (!e.is_regular_file() || e.path().extension() != ".sigmf-meta") continue;
+                const std::string name = e.path().stem().string();
+                std::string label = name;
+                std::error_code ec2;
+                const auto meta = sigmf::read_meta(e.path().string());
+                const auto bytes = std::filesystem::file_size(sigmf::data_path(e.path().string()), ec2);
+                if (!ec2 && meta.sample_rate > 0) {
+                    const double secs = static_cast<double>(bytes) /
+                        (sigmf::datatype_size(meta.datatype) * meta.sample_rate);
+                    char buf[64];
+                    std::snprintf(buf, sizeof(buf), " (%.1f s @ %.3g MS/s)", secs, meta.sample_rate / 1e6);
+                    label += buf;
+                }
+                out.push_back({Kind::SigMF, name, label});
+            }
+        }
         out.push_back({Kind::Sim, "", "Simulator"});
         return out;
     }
@@ -108,6 +135,17 @@ struct SourceMux : public cler::BlockBase {
                 }
                 return true;
 #endif
+            case Kind::SigMF: {
+                if (!bare_name(id)) return false;
+                const std::string meta_path = sigmf_path(id);
+                std::error_code ec;
+                if (!std::filesystem::is_regular_file(meta_path, ec) ||
+                    !std::filesystem::is_regular_file(sigmf::data_path(meta_path), ec)) return false;
+                const auto meta = sigmf::read_meta(meta_path);
+                if (!sigmf::datatype_is_complex(meta.datatype) || meta.sample_rate <= 0) return false;
+                _v.emplace<SigMFSrc>("sigmf", meta_path.c_str(), false, size_t(8192), true);
+                return true;
+            }
             case Kind::Sim:
                 _v.emplace<SimSourceBlock>("sim", rate_hz, freq_hz, 400e3);
                 return true;
@@ -130,6 +168,7 @@ struct SourceMux : public cler::BlockBase {
 
     Kind kind() const {
         if (std::holds_alternative<SimSourceBlock>(_v)) return Kind::Sim;
+        if (std::holds_alternative<SigMFSrc>(_v)) return Kind::SigMF;
 #ifdef CLER_HAS_HACKRF
         if (std::holds_alternative<SourceHackRFBlock>(_v)) return Kind::HackRF;
 #endif
@@ -142,6 +181,7 @@ struct SourceMux : public cler::BlockBase {
 
     double rate() const {
         if (auto* s = std::get_if<SimSourceBlock>(&_v)) return s->rate();
+        if (auto* f = std::get_if<SigMFSrc>(&_v)) return f->sample_rate();
 #ifdef CLER_HAS_HACKRF
         if (auto* h = std::get_if<SourceHackRFBlock>(&_v)) return h->get_sample_rate();
 #endif
@@ -153,6 +193,7 @@ struct SourceMux : public cler::BlockBase {
 
     double center() const {
         if (auto* s = std::get_if<SimSourceBlock>(&_v)) return s->center();
+        if (auto* f = std::get_if<SigMFSrc>(&_v)) return f->center_frequency();
 #ifdef CLER_HAS_HACKRF
         if (auto* h = std::get_if<SourceHackRFBlock>(&_v)) return static_cast<double>(h->get_frequency());
 #endif
@@ -181,6 +222,11 @@ struct SourceMux : public cler::BlockBase {
 
     std::vector<Control> capabilities() const {
         std::vector<Control> c;
+        if (auto* f = std::get_if<SigMFSrc>(&_v)) {
+            c.push_back(range("freq", "Frequency", "Hz", 0, 6e9, 1, f->center_frequency(), true));
+            c.push_back(range("rate", "Sample rate", "Hz", 0, 20e6, 1, f->sample_rate(), true));
+            return c;
+        }
         if (auto* s = std::get_if<SimSourceBlock>(&_v)) {
             c.push_back(range("freq", "Frequency", "Hz", 0, 6e9, 1, s->center()));
             c.push_back(range("rate", "Sample rate", "Hz", 48e3, 20e6, 1, s->rate(), true));
@@ -217,6 +263,16 @@ struct SourceMux : public cler::BlockBase {
 #endif
         return c;
     }
+
+    bool is_file() const { return std::holds_alternative<SigMFSrc>(_v); }
+    void seek(double seconds) { if (auto* f = std::get_if<SigMFSrc>(&_v)) f->seek(seconds); }
+    void pause(bool p) { if (auto* f = std::get_if<SigMFSrc>(&_v)) f->pause(p); }
+    bool paused() const { auto* f = std::get_if<SigMFSrc>(&_v); return f && f->paused(); }
+    void set_loop(bool l) { if (auto* f = std::get_if<SigMFSrc>(&_v)) f->set_loop(l); }
+    bool looping() const { auto* f = std::get_if<SigMFSrc>(&_v); return f && f->looping(); }
+    bool ended() const { auto* f = std::get_if<SigMFSrc>(&_v); return f && f->ended(); }
+    double pos_seconds() const { auto* f = std::get_if<SigMFSrc>(&_v); return f ? f->pos_seconds() : 0.0; }
+    double duration_seconds() const { auto* f = std::get_if<SigMFSrc>(&_v); return f ? f->duration_seconds() : 0.0; }
 
     // Live controls only; rate changes go through select() with the graph stopped.
     void set(const std::string& id, double value) {
@@ -262,6 +318,9 @@ private:
 #ifdef CLER_HAS_CARIBOULITE
     using CBL = SourceCaribouliteBlock<std::complex<float>>;
 #endif
+public:
+    using SigMFSrc = SourceSigMFBlock<std::complex<float>>;
+private:
     std::variant<std::monostate,
 #ifdef CLER_HAS_HACKRF
                  SourceHackRFBlock,
@@ -269,6 +328,8 @@ private:
 #ifdef CLER_HAS_CARIBOULITE
                  CBL,
 #endif
+                 SigMFSrc,
                  SimSourceBlock> _v;
     std::string _id;
+    std::string _sigmf_dir;
 };

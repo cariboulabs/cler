@@ -4,6 +4,10 @@
 #include <complex>
 #include "cler.hpp"
 #include "desktop_blocks/sources/source_mux.hpp"
+#include "desktop_blocks/sigmf/sink_sigmf.hpp"
+#include <cstdio>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -188,3 +192,48 @@ TEST(SourceMux, CaribouliteIfPresent) {
     EXPECT_EQ(mux.kind(), SourceMux::Kind::None);
 }
 #endif
+
+TEST(SourceMux, SigMFEnumerateSelectAndTransport) {
+    const std::string dir = testing::TempDir();
+    const std::string base = dir + "/muxplay";
+    {
+        SinkSigMFBlock<std::complex<float>> sink("s", base.c_str(), 1e5, 433e6, sigmf::Datatype::ci16_le);
+        std::vector<std::complex<float>> tone(1000, {0.5f, -0.25f});
+        sink.in.writeN(tone.data(), tone.size());
+        ASSERT_TRUE(sink.procedure().is_ok());
+    }
+    SourceMux mux("mux");
+    mux.set_sigmf_dir(dir);
+    bool listed = false;
+    for (const auto& d : mux.enumerate()) listed = listed || (d.kind == SourceMux::Kind::SigMF && d.id == "muxplay");
+    EXPECT_TRUE(listed);
+
+    EXPECT_FALSE(mux.select(SourceMux::Kind::SigMF, "../muxplay", 0, 0));
+    EXPECT_FALSE(mux.select(SourceMux::Kind::SigMF, "missing", 0, 0));
+    ASSERT_TRUE(mux.select(SourceMux::Kind::SigMF, "muxplay", 0, 0));
+    EXPECT_EQ(mux.kind(), SourceMux::Kind::SigMF);
+    EXPECT_TRUE(mux.is_file());
+    EXPECT_DOUBLE_EQ(mux.rate(), 1e5);
+    EXPECT_DOUBLE_EQ(mux.center(), 433e6);
+    EXPECT_DOUBLE_EQ(mux.duration_seconds(), 0.01);
+
+    const auto caps = mux.capabilities();
+    ASSERT_EQ(caps.size(), 2u);
+    EXPECT_TRUE(caps[0].ro);
+    EXPECT_TRUE(caps[1].ro);
+
+    const size_t n = pump(mux, 0.05);
+    EXPECT_GE(n, 900u);
+    EXPECT_LE(n, 1100u);
+    EXPECT_TRUE(mux.ended());
+    mux.set_loop(true);
+    mux.seek(0.0);
+    cler::Channel<std::complex<float>> out(1 << 16);
+    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(60);
+    while (std::chrono::steady_clock::now() < end) { mux.procedure(&out); out.commit_read(out.size()); }
+    EXPECT_FALSE(mux.ended());
+    mux.pause(true);
+    EXPECT_TRUE(mux.paused());
+    std::remove((base + ".sigmf-meta").c_str());
+    std::remove((base + ".sigmf-data").c_str());
+}
