@@ -21,10 +21,12 @@
 #include "desktop_blocks/aprs/afsk_demod.hpp"
 #include "desktop_blocks/filters/kaiser_lpf.hpp"
 #include "desktop_blocks/ais/ais_decoder.hpp"
-#include "desktop_blocks/web/json_adapters.hpp"
+#include "desktop_blocks/web/json_sink.hpp"
 #include "desktop_blocks/web/proto.hpp"
 #include "desktop_blocks/web/web_server.hpp"
 #include "desktop_blocks/web/web_sink.hpp"
+#include "decoder_json.hpp"
+#include "recordings_route.hpp"
 #include "websdr_client_files.hpp"
 
 #include <sys/statvfs.h>
@@ -35,6 +37,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -136,6 +139,8 @@ struct App {
     std::string id;
     std::vector<SourceMux::DeviceInfo> devices;
     std::vector<SourceMux::Control> caps;
+    std::mutex health_mutex;
+    std::string health_json = "{}";
 
     App(SourceMux& s, FanoutBlock<std::complex<float>>& f, SpectrumBlock& sp, FrequencyShiftBlock& sh,
         MultiStageResamplerBlock<std::complex<float>>& r, AnalogDemodBlock& d, SigMFRecorderBlock& rc,
@@ -247,7 +252,7 @@ struct App {
         w.begin_obj().key("id").str("adsb").key("available").boolean(false)
          .key("reason").str("needs a full-rate 1090 MHz magnitude tap and CPR aggregation").end();
         w.end().end();
-        return w.out.substr(1, w.out.size() - 2);
+        return w.out;
     }
 
     // state to every tab; hello too when the device list or controls changed
@@ -256,11 +261,23 @@ struct App {
         srv.set_state(state_json());
         if (hello) { srv.set_hello_extra(hello_json()); srv.resend_hello(); }
         web::JsonWriter h;
-        h.begin_obj().key("source").str(source()).key("rate").num(rate)
-         .key("overflows").num(static_cast<double>(src.overflows())).key("recording").boolean(rec.recording())
+        h.begin_obj().key("version").str(WEBSDR_VERSION).key("uptime_s").num(srv.uptime_seconds())
+         .key("clients").num(srv.client_count())
+         .key("source").str(source()).key("rate").num(rate)
+         .key("overflows").num(src.overflows()).key("recording").boolean(rec.recording())
          .key("free_disk").num(free_disk(record_dir)).end();
-        srv.set_health_extra(h.out.substr(1, h.out.size() - 2));
+        {
+            std::lock_guard<std::mutex> lock(health_mutex);
+            health_json = std::move(h.out);
+        }
         if (running) save_state();
+    }
+
+    // the HTTP thread only ever reads this snapshot; App's own fields are the
+    // main thread's
+    std::string health() {
+        std::lock_guard<std::mutex> lock(health_mutex);
+        return health_json;
     }
 
     template <typename FG>
@@ -389,6 +406,7 @@ int main(int argc, char** argv) {
     o.files = WEBSDR_CLIENT_FILES;
     o.file_count = WEBSDR_CLIENT_FILES_COUNT;
     o.version = WEBSDR_VERSION;
+    o.audio_rate = AUDIO_HZ;
     std::string source, record_dir, state_file, mode_s, decoder;
     double freq = 0, rate = 0;
     std::vector<std::pair<std::string, double>> gains;
@@ -459,7 +477,6 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < sizeof rnd; ++i) std::snprintf(hex + 2 * i, 3, "%02x", rnd[i]);
         o.token = hex;
     }
-    o.record_dir = record_dir;
     web::WebServer srv(o);
     SourceMux src("Source");
     FanoutBlock<std::complex<float>> fan("RF fanout", 3, 1 << 20);
@@ -477,13 +494,13 @@ int main(int argc, char** argv) {
     GateBlock<std::complex<float>> ais_gate("AIS gate", false, 1 << 18);
     MultiStageResamplerBlock<std::complex<float>> ais_resamp("AIS channel", static_cast<float>(AIS_HZ / CHANNEL_HZ), 60.0f, 1 << 16);
     AISDecoderBlock ais("AIS", AIS_HZ, 1 << 16);
-    web::JsonTextSinkBlock<ais::Message> ais_json("AIS json", srv);
+    web::JsonTextSinkBlock<ais::Message> ais_json("AIS json", srv, "ais");
     GateBlock<std::complex<float>> aprs_gate("APRS gate", false, 1 << 18);
     MultiStageResamplerBlock<std::complex<float>> aprs_resamp("APRS channel", static_cast<float>(AUDIO_HZ / CHANNEL_HZ), 60.0f, 1 << 16);
     KaiserLPFBlock<std::complex<float>> aprs_lpf("APRS channel filter", AUDIO_HZ, APRS_CHANNEL_HZ / 2, 3e3, 60.0, 1 << 16);
     FMDemodBlock aprs_fm("APRS NBFM", AUDIO_HZ, APRS_DEVIATION_HZ, 1 << 16);
     AFSKDemodBlock afsk("AFSK1200", AUDIO_HZ, 1 << 14);
-    web::JsonTextSinkBlock<aprs::Packet> aprs_json("APRS json", srv);
+    web::JsonTextSinkBlock<aprs::Packet> aprs_json("APRS json", srv, "aprs");
     if (!record_dir.empty()) src.set_sigmf_dir(record_dir);
     App app(src, fan, spec, shift, resamp, demod, rec, srv, sink, rds_gate, ais_gate, aprs_gate, mpx,
             rate, freq, mode);
@@ -520,6 +537,14 @@ int main(int argc, char** argv) {
         cler::BlockRunner(&demod, &sink.audio),
         cler::BlockRunner(&sink));
 
+    srv.add_http_route("/health", [&app](const std::string&, const std::string&) {
+        return web::HttpReply{200, app.health(), "application/json"};
+    });
+    if (!record_dir.empty()) {
+        srv.add_http_route("/recordings", [record_dir](const std::string& path, const std::string&) {
+            return websdr::recordings_route(record_dir, path);
+        });
+    }
     app.rescan();
     app.publish(true);
     srv.start();
@@ -614,15 +639,15 @@ int main(int argc, char** argv) {
                 app.publish();
             }
             web::JsonWriter w;
-            w.begin_obj().key("overflows").num(static_cast<double>(app.src.overflows())).key("source_lost").boolean(app.lost)
-             .key("rec_bytes").num(static_cast<double>(app.rec.bytes())).key("free_bytes").num(free_disk(record_dir))
-             .key("decoder_dropped").num(static_cast<double>(app.decoder_dropped()));
+            w.begin_obj().key("overflows").num(app.src.overflows()).key("source_lost").boolean(app.lost)
+             .key("rec_bytes").num(app.rec.bytes()).key("free_bytes").num(free_disk(record_dir))
+             .key("decoder_dropped").num(app.decoder_dropped());
             if (app.running && app.src.is_file()) {
                 w.key("pos").num(app.src.pos_seconds()).key("duration").num(app.src.duration_seconds())
                  .key("ended").boolean(app.src.ended());
             }
             w.end();
-            srv.set_stats_extra(w.out.substr(1, w.out.size() - 2));
+            srv.set_stats_extra(w.out);
         }
         if (!app.running && now - last_retry >= std::chrono::seconds(2)) {
             last_retry = now;

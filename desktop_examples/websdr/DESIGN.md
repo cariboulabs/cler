@@ -130,10 +130,23 @@ spectrum frames and audio chunks alike, each counted per socket and reported in
 `stats`. A slow tab cannot play real-time audio anyway. Ping every 5 s, close on
 two misses. Socket list mutated only on the server thread.
 
-HTTP: `/` (client), `/health` (JSON: version, git sha, uptime, source, rate,
-overflows, recording, free disk), `/recordings/<name>` (GET, bare filenames only,
-resolved inside `--record-dir`, `..` and separators rejected), `Cache-Control:
-no-store` on the client files.
+HTTP: the library serves `/` and `/client/*` from the embedded files (or
+`--client-dir`), with `Cache-Control: no-store` and traversal rejection
+(`WebServer::safe_name`). Everything else is an app route:
+`srv.add_http_route(prefix, handler)` — longest prefix wins, the library applies
+the same token gate it applies to the WebSocket, the handler returns
+`{status, body, content_type}`. websdr registers two:
+- `/health` — version, uptime, clients, source, rate, overflows, recording, free
+  disk. The handler runs on an HTTP thread and only reads a snapshot the main
+  thread refreshes in `publish()`; App's own fields stay single-threaded.
+- `/recordings` (list) and `/recordings/<name>.sigmf-{data,meta}` (GET) —
+  `desktop_examples/websdr/recordings_route.hpp`, bare filenames only, resolved
+  inside `--record-dir`.
+
+So the library knows sockets, framing, access control and static files; it never
+names a receiver concept. The audio ring is sized from `ServerOptions::audio_rate`;
+the wire rate and 960-sample frame belong to codec 0, and a different rate or
+chunk would be a new codec id rather than a parameter.
 
 ### Security (phase 1, not later)
 

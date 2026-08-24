@@ -107,6 +107,7 @@ function(cler_register_standard_block_components)
 
   if(TARGET cler::blocks_web)
     cler_register_block_component(TARGET cler::blocks_web PATHS
+      desktop_blocks/web/json_sink.hpp
       desktop_blocks/web/web_sink.hpp
     )
   endif()

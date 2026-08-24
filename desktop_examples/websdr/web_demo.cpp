@@ -41,17 +41,22 @@ int main(int argc, char** argv) {
     double freq = 100e6, gain = 20;
     std::string mode = "WBFM", source;
     srv.set_hello_extra(
-        "\"sources\":[{\"id\":\"sim\",\"kind\":\"sim\",\"label\":\"Simulator\",\"available\":true},"
+        "{\"sources\":[{\"id\":\"sim\",\"kind\":\"sim\",\"label\":\"Simulator\",\"available\":true},"
         "{\"id\":\"hackrf:0\",\"kind\":\"hackrf\",\"label\":\"HackRF One (demo, unavailable)\",\"available\":false}],"
         "\"controls\":[{\"id\":\"freq\",\"label\":\"frequency\",\"type\":\"range\",\"min\":1e6,\"max\":6e9,\"step\":1e3,\"unit\":\"Hz\"},"
         "{\"id\":\"mode\",\"label\":\"mode\",\"type\":\"enum\",\"options\":[\"WBFM\",\"NBFM\",\"AM\",\"USB\",\"LSB\"]},"
         "{\"id\":\"gain\",\"label\":\"gain\",\"type\":\"range\",\"min\":0,\"max\":40,\"step\":1,\"unit\":\"dB\"},"
         "{\"id\":\"amp\",\"label\":\"amp\",\"type\":\"bool\"},"
         "{\"id\":\"rate\",\"label\":\"sample rate\",\"type\":\"range\",\"min\":2.4e6,\"max\":2.4e6,\"step\":1,\"unit\":\"Hz\",\"ro\":true}],"
-        "\"spectrum\":{\"n\":1024,\"fps\":20}");
+        "\"spectrum\":{\"n\":1024,\"fps\":20}}");
     srv.set_gen(gen);
     srv.set_state(state_json(gen, freq, mode, gain, source));
-    srv.set_health_extra("\"source\":\"sim\"");
+    srv.add_http_route("/health", [&srv, &o](const std::string&, const std::string&) {
+        web::JsonWriter w;
+        w.begin_obj().key("version").str(o.version).key("uptime_s").num(srv.uptime_seconds())
+         .key("clients").num(srv.client_count()).key("source").str("sim").end();
+        return web::HttpReply{200, w.out, "application/json"};
+    });
     srv.start();
     std::printf("web_demo on http://%s:%d/\n", o.bind.c_str(), o.port);
 
