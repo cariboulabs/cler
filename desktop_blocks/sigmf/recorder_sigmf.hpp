@@ -51,6 +51,7 @@ struct SigMFRecorderBlock : public cler::BlockBase {
                         std::fclose(_fp);
                         _fp = nullptr;
                         _recording.store(false, std::memory_order_release);
+                        _failed.store(true, std::memory_order_release);
                         break;
                     }
                     done += n;
@@ -65,12 +66,19 @@ struct SigMFRecorderBlock : public cler::BlockBase {
     // GUI thread. Opens <prefix>_YYYYmmdd_HHMMSS.sigmf-{meta,data}; the meta
     // carries the given centre frequency.
     bool start(const std::string& prefix, double center_frequency_hz) {
-        std::lock_guard<std::mutex> lock(_mutex);
-        if (_fp) return false;
         char stamp[32];
         const std::time_t now = std::time(nullptr);
         std::strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", std::gmtime(&now));
-        _base = prefix + "_" + stamp;
+        return start_at(prefix + "_" + stamp, center_frequency_hz);
+    }
+
+    // exact base path, no stamp appended
+    bool start_at(const std::string& base, double center_frequency_hz) {
+        std::lock_guard<std::mutex> lock(_mutex);
+        if (_fp) return false;
+        _base = base;
+        _fp = std::fopen((base + ".sigmf-data").c_str(), "wb");
+        if (!_fp) return false;
         sigmf::Meta meta;
         meta.datatype = sigmf::Datatype::ci16_le;
         meta.sample_rate = _rate;
@@ -80,10 +88,14 @@ struct SigMFRecorderBlock : public cler::BlockBase {
         cap.has_frequency = true;
         cap.datetime = sigmf::utc_now();
         meta.captures.push_back(cap);
-        sigmf::write_meta(_base + ".sigmf-meta", meta);
-        _fp = std::fopen((_base + ".sigmf-data").c_str(), "wb");
-        if (!_fp) return false;
+        if (!sigmf::write_meta(_base + ".sigmf-meta", meta)) {
+            std::fclose(_fp);
+            _fp = nullptr;
+            std::remove((_base + ".sigmf-data").c_str());
+            return false;
+        }
         _samples.store(0, std::memory_order_relaxed);
+        _failed.store(false, std::memory_order_release);
         _recording.store(true, std::memory_order_release);
         return true;
     }
@@ -98,6 +110,15 @@ struct SigMFRecorderBlock : public cler::BlockBase {
     }
 
     bool recording() const { return _recording.load(std::memory_order_acquire); }
+    // one-shot: true after a write failure stopped the recording, cleared by the next start
+    bool take_failure() { return _failed.exchange(false, std::memory_order_acq_rel); }
+    // graph stopped and not recording only; the rate lands in the next start()'s meta
+    void set_rate(double rate) {
+        std::lock_guard<std::mutex> lock(_mutex);
+        if (_fp) return;
+        _rate = rate;
+    }
+    uint64_t bytes() const { return _samples.load(std::memory_order_relaxed) * 2 * sizeof(int16_t); }
     uint64_t samples() const { return _samples.load(std::memory_order_relaxed); }
     double sample_rate() const { return _rate; }
     std::string base() const { std::lock_guard<std::mutex> lock(_mutex); return _base; }
@@ -109,5 +130,6 @@ private:
     FILE* _fp = nullptr;
     std::string _base;
     std::atomic<bool> _recording{false};
+    std::atomic<bool> _failed{false};
     std::atomic<uint64_t> _samples{0};
 };

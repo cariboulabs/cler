@@ -11,6 +11,7 @@
 #include "desktop_blocks/sigmf/sigmf.hpp"
 #include "desktop_blocks/sigmf/sink_sigmf.hpp"
 #include "desktop_blocks/sigmf/source_sigmf.hpp"
+#include "desktop_blocks/sigmf/recorder_sigmf.hpp"
 
 namespace {
 
@@ -398,4 +399,79 @@ TEST(SigMFRecorder, StartStopWritesAReadableRecording) {
     }
     EXPECT_EQ(got, 5000u);
     EXPECT_LT(max_err, 2.0f / 32768.0f);
+}
+
+TEST(SigMFBlocks, RecorderStartAtSetRateAndBytes) {
+    std::string base = unique_base();
+    SigMFRecorderBlock rec("rec", 1e6, 1 << 16);
+    rec.set_rate(2e6);
+    ASSERT_TRUE(rec.start_at(base, 433e6));
+    const auto tone = complex_tone(1000);
+    rec.in.writeN(tone.data(), tone.size());
+    ASSERT_TRUE(rec.procedure().is_ok());
+    rec.stop();
+    EXPECT_EQ(rec.base(), base);
+    EXPECT_EQ(rec.bytes(), 1000u * 4u);
+    EXPECT_EQ(file_size(sigmf::data_path(base)), 1000u * 4u);
+    sigmf::Meta meta = sigmf::read_meta(base);
+    EXPECT_DOUBLE_EQ(meta.sample_rate, 2e6);
+    EXPECT_DOUBLE_EQ(meta.center_frequency(), 433e6);
+    remove_recording(base);
+}
+
+TEST(SigMFBlocks, TransportSeeksPausesLoopsAndEnds) {
+    std::string base = unique_base();
+    const auto reference = complex_tone(1000);
+    {
+        SinkSigMFBlock<std::complex<float>> sink("s", base.c_str(), 1e5, 0.0, sigmf::Datatype::cf32_le);
+        drain(sink, reference);
+    }
+    SourceSigMFBlock<std::complex<float>> src("src", base.c_str(), false, 256, true);
+    EXPECT_DOUBLE_EQ(src.duration_seconds(), 0.01);
+    cler::Channel<std::complex<float>> out(cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>));
+
+    src.pause(true);
+    EXPECT_TRUE(src.procedure(&out).is_err());
+    EXPECT_EQ(out.size(), 0u);
+    src.pause(false);
+
+    auto pump_until_ended = [&](double timeout_s) {
+        const auto end = std::chrono::steady_clock::now() + std::chrono::duration<double>(timeout_s);
+        while (!src.ended() && std::chrono::steady_clock::now() < end) {
+            src.procedure(&out);
+            out.commit_read(out.size());
+        }
+    };
+    pump_until_ended(2.0);
+    EXPECT_TRUE(src.ended());
+    EXPECT_DOUBLE_EQ(src.pos_seconds(), 0.01);
+
+    src.seek(0.005);
+    src.procedure(&out);
+    EXPECT_NEAR(src.pos_seconds(), 0.005, 0.002);
+    out.commit_read(out.size());
+    pump_until_ended(2.0);
+    EXPECT_TRUE(src.ended());
+
+    src.set_loop(true);
+    size_t got = 0;
+    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+    while (std::chrono::steady_clock::now() < end) {
+        src.procedure(&out);
+        got += out.size();
+        out.commit_read(out.size());
+    }
+    EXPECT_FALSE(src.ended());
+    EXPECT_GT(got, 1000u);
+    remove_recording(base);
+}
+
+TEST(SigMFBlocks, TryReadMetaRejectsUnsupportedDatatype) {
+    std::string base = unique_base();
+    write_text(sigmf::meta_path(base),
+               "{\n  \"global\": {\n    \"core:datatype\": \"cf64_le\",\n    \"core:sample_rate\": 1000000\n  }\n}\n");
+    sigmf::Meta meta;
+    EXPECT_FALSE(sigmf::try_read_meta(base, meta));
+    EXPECT_FALSE(sigmf::try_read_meta(base + "_missing", meta));
+    remove_recording(base);
 }
