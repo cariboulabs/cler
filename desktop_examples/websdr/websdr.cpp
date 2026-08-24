@@ -50,10 +50,20 @@ static constexpr double CHANNEL_HZ = 240e3;    // demod input rate and channel w
 static constexpr double IF_OFFSET = 400e3;     // keeps the SDR's DC spike out of the channel
 static constexpr double AUDIO_HZ = 48e3;       // AnalogDemodBlock output rate
 static constexpr double AIS_HZ = 96e3;         // 10 samples per AIS symbol
+static constexpr double APRS_DEVIATION_HZ = 5e3;
 
 // Every decoder hangs off a fixed-rate point in the chain, so none of them care
-// which source or sample rate is selected.
-static const char* const DECODERS[] = {"none", "rds", "aprs", "ais"};
+// which source or sample rate is selected — only where the receiver is tuned.
+struct DecoderInfo {
+    const char* id;
+    double bands[2][2];   // {lo, hi} pairs, {0,0} unused
+};
+static const DecoderInfo DECODERS[] = {
+    {"none", {{0, 0}, {0, 0}}},
+    {"rds",  {{87.5e6, 108e6}, {0, 0}}},
+    {"aprs", {{144.38e6, 144.40e6}, {144.79e6, 144.81e6}}},
+    {"ais",  {{161.97e6, 161.99e6}, {162.01e6, 162.03e6}}},
+};
 
 static bool parse_mode(const std::string& m, AnalogDemodBlock::Mode& out) {
     for (auto mode : {AnalogDemodBlock::Mode::WBFM, AnalogDemodBlock::Mode::NBFM, AnalogDemodBlock::Mode::AM,
@@ -90,6 +100,16 @@ static std::string source_id(SourceMux::Kind kind, const std::string& id) {
     return s;
 }
 
+// The decoder taps add a dozen mostly-starved blocks; a worker pool polls them
+// far more cheaply than a thread each, and the source keeps its own thread
+// because it declares may_block.
+static cler::FlowGraphConfig graph_config() {
+    cler::FlowGraphConfig c;
+    c.scheduler = cler::SchedulerType::FixedThreadPool;
+    c.num_workers = 4;
+    return c;
+}
+
 static double free_disk(const std::string& dir) {
     struct statvfs st;
     if (statvfs(dir.empty() ? "." : dir.c_str(), &st) != 0) return 0.0;
@@ -108,7 +128,7 @@ struct App {
     WebSinkBlock& sink;
     GateBlock<std::complex<float>>& rds_gate;
     GateBlock<std::complex<float>>& ais_gate;
-    GateBlock<float>& aprs_gate;
+    GateBlock<std::complex<float>>& aprs_gate;
     FMMpxDecoderBlock& mpx;
 
     std::string decoder = "none";
@@ -126,7 +146,7 @@ struct App {
     App(SourceMux& s, FanoutBlock<std::complex<float>>& f, SpectrumBlock& sp, FrequencyShiftBlock& sh,
         MultiStageResamplerBlock<std::complex<float>>& r, AnalogDemodBlock& d, SigMFRecorderBlock& rc,
         web::WebServer& server, WebSinkBlock& k, GateBlock<std::complex<float>>& rg,
-        GateBlock<std::complex<float>>& ag, GateBlock<float>& pg, FMMpxDecoderBlock& mp,
+        GateBlock<std::complex<float>>& ag, GateBlock<std::complex<float>>& pg, FMMpxDecoderBlock& mp,
         double rate_hz, double freq_hz, AnalogDemodBlock::Mode m)
         : src(s), fan(f), spec(sp), shift(sh), resamp(r), demod(d), rec(rc), srv(server), sink(k),
           rds_gate(rg), ais_gate(ag), aprs_gate(pg), mpx(mp),
@@ -134,7 +154,7 @@ struct App {
 
     bool set_decoder(const std::string& name) {
         bool known = false;
-        for (const char* d : DECODERS) known = known || name == d;
+        for (const auto& d : DECODERS) known = known || name == d.id;
         if (!known) return false;
         decoder = name;
         rds_gate.set_open(name == "rds");
@@ -143,6 +163,8 @@ struct App {
         if (name == "rds") mpx.rds_reset();
         return true;
     }
+
+    uint64_t decoder_dropped() const { return rds_gate.dropped() + aprs_gate.dropped() + ais_gate.dropped(); }
 
     void publish_rds() {
         if (decoder != "rds") return;
@@ -203,8 +225,16 @@ struct App {
         }
         w.end().key("spectrum").begin_obj().key("n").num(1024).key("fps").num(20).end();
         w.key("decoders").begin_arr();
-        for (const char* d : DECODERS) {
-            w.begin_obj().key("id").str(d).key("available").boolean(true).end();
+        for (const auto& d : DECODERS) {
+            w.begin_obj().key("id").str(d.id).key("available").boolean(true);
+            if (d.bands[0][1] > 0.0) {
+                w.key("expects").begin_arr();
+                for (const auto& b : d.bands) {
+                    if (b[1] > 0.0) w.begin_obj().key("min").num(b[0]).key("max").num(b[1]).end();
+                }
+                w.end();
+            }
+            w.end();
         }
         w.begin_obj().key("id").str("adsb").key("available").boolean(false)
          .key("reason").str("needs a full-rate 1090 MHz magnitude tap and CPR aggregation").end();
@@ -260,7 +290,7 @@ struct App {
         shift.set_sample_rate(rate);
         tune_to(freq_hz);
         fg.reset();
-        fg.run();
+        fg.run(graph_config());
         running = true;
         publish(true);
         return true;
@@ -430,7 +460,7 @@ int main(int argc, char** argv) {
     AnalogDemodBlock demod("Demod", CHANNEL_HZ, mode, 1 << 16);
     SigMFRecorderBlock rec("Recorder", rate, 1 << 20);
     WebSinkBlock sink("Web sink", srv);
-    FanoutBlock<std::complex<float>> chanfan("Channel fanout", 3, 1 << 18);
+    FanoutBlock<std::complex<float>> chanfan("Channel fanout", 4, 1 << 18);
     GateBlock<std::complex<float>> rds_gate("RDS gate", false, 1 << 18);
     FMDemodBlock fmdemod("FM demod", CHANNEL_HZ, 75e3, 1 << 16);
     FMMpxDecoderBlock mpx("MPX decoder", CHANNEL_HZ, 5, 50.0, 1 << 16);
@@ -439,8 +469,9 @@ int main(int argc, char** argv) {
     MultiStageResamplerBlock<std::complex<float>> ais_resamp("AIS channel", static_cast<float>(AIS_HZ / CHANNEL_HZ), 60.0f, 1 << 16);
     AISDecoderBlock ais("AIS", AIS_HZ, 1 << 16);
     web::JsonTextSinkBlock<ais::Message> ais_json("AIS json", srv);
-    FanoutBlock<float> audiofan("Audio fanout", 2, 1 << 16);
-    GateBlock<float> aprs_gate("APRS gate", false, 1 << 16);
+    GateBlock<std::complex<float>> aprs_gate("APRS gate", false, 1 << 18);
+    MultiStageResamplerBlock<std::complex<float>> aprs_resamp("APRS channel", static_cast<float>(AUDIO_HZ / CHANNEL_HZ), 60.0f, 1 << 16);
+    FMDemodBlock aprs_fm("APRS NBFM", AUDIO_HZ, APRS_DEVIATION_HZ, 1 << 16);
     AFSKDemodBlock afsk("AFSK1200", AUDIO_HZ, 1 << 14);
     web::JsonTextSinkBlock<aprs::Packet> aprs_json("APRS json", srv);
     if (!record_dir.empty()) src.set_sigmf_dir(record_dir);
@@ -461,7 +492,7 @@ int main(int argc, char** argv) {
         cler::BlockRunner(&spec, &sink.spectrum),
         cler::BlockRunner(&shift, &resamp.in),
         cler::BlockRunner(&resamp, &chanfan.in),
-        cler::BlockRunner(&chanfan, &demod.in, &rds_gate.in, &ais_gate.in),
+        cler::BlockRunner(&chanfan, &demod.in, &rds_gate.in, &ais_gate.in, &aprs_gate.in),
         cler::BlockRunner(&rds_gate, &fmdemod.in),
         cler::BlockRunner(&fmdemod, &mpx.in),
         cler::BlockRunner(&mpx, &mpx_drain.in),
@@ -470,11 +501,12 @@ int main(int argc, char** argv) {
         cler::BlockRunner(&ais_resamp, &ais.in),
         cler::BlockRunner(&ais, &ais_json.in),
         cler::BlockRunner(&ais_json),
-        cler::BlockRunner(&demod, &audiofan.in),
-        cler::BlockRunner(&audiofan, &sink.audio, &aprs_gate.in),
-        cler::BlockRunner(&aprs_gate, &afsk.in),
+        cler::BlockRunner(&aprs_gate, &aprs_resamp.in),
+        cler::BlockRunner(&aprs_resamp, &aprs_fm.in),
+        cler::BlockRunner(&aprs_fm, &afsk.in),
         cler::BlockRunner(&afsk, &aprs_json.in),
         cler::BlockRunner(&aprs_json),
+        cler::BlockRunner(&demod, &sink.audio),
         cler::BlockRunner(&sink));
 
     app.rescan();
@@ -567,7 +599,8 @@ int main(int argc, char** argv) {
             }
             web::JsonWriter w;
             w.begin_obj().key("overflows").num(static_cast<double>(app.src.overflows())).key("source_lost").boolean(app.lost)
-             .key("rec_bytes").num(static_cast<double>(app.rec.bytes())).key("free_bytes").num(free_disk(record_dir));
+             .key("rec_bytes").num(static_cast<double>(app.rec.bytes())).key("free_bytes").num(free_disk(record_dir))
+             .key("decoder_dropped").num(static_cast<double>(app.decoder_dropped()));
             if (app.running && app.src.is_file()) {
                 w.key("pos").num(app.src.pos_seconds()).key("duration").num(app.src.duration_seconds())
                  .key("ended").boolean(app.src.ended());

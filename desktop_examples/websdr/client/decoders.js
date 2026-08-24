@@ -2,7 +2,8 @@ export const MAX_ROWS = 200;
 export const STALE_MS = 120000;
 
 // Columns per stream; RDS is a single live card, the rest are newest-first tables
-// keyed so repeat sightings of one station update in place.
+// keyed so repeat sightings of one station update in place. adsb is listed for
+// the decoder the server still reports as unavailable — the table is ready for it.
 const TABLES = {
   ais: { key: (d) => String(d.mmsi), cols: ['mmsi', 'name', 'lat', 'lon', 'sog', 'cog', 'type'] },
   aprs: { key: (d) => `${d.source}/${d.type}`, cols: ['source', 'type', 'lat', 'lon', 'speed', 'comment'] },
@@ -33,6 +34,19 @@ export function cell(row, col) {
   return typeof v === 'number' ? String(Math.round(v * 100) / 100) : String(v);
 }
 
+// a decoder only makes sense on its own band; anything else is noise
+export function outOfBand(expects, freq) {
+  if (!expects || !expects.length || !Number.isFinite(freq)) return false;
+  return !expects.some((b) => freq >= b.min && freq <= b.max);
+}
+
+export function bandLabel(expects) {
+  if (!expects || !expects.length) return '';
+  return expects.map((b) => (b.max - b.min < 1e5
+    ? `${((b.min + b.max) / 2e6).toFixed(3)} MHz`
+    : `${(b.min / 1e6).toFixed(1)}–${(b.max / 1e6).toFixed(1)} MHz`)).join(' or ');
+}
+
 export function rdsLines(d) {
   const out = [];
   out.push(`PS   ${d.ps || '—'}${d.synced ? '' : '   (not synced)'}`);
@@ -51,10 +65,13 @@ export class DecoderPanel {
     this.rows = new Map();
     this.rds = null;
     this.active = 'none';
+    this.expects = new Map();
+    this.freq = NaN;
   }
 
   setDecoders(list, current) {
     this.tabs.textContent = '';
+    this.expects = new Map((list || []).map((d) => [d.id, d.expects]));
     for (const d of list || []) {
       const b = document.createElement('button');
       b.textContent = d.id;
@@ -76,6 +93,12 @@ export class DecoderPanel {
     this.render();
   }
 
+  setTuning(freq) {
+    const was = outOfBand(this.expects.get(this.active), this.freq);
+    this.freq = freq;
+    if (outOfBand(this.expects.get(this.active), freq) !== was) this.render();
+  }
+
   push(stream, data, now = Date.now()) {
     if (stream === 'rds') {
       this.rds = data;
@@ -89,16 +112,22 @@ export class DecoderPanel {
   render(now = Date.now()) {
     const el = this.body;
     el.textContent = '';
+    const expects = this.expects.get(this.active);
+    if (outOfBand(expects, this.freq)) {
+      const chip = document.createElement('div');
+      chip.className = 'chip-warn';
+      chip.textContent = `tuned outside ${bandLabel(expects)} — ${this.active} will not decode here`;
+      el.appendChild(chip);
+    }
+    const line = (text) => { const d = document.createElement('div'); d.textContent = text; el.appendChild(d); };
     if (this.active === 'rds') {
-      if (!this.rds) { el.textContent = 'waiting for RDS…'; return; }
-      for (const line of rdsLines(this.rds)) {
-        const d = document.createElement('div'); d.textContent = line; el.appendChild(d);
-      }
+      if (!this.rds) { line('waiting for RDS…'); return; }
+      for (const l of rdsLines(this.rds)) line(l);
       return;
     }
     const rows = this.rows.get(this.active) || [];
-    if (!isTable(this.active)) { el.textContent = this.active === 'none' ? 'no decoder running' : ''; return; }
-    if (!rows.length) { el.textContent = 'nothing decoded yet'; return; }
+    if (!isTable(this.active)) { if (this.active === 'none') line('no decoder running'); return; }
+    if (!rows.length) { line('nothing decoded yet'); return; }
     const table = document.createElement('table');
     const head = document.createElement('tr');
     for (const c of columns(this.active)) {

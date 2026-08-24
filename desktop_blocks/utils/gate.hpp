@@ -7,12 +7,12 @@
 #include <cstring>
 
 // A monitoring tap that can be switched off at runtime: forwards while open,
-// discards while closed. It always consumes its whole input, because an
-// upstream fanout advances by its slowest output and would otherwise stall the
-// live path whenever this branch is idle or behind.
-// ponytail: an open gate drops whatever does not fit downstream and counts it;
-// the decoder branches run in real time so the counter stays at zero. Give the
-// output channel more room, or backpressure here, if a slow consumer matters.
+// discards while closed. A closed gate consumes everything, because an upstream
+// fanout advances by its slowest output and would otherwise stall the live path
+// whenever this branch is idle.
+// An open gate normally backpressures like any block. Only once its input is
+// backing up towards full does it discard the excess and count it, so a slow or
+// stalled decoder degrades itself instead of freezing audio.
 template <typename T>
 struct GateBlock : public cler::BlockBase {
     cler::Channel<T> in;
@@ -30,14 +30,25 @@ struct GateBlock : public cler::BlockBase {
     cler::Result<cler::Empty, cler::Error> procedure(cler::ChannelBase<T>* out) {
         auto [rptr, rsize] = in.read_dbf();
         if (rsize == 0) return cler::Error::NotEnoughSamples;
-        if (_open.load(std::memory_order_relaxed)) {
-            auto [wptr, wsize] = out->write_dbf();
-            const size_t n = std::min(rsize, wsize);
+        if (!_open.load(std::memory_order_relaxed)) {
+            in.commit_read(rsize);
+            return cler::Empty{};
+        }
+
+        auto [wptr, wsize] = out->write_dbf();
+        const size_t n = std::min(rsize, wsize);
+        if (n > 0) {
             std::memcpy(wptr, rptr, n * sizeof(T));
             out->commit_write(n);
+        }
+        size_t consumed = n;
+        const size_t capacity = in.size() + in.space();
+        if (n < rsize && in.size() - n > capacity - capacity / 4) {
+            consumed = rsize;
             _dropped.fetch_add(rsize - n, std::memory_order_relaxed);
         }
-        in.commit_read(rsize);
+        in.commit_read(consumed);
+        if (consumed == 0) return cler::Error::NotEnoughSpaceOrSamples;
         return cler::Empty{};
     }
 

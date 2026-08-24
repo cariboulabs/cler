@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addRow, cell, columns, isStale, isTable, rdsLines, MAX_ROWS, STALE_MS } from '../client/decoders.js';
+import { addRow, bandLabel, cell, columns, isStale, isTable, outOfBand, rdsLines, MAX_ROWS, STALE_MS } from '../client/decoders.js';
 
 test('knows which streams are tables', () => {
   assert.equal(isTable('ais'), true);
@@ -59,4 +59,22 @@ test('rds renders a card, radiotext only when present', () => {
   assert.equal(withRt.length, 4);
   assert.match(withRt[0], /not synced/);
   assert.match(withRt[1], /now playing/);
+});
+
+test('flags tuning outside a decoder band', () => {
+  const fm = [{ min: 87.5e6, max: 108e6 }];
+  const aprs = [{ min: 144.38e6, max: 144.40e6 }, { min: 144.79e6, max: 144.81e6 }];
+  assert.equal(outOfBand(fm, 105.7e6), false);
+  assert.equal(outOfBand(fm, 162e6), true);
+  assert.equal(outOfBand(aprs, 144.8e6), false, 'second range counts');
+  assert.equal(outOfBand(aprs, 144.5e6), true, 'the gap between ranges is out');
+  assert.equal(outOfBand(undefined, 1e6), false, 'no expectation means never wrong');
+  assert.equal(outOfBand(fm, NaN), false, 'unknown tuning means never wrong');
+});
+
+test('band labels read as ranges or spot frequencies', () => {
+  assert.equal(bandLabel([{ min: 87.5e6, max: 108e6 }]), '87.5–108.0 MHz');
+  assert.equal(bandLabel([{ min: 144.38e6, max: 144.40e6 }]), '144.390 MHz');
+  assert.match(bandLabel([{ min: 161.97e6, max: 161.99e6 }, { min: 162.01e6, max: 162.03e6 }]), / or /);
+  assert.equal(bandLabel(undefined), '');
 });

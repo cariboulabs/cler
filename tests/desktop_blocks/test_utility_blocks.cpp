@@ -365,16 +365,56 @@ TEST_F(UtilityBlocksTest, GateBlockForwardsOnlyWhileOpen) {
     ASSERT_TRUE(gate.procedure(&out).is_err());
 }
 
-// An open gate never blocks its input either: the excess is dropped and counted.
-TEST_F(UtilityBlocksTest, GateBlockDropsWhatDoesNotFitDownstream) {
-    GateBlock<float> gate("test_gate_full", true, 8192);
+// An open gate backpressures like any block while there is room left: what does
+// not fit stays put, nothing is thrown away.
+TEST_F(UtilityBlocksTest, GateBlockBackpressuresBeforeItDrops) {
+    GateBlock<float> gate("test_gate_bp", true, 8192);
     cler::Channel<float> out(2048);
-    std::vector<float> in(8000, 1.0f);
+    std::vector<float> in(4096, 1.0f);
 
     const size_t written = gate.in.writeN(in.data(), in.size());
     ASSERT_TRUE(gate.procedure(&out).is_ok());
-    EXPECT_EQ(gate.in.size(), 0u);
-    EXPECT_GT(out.size(), 0u);
-    EXPECT_LT(out.size(), written);
-    EXPECT_EQ(out.size() + gate.dropped(), written);
+    const size_t moved = out.size();
+    EXPECT_GT(moved, 0u);
+    EXPECT_EQ(gate.dropped(), 0u);
+    EXPECT_EQ(gate.in.size(), written - moved);
+
+    // downstream still full: no progress, and still no hole punched
+    ASSERT_TRUE(gate.procedure(&out).is_err());
+    EXPECT_EQ(gate.dropped(), 0u);
+
+    for (size_t i = 0; i < moved; ++i) { float v; ASSERT_TRUE(out.try_pop(v)); }
+    ASSERT_TRUE(gate.procedure(&out).is_ok());
+    EXPECT_EQ(gate.dropped(), 0u);
+}
+
+// A stalled decoder would fill the tap and stall the fanout above it, so once
+// the input is nearly full the gate discards the excess and counts it.
+TEST_F(UtilityBlocksTest, GateBlockDropsOnlyWhenBackingUp) {
+    GateBlock<float> gate("test_gate_full", true, 8192);
+    cler::Channel<float> out(2048);
+    std::vector<float> filler(out.space(), 0.0f);
+    out.writeN(filler.data(), filler.size());
+    ASSERT_EQ(out.space(), 0u) << "downstream is stuck";
+
+    std::vector<float> in(gate.in.space(), 1.0f);
+    const size_t written = gate.in.writeN(in.data(), in.size());
+    ASSERT_TRUE(gate.procedure(&out).is_ok());
+    EXPECT_EQ(gate.dropped(), written);
+    EXPECT_EQ(gate.in.size(), 0u) << "the fanout above must never find this full";
+}
+
+// write_dbf hands back nothing when the output is full; the copy must be skipped
+TEST_F(UtilityBlocksTest, GateBlockHandlesAFullOutput) {
+    GateBlock<float> gate("test_gate_zero", true, 8192);
+    cler::Channel<float> out(2048);
+    std::vector<float> filler(out.space(), 0.0f);
+    out.writeN(filler.data(), filler.size());
+    ASSERT_EQ(out.space(), 0u);
+
+    std::vector<float> in(100, 1.0f);
+    gate.in.writeN(in.data(), in.size());
+    ASSERT_TRUE(gate.procedure(&out).is_err());
+    EXPECT_EQ(gate.dropped(), 0u);
+    EXPECT_EQ(gate.in.size(), in.size());
 }

@@ -82,7 +82,7 @@ private:
     std::function<void(const std::string&)> _on_control;
     std::thread _tick;
     std::atomic<bool> _running{false};
-    std::atomic<uint64_t> _spectrum_dropped{0}, _audio_dropped{0};
+    std::atomic<uint64_t> _spectrum_dropped{0}, _audio_dropped{0}, _text_dropped{0};
 
     void tick_loop();
     void broadcast(const std::string& text);

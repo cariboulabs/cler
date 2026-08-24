@@ -46,6 +46,7 @@
   #text tr.stale td { color:var(--dim); opacity:.6; }
   #dectabs { display:flex; flex-wrap:wrap; gap:4px; }
   #dectabs button { font-size:12px; padding:2px 8px; }
+  .chip-warn { background:#3a3418; border:1px solid var(--warn); color:var(--warn); padding:3px 6px; border-radius:4px; margin-bottom:6px; }
 </style>
 </head>
 <body>
@@ -163,7 +164,9 @@ function onText(m) {
   } else if (m.t === 'state') {
     applyState(m);
   } else if (m.t === 'stats') {
-    const extra = state.st.recording ? ` · rec ${((m.rec_bytes ?? 0) / 1e6).toFixed(1)} MB` : '';
+    const extra = (state.st.recording ? ` · rec ${((m.rec_bytes ?? 0) / 1e6).toFixed(1)} MB` : '')
+      + (m.decoder_dropped ? ` · decoder drops ${m.decoder_dropped}` : '')
+      + (m.text_dropped ? ` · text drops ${m.text_dropped}` : '');
     $('s-stats').textContent = `drops spec ${m.spectrum_dropped ?? 0} audio ${m.audio_dropped ?? 0} · overflows ${m.overflows ?? 0} · clients ${m.clients ?? 1}${extra}`;
     $('recinfo').textContent = state.st.recording ? `recording · ${((m.rec_bytes ?? 0) / 1e6).toFixed(1)} MB · ${((m.free_bytes ?? 0) / 1e9).toFixed(1)} GB free` : '';
     if (m.duration !== undefined) {
@@ -197,6 +200,7 @@ function applyState(s) {
   if (state.st.paused !== undefined) $('playpause').textContent = state.st.paused ? '▶' : '⏸';
   if (state.st.loop !== undefined) $('loop').checked = !!state.st.loop;
   if (state.st.decoder) decoders.setActive(state.st.decoder);
+  if (state.st.freq !== undefined) decoders.setTuning(state.st.freq);
   $('recbtn').textContent = state.st.recording ? '■ Stop recording' : '● Record';
   $('recbtn').classList.toggle('on', !!state.st.recording);
   const ctl = state.role === 'ctl';

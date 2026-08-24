@@ -282,12 +282,20 @@ nginx + basic auth in front if a client insists.
 4. **Decoders as tabs** — JSON adapter blocks for RDS, ADS-B, AIS, APRS, modem/FEC
    stats; tables in the browser. Map later.
    As built: one decoder runs at a time (`--decoder`, `set decoder`), each on a
-   `GateBlock` tap off a fixed-rate point so no source or rate cares — RDS off the
-   240 kHz channel (FM demod + MPX), APRS off the 48 kHz demodulated audio (AFSK1200),
-   AIS off a 96 kHz resample of the channel. A closed gate still drains its input,
-   because the fanout above it advances by its slowest output. ADS-B is reported
-   `available:false`: it needs a full-rate magnitude tap off the RF fanout and the
-   CPR aggregation that today lives inside the GUI-only `ADSBAggregateBlock`.
+   `GateBlock` tap off the 240 kHz channel, so no source, rate or listening mode
+   matters — RDS via FM demod + MPX, APRS via its own NBFM demod at 48 kHz then
+   AFSK1200, AIS via a 96 kHz resample. Each advertises the band it `expects` and
+   the client warns when the receiver is tuned elsewhere. A closed gate drains its
+   input (the fanout above advances by its slowest output); an open one
+   backpressures normally and only discards once its input nears full, counted in
+   `stats.decoder_dropped`. The graph runs on a `FixedThreadPool`: a dozen mostly
+   idle tap blocks cost ~3 points of a core each with their own thread and nothing
+   measurable on a pool.
+   ADS-B is reported `available:false`: it needs a full-rate magnitude tap off the
+   RF fanout and the CPR aggregation that today lives inside the GUI-only
+   `ADSBAggregateBlock`. The MPX block still produces stereo audio into a null sink
+   when RDS runs; its cost is the per-sample pilot PLL that RDS needs anyway, so
+   splitting the audio path out would save little.
 5. **WAN profile + polish** — `pcm16@24k`, Opus, deflated spectrum rows, fps/N
    negotiation driven by send-queue depth; `--state-file`; gallery entry (screenshot,
    it is not a wasm demo); SoapyRemote note in README.
