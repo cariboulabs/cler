@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'tools/flowgraph_gui/**'
+      - 'tools/cler-fg/**'
       - 'desktop_examples/**'
       - 'desktop_blocks/**'
       - 'include/**'
@@ -12,7 +12,7 @@ on:
   pull_request:
     branches: [ main, develop ]
     paths:
-      - 'tools/flowgraph_gui/**'
+      - 'tools/cler-fg/**'
       - 'desktop_examples/**'
       - 'desktop_blocks/**'
       - 'include/**'
@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 60
     defaults:
       run:
-        working-directory: tools/flowgraph_gui/app
+        working-directory: tools/cler-fg/app
 
     steps:
       - uses: actions/checkout@v4
@@ -50,15 +50,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: tools/flowgraph_gui/app/package-lock.json
+          cache-dependency-path: tools/cler-fg/app/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            tools/flowgraph_gui/cler-graph
-            tools/flowgraph_gui/app/src-tauri
+            tools/cler-fg/cler-graph
+            tools/cler-fg/app/src-tauri
 
       # F7 check resolves imgui/implot/liquid headers from a configured build dir
       - name: Configure cler (fetch deps, no build)
@@ -68,11 +68,11 @@ jobs:
       - run: npm ci
 
       - name: cargo test (cler-graph)
-        working-directory: tools/flowgraph_gui/cler-graph
+        working-directory: tools/cler-fg/cler-graph
         run: cargo test --quiet
 
       - name: cargo test (src-tauri)
-        working-directory: tools/flowgraph_gui/app/src-tauri
+        working-directory: tools/cler-fg/app/src-tauri
         run: cargo test --quiet
 
       - name: vitest

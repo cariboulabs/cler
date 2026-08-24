@@ -1,5 +1,9 @@
 # earshot — the receiver in a browser, over ssh
 
+No install: a [wasm build on the simulator](https://cariboulabs.github.io/cler/demos/run/earshot/index.html)
+runs the same graph and client in one page (built by `tools/wasm-demos/build.sh`,
+bridge in `tools/wasm-demos/web_server_wasm.cpp`).
+
 Build (HackRF support needs libhackrf-dev at configure time):
 
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j --target earshot

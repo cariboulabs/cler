@@ -25,7 +25,7 @@ embedded_examples/       baremetal, FreeRTOS, ThreadX, Zephyr
 tests/                   spsc-queue/, desktop_blocks/, scheduler/ (gtest)
 performance/             perf_* benchmarks; tools/cler_tools/ cler-validate,
                          cler-viz (Python)
-tools/flowgraph_gui/     GRC-style GUI (has its own AGENTS.md)
+tools/cler-fg/     GRC-style GUI (has its own AGENTS.md)
 ```
 
 ## Build
@@ -178,16 +178,16 @@ cler-validate desktop_examples/*.cpp   # missing runners, bad connections
 cler-viz file.cpp -o output.svg
 ```
 
-**Flowgraph GUI**: read `tools/flowgraph_gui/AGENTS.md` before editing there.
+**Flowgraph GUI**: read `tools/cler-fg/AGENTS.md` before editing there.
 Product constraint: the GUI places existing blocks discovered from the library
 but must not offer a new-block wizard — new block types are authored in C++.
 Svelte 5 runes API only (`$state`, `$derived`, `$effect`, `$props`).
 
 **Browser builds**: desktop examples compile unmodified with Emscripten
 (`__EMSCRIPTEN__` branches in `gui_manager.cpp`: GLES3, `emscripten_sleep`
-yield, `-DImDrawIdx=unsigned int`); `tools/flowgraph_gui/web-build/build.sh`
+yield, `-DImDrawIdx=unsigned int`); `tools/wasm-demos/build.sh`
 builds liquid + GUI blocks into an archive and the bundled examples for
-`docs/cler-fg/try/run/`. Hardware blocks stay desktop-only.
+`docs/demos/run/`. Hardware blocks stay desktop-only.
 
 **Screenshots**: `GuiManager::request_screenshot(path)` grabs the next frame
 (prefer `.png`). `spike` exposes it: `./spike --capture /tmp/shots
