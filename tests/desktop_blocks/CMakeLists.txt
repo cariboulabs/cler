@@ -170,4 +170,13 @@ if (TARGET websdr)
         add_test(NAME websdr_e2e_test COMMAND sh -c "echo SKIP: node not found; exit 77")
     endif()
     set_tests_properties(websdr_e2e_test PROPERTIES SKIP_RETURN_CODE 77)
+
+    if (NODE_EXECUTABLE)
+        add_test(NAME websdr_integration_test COMMAND ${CMAKE_COMMAND} -E env
+            WEBSDR_BIN=$<TARGET_FILE:websdr>
+            ${NODE_EXECUTABLE} ${PROJECT_SOURCE_DIR}/desktop_examples/websdr/client_tests/integration.mjs)
+    else()
+        add_test(NAME websdr_integration_test COMMAND sh -c "echo SKIP: node not found; exit 77")
+    endif()
+    set_tests_properties(websdr_integration_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180)
 endif()
