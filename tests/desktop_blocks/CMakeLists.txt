@@ -172,7 +172,7 @@ endif()
 if (TARGET earshot)
     if (NODE_EXECUTABLE)
         add_test(NAME earshot_e2e_test COMMAND ${CMAKE_COMMAND} -E env
-            EARSHOT_BIN=$<TARGET_FILE:earshot> NODE_PATH=${PROJECT_SOURCE_DIR}/tools/flowgraph_gui/app/node_modules
+            EARSHOT_BIN=$<TARGET_FILE:earshot> NODE_PATH=${PROJECT_SOURCE_DIR}/tools/cler-fg/app/node_modules
             ${NODE_EXECUTABLE} ${PROJECT_SOURCE_DIR}/desktop_examples/earshot/client_tests/e2e.mjs)
     else()
         add_test(NAME earshot_e2e_test COMMAND sh -c "echo SKIP: node not found; exit 77")
