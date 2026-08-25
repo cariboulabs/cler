@@ -342,7 +342,7 @@ fn streamlined_has_no_sites_and_no_error() {
 
 #[test]
 fn inline_config_temporary_is_read_only() {
-    let site = only_site("../tools/flowgraph_gui/cler-graph/tests/data/cariboulite_spectrum.cpp");
+    let site = only_site("../tools/cler-fg/cler-graph/tests/data/cariboulite_spectrum.cpp");
     let config = site.config.as_ref().expect("inline config");
     assert_eq!(config.source, ConfigSource::InlineTemporary);
     assert!(!config.editable);

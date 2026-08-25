@@ -39,7 +39,7 @@ fn bundled_example_paths_resolve_from_the_application_directory() {
         corpus("hello_world.cpp").canonicalize().expect("corpus")
     );
     let conflict =
-        document::canonical("tools/flowgraph_gui/cler-graph/tests/data/type_conflict.cpp")
+        document::canonical("tools/cler-fg/cler-graph/tests/data/type_conflict.cpp")
             .expect("fixture path");
     assert!(conflict.ends_with("cler-graph/tests/data/type_conflict.cpp"));
 }

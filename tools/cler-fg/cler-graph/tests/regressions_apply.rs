@@ -244,7 +244,7 @@ fn s2_set_param_text_cannot_escape_its_argument_slot() {
 
 #[test]
 fn s2_set_config_value_cannot_inject_a_statement() {
-    let mut session = session("../tools/flowgraph_gui/cler-graph/tests/data/fm_receiver.cpp");
+    let mut session = session("../tools/cler-fg/cler-graph/tests/data/fm_receiver.cpp");
     let before = session.source().to_string();
     let error = session
         .apply(tx(
@@ -262,7 +262,7 @@ fn s2_set_config_value_cannot_inject_a_statement() {
 
 #[test]
 fn s11_set_config_path_must_be_a_member_path() {
-    let mut session = session("../tools/flowgraph_gui/cler-graph/tests/data/fm_receiver.cpp");
+    let mut session = session("../tools/cler-fg/cler-graph/tests/data/fm_receiver.cpp");
     let before = session.source().to_string();
     let error = session
         .apply(tx(
@@ -551,7 +551,7 @@ fn s9_two_add_blocks_in_one_transaction_apply() {
 
 #[test]
 fn s9_two_new_config_paths_in_one_transaction_apply() {
-    let mut session = session("../tools/flowgraph_gui/cler-graph/tests/data/fm_receiver.cpp");
+    let mut session = session("../tools/cler-fg/cler-graph/tests/data/fm_receiver.cpp");
     session
         .apply(tx(
             0,
@@ -713,7 +713,7 @@ fn s17_crlf_sources_keep_their_line_endings() {
     let bare = after.matches('\n').count() - after.matches("\r\n").count();
     assert_eq!(bare, 0, "add_block introduced {bare} LF-only line endings");
 
-    let mut config = loaded(&source("../tools/flowgraph_gui/cler-graph/tests/data/fm_receiver.cpp").replace('\n', "\r\n"));
+    let mut config = loaded(&source("../tools/cler-fg/cler-graph/tests/data/fm_receiver.cpp").replace('\n', "\r\n"));
     config
         .apply(tx(
             0,

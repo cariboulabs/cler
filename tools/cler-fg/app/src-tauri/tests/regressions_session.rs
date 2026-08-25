@@ -615,7 +615,7 @@ fn editing_one_document_does_not_flag_its_neighbour() {
     let a = dir.join("hello_world.cpp");
     let b = dir.join("fm_receiver.cpp");
     std::fs::copy(corpus("hello_world.cpp"), &a).expect("copy a");
-    std::fs::copy(corpus("../tools/flowgraph_gui/cler-graph/tests/data/fm_receiver.cpp"), &b).expect("copy b");
+    std::fs::copy(corpus("../tools/cler-fg/cler-graph/tests/data/fm_receiver.cpp"), &b).expect("copy b");
 
     let docs = Documents::default();
     document::open(&docs, as_str(&a)).expect("open a");
@@ -748,7 +748,7 @@ fn concurrent_applies_against_one_base_revision_admit_exactly_one() {
     let a = dir.join("hello_world.cpp");
     let b = dir.join("fm_receiver.cpp");
     std::fs::copy(corpus("hello_world.cpp"), &a).expect("copy a");
-    std::fs::copy(corpus("../tools/flowgraph_gui/cler-graph/tests/data/fm_receiver.cpp"), &b).expect("copy b");
+    std::fs::copy(corpus("../tools/cler-fg/cler-graph/tests/data/fm_receiver.cpp"), &b).expect("copy b");
 
     let docs = Arc::new(Documents::default());
     document::open(&docs, as_str(&a)).expect("open a");
