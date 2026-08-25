@@ -45,6 +45,17 @@ inline int listen_loopback(int port, int backlog = 4) {
     return fd;
 }
 
+// macOS has no MSG_NOSIGNAL: passing it makes send() fail outright, which the
+// writer reads as a dead client, so the connector delivers nothing at all.
+// SO_NOSIGPIPE on the accepted socket is the same protection there.
+#if defined(__APPLE__)
+static constexpr int kSendFlags = 0;
+inline void suppress_sigpipe(int fd) { int on = 1; ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof on); }
+#else
+static constexpr int kSendFlags = MSG_NOSIGNAL;
+inline void suppress_sigpipe(int) {}
+#endif
+
 // shutdown() does not wake a blocked accept() on Linux, so every loop that has
 // to notice a shutdown flag waits with poll() instead of blocking outright.
 inline bool wait_readable(int fd, int timeout_ms) {
@@ -131,6 +142,7 @@ private:
         while (_running) {
             if (!wait_readable(_listen, 100)) continue;
             const int fd = ::accept(_listen, nullptr, nullptr);
+            if (fd >= 0) suppress_sigpipe(fd);
             if (fd < 0) continue;
             Slot* free_slot = nullptr;
             for (auto& s : _slots) {
@@ -177,7 +189,7 @@ private:
             size_t off = 0;
             bool alive = true;
             while (off < total && alive) {
-                const ssize_t w = ::send(s.fd, bytes + off, total - off, MSG_NOSIGNAL);
+                const ssize_t w = ::send(s.fd, bytes + off, total - off, kSendFlags);
                 if (w > 0) off += static_cast<size_t>(w);
                 else if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) alive = _running;
                 else alive = false;
@@ -234,6 +246,7 @@ private:
         while (_running) {
             if (!wait_readable(_listen, 100)) continue;
             const int fd = ::accept(_listen, nullptr, nullptr);
+            if (fd >= 0) suppress_sigpipe(fd);
             if (fd < 0) continue;
             _client = fd;
             LineReader reader;
