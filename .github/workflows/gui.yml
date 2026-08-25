@@ -1,4 +1,4 @@
-name: Flowgraph GUI
+name: cler-fg
 
 on:
   push:
