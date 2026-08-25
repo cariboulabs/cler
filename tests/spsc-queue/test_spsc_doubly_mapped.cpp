@@ -708,3 +708,21 @@ TEST_F(SPSCQueueDoublyMappedTest, MirrorPeriodMatchesCapacityAboveHugePageSize) 
     EXPECT_EQ(gin, gout);
     EXPECT_EQ(mism, 0u);
 }
+
+TEST_F(SPSCQueueDoublyMappedTest, NonDividingElementSizeSurvivesTheWrap) {
+    struct Frame { uint32_t tag; uint8_t pad[4132]; };
+    dro::SPSCQueue<Frame> q(8);
+    uint32_t next_write = 0, next_read = 0;
+    while (next_read < 200) {
+        for (;;) {
+            auto [w, space] = q.write_dbf();
+            if (space == 0) break;
+            w[0].tag = next_write++;
+            q.commit_write(1);
+        }
+        auto [r, avail] = q.read_dbf();
+        ASSERT_NE(avail, 0u);
+        for (size_t i = 0; i < avail; ++i) ASSERT_EQ(r[i].tag, next_read++);
+        q.commit_read(avail);
+    }
+}

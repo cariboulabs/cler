@@ -99,11 +99,13 @@ public:
           const std::size_t buffer_bytes = requested_capacity * sizeof(T);
           
           // If DBF is possible, align capacity to page boundary
-          if (cler::platform::supports_doubly_mapped_buffers() && 
+          if (cler::platform::supports_doubly_mapped_buffers() &&
               buffer_bytes >= DOUBLY_MAPPED_MIN_SIZE) {
             const std::size_t page_size = cler::platform::get_page_size();
             const std::size_t aligned_bytes = ((buffer_bytes + page_size - 1) / page_size) * page_size;
-            return aligned_bytes / sizeof(T);  // Return page-aligned capacity
+            if (aligned_bytes % sizeof(T) == 0) {
+              return aligned_bytes / sizeof(T);  // Return page-aligned capacity
+            }
           }
           return requested_capacity;  // Return regular capacity
         }()),
@@ -116,8 +118,9 @@ public:
     const std::size_t buffer_bytes = capacity_ * sizeof(T);
     
     // Try doubly mapped allocation for buffers ≥32KB (typical SDR buffer size)
-    if (cler::platform::supports_doubly_mapped_buffers() && 
-        buffer_bytes >= DOUBLY_MAPPED_MIN_SIZE) {
+    if (cler::platform::supports_doubly_mapped_buffers() &&
+        buffer_bytes >= DOUBLY_MAPPED_MIN_SIZE &&
+        buffer_bytes % cler::platform::get_page_size() == 0) {
       
       // capacity_ is already page-aligned from the lambda above
       if (vmem_allocation_.create(buffer_bytes)) {
