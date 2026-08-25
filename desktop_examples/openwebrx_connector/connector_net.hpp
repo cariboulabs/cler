@@ -160,6 +160,10 @@ private:
             ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
             timeval tv{0, 200000};
             ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+            for (auto [stale, n] = free_slot->ring.read_dbf(); n;
+                 std::tie(stale, n) = free_slot->ring.read_dbf()) {
+                free_slot->ring.commit_read(n);
+            }
             free_slot->fd = fd;
             free_slot->active.store(true, std::memory_order_release);
             free_slot->writer = std::thread([this, free_slot] { write_loop(*free_slot); });
@@ -167,12 +171,6 @@ private:
     }
 
     void write_loop(Slot& s) {
-        // A reused slot may still hold the previous reader's samples. Only the
-        // consumer may move the read index, so the new writer drops them here
-        // rather than the accept thread resetting the ring under the producer.
-        for (auto [stale, n] = s.ring.read_dbf(); n; std::tie(stale, n) = s.ring.read_dbf()) {
-            s.ring.commit_read(n);
-        }
         while (_running && s.active.load(std::memory_order_acquire)) {
             auto [p, n] = s.ring.read_dbf();
             if (n == 0) {
