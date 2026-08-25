@@ -186,7 +186,10 @@ for (const [type, name] of [[1, 'spectrum'], [2, 'audio']]) {
   const firstCurrent = frames.findIndex((f) => f.gen === state.gen);
   if (firstCurrent < 0) fail(`no ${name} frames of the current gen arrived after the switch`);
   const stale = frames.slice(firstCurrent).filter((f) => f.gen < state.gen);
-  if (stale.length) fail(`${stale.length} stale ${name} frames arrived after that stream caught up`);
+  if (stale.length) {
+    const seq = frames.map((f) => f.gen).join(',');
+    fail(`${stale.length} stale ${name} frames arrived after that stream caught up; state.gen=${state.gen} seq=[${seq}]`);
+  }
 }
 if (state.frames.length < 10) fail(`stream did not resume after the switch (${state.frames.length} frames)`);
 ok(`switch back to sim: gen ${genBeforeSim} → ${state.gen}, ${state.frames.length} frames, none stale`);

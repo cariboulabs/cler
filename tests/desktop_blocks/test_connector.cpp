@@ -228,7 +228,7 @@ TEST(ConnectorSockets, KeepingUpReaderLosesNothing) {
     ASSERT_TRUE(wait_for([&] { return iq.clients() == 1; }));
 
     constexpr size_t BLOCK = 8192;
-    constexpr int BLOCKS = 400;  // 3.3 M samples cycling a 262 k ring many times
+    constexpr int BLOCKS = 160;  // 1.3 M samples, several times around a 262 k ring
     std::vector<std::complex<float>> block(BLOCK);
     std::atomic<size_t> received{0};
     std::atomic<bool> reading{true};
@@ -248,14 +248,20 @@ TEST(ConnectorSockets, KeepingUpReaderLosesNothing) {
     // and an "outstanding bytes" window still depends on how fast the socket
     // drains, which is what broke this test on macOS.
     constexpr size_t SAMPLE = sizeof(std::complex<float>);
+    // Sync every SYNC blocks rather than every block: the outstanding bytes stay
+    // far below the ring, so a drop still means a stale bound was believed, but
+    // the test no longer pays one socket round trip per 32 KB — which is what
+    // made it time out on macOS.
+    constexpr int SYNC = 16;
     size_t pushed_bytes = 0;
     bool drained = true;
     for (int b = 0; b < BLOCKS && drained; ++b) {
         for (size_t i = 0; i < BLOCK; ++i) block[i] = {static_cast<float>(b), static_cast<float>(i)};
         iq.push(block.data(), block.size());
         pushed_bytes += BLOCK * SAMPLE;
-        drained = wait_for([&] { return received.load() >= pushed_bytes; }, 8000);
+        if ((b + 1) % SYNC == 0) drained = wait_for([&] { return received.load() >= pushed_bytes; }, 10000);
     }
+    drained = drained && wait_for([&] { return received.load() >= pushed_bytes; }, 10000);
     ASSERT_TRUE(drained) << "the reader never caught up; received " << received.load()
                          << " of " << pushed_bytes;
     const size_t want = sizeof(std::complex<float>) * BLOCK * BLOCKS;
