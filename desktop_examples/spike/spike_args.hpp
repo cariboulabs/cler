@@ -18,6 +18,7 @@ struct SpikeArgs {
     double history_s = 0.0;
     bool   rate_from_cli = false;
     std::string device_address;
+    SourceLimits limits;
 
     std::string capture_dir;
     int    capture_frames    = 1;

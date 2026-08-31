@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
     SpikeArgs args = parse_args(argc, argv);
     const double want_freq = args.freq, want_rate = args.rate;
     std::string why = check_and_clamp_source(args.source, args.device_address,
-                                             args.freq, args.rate);
+                                             args.freq, args.rate, &args.limits);
     if (!why.empty()) {
         std::cerr << "Error: " << why << "\n";
         return 1;

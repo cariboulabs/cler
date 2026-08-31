@@ -30,6 +30,14 @@ inline constexpr double HACKRF_RATE_MIN_HZ = 2e6;
 inline constexpr double HACKRF_RATE_MAX_HZ = 20e6;
 #endif
 
+// What the device told us it accepts, so the panel's widgets and a restored
+// conf cannot ask for something the driver will refuse.
+struct SourceLimits {
+    bool   known = false;
+    double fmin = 0.0, fmax = 0.0;
+    double rmin = 0.0, rmax = 0.0;
+};
+
 struct SourceConfig {
     double center_freq_Hz = 915e6;
     double sample_rate_Hz = 1e6;
@@ -50,8 +58,9 @@ struct ISource {
 
 // Runs before the source constructor, which panics on anything the driver rejects.
 inline std::string check_and_clamp_source(SourceKind kind, const std::string& dev,
-                                          double& freq_hz, double& rate_hz) {
-    (void)dev; (void)freq_hz; (void)rate_hz;
+                                          double& freq_hz, double& rate_hz,
+                                          SourceLimits* limits = nullptr) {
+    (void)dev; (void)freq_hz; (void)rate_hz; (void)limits;
     switch (kind) {
         case SourceKind::Pluto: {
 #ifdef SPIKE_HAVE_PLUTO
@@ -61,6 +70,8 @@ inline std::string check_and_clamp_source(SourceKind kind, const std::string& de
             if (!pr.ok) return "pluto at " + uri +
                                " has no receiver - its firmware exposes no cf-ad9361-lpc";
             // probe() already nudges rmin past the floor the driver rejects
+            if (limits) *limits = {true, double(pr.fmin), double(pr.fmax),
+                                         double(pr.rmin), double(pr.rmax)};
             freq_hz = std::clamp(freq_hz, double(pr.fmin), double(pr.fmax));
             rate_hz = std::clamp(rate_hz, double(pr.rmin), double(pr.rmax));
             return {};
@@ -76,6 +87,7 @@ inline std::string check_and_clamp_source(SourceKind kind, const std::string& de
                 return "hackrf: " + std::string(hackrf_error_name(static_cast<hackrf_error>(r))) +
                        " - another program may have it open, or the udev rules are missing";
             }
+            if (limits) *limits = {true, 1e6, 7250e6, HACKRF_RATE_MIN_HZ, HACKRF_RATE_MAX_HZ};
             rate_hz = std::clamp(rate_hz, HACKRF_RATE_MIN_HZ, HACKRF_RATE_MAX_HZ);
             return {};
 #else
