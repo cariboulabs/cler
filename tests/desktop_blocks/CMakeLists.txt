@@ -143,9 +143,16 @@ endif()
 
 add_executable(connector_test test_connector.cpp)
 target_link_libraries(connector_test gtest_main cler::desktop_blocks)
-add_test(NAME connector_test COMMAND ${CMAKE_COMMAND} -E env
-    OPENWEBRX_CONNECTOR_BIN=$<TARGET_FILE:openwebrx_connector> $<TARGET_FILE:connector_test>)
-add_dependencies(connector_test openwebrx_connector)
+# The e2e case needs the connector binary, which only CLER_BUILD_EXAMPLES builds.
+# Without it the test self-skips that case (GTEST_SKIP on OPENWEBRX_CONNECTOR_BIN),
+# so still register it -- the protocol unit tests do not need the binary.
+if(TARGET openwebrx_connector)
+    add_test(NAME connector_test COMMAND ${CMAKE_COMMAND} -E env
+        OPENWEBRX_CONNECTOR_BIN=$<TARGET_FILE:openwebrx_connector> $<TARGET_FILE:connector_test>)
+    add_dependencies(connector_test openwebrx_connector)
+else()
+    add_test(NAME connector_test COMMAND connector_test)
+endif()
 
 add_executable(earshot_ops_test test_earshot_ops.cpp)
 target_link_libraries(earshot_ops_test gtest_main cler::desktop_blocks)
