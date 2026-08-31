@@ -48,10 +48,7 @@ struct ISource {
     virtual SourceKind kind() const = 0;
 };
 
-// Non-panicking pre-flight, run before the (panicking) source constructor:
-// returns "" when the device can be opened, otherwise why not, and clamps freq
-// and rate into what that hardware will actually accept. Without this a rate the
-// driver rejects reaches the constructor and aborts with a core dump.
+// Runs before the source constructor, which panics on anything the driver rejects.
 inline std::string check_and_clamp_source(SourceKind kind, const std::string& dev,
                                           double& freq_hz, double& rate_hz) {
     (void)dev; (void)freq_hz; (void)rate_hz;

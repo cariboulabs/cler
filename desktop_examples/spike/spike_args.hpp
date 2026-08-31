@@ -28,8 +28,7 @@ struct SpikeArgs {
     bool   capture_mode() const { return !capture_dir.empty(); }
 };
 
-// 1 MS/s only suits the USRP: the AD9361 floor is 2.083 MS/s and the HackRF
-// wants >= 2 MS/s, so each source gets its own default when -r is not given.
+// The AD9361 floor is 2.083 MS/s and the HackRF wants >= 2 MS/s; only the USRP takes 1.
 static double default_rate_for(SourceKind kind) {
     switch (kind) {
         case SourceKind::Pluto:  return 2.4e6;
