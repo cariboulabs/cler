@@ -47,9 +47,13 @@ struct ControlPanel : public cler::BlockBase {
           _src(src), _trig(trig), _spectrum(spectrum), _sgram(sgram), _power(power),
           _chan(chan),
           _kind(src->kind()),
-          _freq_ui_max_mhz(src->kind() == SourceKind::HackRF ? 7250.0f : 6000.0f),
-          _rate_ui_min_msps(src->kind() == SourceKind::HackRF ? 2.0f : 0.1f),
-          _rate_ui_max_msps(src->kind() == SourceKind::HackRF ? 20.0f : 61.44f),
+          _freq_ui_min_mhz(a.limits.known ? static_cast<float>(a.limits.fmin / 1e6) : 0.0f),
+          _freq_ui_max_mhz(a.limits.known ? static_cast<float>(a.limits.fmax / 1e6)
+                                          : (src->kind() == SourceKind::HackRF ? 7250.0f : 6000.0f)),
+          _rate_ui_min_msps(a.limits.known ? static_cast<float>(a.limits.rmin / 1e6)
+                                           : (src->kind() == SourceKind::HackRF ? 2.0f : 0.1f)),
+          _rate_ui_max_msps(a.limits.known ? static_cast<float>(a.limits.rmax / 1e6)
+                                           : (src->kind() == SourceKind::HackRF ? 20.0f : 61.44f)),
           _freq_mhz(static_cast<float>(a.freq / 1e6)),
           _freq_anchor_mhz(_freq_mhz),
           _gain_db(static_cast<float>(a.gain)),
@@ -217,11 +221,11 @@ struct ControlPanel : public cler::BlockBase {
              "garbled once, and the waterfall restarts.");
 
         // Apply only on edit-end (avoid spamming retunes); anchor recenters on commit only, else mid-drag moves the mapping under the cursor.
-        const float freq_lo = std::max(0.0f,            _freq_anchor_mhz - 25.0f);
+        const float freq_lo = std::max(_freq_ui_min_mhz, _freq_anchor_mhz - 25.0f);
         const float freq_hi = std::min(_freq_ui_max_mhz, _freq_anchor_mhz + 25.0f);
         ImGui::SetNextItemWidth(180);
         editable("Center (MHz)", &_freq_mhz, freq_lo, freq_hi, "%.3f",
-                 /*slider=*/true, 0.1f, /*tmin=*/0.0f, /*tmax=*/_freq_ui_max_mhz);
+                 /*slider=*/true, 0.1f, /*tmin=*/_freq_ui_min_mhz, /*tmax=*/_freq_ui_max_mhz);
         bool freq_done = ImGui::IsItemDeactivatedAfterEdit();
         if (freq_done) {
             _freq_anchor_mhz = _freq_mhz;   // recenter for next time
@@ -566,6 +570,14 @@ struct ControlPanel : public cler::BlockBase {
         // Window is NOT clamped here: its limit depends on the DECIMATED rate, only known once bandwidth applies (clamped in apply_all()/on_rate_changed()).
         clamp_zs_bw();
         _chan_span_s = std::min(std::max(_chan_span_s, 1.0f), 600.0f);
+        // set_frequency() ignores an out-of-range write, which would leave the
+        // panel showing a frequency the radio is not on
+        _freq_mhz = std::clamp(_freq_mhz, _freq_ui_min_mhz, _freq_ui_max_mhz);
+        if (_loaded_rate_hz > 0.0) {
+            _loaded_rate_hz = std::clamp(_loaded_rate_hz,
+                                         static_cast<double>(_rate_ui_min_msps) * 1e6,
+                                         static_cast<double>(_rate_ui_max_msps) * 1e6);
+        }
         _freq_anchor_mhz = _freq_mhz;   // center the freq slider on the saved value
         return true;
     }
@@ -762,7 +774,8 @@ private:
     ChannelizerPanelBlock* _chan;
 
     SourceKind _kind;               // selects gain UI + rate-live behavior
-    float  _freq_ui_max_mhz;        // freq slider/typed upper bound (6000 UHD, 7250 HackRF)
+    float  _freq_ui_min_mhz;        // freq slider/typed lower bound (device floor when probed)
+float  _freq_ui_max_mhz;        // freq slider/typed upper bound (6000 UHD, 7250 HackRF)
     float  _rate_ui_min_msps;       // rate widget lower bound (0.1 UHD, 2 HackRF)
     float  _rate_ui_max_msps;       // rate widget upper bound (61.44 UHD, 20 HackRF)
     float  _freq_mhz;
