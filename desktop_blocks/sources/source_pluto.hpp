@@ -42,7 +42,7 @@ struct SourcePlutoBlock : public cler::BlockBase {
         bool ok = false;
         bool reached = false;   // the context opened; ok still false means no rx device on it
         long long fmin = 70000000, fmax = 6000000000;
-        long long rmin = 2083333, rmax = 61440000;
+        long long rmin = 2083334, rmax = 61440000;
     };
 
     // Non-panicking availability check; also reads what the driver will accept
@@ -69,6 +69,8 @@ struct SourcePlutoBlock : public cler::BlockBase {
                 // reports the minimum back, so a caller clamping to rmin fails
                 ++pr.rmin;
             }
+            if (pr.rmin > pr.rmax) pr.rmin = pr.rmax;
+            if (pr.fmin > pr.fmax) pr.fmin = pr.fmax;
         }
         iio_context_destroy(ctx);
         return pr;

@@ -84,6 +84,10 @@ inline std::string check_and_clamp_source(SourceKind kind, const std::string& de
         }
         case SourceKind::UHD:
 #ifdef SPIKE_HAVE_UHD
+            // find() only; a busy USRP still panics in the constructor
+            if (uhd::device::find(uhd::device_addr_t(dev)).empty()) {
+                return dev.empty() ? "no usrp found" : "no usrp matching " + dev;
+            }
             return {};
 #else
             return "built without UHD support (UHD not found at configure time)";
@@ -242,7 +246,7 @@ private:
     static SourceVariant make_source(SourceKind kind, double freq_hz, double rate_hz,
                                      const std::string& device_address, double gain_db,
                                      int lna_gain_db, int vga_gain_db, bool amp_enable) {
-        (void)device_address; (void)gain_db;
+        (void)gain_db;
         (void)lna_gain_db; (void)vga_gain_db; (void)amp_enable;
         switch (kind) {
             case SourceKind::HackRF:
@@ -250,7 +254,8 @@ private:
                 return SourceVariant(std::in_place_type<SourceHackRFBlock>, "HackRF",
                                      static_cast<uint64_t>(freq_hz + 0.5),
                                      static_cast<uint32_t>(rate_hz + 0.5),
-                                     lna_gain_db, vga_gain_db, amp_enable);
+                                     lna_gain_db, vga_gain_db, amp_enable, size_t{0},
+                                     device_address.empty() ? nullptr : device_address.c_str());
 #else
                 cler::panic("spike: built without HackRF support (libhackrf not found at configure time)");
 #endif

@@ -145,11 +145,21 @@ static int run_app(SpikeArgs& args) {
 
 int main(int argc, char** argv) {
     SpikeArgs args = parse_args(argc, argv);
+    const double want_freq = args.freq, want_rate = args.rate;
     std::string why = check_and_clamp_source(args.source, args.device_address,
                                              args.freq, args.rate);
     if (!why.empty()) {
         std::cerr << "Error: " << why << "\n";
         return 1;
+    }
+    // A clamp must be visible: --capture writes files labelled with what landed.
+    if (args.freq != want_freq) {
+        std::cerr << "Note: " << want_freq / 1e6 << " MHz is out of range, using "
+                  << args.freq / 1e6 << " MHz\n";
+    }
+    if (args.rate != want_rate) {
+        std::cerr << "Note: " << want_rate / 1e6 << " MS/s is out of range, using "
+                  << args.rate / 1e6 << " MS/s\n";
     }
     return run_app(args);
 }
