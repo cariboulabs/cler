@@ -145,5 +145,12 @@ static int run_app(SpikeArgs& args) {
 
 int main(int argc, char** argv) {
     SpikeArgs args = parse_args(argc, argv);
+    // Ask the device what it accepts before the source constructor, which panics.
+    std::string why = check_and_clamp_source(args.source, args.device_address,
+                                             args.freq, args.rate);
+    if (!why.empty()) {
+        std::cerr << "Error: " << why << "\n";
+        return 1;
+    }
     return run_app(args);
 }

@@ -28,13 +28,26 @@ struct SpikeArgs {
     bool   capture_mode() const { return !capture_dir.empty(); }
 };
 
+// 1 MS/s only suits the USRP: the AD9361 floor is 2.083 MS/s and the HackRF
+// wants >= 2 MS/s, so each source gets its own default when -r is not given.
+static double default_rate_for(SourceKind kind) {
+    switch (kind) {
+        case SourceKind::Pluto:  return 2.4e6;
+        case SourceKind::HackRF: return 2.4e6;
+        case SourceKind::UHD:    break;
+    }
+    return 1e6;
+}
+
 static void print_usage(const char* prog) {
     std::cout << "\nSlim Spike-like analyzer for USRP / HackRF / Pluto\n"
               << "Usage: " << prog << " [OPTIONS]\n"
               << "  -s, --source DEV  Device source: uhd|hackrf|pluto (default uhd)\n"
               << "  -f, --freq FREQ   Center frequency Hz (default 915e6)\n"
-              << "  -r, --rate RATE   Initial sample rate S/s (default 1e6; live-tunable\n"
-              << "                    in the GUI; if given, overrides the saved rate)\n"
+              << "  -r, --rate RATE   Initial sample rate S/s (default 1e6 for uhd, 2.4e6 for\n"
+              << "                    hackrf/pluto, whose hardware floors are higher;\n"
+              << "                    live-tunable in the GUI; if given, overrides the\n"
+              << "                    saved rate and is clamped to what the device takes)\n"
               << "  -g, --gain GAIN   [uhd/pluto] Gain dB (default 30; pluto applies it\n"
               << "                    at start only, <0 selects AGC)\n"
               << "      --lna  DB     [hackrf] LNA gain dB, 0-40 step 8 (default 40)\n"
@@ -102,6 +115,7 @@ static SpikeArgs parse_args(int argc, char** argv) {
         else if (arg == "--capture-exit")  a.capture_exit  = true;
         else { std::cerr << "Unknown option: " << arg << "\n"; print_usage(argv[0]); exit(1); }
     }
+    if (!a.rate_from_cli) a.rate = default_rate_for(a.source);
     if (a.capture_frames < 1) {
         std::cerr << "Error: --capture-on-trigger needs N >= 1\n"; exit(1);
     }

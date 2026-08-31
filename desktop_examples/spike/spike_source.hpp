@@ -21,6 +21,15 @@
 
 enum class SourceKind { UHD, HackRF, Pluto };
 
+#ifdef SPIKE_HAVE_PLUTO
+static constexpr const char* DEFAULT_PLUTO_URI = "ip:192.168.2.1";
+#endif
+
+#ifdef SPIKE_HAVE_HACKRF
+inline constexpr double HACKRF_RATE_MIN_HZ = 2e6;
+inline constexpr double HACKRF_RATE_MAX_HZ = 20e6;
+#endif
+
 struct SourceConfig {
     double center_freq_Hz = 915e6;
     double sample_rate_Hz = 1e6;
@@ -38,6 +47,53 @@ struct ISource {
     virtual size_t get_overflow_count() const = 0;
     virtual SourceKind kind() const = 0;
 };
+
+// Non-panicking pre-flight, run before the (panicking) source constructor:
+// returns "" when the device can be opened, otherwise why not, and clamps freq
+// and rate into what that hardware will actually accept. Without this a rate the
+// driver rejects reaches the constructor and aborts with a core dump.
+inline std::string check_and_clamp_source(SourceKind kind, const std::string& dev,
+                                          double& freq_hz, double& rate_hz) {
+    (void)dev; (void)freq_hz; (void)rate_hz;
+    switch (kind) {
+        case SourceKind::Pluto: {
+#ifdef SPIKE_HAVE_PLUTO
+            const std::string uri = dev.empty() ? DEFAULT_PLUTO_URI : dev;
+            const auto pr = SourcePlutoBlock::probe(uri.c_str());
+            if (!pr.reached) return "cannot reach pluto at " + uri;
+            if (!pr.ok) return "pluto at " + uri +
+                               " has no receiver - its firmware exposes no cf-ad9361-lpc";
+            // probe() already nudges rmin past the floor the driver rejects
+            freq_hz = std::clamp(freq_hz, double(pr.fmin), double(pr.fmax));
+            rate_hz = std::clamp(rate_hz, double(pr.rmin), double(pr.rmax));
+            return {};
+#else
+            return "built without Pluto support (libiio not found at configure time)";
+#endif
+        }
+        case SourceKind::HackRF: {
+#ifdef SPIKE_HAVE_HACKRF
+            const int r = SourceHackRFBlock::open_status(dev.empty() ? nullptr : dev.c_str());
+            if (r == HACKRF_ERROR_NOT_FOUND) return "no hackrf found";
+            if (r != HACKRF_SUCCESS) {
+                return "hackrf: " + std::string(hackrf_error_name(static_cast<hackrf_error>(r))) +
+                       " - another program may have it open, or the udev rules are missing";
+            }
+            rate_hz = std::clamp(rate_hz, HACKRF_RATE_MIN_HZ, HACKRF_RATE_MAX_HZ);
+            return {};
+#else
+            return "built without HackRF support (libhackrf not found at configure time)";
+#endif
+        }
+        case SourceKind::UHD:
+#ifdef SPIKE_HAVE_UHD
+            return {};
+#else
+            return "built without UHD support (UHD not found at configure time)";
+#endif
+    }
+    return {};
+}
 
 struct SpikeSourceBlock : public cler::BlockBase, public ISource {
     static constexpr bool may_block = true;
@@ -161,7 +217,8 @@ private:
     }
 
     void configure_hackrf(SourceHackRFBlock& hackrf, const SourceConfig& cfg) {
-        uint32_t requested_rate = static_cast<uint32_t>(cfg.sample_rate_Hz + 0.5);
+        uint32_t requested_rate = static_cast<uint32_t>(
+            std::clamp(cfg.sample_rate_Hz, HACKRF_RATE_MIN_HZ, HACKRF_RATE_MAX_HZ) + 0.5);
         bool rate_change_restarts_stream = requested_rate != 0 && requested_rate != _hackrf_rate;
         if (rate_change_restarts_stream) {
             hackrf.set_sample_rate(requested_rate);
@@ -183,10 +240,6 @@ private:
         staged.bandwidth_Hz   = cfg.bandwidth_Hz;
         uhd.request_configure(staged);
     }
-#endif
-
-#ifdef SPIKE_HAVE_PLUTO
-    static constexpr const char* DEFAULT_PLUTO_URI = "ip:192.168.2.1";
 #endif
 
     static SourceVariant make_source(SourceKind kind, double freq_hz, double rate_hz,
