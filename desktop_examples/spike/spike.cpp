@@ -89,7 +89,7 @@ static int run_app(SpikeArgs& args) {
     ControlPanel panel("ControlPanel", &src_if, &trigger, &spectrum, &spectrogram,
                        &power, &channelizer, waterfall_rows, args);
     const std::string settings_file = config_path(".cler_spike.conf");
-    panel.load(settings_file);   // restore last session's settings if present
+    panel.load(settings_file);
 
     // Capture mode overrides two loaded settings: the destination directory, and
     // the scope's visibility (a conf that hid it would yield useless snapshots).
@@ -123,7 +123,7 @@ static int run_app(SpikeArgs& args) {
     );
 
     flowgraph.run();
-    panel.apply_all();   // sync radio + trigger to loaded/initial settings
+    panel.apply_all();
     // Report what the panel actually applied; args.* may be stale by now.
     std::cout << "CLER Spike running at " << panel.freq_mhz() << " MHz, "
               << panel.rate_hz() / 1e6 << " MS/s. Close window to exit." << std::endl;
@@ -138,7 +138,7 @@ static int run_app(SpikeArgs& args) {
     // dir and scope visibility, and an unattended run would overwrite the
     // user's tuned conf with them.
     if (!args.capture_mode())
-        panel.save(settings_file);   // remember settings for next session
+        panel.save(settings_file);
     std::cout << "Overflows: " << src_if.get_overflow_count() << std::endl;
     return capture.timed_out() ? 2 : 0;
 }
