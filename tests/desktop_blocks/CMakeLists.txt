@@ -94,17 +94,22 @@ add_executable(source_mux_test test_source_mux.cpp)
 target_link_libraries(source_mux_test gtest_main cler::desktop_blocks)
 add_test(NAME source_mux_test COMMAND source_mux_test)
 
-add_executable(gui_render_test
-    test_gui_render.cpp
-)
+if(CLER_BUILD_BLOCKS_GUI)
+    add_executable(gui_render_test
+        test_gui_render.cpp
+    )
 
-target_link_libraries(gui_render_test
-    gtest_main
-    cler::desktop_blocks
-)
+    target_link_libraries(gui_render_test
+        gtest_main
+        cler::desktop_blocks
+    )
+
+    add_test(NAME gui_render_test COMMAND gui_render_test)
+else()
+    message(STATUS "Skipping gui_render_test because CLER_BUILD_BLOCKS_GUI is OFF")
+endif()
 
 # Register tests with CTest for discovery
-add_test(NAME gui_render_test COMMAND gui_render_test)
 add_test(NAME math_blocks_test COMMAND math_blocks_test)
 add_test(NAME utility_blocks_test COMMAND utility_blocks_test)
 add_test(NAME sink_blocks_test COMMAND sink_blocks_test)
@@ -143,9 +148,16 @@ endif()
 
 add_executable(connector_test test_connector.cpp)
 target_link_libraries(connector_test gtest_main cler::desktop_blocks)
-add_test(NAME connector_test COMMAND ${CMAKE_COMMAND} -E env
-    OPENWEBRX_CONNECTOR_BIN=$<TARGET_FILE:openwebrx_connector> $<TARGET_FILE:connector_test>)
-add_dependencies(connector_test openwebrx_connector)
+# The e2e case needs the connector binary, which only CLER_BUILD_EXAMPLES builds.
+# Without it the test self-skips that case (GTEST_SKIP on OPENWEBRX_CONNECTOR_BIN),
+# so still register it -- the protocol unit tests do not need the binary.
+if(TARGET openwebrx_connector)
+    add_test(NAME connector_test COMMAND ${CMAKE_COMMAND} -E env
+        OPENWEBRX_CONNECTOR_BIN=$<TARGET_FILE:openwebrx_connector> $<TARGET_FILE:connector_test>)
+    add_dependencies(connector_test openwebrx_connector)
+else()
+    add_test(NAME connector_test COMMAND connector_test)
+endif()
 
 add_executable(earshot_ops_test test_earshot_ops.cpp)
 target_link_libraries(earshot_ops_test gtest_main cler::desktop_blocks)
