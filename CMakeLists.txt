@@ -28,11 +28,19 @@ add_compile_options(-Wall -Wextra
       )
 message(STATUS "Asserts are ENABLED even in Release builds")
 
+# Built as a subproject (add_subdirectory from a consumer), the optional pieces
+# default OFF so a consumer compiles only what it links; opt in by setting them.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  set(CLER_STANDALONE ON)
+else()
+  set(CLER_STANDALONE OFF)
+  message(STATUS "cler as a subproject: gui, web blocks and examples default OFF")
+endif()
 option(CLER_BUILD_BLOCKS "Build CLER blocks" ON)
-option(CLER_BUILD_BLOCKS_GUI "Build CLER blocks with gui" ON)
+option(CLER_BUILD_BLOCKS_GUI "Build CLER blocks with gui" ${CLER_STANDALONE})
 option(CLER_BUILD_BLOCKS_LIQUID "Build CLER blocks that use liquid-dsp" ON)
-option(CLER_BUILD_BLOCKS_WEB "Build CLER blocks that serve a browser client" ON)
-option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
+option(CLER_BUILD_BLOCKS_WEB "Build CLER blocks that serve a browser client" ${CLER_STANDALONE})
+option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ${CLER_STANDALONE})
 option(CLER_BUILD_PERFORMANCE "Build CLER performance tests" OFF)
 option(CLER_BUILD_TESTS "Build CLER unit tests" OFF)
 set(CLER_EDITOR_TARGET "" CACHE STRING "Existing target to link from editor block requirements")
