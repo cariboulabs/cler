@@ -31,7 +31,15 @@ if (CLER_BUILD_BLOCKS_LIQUID)
     GIT_SHALLOW    TRUE
     GIT_PROGRESS   TRUE
   )
+  # liquid writes the configure time into liquid.config.h, which all its sources
+  # include, so every re-configure recompiled all of liquid. string(TIMESTAMP)
+  # honours SOURCE_DATE_EPOCH, pinned for liquid's configure only; ENABLE_TIMESTAMPS
+  # OFF keeps that fixed date out of the library.
+  set(ENABLE_TIMESTAMPS OFF CACHE BOOL "" FORCE)
+  set(_cler_source_date_epoch "$ENV{SOURCE_DATE_EPOCH}")
+  set(ENV{SOURCE_DATE_EPOCH} 0)
   FetchContent_MakeAvailable(liquid)
+  set(ENV{SOURCE_DATE_EPOCH} "${_cler_source_date_epoch}")
 
   add_library(blocks_liquid INTERFACE)
   add_library(cler::blocks_liquid ALIAS blocks_liquid)
