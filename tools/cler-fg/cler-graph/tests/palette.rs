@@ -484,6 +484,13 @@ const EXPECTED_BLOCKS: &[(&str, usize, usize, PortCount, PortCount)] = &[
         PortCount::Fixed(1),
     ),
     (
+        "ClockDriftBlock",
+        1,
+        1,
+        PortCount::Fixed(1),
+        PortCount::Fixed(1),
+    ),
+    (
         "PlotCSpectrogramBlock",
         1,
         0,
