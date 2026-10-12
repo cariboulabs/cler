@@ -9,6 +9,7 @@
 #include "desktop_blocks/linear_modem/modulator.hpp"
 #include "desktop_blocks/linear_modem/symbol_source.hpp"
 #include "desktop_blocks/noise/awgn.hpp"
+#include "desktop_blocks/noise/clock_drift.hpp"
 
 namespace {
 
@@ -210,4 +211,32 @@ TEST(ModemBlocks, BerCounterRecoversFromAConstellationSlip) {
     EXPECT_TRUE(went_unaligned) << "the slip never cost alignment";
     EXPECT_TRUE(ber.aligned());
     EXPECT_LT(ber.ber(), 0.01) << "stale rotation still being counted";
+}
+
+// TX and RX clocks 100 ppm apart: symsync must track the rate offset, not just a
+// fixed phase, or the slipping sampling instant shows up as bit errors.
+TEST(ModemBlocks, BpskTracksSampleClockDrift) {
+    std::vector<uint8_t> ref = prbs_symbols(1, REF_SYMBOLS);
+    SymbolSourceBlock src("src", ref);
+    LinearModulatorBlock mod("mod", LIQUID_MODEM_BPSK, SPS, BETA, 5, 4096);
+    ClockDriftBlock drift("drift", 100.0, 0.5, 16384);
+    NoiseAWGNBlock<std::complex<float>> awgn("awgn", awgn_stddev_for_esn0_db(20.0f), 16384, 4242);
+    LinearDemodulatorBlock demod("demod", LIQUID_MODEM_BPSK, SPS, BETA, 5, 0.002f, 0.5f, 16384);
+    BERCounterBlock ber("ber", LIQUID_MODEM_BPSK, ref, 20000);
+    cler::Channel<std::complex<float>> constellation(16384);
+    std::vector<std::complex<float>> drain(16384);
+
+    for (int i = 0; i < 20000 && ber.bits() <= 100000u; ++i) {
+        src.procedure(&mod.in);
+        mod.procedure(&drift.in);
+        drift.procedure(&awgn.in);
+        awgn.procedure(&demod.in);
+        demod.procedure(&ber.in, &constellation);
+        constellation.readN(drain.data(), constellation.size());
+        ber.procedure();
+    }
+    ASSERT_TRUE(ber.aligned());
+    ASSERT_GT(ber.bits(), 100000u);
+    EXPECT_EQ(ber.bit_errors(), 0u) << "BER " << ber.ber();
+    EXPECT_TRUE(demod.locked());
 }
