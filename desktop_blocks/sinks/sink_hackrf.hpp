@@ -40,8 +40,7 @@ struct SinkHackRFBlock : public cler::BlockBase {
           _samp_rate_hz(samp_rate_hz),
           _txvga_gain_db(txvga_gain_db),
           _amp_enable(amp_enable),
-          // libhackrf asks for 262144 bytes per TX transfer; a smaller ring can never fill one.
-          _iq(std::max<size_t>(2 * 262144,
+          _iq(std::max<size_t>(2 * HACKRF_TRANSFER_BYTES,
                                2 * (buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size)))
     {
         if (buffer_size > 0 && buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
@@ -124,6 +123,10 @@ struct SinkHackRFBlock : public cler::BlockBase {
     void reset_underrun_count() { _underrun_count.store(0); }
 
 private:
+    // libhackrf's TX transfer size (TRANSFER_BUFFER_SIZE in hackrf.c, not exported).
+    // A smaller ring can never fill one transfer.
+    static constexpr size_t HACKRF_TRANSFER_BYTES = 262144;
+
     hackrf_device* _dev = nullptr;
     uint64_t _freq_hz;
     uint32_t _samp_rate_hz;
