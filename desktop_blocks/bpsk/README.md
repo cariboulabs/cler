@@ -111,6 +111,7 @@ symbol from which the 256-symbol rolling EVM stays ≤ −15 dB at Es/N0 20 dB. 
 ./bpsk_link --sim --headless            # one status line per second
 ./bpsk_link --tx hackrf --freq 918.5e6 --rate 2e6 --gain 0
 ./bpsk_link --rx pluto --uri ip:192.168.2.1 --freq 918.5e6 --rate 2e6 [--record rx.cf32]
+./bpsk_link --replay rx.cf32 [--headless]      # decode a recording offline, prints the final counters
 ```
 
 ## Limits
