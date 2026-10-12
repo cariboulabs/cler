@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cmath>
 #include <complex>
+#include <mutex>
 #include <vector>
 
 // Liquid-free BPSK receiver: complex baseband in at `sps`, soft symbols out
@@ -66,6 +67,9 @@ struct BPSKReceiverBlock : public cler::BlockBase {
         const size_t max_symbols = static_cast<size_t>(
             static_cast<double>(cfg.block_size / _decim) / 2.0 / (1.0 - cfg.max_rate_deviation)) + 4;
         _staging.resize(max_symbols);
+        _pre.resize(max_symbols);
+        _snap_pre.resize(SNAPSHOT_POINTS);
+        _snap_post.resize(SNAPSHOT_POINTS);
         _agc_target = 1.0f - cfg.beta / 4.0f;
         _tg = bpsk::pi_gains(cfg.timing_bn_ts, cfg.timing_zeta, cfg.timing_kp, 1.0f);
         _cg = bpsk::pi_gains(cfg.carrier_bn_ts, cfg.carrier_zeta, cfg.carrier_kp, 1.0f);
@@ -84,6 +88,16 @@ struct BPSKReceiverBlock : public cler::BlockBase {
     bool locked() const { return _locked.load(std::memory_order_relaxed); }
     float evm_db() const { return _evm_db.load(std::memory_order_relaxed); }
     float lock_metric() const { return _lock_metric.load(std::memory_order_relaxed); }
+    // Symbol-centre points of the last processed block before and after the Costas
+    // loop (for a constellation display). Copies up to max points; any thread.
+    size_t snapshot(std::complex<float>* before_costas, std::complex<float>* after_costas, size_t max) {
+        std::lock_guard<std::mutex> lock(_snap_mutex);
+        const size_t n = std::min(max, _snap_n);
+        std::copy_n(_snap_pre.data(), n, before_costas);
+        std::copy_n(_snap_post.data(), n, after_costas);
+        return n;
+    }
+
     bpsk::PiGains timing_gains() const { return _tg; }
     bpsk::PiGains carrier_gains() const { return _cg; }
 
@@ -156,10 +170,22 @@ private:
         std::copy(_line.end() - static_cast<long>(taps - 1), _line.end(), _line.begin());
 
         // 4. timing + 5. carrier
+        const size_t first = _staged;
         recover(static_cast<long>(m_out));
+        publish_snapshot(first);
         std::copy(_s2.begin() + static_cast<long>(m_out), _s2.begin() + static_cast<long>(m_out + 3), _s2.begin());
 
         _cfo_hz.store(_cfo_est * _fs, std::memory_order_relaxed);
+    }
+
+    // Skipped, never waited for, while a reader holds the lock.
+    void publish_snapshot(size_t first) {
+        std::unique_lock<std::mutex> lock(_snap_mutex, std::try_to_lock);
+        if (!lock.owns_lock()) return;
+        const size_t n = std::min(_staged - first, SNAPSHOT_POINTS);
+        std::copy_n(_pre.data() + first, n, _snap_pre.data());
+        std::copy_n(_staging.data() + first, n, _snap_post.data());
+        _snap_n = n;
     }
 
     // Matched-filter output for input index i of the current block.
@@ -237,6 +263,7 @@ private:
         }
         const std::complex<float> d(z.real() >= 0.0f ? 1.0f : -1.0f, 0.0f);
         _evm += LOCK_ALPHA * (std::norm(z - d) - _evm);
+        _pre[_staged] = y;
         _staging[_staged++] = z;
 
         _lock_metric.store(_cos2, std::memory_order_relaxed);
@@ -248,6 +275,7 @@ private:
 
     static constexpr double CFO_MIN_PEAK_TO_MEAN = 30.0;
     static constexpr size_t RATE_WINDOW = 2048;
+    static constexpr size_t SNAPSHOT_POINTS = 512;
     static constexpr float LOCK_ALPHA = 0.01f;
 
     BPSKReceiverConfig _cfg;
@@ -259,6 +287,11 @@ private:
     std::vector<std::complex<float>> _line;
     std::vector<std::complex<float>> _s2;
     std::vector<std::complex<float>> _staging;
+    std::vector<std::complex<float>> _pre;
+    std::mutex _snap_mutex;
+    std::vector<std::complex<float>> _snap_pre;
+    std::vector<std::complex<float>> _snap_post;
+    size_t _snap_n = 0;
     size_t _fill = 0;
     size_t _staged = 0;
     size_t _sent = 0;
