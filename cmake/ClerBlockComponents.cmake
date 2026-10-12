@@ -81,6 +81,11 @@ endfunction()
 function(cler_register_standard_block_components)
   cler_register_block_component(TARGET cler::blocks_blob PATHS desktop_blocks/blob.hpp)
   cler_register_block_component(TARGET cler::blocks_core PATHS
+    desktop_blocks/bpsk/bpsk_common.hpp
+    desktop_blocks/bpsk/deframer.hpp
+    desktop_blocks/bpsk/framer.hpp
+    desktop_blocks/bpsk/modulator.hpp
+    desktop_blocks/bpsk/receiver.hpp
     desktop_blocks/kernels/kernels.hpp
     desktop_blocks/math/add.hpp
     desktop_blocks/math/complex_demux.hpp
