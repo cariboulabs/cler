@@ -25,6 +25,12 @@ else()
     message(STATUS "Skipping frequency_shift example because CLER_BUILD_BLOCKS_GUI or CLER_BUILD_BLOCKS_LIQUID is OFF")
 endif()
 
+add_executable(bpsk_link bpsk_link.cpp)
+target_link_libraries(bpsk_link PRIVATE cler::desktop_blocks)
+if (CLER_BUILD_BLOCKS_GUI)
+    target_compile_definitions(bpsk_link PRIVATE BPSK_LINK_GUI)
+endif()
+
 if (CLER_BUILD_BLOCKS_LIQUID)
     add_executable(packet_link packet_link.cpp)
     target_link_libraries(packet_link PRIVATE cler::desktop_blocks)
