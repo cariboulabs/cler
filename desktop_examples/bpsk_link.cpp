@@ -499,8 +499,10 @@ int run_tx(const Options& o) {
     BPSKModulatorBlock mod("Modulator", o.sps, 0.35f, 10, 4096);
     // Unit-energy pulses peak above 1 at sps 8; scale so the HackRF's int8 packing never clips.
     GainBlock<std::complex<float>> gain("TX scale", std::complex<float>(static_cast<float>(o.scale), 0.0f), 16384);
+    // The sink's byte ring is 2 * buffer_size; each libhackrf USB transfer asks for 262144 bytes and
+    // zero-fills what the ring lacks, so a smaller ring puts ~29 ms of silence into every transfer.
     SinkHackRFBlock hackrf("HackRF", static_cast<uint64_t>(o.freq), static_cast<uint32_t>(o.rate),
-                           o.gain < 0.0 ? 0 : static_cast<int>(o.gain), false, 16384);
+                           o.gain < 0.0 ? 0 : static_cast<int>(o.gain), false, 262144);
     auto fg = cler::make_desktop_flowgraph(
         cler::BlockRunner(&src, &framer.in), cler::BlockRunner(&framer, &mod.in),
         cler::BlockRunner(&mod, &gain.in), cler::BlockRunner(&gain, &hackrf.in), cler::BlockRunner(&hackrf));
