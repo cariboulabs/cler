@@ -88,6 +88,7 @@ function(cler_register_standard_block_components)
     desktop_blocks/math/gain.hpp
     desktop_blocks/misc/uhd_common.hpp
     desktop_blocks/noise/awgn.hpp
+    desktop_blocks/noise/clock_drift.hpp
     desktop_blocks/utils/fanout.hpp
     desktop_blocks/utils/gate.hpp
     desktop_blocks/utils/fused.hpp
