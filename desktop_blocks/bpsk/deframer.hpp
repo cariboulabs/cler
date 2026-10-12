@@ -14,8 +14,12 @@
 // ([length][payload], inverse of BPSKFramerBlock). Only CRC-checked frames leave.
 //
 // Frame sync: the 26-symbol preamble is correlated against the last 26 symbols,
-// normalised to [0, 1] by both energies; a frame starts after the local maximum
-// of a run above `threshold`. The correlation phase de-rotates the frame, so a
+// normalised to [0, 1] by both energies. After the metric first reaches
+// `threshold`, the search runs PEAK_SEARCH more symbols and takes the maximum:
+// a window 13 symbols early lines the second Barker-13 up with the first and can
+// pass the threshold on its own when data or idle symbols precede the preamble.
+// The symbols after the true peak are replayed from a short history as the
+// first length bits. The correlation phase de-rotates the frame, so a
 // carrier loop that settled on 180 degrees (negative peak) yields the same bits.
 struct BPSKDeframerBlock : public cler::BlockBase {
     cler::Channel<std::complex<float>> in;
@@ -71,6 +75,8 @@ private:
             take_bit(std::real(z * _derot) < 0.0f ? 1u : 0u);
             return;
         }
+        _hist[_n % HISTORY] = z;
+        ++_n;
         _win[_wpos] = z;
         _wpos = (_wpos + 1) % bpsk::PREAMBLE_SYMBOLS;
         if (_filled < bpsk::PREAMBLE_SYMBOLS) {
@@ -86,26 +92,30 @@ private:
         }
         const float e = std::max(energy, 1e-12f);
         const float metric = std::abs(corr) / std::sqrt(static_cast<float>(bpsk::PREAMBLE_SYMBOLS) * e);
-        if (_candidate) {
+        if (_hold > 0) {
             if (metric > _best) {
                 _best = metric;
                 _best_corr = corr;
-                return;
+                _best_n = _n;
             }
-            // Peak was the previous symbol; this one is the first length bit.
+            if (--_hold > 0) return;
             start_frame();
-            take_bit(std::real(z * _derot) < 0.0f ? 1u : 0u);
+            // Symbols after the peak window already went by: replay them.
+            for (uint64_t k = _best_n; k < _n && _state != State::Search; ++k) {
+                take_bit(std::real(_hist[k % HISTORY] * _derot) < 0.0f ? 1u : 0u);
+            }
             return;
         }
         if (metric >= _threshold) {
-            _candidate = true;
+            _hold = PEAK_SEARCH;
             _best = metric;
             _best_corr = corr;
+            _best_n = _n;
         }
     }
 
     void start_frame() {
-        _candidate = false;
+        _hold = 0;
         _detected.fetch_add(1, std::memory_order_relaxed);
         _last_peak.store(_best, std::memory_order_relaxed);
         _derot = std::conj(_best_corr) / std::abs(_best_corr);
@@ -164,12 +174,18 @@ private:
         _wpos = 0;
     }
 
+    static constexpr size_t PEAK_SEARCH = 16;
+    static constexpr size_t HISTORY = 32;
+
     float _threshold;
     State _state = State::Search;
     std::array<std::complex<float>, bpsk::PREAMBLE_SYMBOLS> _win{};
     size_t _wpos = 0;
     size_t _filled = 0;
-    bool _candidate = false;
+    size_t _hold = 0;
+    std::array<std::complex<float>, HISTORY> _hist{};
+    uint64_t _n = 0;
+    uint64_t _best_n = 0;
     float _best = 0.0f;
     std::complex<float> _best_corr{0.0f, 0.0f};
     std::complex<float> _derot{1.0f, 0.0f};
