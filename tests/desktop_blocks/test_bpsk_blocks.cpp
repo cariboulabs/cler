@@ -168,6 +168,40 @@ TEST(BPSKBlocks, FramerDeframerRoundTrip) {
     EXPECT_EQ(framer.records_rejected(), 0u);
 }
 
+// 1b. Idle fill between frames (what a radio link sends) must not trigger the
+//     preamble search 13 symbols early on the Barker-13 x2 sidelobe.
+TEST(BPSKBlocks, IdleFillBetweenFramesDecodes) {
+    BPSKFramerBlock framer("framer", 128, true);
+    BPSKDeframerBlock deframer("deframer");
+    cler::Channel<float> symbols(BUF);
+    cler::Channel<uint8_t> packets(BUF);
+    const auto sent = random_messages(200, 13);
+    std::mt19937 rng(17);
+
+    std::vector<uint8_t> carry;
+    std::vector<Message> got;
+    std::vector<float> s(BUF);
+    std::vector<cf> z(BUF);
+    auto pump = [&](int calls) {
+        for (int i = 0; i < calls; ++i) {
+            framer.procedure(&symbols);
+            const size_t n = symbols.readN(s.data(), std::min(symbols.size(), deframer.in.space()));
+            for (size_t k = 0; k < n; ++k) z[k] = cf(s[k], 0.0f);
+            deframer.in.writeN(z.data(), n);
+            deframer.procedure(&packets);
+            pop_records(packets, carry, got);
+        }
+    };
+    for (const auto& m : sent) {
+        push_records(framer.in, {m});
+        pump(1 + static_cast<int>(rng() % 6));  // the frame, then 0..5 idle chunks
+    }
+    pump(8);
+    EXPECT_EQ(count_matches(sent, got), sent.size());
+    EXPECT_EQ(deframer.crc_failures(), 0u);
+    EXPECT_EQ(deframer.bad_lengths(), 0u);
+}
+
 // 2. Unit-energy RRC taps; TX RRC * RX RRC is Nyquist (no ISI at symbol centres);
 //    the modulator's impulse response is exactly the taps.
 TEST(BPSKBlocks, ModulatorPulseIsUnitEnergyNyquist) {
