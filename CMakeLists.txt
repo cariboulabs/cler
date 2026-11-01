@@ -4,13 +4,12 @@ project(cler
         LANGUAGES CXX C
         DESCRIPTION "Compile Time DSP Flowgraph Framework for SDRs and Embedded Systems")
 
-# Lock this build dir to one generator to prevent mismatch issues
-set(PROJECT_CONFIGURED_GENERATOR "${CMAKE_GENERATOR}" CACHE STRING "Generator used to configure this build tree")
-if (NOT PROJECT_CONFIGURED_GENERATOR STREQUAL CMAKE_GENERATOR)
-  message(FATAL_ERROR
-    "This build dir was configured with '${PROJECT_CONFIGURED_GENERATOR}', "
-    "but now you're using '${CMAKE_GENERATOR}'. Use a different build dir or clean it.")
-endif()
+include(cmake/CleanOnGenMismatch.cmake)
+file(GLOB _dep_builds LIST_DIRECTORIES true
+     "${CMAKE_BINARY_DIR}/_deps/*-subbuild" "${CMAKE_BINARY_DIR}/_deps/*-build")
+foreach(_d IN LISTS _dep_builds)
+  clean_on_gen_mismatch("${_d}")
+endforeach()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,10 +28,21 @@ add_compile_options(-Wall -Wextra
       )
 message(STATUS "Asserts are ENABLED even in Release builds")
 
+if(NOT DEFINED PROJECT_IS_TOP_LEVEL)
+  if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(PROJECT_IS_TOP_LEVEL ON)
+  else()
+    set(PROJECT_IS_TOP_LEVEL OFF)
+  endif()
+endif()
+if(NOT PROJECT_IS_TOP_LEVEL)
+  message(STATUS "cler as a subproject: gui, web blocks and examples default OFF")
+endif()
 option(CLER_BUILD_BLOCKS "Build CLER blocks" ON)
-option(CLER_BUILD_BLOCKS_GUI "Build CLER blocks with gui" ON)
+option(CLER_BUILD_BLOCKS_GUI "Build CLER blocks with gui" ${PROJECT_IS_TOP_LEVEL})
 option(CLER_BUILD_BLOCKS_LIQUID "Build CLER blocks that use liquid-dsp" ON)
-option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ON)
+option(CLER_BUILD_BLOCKS_WEB "Build CLER blocks that serve a browser client" ${PROJECT_IS_TOP_LEVEL})
+option(CLER_BUILD_EXAMPLES "Build CLER example binaries" ${PROJECT_IS_TOP_LEVEL})
 option(CLER_BUILD_PERFORMANCE "Build CLER performance tests" OFF)
 option(CLER_BUILD_TESTS "Build CLER unit tests" OFF)
 set(CLER_EDITOR_TARGET "" CACHE STRING "Existing target to link from editor block requirements")
@@ -57,7 +67,7 @@ if(NOT DEFINED CLER_DEFAULT_MAX_WORKERS)
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type")
 endif()
 
 # For Release, force optimization
@@ -98,8 +108,9 @@ find_package(PkgConfig REQUIRED)
 
 message(STATUS "CLER: Using CLER_DEFAULT_MAX_WORKERS=${CLER_DEFAULT_MAX_WORKERS}")
 
+include(cmake/ClerBlockComponents.cmake)
+
 if (CLER_BUILD_BLOCKS)
-  include(cmake/ClerBlockComponents.cmake)
   add_subdirectory(desktop_logger) #mightaswell
   add_subdirectory(desktop_blocks)
 endif()
@@ -109,37 +120,8 @@ if(CLER_BUILD_EXAMPLES AND CLER_BUILD_BLOCKS)
   add_subdirectory(embedded_examples)
 endif()
 
-if(CLER_EDITOR_SOURCE AND CLER_EDITOR_TARGET AND NOT TARGET ${CLER_EDITOR_TARGET})
-  if(NOT CLER_BUILD_BLOCKS)
-    message(FATAL_ERROR "CLER editor drafts outside the tree require CLER_BUILD_BLOCKS=ON")
-  endif()
-  add_executable(${CLER_EDITOR_TARGET} "${CLER_EDITOR_SOURCE}")
-  message(STATUS "CLER editor draft '${CLER_EDITOR_TARGET}' from ${CLER_EDITOR_SOURCE}")
-endif()
-
-if(CLER_EDITOR_REQUIREMENTS_FILE AND CLER_EDITOR_REQUIREMENTS_EXACT)
-  if(NOT CLER_BUILD_BLOCKS)
-    message(FATAL_ERROR "CLER editor exact block linking requires CLER_BUILD_BLOCKS=ON")
-  endif()
-  if(NOT CLER_EDITOR_TARGET)
-    message(FATAL_ERROR "CLER_EDITOR_REQUIREMENTS_FILE requires CLER_EDITOR_TARGET")
-  endif()
-  cler_configure_editor_exact_block_linking(
-    TARGET "${CLER_EDITOR_TARGET}"
-    REQUIREMENTS_FILE "${CLER_EDITOR_REQUIREMENTS_FILE}"
-  )
-elseif(CLER_EDITOR_TARGET)
-  if(TARGET ${CLER_EDITOR_TARGET})
-    target_link_libraries(${CLER_EDITOR_TARGET} PRIVATE cler::desktop_blocks)
-    set_property(TARGET ${CLER_EDITOR_TARGET} PROPERTY CLER_EDITOR_BLOCK_LINK_MODE umbrella)
-    if(CLER_EDITOR_REQUIREMENTS_FILE)
-      message(STATUS "CLER editor target '${CLER_EDITOR_TARGET}' block linking: umbrella fallback (incomplete requirements)")
-    else()
-      message(STATUS "CLER editor target '${CLER_EDITOR_TARGET}' block linking: umbrella (no requirements file)")
-    endif()
-  else()
-    message(FATAL_ERROR "CLER editor target '${CLER_EDITOR_TARGET}' does not exist")
-  endif()
+if(CLER_EDITOR_TARGET)
+  cler_configure_editor_target()
 endif()
 
 if(CLER_BUILD_PERFORMANCE)
@@ -147,5 +129,6 @@ if(CLER_BUILD_PERFORMANCE)
 endif()
 
 if(CLER_BUILD_TESTS)
+  enable_testing()
   add_subdirectory(tests)
 endif()

@@ -21,6 +21,7 @@ struct SpikeArgs {
     bool   gain_from_cli = false;
     std::string device_address;
     std::string calibration;
+    SourceLimits limits;
 
     std::string capture_dir;
     int    capture_frames    = 1;
@@ -31,14 +32,27 @@ struct SpikeArgs {
     bool   capture_mode() const { return !capture_dir.empty(); }
 };
 
+// The AD9361 floor is 2.083 MS/s and the HackRF wants >= 2 MS/s; only the USRP takes 1.
+static double default_rate_for(SourceKind kind) {
+    switch (kind) {
+        case SourceKind::Pluto:  return 2.4e6;
+        case SourceKind::HackRF: return 2.4e6;
+        case SourceKind::UHD:    break;
+    }
+    return 1e6;
+}
+
 static void print_usage(const char* prog) {
     std::cout << "\nSlim Spike-like analyzer for USRP / HackRF / Pluto\n"
               << "Usage: " << prog << " [OPTIONS]\n"
               << "  -s, --source DEV  Device source: uhd|hackrf|pluto (default uhd)\n"
-              << "  -f, --freq FREQ   Center frequency Hz (default 915e6; if given, overrides\n"
-              << "                    the saved center)\n"
-              << "  -r, --rate RATE   Initial sample rate S/s (default 1e6; live-tunable\n"
-              << "                    in the GUI; if given, overrides the saved rate)\n"
+              << "  -f, --freq FREQ   Center frequency Hz (default 915e6; if given, overrides the\n"
+              << "                    saved center; clamped to what the device tunes, which is\n"
+              << "                    reported when it happens)\n"
+              << "  -r, --rate RATE   Initial sample rate S/s (default 1e6 for uhd, 2.4e6 for\n"
+              << "                    hackrf/pluto, whose hardware floors are higher;\n"
+              << "                    live-tunable in the GUI; if given, overrides the\n"
+              << "                    saved rate and is clamped to what the device takes)\n"
               << "  -g, --gain GAIN   [uhd/pluto] Gain dB (default 30; if given, overrides the\n"
               << "                    saved gain; pluto applies it\n"
               << "                    at start only, <0 selects AGC)\n"
@@ -54,6 +68,7 @@ static void print_usage(const char* prog) {
               << "                    directory holding them (newest wins); all levels then\n"
               << "                    read dBm at the RX2 connector instead of dBFS\n"
               << "                    [pluto] IIO uri (default ip:192.168.2.1)\n"
+              << "                    [hackrf] serial (default first device found)\n"
               << "  -h, --help\n"
               << "\nUnattended capture (for scripts / agents; needs a display):\n"
               << "      --capture DIR      Snapshot automatically into DIR (created if\n"
@@ -111,6 +126,7 @@ static SpikeArgs parse_args(int argc, char** argv) {
         else if (arg == "--capture-exit")  a.capture_exit  = true;
         else { std::cerr << "Unknown option: " << arg << "\n"; print_usage(argv[0]); exit(1); }
     }
+    if (!a.rate_from_cli) a.rate = default_rate_for(a.source);
     if (a.capture_frames < 1) {
         std::cerr << "Error: --capture-on-trigger needs N >= 1\n"; exit(1);
     }

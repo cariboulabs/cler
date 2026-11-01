@@ -1,0 +1,17 @@
+[Unit]
+Description=cler earshot browser receiver
+After=network.target
+
+[Service]
+User=earshot
+Group=plugdev
+EnvironmentFile=-/etc/default/cler-earshot
+ExecStart=/usr/local/bin/earshot --state-file /var/lib/cler-earshot/state.json --record-dir /var/lib/cler-earshot $EARSHOT_ARGS
+StateDirectory=cler-earshot
+Type=notify
+WatchdogSec=30
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

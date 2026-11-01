@@ -44,14 +44,14 @@ int main() {
         "Chirp-CSpectrumPlot",
         {"CW", "Chirp"},
         SPS,
-        256 // buffer size for FFT
+        1024 // buffer size for FFT
     );
 
     PlotCSpectrogramBlock cspectrogram_plot(
         "CW-SpectrogramPlot",
         {"CW", "Chirp"},
         SPS,
-        128, // buffer size for FFT
+        256, // buffer size for FFT
         100 // tall
     );
 

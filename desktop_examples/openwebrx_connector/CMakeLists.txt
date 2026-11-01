@@ -1,0 +1,2 @@
+add_executable(openwebrx_connector openwebrx_connector.cpp)
+target_link_libraries(openwebrx_connector PRIVATE cler::desktop_blocks)

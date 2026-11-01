@@ -2,7 +2,7 @@
 
 #include "cler.hpp"
 #include "adsb_types.hpp"
-#include "adsb_coastline_loader.hpp"
+#include "desktop_blocks/gui/map_canvas.hpp"
 #include "modes.h"
 #include "cpr.h"
 #include <unordered_map>
@@ -23,10 +23,7 @@ struct ADSBAggregateBlock : public cler::BlockBase {
                        const char* coastline_data_path = "adsb_coastlines/ne_110m_coastline.shp")
         : BlockBase(name), in(1024),
           _callback(callback), _callback_context(callback_context),
-          _map_center_lat(initial_map_center_lat), _map_center_lon(initial_map_center_lon),
-          _map_zoom(0.1f), _coastlines_loaded(false) {
-        _coastlines_loaded = _coastline_data.load_from_shapefile(coastline_data_path);
-    }
+          _map(initial_map_center_lat, initial_map_center_lon, coastline_data_path) {}
 
     cler::Result<cler::Empty, cler::Error> procedure() {
         auto [read_ptr, read_size] = in.read_dbf();
@@ -158,30 +155,17 @@ struct ADSBAggregateBlock : public cler::BlockBase {
 
         ImGui::Begin("ADSB Map", nullptr, window_flags);
 
-        ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
-        ImVec2 canvas_size = ImGui::GetContentRegionAvail();
-        if (canvas_size.x < MIN_CANVAS_SIZE) {canvas_size.x = MIN_CANVAS_SIZE;}
-        if (canvas_size.y < MIN_CANVAS_SIZE) {canvas_size.y = MIN_CANVAS_SIZE;}
+        _map.begin();
+        draw_aircraft(ImGui::GetWindowDrawList());
 
-        ImVec2 canvas_p1 = ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y);
-        ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
-        draw_list->AddRectFilled(canvas_pos, canvas_p1, IM_COL32(30, 40, 50, 255));
-        draw_list->AddRect(canvas_pos, canvas_p1, IM_COL32(200, 200, 200, 255));
-
-        draw_grid(draw_list, canvas_pos, canvas_size);
-        draw_coastlines(draw_list, canvas_pos, canvas_size);
-        draw_aircraft(draw_list, canvas_pos, canvas_size);
-
-        ImGui::SetCursorScreenPos(ImVec2(canvas_pos.x + INFO_TEXT_OFFSET_X, canvas_p1.y - INFO_TEXT_OFFSET_Y));
-        const char latitude_hemisphere = _map_center_lat >= 0.0f ? 'N' : 'S';
-        const char longitude_hemisphere = _map_center_lon >= 0.0f ? 'E' : 'W';
+        ImGui::SetCursorScreenPos(ImVec2(_map.pos.x + INFO_TEXT_OFFSET_X, _map.pos.y + _map.size.y - INFO_TEXT_OFFSET_Y));
+        const char latitude_hemisphere = _map.center_lat >= 0.0f ? 'N' : 'S';
+        const char longitude_hemisphere = _map.center_lon >= 0.0f ? 'E' : 'W';
         ImGui::Text("Aircraft: %zu | Center: %.2f°%c, %.2f°%c | Zoom: %.1fx",
-                    _aircraft.size(), std::fabs(_map_center_lat), latitude_hemisphere,
-                    std::fabs(_map_center_lon), longitude_hemisphere, _map_zoom);
+                    _aircraft.size(), std::fabs(_map.center_lat), latitude_hemisphere,
+                    std::fabs(_map.center_lon), longitude_hemisphere, _map.zoom);
 
-        handle_map_interaction(canvas_pos, canvas_size);
-
+        _map.interact();
         ImGui::End();
     }
 
@@ -191,26 +175,12 @@ struct ADSBAggregateBlock : public cler::BlockBase {
     }
 
 private:
-    static constexpr float CANVAS_BOUNDS_MARGIN = 100.0f;
-    static constexpr float AIRCRAFT_SPREAD_RANGE = 200.0f;
-    static constexpr float AIRCRAFT_SPREAD_OFFSET = 100.0f;
     static constexpr float TRIANGLE_SIZE = 8.0f;
-    static constexpr float TRIANGLE_ANGLE_OFFSET = 0.5f;
     static constexpr float MAX_ALTITUDE_FOR_COLOR = 40000.0f;
-    static constexpr float GRID_STEP_ZOOMED_OUT = 0.5f;
-    static constexpr float GRID_STEP_ZOOMED_IN = 0.1f;
-    static constexpr float GRID_ZOOM_THRESHOLD = 1.0f;
-    static constexpr float COASTLINE_THICKNESS = 1.5f;
-    static constexpr float MIN_CANVAS_SIZE = 200.0f;
     static constexpr float INFO_TEXT_OFFSET_X = 10.0f;
     static constexpr float INFO_TEXT_OFFSET_Y = 30.0f;
     static constexpr float LABEL_OFFSET_X = 10.0f;
     static constexpr float LABEL_OFFSET_Y_CALLSIGN = -8.0f;
-    static constexpr float LABEL_OFFSET_Y_ALTITUDE = 4.0f;
-    static constexpr float ZOOM_SENSITIVITY = 0.1f;
-    static constexpr float MIN_ZOOM = 0.01f;
-    static constexpr float MAX_ZOOM = 50.0f;
-    static constexpr float DEFAULT_LAT_SPAN = 2.0f;
     static constexpr float INITIAL_WINDOW_SIZE_X = 1400.0f;
     static constexpr float INITIAL_WINDOW_SIZE_Y = 800.0f;
 
@@ -221,147 +191,22 @@ private:
     ImVec2 _initial_window_position{0.0f, 0.0f};
     ImVec2 _initial_window_size{INITIAL_WINDOW_SIZE_X, INITIAL_WINDOW_SIZE_Y};
 
-    float _map_center_lat;
-    float _map_center_lon;
-    float _map_zoom;
 
-    CoastlineData _coastline_data;
-    bool _coastlines_loaded;
+    MapCanvas _map;
 
-    ImVec2 lat_lon_to_screen(float lat, float lon, ImVec2 canvas_pos, ImVec2 canvas_size) {
-        float lat_span = DEFAULT_LAT_SPAN / _map_zoom;
-        float lon_span = lat_span * (canvas_size.x / canvas_size.y);
-
-        float lat_min = _map_center_lat - lat_span / 2.0f;
-        float lon_min = _map_center_lon - lon_span / 2.0f;
-
-        float x_norm = (lon - lon_min) / lon_span;
-        float y_norm = (lat - lat_min) / lat_span;
-
-        x_norm = std::max(0.0f, std::min(1.0f, x_norm));
-        y_norm = std::max(0.0f, std::min(1.0f, y_norm));
-
-        // screen y is flipped: lat increases upward but screen y increases downward
-        ImVec2 screen;
-        screen.x = canvas_pos.x + x_norm * canvas_size.x;
-        screen.y = canvas_pos.y + (1.0f - y_norm) * canvas_size.y;
-
-        return screen;
-    }
-
-    void draw_grid(ImDrawList* draw_list, ImVec2 canvas_pos, ImVec2 canvas_size) {
-        float lat_span = DEFAULT_LAT_SPAN / _map_zoom;
-        float lon_span = lat_span * (canvas_size.x / canvas_size.y);
-
-        float lat_min = _map_center_lat - lat_span / 2.0f;
-        float lon_min = _map_center_lon - lon_span / 2.0f;
-
-        float grid_step = (lat_span > GRID_ZOOM_THRESHOLD) ? GRID_STEP_ZOOMED_OUT : GRID_STEP_ZOOMED_IN;
-
-        for (float lat = std::floor(lat_min / grid_step) * grid_step; lat < lat_min + lat_span; lat += grid_step) {
-            ImVec2 p1 = lat_lon_to_screen(lat, lon_min, canvas_pos, canvas_size);
-            ImVec2 p2 = lat_lon_to_screen(lat, lon_min + lon_span, canvas_pos, canvas_size);
-            draw_list->AddLine(p1, p2, IM_COL32(100, 100, 120, 100), 0.5f);
-        }
-
-        for (float lon = std::floor(lon_min / grid_step) * grid_step; lon < lon_min + lon_span; lon += grid_step) {
-            ImVec2 p1 = lat_lon_to_screen(lat_min, lon, canvas_pos, canvas_size);
-            ImVec2 p2 = lat_lon_to_screen(lat_min + lat_span, lon, canvas_pos, canvas_size);
-            draw_list->AddLine(p1, p2, IM_COL32(100, 100, 120, 100), 0.5f);
-        }
-    }
-
-    void draw_coastlines(ImDrawList* draw_list, ImVec2 canvas_pos, ImVec2 canvas_size) {
-        if (!_coastlines_loaded || _coastline_data.polylines.empty()) {
-            return;
-        }
-
-        ImU32 coastline_color = IM_COL32(100, 200, 100, 180);
-
-        for (const auto& polyline : _coastline_data.polylines) {
-            if (polyline.size() < 2) continue;
-
-            for (size_t i = 0; i < polyline.size() - 1; ++i) {
-                ImVec2 p1 = lat_lon_to_screen(polyline[i].first, polyline[i].second, canvas_pos, canvas_size);
-                ImVec2 p2 = lat_lon_to_screen(polyline[i + 1].first, polyline[i + 1].second, canvas_pos, canvas_size);
-
-                // Only draw if both points are roughly on screen (avoid massive lines off-canvas)
-                if ((p1.x >= canvas_pos.x - CANVAS_BOUNDS_MARGIN || p2.x >= canvas_pos.x - CANVAS_BOUNDS_MARGIN) &&
-                    (p1.x < canvas_pos.x + canvas_size.x + CANVAS_BOUNDS_MARGIN || p2.x < canvas_pos.x + canvas_size.x + CANVAS_BOUNDS_MARGIN) &&
-                    (p1.y >= canvas_pos.y - CANVAS_BOUNDS_MARGIN || p2.y >= canvas_pos.y - CANVAS_BOUNDS_MARGIN) &&
-                    (p1.y < canvas_pos.y + canvas_size.y + CANVAS_BOUNDS_MARGIN || p2.y < canvas_pos.y + canvas_size.y + CANVAS_BOUNDS_MARGIN)) {
-                    draw_list->AddLine(p1, p2, coastline_color, COASTLINE_THICKNESS);
-                }
-            }
-        }
-    }
-
-    void draw_aircraft(ImDrawList* draw_list, ImVec2 canvas_pos, ImVec2 canvas_size) {
+    void draw_aircraft(ImDrawList* draw_list) {
         for (const auto& pair : _aircraft) {
             const ADSBState& state = pair.second;
-
             // no fallback: unpositioned aircraft are not drawn
-            if (!state.position_valid) {
-                continue;
-            }
-
-            ImVec2 pos = lat_lon_to_screen(state.lat, state.lon, canvas_pos, canvas_size);
-
-            float alt_norm = std::min(1.0f, state.altitude / MAX_ALTITUDE_FOR_COLOR);
-            ImU32 color = ImGui::GetColorU32(ImVec4(alt_norm, 0.5f, 1.0f - alt_norm, 1.0f));
-
-            // arrow triangle: v0 = tip (heading direction), v1/v2 = back corners
-            // -90deg offset empirically needed to align triangle tip with track angle
-            float heading_rad = state.track * cler::PI / 180.0f - cler::PI / 2.0f;
-            float cos_h = std::cos(heading_rad);
-            float sin_h = std::sin(heading_rad);
-
-            ImVec2 v0(pos.x + TRIANGLE_SIZE * 1.2f * cos_h,
-                      pos.y + TRIANGLE_SIZE * 1.2f * sin_h);
-            ImVec2 v1(pos.x - TRIANGLE_SIZE * 0.8f * cos_h - TRIANGLE_SIZE * 0.5f * sin_h,
-                      pos.y - TRIANGLE_SIZE * 0.8f * sin_h + TRIANGLE_SIZE * 0.5f * cos_h);
-            ImVec2 v2(pos.x - TRIANGLE_SIZE * 0.8f * cos_h + TRIANGLE_SIZE * 0.5f * sin_h,
-                      pos.y - TRIANGLE_SIZE * 0.8f * sin_h - TRIANGLE_SIZE * 0.5f * cos_h);
-
-            draw_list->AddTriangleFilled(v0, v1, v2, color);
-            draw_list->AddTriangle(v0, v1, v2, IM_COL32(255, 255, 255, 200), 1.0f);
-
+            if (!state.position_valid) continue;
+            const ImVec2 pos = _map.to_screen(static_cast<float>(state.lat), static_cast<float>(state.lon));
+            const float alt_norm = std::min(1.0f, state.altitude / MAX_ALTITUDE_FOR_COLOR);
+            _map.marker(draw_list, pos, state.track, TRIANGLE_SIZE,
+                        ImGui::GetColorU32(ImVec4(alt_norm, 0.5f, 1.0f - alt_norm, 1.0f)));
             if (state.callsign[0] != '\0') {
                 draw_list->AddText(ImVec2(pos.x + LABEL_OFFSET_X, pos.y + LABEL_OFFSET_Y_CALLSIGN),
                                    IM_COL32(255, 255, 255, 255), state.callsign);
             }
         }
-    }
-
-    void handle_map_interaction(ImVec2 canvas_pos, ImVec2 canvas_size) {
-        ImGuiIO& io = ImGui::GetIO();
-        ImVec2 mouse_pos = io.MousePos;
-
-        bool mouse_over = mouse_pos.x >= canvas_pos.x && mouse_pos.x < canvas_pos.x + canvas_size.x &&
-                          mouse_pos.y >= canvas_pos.y && mouse_pos.y < canvas_pos.y + canvas_size.y;
-
-        if (mouse_over) {
-            if (io.MouseWheel != 0.0f) {
-                _map_zoom *= (1.0f + io.MouseWheel * ZOOM_SENSITIVITY);
-                _map_zoom = std::max(MIN_ZOOM, std::min(MAX_ZOOM, _map_zoom));
-            }
-
-            bool panning_left = ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f);
-            bool panning_right = ImGui::IsMouseDragging(ImGuiMouseButton_Right, 0.0f);
-
-            if (panning_left || panning_right) {
-                ImGuiMouseButton button = panning_left ? ImGuiMouseButton_Left : ImGuiMouseButton_Right;
-                ImVec2 delta = ImGui::GetMouseDragDelta(button);
-                float lat_span = DEFAULT_LAT_SPAN / _map_zoom;
-                float lon_span = lat_span * (canvas_size.x / canvas_size.y);
-
-                // inverted: drag right pushes the map right
-                _map_center_lon -= (delta.x / canvas_size.x) * lon_span;
-                _map_center_lat += (delta.y / canvas_size.y) * lat_span;
-
-                ImGui::ResetMouseDragDelta(button);
-            }
-        }
-
     }
 };

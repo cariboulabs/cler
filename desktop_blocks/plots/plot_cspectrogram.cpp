@@ -488,8 +488,9 @@ void PlotCSpectrogramBlock::render() {
     const double x_max =  static_cast<double>(_sps) / 2.0;
     const float  seam_v = static_cast<float>(_tex_ring_pos) / static_cast<float>(_tall);
 
+    const float plot_h = ImGui::GetContentRegionAvail().y / static_cast<float>(_num_inputs);
     for (size_t i = 0; i < _num_inputs; ++i) {
-        if (ImPlot::BeginPlot(_signal_labels[i].c_str(), ImVec2(-1, -1))) {
+        if (ImPlot::BeginPlot(_signal_labels[i].c_str(), ImVec2(-1, plot_h))) {
             ImPlot::SetupAxes("Frequency (Hz)", "Time (s)", x_flags, y_flags);
             // One-shot Always re-fit after set_sample_rate(); axis is Lock'ed so
             // Always cannot fight user pan/zoom.

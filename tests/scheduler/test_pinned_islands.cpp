@@ -423,6 +423,9 @@ TEST(PinnedIslandsTest, MatchesFixedThreadPoolOnSteadyChain) {
     fg.run_for(std::chrono::milliseconds(500), config);
 
     EXPECT_GT(sink.received.load(), 0u);
+#ifdef __linux__
+    // real pinning exists only on the Linux task policies
     EXPECT_EQ(fg.affinity_failure_count(), 0u);
+#endif
     EXPECT_EQ(fg.partition().island_count, 2u);
 }

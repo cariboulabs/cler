@@ -80,6 +80,12 @@ namespace cler {
         virtual size_t peek_read(const T*& ptr1, size_t& size1, const T*& ptr2, size_t& size2) = 0;
         virtual void commit_read(size_t count) = 0;
         virtual void commit_write(size_t count) = 0;
+        virtual void reset() = 0;
+        // Both sizes are lower bounds, refreshed only once they read zero: a short
+        // span means ask again, and only a returned 0 is authoritative. In a block,
+        // commit what you moved and return; loop only at a boundary that holds
+        // samples from outside the graph. write_dbf also arms the mirror fold that
+        // the next commit_write consumes, so do not call it without committing.
         virtual std::pair<const T*, std::size_t> read_dbf() = 0;
         virtual std::pair<T*, std::size_t> write_dbf() = 0;
         virtual std::size_t producer_thread_cumulative_write_count() const = 0;
@@ -112,6 +118,7 @@ namespace cler {
         }
         void commit_read(size_t count) override { _queue.commit_read(count); }
         void commit_write(size_t count) override { _queue.commit_write(count); }
+        void reset() override { _queue.reset(); }
 
         std::pair<const T*, std::size_t> read_dbf() override { return _queue.read_dbf(); }
         std::pair<T*, std::size_t> write_dbf() override { return _queue.write_dbf(); }
@@ -421,6 +428,7 @@ namespace cler {
 
         void run(const FlowGraphConfig& config = FlowGraphConfig{}) {
             _config = config;
+            _joined = false;
             _stop_flag.store(false, std::memory_order_release);
             
             
@@ -491,10 +499,20 @@ namespace cler {
             for (size_t i = 0; i < _active_task_count; ++i) {
                 TaskPolicy::join_task(_tasks[i]);
             }
+            _joined = true;
         }
 
         bool is_stopped() const {
             return _stop_flag.load(std::memory_order_acquire);
+        }
+
+        // Only between stop() and run(): a self-terminated graph still has
+        // workers unwinding until stop() joins them.
+        void reset() {
+            if (!_joined) TaskPolicy::fatal("FlowGraph::reset()", "called while workers are running; stop() first");
+            std::apply([](auto&... runners) {
+                (std::apply([](auto*... outs) { (outs->reset(), ...); }, runners.outputs), ...);
+            }, _runners);
         }
 
         const FlowGraphConfig& config() const { return _config; }
@@ -852,6 +870,7 @@ namespace cler {
         std::tuple<BlockRunners...> _runners;
         std::array<typename TaskPolicy::task_type, _N> _tasks;
         std::atomic<bool> _stop_flag{false};
+        bool _joined = true;
         FlowGraphConfig _config;
         std::array<BlockExecutionStats, _N> _stats;
         std::array<sched::detail::SchedulerCostSample, _N> _cost_samples;

@@ -25,7 +25,7 @@ embedded_examples/       baremetal, FreeRTOS, ThreadX, Zephyr
 tests/                   spsc-queue/, desktop_blocks/, scheduler/ (gtest)
 performance/             perf_* benchmarks; tools/cler_tools/ cler-validate,
                          cler-viz (Python)
-tools/flowgraph_gui/     GRC-style GUI (has its own AGENTS.md)
+tools/cler-fg/     GRC-style GUI (has its own AGENTS.md)
 ```
 
 ## Build
@@ -106,7 +106,12 @@ surfaces the shortfall next call.
 `Channel<float, 1024>` is stack/compile-time size; `Channel<float> ch(1024)`
 is heap/runtime size. Access methods ranked by measured performance:
 1. **`read_dbf`/`write_dbf`** — zero-copy, **the default**; mandatory for
-   hardware interfaces. Needs a heap channel ≥ `DOUBLY_MAPPED_MIN_SIZE` (4 KB);
+   hardware interfaces. The returned size is a **lower bound** (free space comes
+   from a cached index refreshed only once it reads zero), so a short span means
+   "ask again"; only a returned 0 is authoritative. A block writes what fits,
+   commits what it moved and returns — the scheduler calls back. Code at a
+   boundary holding samples from outside the graph (socket, device callback)
+   must loop instead, or it drops what the ring had room for. Needs a heap channel ≥ `DOUBLY_MAPPED_MIN_SIZE` (4 KB);
    otherwise asserts in debug, returns `{nullptr, 0}` in release. Where the OS
    cannot double-map (wasm; `-DCLER_DISABLE_DOUBLY_MAPPED` to force it) the
    channel falls back to a software mirror: same API, 3× memory, one copy at
@@ -129,8 +134,11 @@ Include `task_policies/cler_desktop_tpolicy.hpp`; wire with
 cler::BlockRunner(&gain, &sink.in), ...)`, then `fg.run(config)`/`fg.stop()`.
 
 - **ThreadPerBlock** (default): one thread per block; small graphs, debugging.
-- **FixedThreadPool**: fixed round-robin workers; needs `config.num_workers`
-  (min 2); suffers on imbalanced work.
+- **FixedThreadPool**: splits the blocks into contiguous chunks of declaration
+  order, one worker each, round-robin within a chunk; needs `config.num_workers`
+  (min 2). No cost balancing and no stealing, so a graph whose heavy blocks are
+  declared together pins them all on one worker — reorder the `BlockRunner`
+  arguments or use PinnedIslands.
 - **PinnedIslands**: contiguous topo-order islands, one pinned worker each;
   cost-calibrated, repartitions on drift, workers park when idle; best on
   core-constrained targets (real pinning only on Linux task policies).
@@ -170,16 +178,16 @@ cler-validate desktop_examples/*.cpp   # missing runners, bad connections
 cler-viz file.cpp -o output.svg
 ```
 
-**Flowgraph GUI**: read `tools/flowgraph_gui/AGENTS.md` before editing there.
+**Flowgraph GUI**: read `tools/cler-fg/AGENTS.md` before editing there.
 Product constraint: the GUI places existing blocks discovered from the library
 but must not offer a new-block wizard — new block types are authored in C++.
 Svelte 5 runes API only (`$state`, `$derived`, `$effect`, `$props`).
 
 **Browser builds**: desktop examples compile unmodified with Emscripten
 (`__EMSCRIPTEN__` branches in `gui_manager.cpp`: GLES3, `emscripten_sleep`
-yield, `-DImDrawIdx=unsigned int`); `tools/flowgraph_gui/web-build/build.sh`
+yield, `-DImDrawIdx=unsigned int`); `tools/wasm-demos/build.sh`
 builds liquid + GUI blocks into an archive and the bundled examples for
-`docs/cler-fg/try/run/`. Hardware blocks stay desktop-only.
+`docs/demos/run/`. Hardware blocks stay desktop-only.
 
 **Screenshots**: `GuiManager::request_screenshot(path)` grabs the next frame
 (prefer `.png`). `spike` exposes it: `./spike --capture /tmp/shots

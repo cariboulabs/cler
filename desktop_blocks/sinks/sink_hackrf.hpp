@@ -40,7 +40,8 @@ struct SinkHackRFBlock : public cler::BlockBase {
           _samp_rate_hz(samp_rate_hz),
           _txvga_gain_db(txvga_gain_db),
           _amp_enable(amp_enable),
-          _iq(2 * (buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size))
+          _iq(std::max<size_t>(2 * HACKRF_TRANSFER_BYTES,
+                               2 * (buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(std::complex<float>) : buffer_size)))
     {
         if (buffer_size > 0 && buffer_size * sizeof(std::complex<float>) < cler::DOUBLY_MAPPED_MIN_SIZE) {
             cler::panic("Buffer size too small for doubly-mapped buffers");
@@ -122,6 +123,10 @@ struct SinkHackRFBlock : public cler::BlockBase {
     void reset_underrun_count() { _underrun_count.store(0); }
 
 private:
+    // libhackrf's TX transfer size (TRANSFER_BUFFER_SIZE in hackrf.c, not exported).
+    // A smaller ring can never fill one transfer.
+    static constexpr size_t HACKRF_TRANSFER_BYTES = 262144;
+
     hackrf_device* _dev = nullptr;
     uint64_t _freq_hz;
     uint32_t _samp_rate_hz;
@@ -136,12 +141,15 @@ private:
         uint8_t* buf = transfer->buffer;
         const size_t bytes_needed = static_cast<size_t>(transfer->buffer_length);
 
-        auto [read_ptr, read_size] = self->_iq.read_dbf();
-        const size_t bytes_to_send = (read_ptr == nullptr) ? 0 : std::min(read_size, bytes_needed);
-
-        if (bytes_to_send > 0) {
-            std::memcpy(buf, read_ptr, bytes_to_send);
-            self->_iq.commit_read(bytes_to_send);
+        // read_dbf() reports a cached lower bound, so a device callback loops until a read returns 0.
+        size_t bytes_to_send = 0;
+        while (bytes_to_send < bytes_needed) {
+            auto [read_ptr, read_size] = self->_iq.read_dbf();
+            if (read_ptr == nullptr || read_size == 0) break;
+            const size_t n = std::min(read_size, bytes_needed - bytes_to_send);
+            std::memcpy(&buf[bytes_to_send], read_ptr, n);
+            self->_iq.commit_read(n);
+            bytes_to_send += n;
         }
 
         if (bytes_to_send < bytes_needed) {

@@ -1,0 +1,275 @@
+{
+  "sha256": "072f17e4e3a1e76b41b980200656a61ab7472f700cb588b1534be13a14b8e1bb",
+  "version": "0.3.0",
+  "file": "tools/cler-fg/cler-graph/tests/data/type_conflict.cpp",
+  "has_errors": false,
+  "errors": [],
+  "sites": [
+    {
+      "function": "main",
+      "call_offset": 1097,
+      "span": {
+        "start": 1097,
+        "end": 1317
+      },
+      "flowgraph_var": "flowgraph",
+      "blocks": [
+        {
+          "var": "ramp",
+          "type_text": "RampSourceBlock",
+          "type_name": "RampSourceBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"Ramp Source\"",
+              "span": {
+                "start": 896,
+                "end": 909
+              }
+            }
+          ],
+          "display_name": "Ramp Source",
+          "in_graph": true,
+          "span": {
+            "start": 875,
+            "end": 911
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "throttle",
+          "type_text": "ThrottleBlock<float>",
+          "type_name": "ThrottleBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "float",
+              "resolved": null,
+              "span": {
+                "start": 930,
+                "end": 935
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"Throttle\"",
+              "span": {
+                "start": 946,
+                "end": 956
+              }
+            },
+            {
+              "text": "1000",
+              "span": {
+                "start": 958,
+                "end": 962
+              }
+            }
+          ],
+          "display_name": "Throttle",
+          "in_graph": true,
+          "span": {
+            "start": 916,
+            "end": 964
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "throughput",
+          "type_text": "ThroughputBlock<std::complex<float>>",
+          "type_name": "ThroughputBlock",
+          "alias": null,
+          "template_args": [
+            {
+              "text": "std::complex<float>",
+              "resolved": null,
+              "span": {
+                "start": 985,
+                "end": 1004
+              }
+            }
+          ],
+          "ctor_args": [
+            {
+              "text": "\"Throughput\"",
+              "span": {
+                "start": 1017,
+                "end": 1029
+              }
+            }
+          ],
+          "display_name": "Throughput",
+          "in_graph": true,
+          "span": {
+            "start": 969,
+            "end": 1031
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "var": "sink",
+          "type_text": "ComplexSinkBlock",
+          "type_name": "ComplexSinkBlock",
+          "alias": null,
+          "template_args": [],
+          "ctor_args": [
+            {
+              "text": "\"Complex Sink\"",
+              "span": {
+                "start": 1058,
+                "end": 1072
+              }
+            }
+          ],
+          "display_name": "Complex Sink",
+          "in_graph": true,
+          "span": {
+            "start": 1036,
+            "end": 1074
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "runners": [
+        {
+          "index": 0,
+          "block": "ramp",
+          "block_expr": "&ramp",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 1135,
+            "end": 1173
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 1,
+          "block": "throttle",
+          "block_expr": "&throttle",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 1183,
+            "end": 1227
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 2,
+          "block": "throughput",
+          "block_expr": "&throughput",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 1237,
+            "end": 1277
+          },
+          "editable": true,
+          "read_only_reason": null
+        },
+        {
+          "index": 3,
+          "block": "sink",
+          "block_expr": "&sink",
+          "may_block": false,
+          "form": "inline",
+          "span": {
+            "start": 1287,
+            "end": 1311
+          },
+          "editable": true,
+          "read_only_reason": null
+        }
+      ],
+      "edges": [
+        {
+          "from": "ramp",
+          "to": "throttle",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 0,
+          "arg_index": 1,
+          "text": "&throttle.in",
+          "span": {
+            "start": 1160,
+            "end": 1172
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "float",
+          "source_type": "float",
+          "type_conflict": false
+        },
+        {
+          "from": "throttle",
+          "to": "throughput",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 1,
+          "arg_index": 1,
+          "text": "&throughput.in",
+          "span": {
+            "start": 1212,
+            "end": 1226
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "float",
+          "type_conflict": true
+        },
+        {
+          "from": "throughput",
+          "to": "sink",
+          "port": {
+            "name": "in",
+            "index": null,
+            "kind": "field"
+          },
+          "runner_index": 2,
+          "arg_index": 1,
+          "text": "&sink.in",
+          "span": {
+            "start": 1268,
+            "end": 1276
+          },
+          "editable": true,
+          "read_only_reason": null,
+          "sample_type": "std::complex<float>",
+          "source_type": "std::complex<float>",
+          "type_conflict": false
+        }
+      ],
+      "config": {
+        "var": null,
+        "source": "absent",
+        "assignments": [],
+        "run_call_span": {
+          "start": 1324,
+          "end": 1339
+        },
+        "editable": true,
+        "read_only_reason": null
+      },
+      "gui": null,
+      "unresolved": [],
+      "editable": true,
+      "read_only_reason": null
+    }
+  ]
+}

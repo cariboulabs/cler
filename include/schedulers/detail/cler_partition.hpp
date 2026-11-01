@@ -207,6 +207,10 @@ namespace cler {
             std::array<size_t, MaxBlocksParam> block_owner;
 
         public:
+            size_t worker_block_count(size_t worker) const {
+                return worker < MaxWorkers ? queues[worker].count : 0;
+            }
+
             void initialize(const block_index_t* block_ids, size_t block_id_count, size_t workers) {
                 for (auto& q : queues) {
                     q.count = 0;

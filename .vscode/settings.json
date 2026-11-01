@@ -1,0 +1,4 @@
+{
+  "cmake.generator": "Unix Makefiles",
+  "cmake.buildDirectory": "${workspaceFolder}/build-vscode"
+}

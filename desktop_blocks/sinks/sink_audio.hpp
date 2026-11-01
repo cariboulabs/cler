@@ -28,18 +28,29 @@ struct SinkAudioBlock : public cler::BlockBase {
     static constexpr bool may_block = true;
     cler::Channel<float> in;
 
+    // channels > 1 expects interleaved frames on `in` (L,R,L,R,... for stereo).
+    // latency_s sizes the device buffer (0 = device default, ~35 ms); a bursty
+    // upstream (SDR USB transfers) needs a few hundred ms or every gap
+    // underflows and the restart penalty drags the sink below real time.
     SinkAudioBlock(const char* name,
                    double sample_rate = 48000.0,
                    int device_index = paNoDevice,
-                   size_t buffer_size = 0)
+                   size_t buffer_size = 0,
+                   int channels = 1,
+                   double latency_s = 0.0)
         : cler::BlockBase(name),
           in(buffer_size == 0 ? cler::DOUBLY_MAPPED_MIN_SIZE / sizeof(float) : buffer_size),
           _sample_rate(sample_rate),
           _device_index(device_index),
+          _channels(channels),
+          _latency_s(latency_s),
           _stream(nullptr)
     {
         if (sample_rate <= 0.0 || sample_rate > 1e6) {
             cler::panic("Invalid sample rate: must be > 0 and <= 1MHz");
+        }
+        if (channels < 1 || channels > 8) {
+            cler::panic("Invalid channel count: must be 1..8");
         }
 
         if (buffer_size > 0 && buffer_size * sizeof(float) < cler::DOUBLY_MAPPED_MIN_SIZE) {
@@ -69,11 +80,12 @@ struct SinkAudioBlock : public cler::BlockBase {
         }
 
         auto [read_ptr, read_size] = in.read_dbf();
+        read_size -= read_size % static_cast<size_t>(_channels);
         if (read_size == 0) {
             return cler::Error::NotEnoughSamples;
         }
 
-        PaError err = Pa_WriteStream(_stream, read_ptr, read_size);
+        PaError err = Pa_WriteStream(_stream, read_ptr, read_size / static_cast<size_t>(_channels));
 
         if (err == paOutputUnderflowed) {
             in.commit_read(read_size);
@@ -114,6 +126,8 @@ struct SinkAudioBlock : public cler::BlockBase {
 private:
     double _sample_rate;
     int _device_index;
+    int _channels;
+    double _latency_s;
     PaStream* _stream;
 
     void _open_stream() {
@@ -130,9 +144,9 @@ private:
             cler::panic("Pa_GetDeviceInfo() failed for output device");
         }
 
-        output_params.channelCount = 1;
+        output_params.channelCount = _channels;
         output_params.sampleFormat = paFloat32;
-        output_params.suggestedLatency = device_info->defaultHighOutputLatency;
+        output_params.suggestedLatency = _latency_s > 0.0 ? _latency_s : device_info->defaultHighOutputLatency;
         output_params.hostApiSpecificStreamInfo = nullptr;
 
         PaError err = Pa_OpenStream(

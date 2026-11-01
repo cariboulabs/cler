@@ -59,6 +59,15 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
     bool export_spectrum(size_t channel, std::vector<float>& freq_hz,
                          std::vector<float>& mag_db) const;
 
+    // GUI-THREAD-ONLY: a double-click on the plot leaves its baseband
+    // frequency here until taken (tune-by-click for receiver panels).
+    bool take_click(double& baseband_hz) {
+        if (!_click_pending) return false;
+        _click_pending = false;
+        baseband_hz = _click_hz;
+        return true;
+    }
+
 private:
     void next_window_geometry();   // SetNextWindowPos/Size before Begin()
 
@@ -70,8 +79,6 @@ private:
     size_t _n_fft_samples;
     size_t _buffer_size;
     SpectralWindow _window_type;
-
-    cler::Channel<std::complex<float>>* _signal_channels;
 
     std::aligned_storage_t<sizeof(cler::Channel<std::complex<float>>), alignof(cler::Channel<std::complex<float>>)> _in_storage[MAX_INPUT_CHANNEL_SLOTS];
 
@@ -97,6 +104,8 @@ private:
 
     // One-shot X-axis re-fit after set_sample_rate() (GUI thread only).
     bool   _axis_refit = false;
+    bool   _click_pending = false;
+    double _click_hz = 0.0;
 
     std::mutex _snapshot_mutex;
     size_t _snapshot_ready_size = 0;

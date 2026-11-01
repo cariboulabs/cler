@@ -99,11 +99,13 @@ public:
           const std::size_t buffer_bytes = requested_capacity * sizeof(T);
           
           // If DBF is possible, align capacity to page boundary
-          if (cler::platform::supports_doubly_mapped_buffers() && 
+          if (cler::platform::supports_doubly_mapped_buffers() &&
               buffer_bytes >= DOUBLY_MAPPED_MIN_SIZE) {
             const std::size_t page_size = cler::platform::get_page_size();
             const std::size_t aligned_bytes = ((buffer_bytes + page_size - 1) / page_size) * page_size;
-            return aligned_bytes / sizeof(T);  // Return page-aligned capacity
+            if (aligned_bytes % sizeof(T) == 0) {
+              return aligned_bytes / sizeof(T);  // Return page-aligned capacity
+            }
           }
           return requested_capacity;  // Return regular capacity
         }()),
@@ -116,8 +118,9 @@ public:
     const std::size_t buffer_bytes = capacity_ * sizeof(T);
     
     // Try doubly mapped allocation for buffers ≥32KB (typical SDR buffer size)
-    if (cler::platform::supports_doubly_mapped_buffers() && 
-        buffer_bytes >= DOUBLY_MAPPED_MIN_SIZE) {
+    if (cler::platform::supports_doubly_mapped_buffers() &&
+        buffer_bytes >= DOUBLY_MAPPED_MIN_SIZE &&
+        buffer_bytes % cler::platform::get_page_size() == 0) {
       
       // capacity_ is already page-aligned from the lambda above
       if (vmem_allocation_.create(buffer_bytes)) {
@@ -383,6 +386,15 @@ public:
     return true;
   }
 
+  // Drops everything queued. Only when neither side is running.
+  void reset() noexcept {
+    const auto writeIndex = writer_.writeIndex_.load(std::memory_order_acquire);
+    reader_.readIndex_.store(writeIndex, std::memory_order_release);
+    reader_.writeIndexCache_ = writeIndex;
+    reader_.dbfLastReadIndex_ = writeIndex;
+    writer_.readIndexCache_ = writeIndex;
+  }
+
   [[nodiscard]] std::size_t size() const noexcept {
     const auto writeIndex = writer_.writeIndex_.load(std::memory_order_acquire);
     const auto readIndex = reader_.readIndex_.load(std::memory_order_acquire);
@@ -593,6 +605,9 @@ public:
         std::memory_order_relaxed);
   }
 
+  // Mirror of write_dbf: the size is a lower bound on what is readable, taken from
+  // a cached writer index that refreshes only when the bound reaches zero. A short
+  // span is not "the producer stopped"; only a returned 0 is authoritative.
   std::pair<const T*, std::size_t> read_dbf() noexcept {
       if constexpr (N == 0) {
           if (base_type::is_doubly_mapped_ || base_type::is_mirrored_) {
@@ -654,6 +669,11 @@ public:
       writer_.cumulativeWriteCount_ += count;
   }
 
+  // The size is a lower bound: free space is computed from a cached reader index
+  // that is refreshed only once the bound reaches zero, so a short span means "ask
+  // again", never "the ring is full". Only a returned 0 is authoritative. A block
+  // returns NotEnoughSpace and the scheduler calls back; a boundary writer holding
+  // samples from outside the graph must loop, or it drops what the ring had room for.
   std::pair<T*, std::size_t> write_dbf() noexcept {
       if constexpr (N == 0) {
           if (base_type::is_doubly_mapped_ || base_type::is_mirrored_) {

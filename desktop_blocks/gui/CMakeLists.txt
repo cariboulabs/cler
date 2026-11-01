@@ -70,8 +70,10 @@ target_link_libraries(blocks_gui PUBLIC
   ${GLFW_LIBRARIES}
   OpenGL::GL
   Threads::Threads
-  X11
 )
+if (UNIX AND NOT APPLE)
+  target_link_libraries(blocks_gui PUBLIC X11)
+endif()
 
 # Add GLFW library directories for systems like macOS
 target_link_directories(blocks_gui PUBLIC ${GLFW_LIBRARY_DIRS})

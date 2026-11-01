@@ -20,22 +20,34 @@ if (CLER_BUILD_BLOCKS_LIQUID)
   # Always fetch liquid-dsp from GitHub to ensure we have all source files
   message(STATUS "Fetching liquid-dsp from GitHub...")
 
-  set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/_deps")
   set(BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
   set(BUILD_AUTOTESTS  OFF CACHE BOOL "" FORCE)
   set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 
   FetchContent_Declare(liquid
     GIT_REPOSITORY https://github.com/jgaeddert/liquid-dsp
-    GIT_TAG        master
+    # pinned: unpinned master made CI results change between runs
+    GIT_TAG        03d052b89b543e6d5f9a882139ba19f7683bcd29
     GIT_SHALLOW    TRUE
     GIT_PROGRESS   TRUE
   )
+  # liquid writes the configure time into liquid.config.h, which all its sources
+  # include, so every re-configure recompiled all of liquid. string(TIMESTAMP)
+  # honours SOURCE_DATE_EPOCH, pinned for liquid's configure only; ENABLE_TIMESTAMPS
+  # OFF keeps that fixed date out of the library.
+  set(ENABLE_TIMESTAMPS OFF CACHE BOOL "" FORCE)
+  set(_cler_source_date_epoch "$ENV{SOURCE_DATE_EPOCH}")
+  set(ENV{SOURCE_DATE_EPOCH} 0)
   FetchContent_MakeAvailable(liquid)
+  set(ENV{SOURCE_DATE_EPOCH} "${_cler_source_date_epoch}")
 
   add_library(blocks_liquid INTERFACE)
   add_library(cler::blocks_liquid ALIAS blocks_liquid)
-  target_link_libraries(blocks_liquid INTERFACE cler::blocks_core liquid)
+  if(TARGET liquid)
+    target_link_libraries(blocks_liquid INTERFACE cler::blocks_core liquid)
+  else()
+    target_link_libraries(blocks_liquid INTERFACE cler::blocks_core liquid-static)
+  endif()
 endif()
 
 #so any block that wants can use this..
@@ -67,23 +79,60 @@ else()
   message(STATUS "Skipping GUI blocks because CLER_BUILD_BLOCKS_GUI is OFF")
 endif()
 
+add_subdirectory(sigmf)
+target_link_libraries(cler_desktop_blocks INTERFACE
+  cler::blocks_sigmf
+)
+
 add_subdirectory(udp)
 target_link_libraries(cler_desktop_blocks INTERFACE
   cler::blocks_udp
 )
+
+if (CLER_BUILD_BLOCKS_WEB)
+  add_subdirectory(web)
+endif()
 
 if (CLER_BUILD_BLOCKS_LIQUID)
   add_subdirectory(ezgmsk)
   target_link_libraries(cler_desktop_blocks INTERFACE
     cler::blocks_ezgmsk)
 
+  add_subdirectory(fec)
+  target_link_libraries(cler_desktop_blocks INTERFACE
+    cler::blocks_fec)
+
   add_subdirectory(fm)
   target_link_libraries(cler_desktop_blocks INTERFACE
     cler::blocks_fm)
 
+  add_subdirectory(demod)
+  target_link_libraries(cler_desktop_blocks INTERFACE
+    cler::blocks_demod)
+
+  add_subdirectory(ais)
+  target_link_libraries(cler_desktop_blocks INTERFACE
+    cler::blocks_ais)
+  if (CLER_BUILD_BLOCKS_GUI)
+    target_link_libraries(cler_desktop_blocks INTERFACE
+      cler::blocks_ais_map)
+  endif()
+
+  add_subdirectory(aprs)
+  target_link_libraries(cler_desktop_blocks INTERFACE
+    cler::blocks_aprs)
+  if (CLER_BUILD_BLOCKS_GUI)
+    target_link_libraries(cler_desktop_blocks INTERFACE
+      cler::blocks_aprs_map)
+  endif()
+
   add_subdirectory(filters)
   target_link_libraries(cler_desktop_blocks INTERFACE
     cler::blocks_filters)
+
+  add_subdirectory(linear_modem)
+  target_link_libraries(cler_desktop_blocks INTERFACE
+    cler::blocks_linear_modem)
 endif()
 
 if (CLER_BUILD_BLOCKS_GUI)

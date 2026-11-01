@@ -35,6 +35,9 @@ target_link_libraries(may_block_test
 )
 
 add_test(NAME may_block_test COMMAND may_block_test)
+# needs 3 threads of its own; sharing a 4-vCPU CI runner with 3 other ctest jobs
+# starved a whole worker partition and made the throughput asserts flaky
+set_tests_properties(may_block_test PROPERTIES RUN_SERIAL TRUE)
 
 add_executable(pinned_islands_test
     test_pinned_islands.cpp

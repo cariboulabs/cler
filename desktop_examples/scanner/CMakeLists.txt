@@ -1,0 +1,6 @@
+if (CLER_BUILD_BLOCKS_GUI AND CLER_BUILD_BLOCKS_LIQUID AND HACKRF_FOUND AND PORTAUDIO_FOUND)
+    add_executable(scanner scanner.cpp)
+    target_link_libraries(scanner PRIVATE cler::desktop_blocks)
+else()
+    message(STATUS "Skipping scanner example (needs GUI + liquid + HackRF + PortAudio)")
+endif()

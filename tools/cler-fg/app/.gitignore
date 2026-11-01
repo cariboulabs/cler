@@ -1,0 +1,8 @@
+node_modules
+/dist
+.env
+.env.*
+vite.config.ts.timestamp-*
+src/wasm/*.wasm
+
+public/payload/
