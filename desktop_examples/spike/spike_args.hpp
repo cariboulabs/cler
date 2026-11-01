@@ -17,6 +17,8 @@ struct SpikeArgs {
     size_t fft  = 2048;
     double history_s = 0.0;
     bool   rate_from_cli = false;
+    bool   freq_from_cli = false;
+    bool   gain_from_cli = false;
     std::string device_address;
     std::string calibration;
 
@@ -33,10 +35,12 @@ static void print_usage(const char* prog) {
     std::cout << "\nSlim Spike-like analyzer for USRP / HackRF / Pluto\n"
               << "Usage: " << prog << " [OPTIONS]\n"
               << "  -s, --source DEV  Device source: uhd|hackrf|pluto (default uhd)\n"
-              << "  -f, --freq FREQ   Center frequency Hz (default 915e6)\n"
+              << "  -f, --freq FREQ   Center frequency Hz (default 915e6; if given, overrides\n"
+              << "                    the saved center)\n"
               << "  -r, --rate RATE   Initial sample rate S/s (default 1e6; live-tunable\n"
               << "                    in the GUI; if given, overrides the saved rate)\n"
-              << "  -g, --gain GAIN   [uhd/pluto] Gain dB (default 30; pluto applies it\n"
+              << "  -g, --gain GAIN   [uhd/pluto] Gain dB (default 30; if given, overrides the\n"
+              << "                    saved gain; pluto applies it\n"
               << "                    at start only, <0 selects AGC)\n"
               << "      --lna  DB     [hackrf] LNA gain dB, 0-40 step 8 (default 40)\n"
               << "      --vga  DB     [hackrf] VGA gain dB, 0-62 step 2 (default 16)\n"
@@ -89,9 +93,9 @@ static SpikeArgs parse_args(int argc, char** argv) {
             else if (v == "pluto")         a.source = SourceKind::Pluto;
             else { std::cerr << "Unknown source: " << v << " (want uhd|hackrf|pluto)\n"; exit(1); }
         }
-        else if (arg == "-f" || arg == "--freq") a.freq = std::stod(next());
+        else if (arg == "-f" || arg == "--freq") { a.freq = std::stod(next()); a.freq_from_cli = true; }
         else if (arg == "-r" || arg == "--rate") { a.rate = std::stod(next()); a.rate_from_cli = true; }
-        else if (arg == "-g" || arg == "--gain") a.gain = std::stod(next());
+        else if (arg == "-g" || arg == "--gain") { a.gain = std::stod(next()); a.gain_from_cli = true; }
         else if (arg == "--lna") a.lna = std::stoi(next());
         else if (arg == "--vga") a.vga = std::stoi(next());
         else if (arg == "--amp") a.amp = (std::stoi(next()) != 0);

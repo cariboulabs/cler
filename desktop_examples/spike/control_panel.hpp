@@ -59,6 +59,8 @@ struct ControlPanel : public cler::BlockBase {
           _rate_hz(a.rate),
           _rate_msps(static_cast<float>(a.rate / 1e6)),
           _rate_from_cli(a.rate_from_cli),
+          _freq_from_cli(a.freq_from_cli),
+          _gain_from_cli(a.gain_from_cli),
           _n_fft(a.fft),
           _sgram_rows(sgram_rows),
           _zs_bw_mhz(static_cast<float>(a.rate / 1e6)),   // full rate = bypass
@@ -531,8 +533,8 @@ struct ControlPanel : public cler::BlockBase {
         if (!f) return false;
         std::string key;
         while (f >> key) {
-            if      (key == "freq_mhz")       f >> _freq_mhz;
-            else if (key == "gain_db")        f >> _gain_db;
+            if      (key == "freq_mhz")       { float saved; f >> saved; if (!_freq_from_cli) _freq_mhz = saved; }
+            else if (key == "gain_db")        { float saved; f >> saved; if (!_gain_from_cli) _gain_db = saved; }
             else if (key == "lna_gain_db")    f >> _lna_db;
             else if (key == "vga_gain_db")    f >> _vga_db;
             else if (key == "amp_enable")     f >> _amp_enable;
@@ -787,6 +789,8 @@ private:
     float  _rate_msps;              // rate widget value (MS/s), follows _rate_hz
     double _loaded_rate_hz = 0.0;   // conf key rate_hz (0 = not present)
     bool   _rate_from_cli;          // -r given explicitly: overrides saved rate_hz
+    bool   _freq_from_cli;
+    bool   _gain_from_cli;
     size_t _n_fft;
     size_t _sgram_rows;
     float  _history_s = 0.0f;               // waterfall depth (s); seeds spectrogram in apply_all()
