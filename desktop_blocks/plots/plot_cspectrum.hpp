@@ -6,6 +6,7 @@
 #include "imgui.h"
 #include <vector>
 #include <mutex>
+#include <string>
 #include <vector>
 #include <type_traits>
 
@@ -41,6 +42,12 @@ struct PlotCSpectrumBlock : public cler::BlockBase {
     }
 
     void set_visible(bool visible) { _visible = visible; }
+
+    // GUI-THREAD-ONLY: absolute RF center, so the marker reads out in RF MHz.
+    void set_center_freq_hz(double hz) { _center_hz = hz; }
+
+    // GUI-THREAD-ONLY: level unit shown on the axis and marker ("dB", "dBm").
+    void set_level_unit(const char* unit);
 
     // GUI-THREAD-ONLY: retunes the frequency axis and requests a one-shot
     // X-axis re-fit on the next render(). procedure() never reads _sps.
@@ -99,4 +106,10 @@ private:
     std::atomic<bool> _external_pause{false};
 
     bool _visible = true;
+
+    bool        _marker_on = false;
+    double      _marker_hz = 0.0;
+    double      _center_hz = 0.0;
+    std::string _level_unit = "dB";
+    std::string _level_axis_label = "Magnitude [dB]";
 };

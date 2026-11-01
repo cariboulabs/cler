@@ -13,6 +13,7 @@
 #include "control_panel.hpp"
 #include "snapshot.hpp"
 #include "capture.hpp"
+#include "calibration.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -43,7 +44,21 @@ static int run_app(SpikeArgs& args) {
                             args.device_address, args.gain,
                             args.lna, args.vga, args.amp);
     args.rate = source.actual_sample_rate();
-    ISource& src_if = source;
+
+    std::optional<RxCalibration> calibration;
+    if (!args.calibration.empty()) {
+        if (args.source != SourceKind::UHD) {
+            std::cerr << "Error: --cal is only measured for the USRP (uhd source)\n";
+            return 1;
+        }
+        calibration = RxCalibration::load(args.calibration);
+        if (!calibration) return 1;
+        std::cout << "Levels in dBm at RX2, calibration " << calibration->path << std::endl;
+    }
+    CalibrationScaleBlock scale("Calibration");
+    std::optional<CalibratedSource> calibrated;
+    if (calibration) calibrated.emplace(source, scale, *calibration);
+    ISource& src_if = calibrated ? static_cast<ISource&>(*calibrated) : static_cast<ISource&>(source);
 
     FanoutBlock<std::complex<float>> fanout("Fanout", 4);
     PowerDetectorBlock<std::complex<float>> power("PowerDetector", -120.0f);
@@ -60,6 +75,7 @@ static int run_app(SpikeArgs& args) {
                  /*max_window_ms*/5000.0f);
 
     PlotCSpectrumBlock spectrum("Spectrum", {"I/Q"}, static_cast<size_t>(args.rate), args.fft);
+    if (calibration) spectrum.set_level_unit("dBm");
 
     // Drains its whole input each call so it never stalls the shared fanout (min-space commit); paused via set_active() while hidden.
     //
@@ -111,7 +127,8 @@ static int run_app(SpikeArgs& args) {
     // Trigger is a sink: renders its own capture (oscilloscope-style), no downstream channel.
     auto flowgraph = cler::make_desktop_flowgraph(
         cler::BlockRunner(&panel),
-        cler::BlockRunner(&source,  &fanout.in),
+        cler::BlockRunner(&source,  &scale.in),
+        cler::BlockRunner(&scale,   &fanout.in),
         cler::BlockRunner(&fanout,  &power.in, &spectrum.in[0], &spectrogram.in[0],
                                     &channelizer.in),
         cler::BlockRunner(&power,   &trigger.in),

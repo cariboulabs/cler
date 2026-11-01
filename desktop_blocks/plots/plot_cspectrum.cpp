@@ -1,4 +1,5 @@
 #include "plot_cspectrum.hpp"
+#include <algorithm>
 #include "cler_desktop_utils.hpp"
 #include "implot.h"
 
@@ -217,9 +218,21 @@ void PlotCSpectrumBlock::render() {
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Averaging: 0=frozen, 0.3=heavy, 0.7=light, 1=none");
     }
+    ImGui::SameLine();
+    ImGui::Checkbox("Marker", &_marker_on);
+    if (_marker_on) {
+        ImGui::SameLine();
+        if (ImGui::Button("Peak") && !_first_spectrum) {
+            size_t peak_bin = std::max_element(_spectrum_avg[0], _spectrum_avg[0] + _n_fft_samples) - _spectrum_avg[0];
+            _marker_hz = _freq_bins[peak_bin];
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Move the marker to the highest bin of the averaged spectrum (drag it by hand otherwise)");
+        }
+    }
 
     if (ImPlot::BeginPlot(name())) {
-        ImPlot::SetupAxes("Frequency [Hz]", "Magnitude [dB]");
+        ImPlot::SetupAxes("Frequency [Hz]", _level_axis_label.c_str());
         // One-shot re-fit after a sample-rate change (SetupAxes alone keeps
         // the old limits).
         if (_axis_refit) {
@@ -273,10 +286,27 @@ void PlotCSpectrumBlock::render() {
                              _spectrum_avg[i],
                              static_cast<int>(_n_fft_samples));
         }
+        if (_marker_on) {
+            const ImVec4 marker_color(1.0f, 0.85f, 0.0f, 1.0f);
+            ImPlot::DragLineX(0, &_marker_hz, marker_color);
+            const double half_span = static_cast<double>(_sps) / 2.0;
+            _marker_hz = std::min(std::max(_marker_hz, -half_span), half_span - 1.0);
+            const size_t bin = static_cast<size_t>((_marker_hz + half_span) / static_cast<double>(_sps) * static_cast<double>(_n_fft_samples));
+            const double level = _spectrum_avg[0][std::min(bin, _n_fft_samples - 1)];
+            const double rf_mhz = (_center_hz + _marker_hz) / 1e6;
+            ImPlot::PlotScatter("##marker", &_marker_hz, &level, 1);
+            ImPlot::Annotation(_marker_hz, level, marker_color, ImVec2(10, -10), true,
+                               "%.4f MHz\n%.1f %s", rf_mhz, level, _level_unit.c_str());
+        }
         ImPlot::EndPlot();
     }
 
     ImGui::End();
+}
+
+void PlotCSpectrumBlock::set_level_unit(const char* unit) {
+    _level_unit = unit;
+    _level_axis_label = std::string("Magnitude [") + unit + "]";
 }
 
 void PlotCSpectrumBlock::set_sample_rate(size_t sps) {

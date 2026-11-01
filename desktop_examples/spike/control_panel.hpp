@@ -645,6 +645,7 @@ private:
     void push_radio_config() {
         // current rate: UHD skips this no-op, HackRF ignores rate entirely
         _src->request_configure(make_config(_rate_hz));
+        _spectrum->set_center_freq_hz(static_cast<double>(_freq_mhz) * 1e6);
     }
 
     // Stages a new rate onto the source's streaming thread; render()'s poll picks up the actual result. (UHD only)

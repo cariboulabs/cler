@@ -18,6 +18,7 @@ struct SpikeArgs {
     double history_s = 0.0;
     bool   rate_from_cli = false;
     std::string device_address;
+    std::string calibration;
 
     std::string capture_dir;
     int    capture_frames    = 1;
@@ -45,6 +46,9 @@ static void print_usage(const char* prog) {
               << "                    spectrogram ring; default ~4.1s at 1MS/s. Lower this\n"
               << "                    to reach a shorter history, e.g. --history 1)\n"
               << "  -d, --dev  ADDR   [uhd] USRP device address (default auto)\n"
+              << "      --cal  PATH   [uhd] RX calibration .tsv from robin-sw usrp_cal.py, or a\n"
+              << "                    directory holding them (newest wins); all levels then\n"
+              << "                    read dBm at the RX2 connector instead of dBFS\n"
               << "                    [pluto] IIO uri (default ip:192.168.2.1)\n"
               << "  -h, --help\n"
               << "\nUnattended capture (for scripts / agents; needs a display):\n"
@@ -94,6 +98,7 @@ static SpikeArgs parse_args(int argc, char** argv) {
         else if (arg == "-F" || arg == "--fft")  a.fft  = std::stoul(next());
         else if (arg == "-H" || arg == "--history") a.history_s = std::stod(next());
         else if (arg == "-d" || arg == "--dev" || arg == "--device") a.device_address = next();
+        else if (arg == "--cal") a.calibration = next();
         else if (arg == "--capture") a.capture_dir = next();
         else if (arg == "--capture-on-trigger") a.capture_frames = std::stoi(next());
         else if (arg == "--capture-timeout") a.capture_timeout_s = std::stod(next());
