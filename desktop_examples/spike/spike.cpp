@@ -22,6 +22,8 @@
 using Trig = TriggerBlock<float>;
 using PowerDet = PowerDetectorBlock<std::complex<float>>;
 
+static constexpr const char* CALIBRATED_RX_ANTENNA = "RX2";
+
 static const char* window_title_for(SourceKind kind) {
     switch (kind) {
         case SourceKind::HackRF: return "CLER Spike - HackRF";
@@ -45,6 +47,16 @@ static int run_app(SpikeArgs& args) {
                             args.lna, args.vga, args.amp);
     args.rate = source.actual_sample_rate();
 
+    if (!args.rx_antenna.empty()) {
+        std::string why = source.select_rx_antenna(args.rx_antenna);
+        if (!why.empty()) {
+            std::cerr << "Error: " << why << "\n";
+            return 1;
+        }
+    }
+    if (args.source == SourceKind::UHD)
+        std::cout << "USRP RX antenna: " << source.rx_antenna() << std::endl;
+
     std::optional<RxCalibration> calibration;
     if (!args.calibration.empty()) {
         if (args.source != SourceKind::UHD) {
@@ -54,6 +66,9 @@ static int run_app(SpikeArgs& args) {
         calibration = RxCalibration::load(args.calibration);
         if (!calibration) return 1;
         std::cout << "Levels in dBm at RX2, calibration " << calibration->path << std::endl;
+        if (source.rx_antenna() != CALIBRATED_RX_ANTENNA)
+            std::cerr << "Warning: levels on " << source.rx_antenna()
+                      << " are not calibrated (offset from RX2 cal, approximate)\n";
     }
     CalibrationScaleBlock scale("Calibration");
     std::optional<CalibratedSource> calibrated;

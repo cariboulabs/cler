@@ -6,6 +6,7 @@
 #include <string>
 #include <type_traits>
 #include <variant>
+#include <vector>
 
 #include "cler.hpp"
 #include "cler_desktop_utils.hpp"
@@ -205,6 +206,30 @@ struct SpikeSourceBlock : public cler::BlockBase, public ISource {
                 return src.get_overflow_count();
             }
         }, _source);
+    }
+
+    std::string select_rx_antenna(const std::string& antenna) {
+#ifdef SPIKE_HAVE_UHD
+        if (auto* uhd = std::get_if<UHDSource>(&_source)) {
+            const std::vector<std::string> antennas = uhd->rx_antennas();
+            if (std::find(antennas.begin(), antennas.end(), antenna) == antennas.end()) {
+                std::string available;
+                for (const std::string& name : antennas) available += " " + name;
+                return "usrp has no rx antenna " + antenna + " (has:" + available + ")";
+            }
+            uhd->set_rx_antenna(antenna);
+            return {};
+        }
+#endif
+        (void)antenna;
+        return "--antenna is only for the USRP (uhd source)";
+    }
+
+    std::string rx_antenna() const {
+#ifdef SPIKE_HAVE_UHD
+        if (const auto* uhd = std::get_if<UHDSource>(&_source)) return uhd->rx_antenna();
+#endif
+        return {};
     }
 
     SourceKind kind() const override {

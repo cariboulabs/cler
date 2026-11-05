@@ -21,6 +21,7 @@ struct SpikeArgs {
     bool   gain_from_cli = false;
     std::string device_address;
     std::string calibration;
+    std::string rx_antenna;
     SourceLimits limits;
 
     std::string capture_dir;
@@ -66,9 +67,11 @@ static void print_usage(const char* prog) {
               << "  -d, --dev  ADDR   [uhd] USRP device address (default auto)\n"
               << "      --cal  PATH   [uhd] RX calibration .tsv from robin-sw usrp_cal.py, or a\n"
               << "                    directory holding them (newest wins); all levels then\n"
-              << "                    read dBm at the RX2 connector instead of dBFS\n"
+              << "                    read dBm at the RX2 connector instead of dBFS;\n"
+              << "                    valid for RX2 only\n"
               << "                    [pluto] IIO uri (default ip:192.168.2.1)\n"
               << "                    [hackrf] serial (default first device found)\n"
+              << "      --antenna NAME [uhd] RX antenna, e.g. TX/RX or RX2 (default RX2)\n"
               << "  -h, --help\n"
               << "\nUnattended capture (for scripts / agents; needs a display):\n"
               << "      --capture DIR      Snapshot automatically into DIR (created if\n"
@@ -118,6 +121,7 @@ static SpikeArgs parse_args(int argc, char** argv) {
         else if (arg == "-H" || arg == "--history") a.history_s = std::stod(next());
         else if (arg == "-d" || arg == "--dev" || arg == "--device") a.device_address = next();
         else if (arg == "--cal") a.calibration = next();
+        else if (arg == "--antenna") a.rx_antenna = next();
         else if (arg == "--capture") a.capture_dir = next();
         else if (arg == "--capture-on-trigger") a.capture_frames = std::stoi(next());
         else if (arg == "--capture-timeout") a.capture_timeout_s = std::stod(next());
