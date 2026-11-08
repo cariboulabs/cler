@@ -83,7 +83,8 @@ struct SourcePlutoBlock : public cler::BlockBase {
                      double gain_db = -1.0,    // <0 => AGC (agc_mode), >=0 => manual gain
                      long long bandwidth_hz = 0, // 0 => same as sample rate
                      size_t buffer_size = 1 << 14,
-                     PlutoAgcMode agc_mode = PlutoAgcMode::FastAttack)
+                     PlutoAgcMode agc_mode = PlutoAgcMode::FastAttack,
+                     int rx_channel = 0)       // 0 => RX1, 1 => RX2 (2r2t only)
         : cler::BlockBase(name),
           _freq_hz(freq_hz),
           _samp_rate_hz(samp_rate_hz),
@@ -106,8 +107,13 @@ struct SourcePlutoBlock : public cler::BlockBase {
 
         // RX LO frequency lives on output channel altvoltage0 of the phy
         iio_channel* lo = iio_device_find_channel(phy, "altvoltage0", true);
-        // RX chain config lives on input channel voltage0 of the phy
-        iio_channel* chn = iio_device_find_channel(phy, "voltage0", false);
+        if (rx_channel != 0 && rx_channel != 1) {
+            iio_context_destroy(_ctx);
+            cler::panic("Pluto: rx_channel must be 0 (RX1) or 1 (RX2)");
+        }
+        // RX chain config of RXn lives on input channel voltage<n> of the phy
+        const std::string phy_ch = "voltage" + std::to_string(rx_channel);
+        iio_channel* chn = iio_device_find_channel(phy, phy_ch.c_str(), false);
         if (!lo || !chn) {
             iio_context_destroy(_ctx);
             cler::panic("Pluto: phy channels not found");
@@ -137,14 +143,22 @@ struct SourcePlutoBlock : public cler::BlockBase {
             iio_channel_attr_write_double(chn, "hardwaregain", gain_db);
         }
 
-        _rx_i = iio_device_find_channel(rx_dev, "voltage0", false);
-        _rx_q = iio_device_find_channel(rx_dev, "voltage1", false);
+        // RXn streams as I = voltage<2n>, Q = voltage<2n+1>; RX2 exists only in 2r2t
+        const std::string i_ch = "voltage" + std::to_string(2 * rx_channel);
+        const std::string q_ch = "voltage" + std::to_string(2 * rx_channel + 1);
+        _rx_i = iio_device_find_channel(rx_dev, i_ch.c_str(), false);
+        _rx_q = iio_device_find_channel(rx_dev, q_ch.c_str(), false);
         if (!_rx_i || !_rx_q) {
             iio_context_destroy(_ctx);
-            cler::panic("Pluto: RX streaming channels not found");
+            cler::panic(rx_channel == 1 ? "Pluto: RX2 streaming channels not found (board not in 2r2t mode?)"
+                                        : "Pluto: RX streaming channels not found");
         }
         iio_channel_enable(_rx_i);
         iio_channel_enable(_rx_q);
+        if (iio_device_get_sample_size(rx_dev) != 4) {
+            iio_context_destroy(_ctx);
+            cler::panic("Pluto: RX buffer is not one int16 I/Q pair per sample");
+        }
 
         _buf = iio_device_create_buffer(rx_dev, buffer_size, false);
         if (!_buf) {
